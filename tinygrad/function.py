@@ -40,16 +40,16 @@ class Reciprocal(Function):
 # ******* helper functions *******
 def _significand_bits(d: DType) -> int:
   return {
-    dtypes.float64: 52,
-    dtypes.float32: 23,
-    dtypes.float16: 10,
+    dtypes.float64: 52, dtypes.int64: 52,
+    dtypes.float32: 23, dtypes.int32: 23,
+    dtypes.float16: 10, dtypes.int16: 10,
   }[d]
 
 def _exponent_bias(d: DType) -> int:
   return {
-    dtypes.float64: 1022,
-    dtypes.float32: 126,
-    dtypes.float16: 15,
+    dtypes.float64: 1022, dtypes.int64: 1022,
+    dtypes.float32: 126,  dtypes.int32: 126,
+    dtypes.float16: 14,   dtypes.int16: 14,
   }[d]
 
 def _exponent_mask(d: DType) -> int:
@@ -61,12 +61,10 @@ def _exponent_mask(d: DType) -> int:
 
 def _float_to_bits(d: LazyBuffer) -> LazyBuffer:
   cast_to = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[d.dtype]
-  assert cast_to is not None
   return d.cast(cast_to, True)
 
 def _bits_to_float(d: LazyBuffer) -> LazyBuffer:
   cast_to = {dtypes.uint64: dtypes.float64, dtypes.uint32: dtypes.float32, dtypes.uint16: dtypes.float16}[d.dtype]
-  assert cast_to is not None
   return d.cast(cast_to, True)
 
 def _rintk(d: LazyBuffer) -> LazyBuffer:
@@ -111,17 +109,14 @@ def _ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   m2 = e.e(BinaryOps.SHL, e.const(_significand_bits(d.dtype)))
 
   return m1.e(BinaryOps.ADD, m2).cast(d.dtype, True)
+
 def _pow2if(q: LazyBuffer):
-  if q.dtype == dtypes.int32:
-    return q.e(BinaryOps.ADD, q.const(127)).e(BinaryOps.SHL, q.const(23)).cast(dtypes.float32, True)
-  if q.dtype == dtypes.int64:
-    return q.e(BinaryOps.ADD, q.const(1023)).e(BinaryOps.SHL, q.const(52)).cast(dtypes.float64, True)
-  assert q.dtype in (dtypes.int32, dtypes.int64), f"_pow2if: {q.dtype} is not implemented."
-  return None
+  final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: dtypes.float16}[q.dtype]
+  return q.e(BinaryOps.ADD, q.const(_exponent_bias(q.dtype)+1)).e(BinaryOps.SHL, q.const(_significand_bits(q.dtype))).cast(final_dtype, True)
 
 def _ldexp2kf(d: LazyBuffer, e: LazyBuffer) -> LazyBuffer:
-  assert d.dtype in (dtypes.float32, dtypes.float64)
-  assert e.dtype in (dtypes.int32, dtypes.int64)
+  assert d.dtype in (dtypes.float16, dtypes.float32, dtypes.float64)
+  assert e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
   return d.e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.SHR, e.const(1)))).e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.ADD, e.e(BinaryOps.SHR, e.const(1)).e(UnaryOps.NEG)))) # noqa: E501
 
 def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
@@ -422,7 +417,7 @@ class Log(Function):
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    fast_approx = x.dtype in [dtypes.float32, dtypes.float64]
+    fast_approx = x.dtype in [dtypes.float16, dtypes.float32, dtypes.float64]
     self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2)))
     self.ret = _xexp2(self.ret) if fast_approx else self.ret.e(UnaryOps.EXP2)
     return self.ret
