@@ -1761,7 +1761,6 @@ class Tensor:
     print(a.matmul(b).numpy())
     ```
     """
-    # if(getenv("AMX",0)): return x.dot(self, acc_dtype=acc_dtype) if reverse else self.dot(x, acc_dtype=acc_dtype)
     return x.dot(self, acc_dtype=acc_dtype) if reverse else self.dot(x, acc_dtype=acc_dtype)
 
   def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:

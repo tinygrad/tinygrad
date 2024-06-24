@@ -479,7 +479,7 @@ class Linearizer(Kernel):
         r = reduceops[0]
         ldx = UOp(UOps.GEP, PtrDType(r.dtype), (self.buf_uops[1], self.loop_uops["gidx0"] * self.amx))
         ldy = UOp(UOps.GEP, PtrDType(r.dtype), (self.buf_uops[2], self.loop_uops["gidx1"] * self.amx))
-        accs[r] = [UOp(UOps.MMA, r.dtype, (ldx, ldy), ("amx", (self.amx**3, reduce_idxs[0].max + 1), r.dtype, self.amx, self.full_shape))]
+        accs[r] = [UOp(UOps.MMA, r.dtype, (ldx, ldy), ("amx", (self.amx**3, self.full_shape[self.first_reduce]), r.dtype, self.amx, self.full_shape))]
         return [accs[r]]
       # TODO: delete render_reduceop and move the logic for group_for_reduces to Block
       nlidx, nuidx = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,\

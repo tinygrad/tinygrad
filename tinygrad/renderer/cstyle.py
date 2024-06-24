@@ -164,7 +164,7 @@ class CStyleLanguage(Renderer):
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.MMA: r[u] = f"__mma_{args[1][1]}_{args[2].name}(&{r[src[0]]}, &{r[src[1]]}, &acc)"
+        elif uop is UOps.MMA: r[u] = f"__mma_{args[1][1]}_{args[4][-1]}_{args[4][-2]}_{args[2].name}(&{r[src[0]]}, &{r[src[1]]}, &acc)"
         elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(args[0], dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
@@ -188,8 +188,10 @@ class ClangRenderer(CStyleLanguage):
 
 class AMXRenderer(ClangRenderer):
   device = "AMX"
-  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx:str, local=False) -> str:
-    if(var_name.startswith('__mma')): return var_name.replace('acc', f'{buf_name}[{idx}]')+";"
+
+  def render_store(self, buf_name: str, buf_dtype: DType, var_name: str, var_dtype: DType, idx: str, local=False) -> str:
+    if var_name.startswith("__mma"):
+      return var_name.replace("acc", f"{buf_name}[{idx}]") + ";"
     return super().render_store(buf_name, buf_dtype, var_name, var_dtype, idx, local)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
@@ -197,19 +199,19 @@ class AMXRenderer(ClangRenderer):
       '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
       '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
     ]
-    for arg in set([uop.arg for uop in uops if uop.op is UOps.MMA]):
-      amx_op = 12 if (dtype := arg[2]) is dtypes.float else 10
-      M, N, K, l, ll = arg[4]
+    for _, _, dtype, amx, full_shape in set([uop.arg for uop in uops if uop.op is UOps.MMA]):
+      amx_op = 12 if dtype is dtypes.float else 10
+      M, N, K, a, _ = full_shape
       prefix.append(
-        f"""void __mma_{K}_{dtype.name}(const {dtype.name}* restrict data1, const {dtype.name}* restrict data2, {dtype.name}* restrict data0) {{
+        f"""void __mma_{K}_{a}_{a}_{dtype.name}(const {dtype.name}* restrict data1, const {dtype.name}* restrict data2, {dtype.name}* restrict data0) {{
   AMX_SET(0); // set
-  for(int lidx0=0; lidx0<{K}; lidx0++){{
-    AMX(0, data2, 1ull<<62 | lidx0*{dtype.itemsize}*{M*l}); AMX(1, data1, 1ull<<62 | lidx0*{dtype.itemsize}*{N*ll}); // ldx, ldy
+  for(int ridx0=0; ridx0<{K}; ridx0++){{
+    AMX(0, data2, 1ull<<62 | ridx0*{dtype.itemsize}*{M * a}); AMX(1, data1, 1ull<<62 | ridx0*{dtype.itemsize}*{N * a}); // ldx, ldy
     AMX({amx_op}, 0, 0ull); AMX({amx_op}, 0, 1ull<<20 | 64<<10); AMX({amx_op}, 0, 2ull<<20 | 64); AMX({amx_op}, 0, 3ull<<20 | 64<<10 | 64); // fma
   }}
-  for(int ridx2 = 0; ridx2<{(arg[3]//2)}; ridx2++){{
-    AMX(5, data0, 1ull<<62 | (ridx2*{dtype.itemsize}ull)<<56   | ridx2*{dtype.itemsize}*{N*l}); // stz
-    AMX(5, data0, 1ull<<62 | (ridx2*{dtype.itemsize}ull+2)<<56 | ridx2*{dtype.itemsize}*{N*l}+{(arg[3]//2)}*{dtype.itemsize}*{N*l}); // stz
+  for(int ridx1 = 0; ridx1<{(amx // 2)}; ridx1++){{
+    AMX(5, data0, 1ull<<62 | (ridx1*{dtype.itemsize}ull)<<56   | ridx1*{dtype.itemsize}*{N * a}); // stz
+    AMX(5, data0, 1ull<<62 | (ridx1*{dtype.itemsize}ull+2)<<56 | ridx1*{dtype.itemsize}*{N * a}+{(amx // 2)}*{dtype.itemsize}*{N * a}); // stz
   }}
   AMX_SET(1); // clr
 }}""",
