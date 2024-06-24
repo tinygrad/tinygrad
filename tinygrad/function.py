@@ -37,12 +37,35 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
+  def _reduce_range(self, x:LazyBuffer) -> LazyBuffer:
+    pi_neg = x.const(-math.pi)
+    two_pi = x.const(math.pi * 2)
+    two_pi_rec = x.const(1/(2*math.pi))
+    k = x.e(BinaryOps.MUL, two_pi_rec).cast(dtypes.int64).cast(x.dtype)
+    x = x.e(BinaryOps.ADD, k.e(BinaryOps.MUL, two_pi).e(UnaryOps.NEG))
+    x = x.e(UnaryOps.NEG).e(BinaryOps.MAX, x.e(BinaryOps.ADD, pi_neg)).e(UnaryOps.NEG)
+    x = x.e(BinaryOps.MAX, pi_neg.e(BinaryOps.ADD, x.e(UnaryOps.NEG)))
+    x = x.e(UnaryOps.NEG).e(BinaryOps.MAX, x.e(BinaryOps.ADD, pi_neg)).e(UnaryOps.NEG)
+    return x
+
+  def _f(self,x: LazyBuffer) -> LazyBuffer:
+    u = x.const(1.5387432678315556e-10)
+    u = u.e(BinaryOps.MUL, x).e(BinaryOps.ADD, x.const(-2.5028462314590299e-08))
+    u = u.e(BinaryOps.MUL, x).e(BinaryOps.ADD, x.const(2.7556901453107851e-06))
+    u = u.e(BinaryOps.MUL, x).e(BinaryOps.ADD, x.const(-0.00019841266010905452))
+    u = u.e(BinaryOps.MUL, x).e(BinaryOps.ADD, x.const(0.0083333333165181104))
+    return u.e(BinaryOps.MUL, x).e(BinaryOps.ADD, x.const(-0.16666666666402324))
+
+  def _fastsin2(self,x: LazyBuffer) -> LazyBuffer:
+    x_squared = x.e(BinaryOps.MUL, x)
+    return x.e(BinaryOps.ADD, x.e(BinaryOps.MUL, x_squared.e(BinaryOps.MUL, self._f(x_squared))))
+
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.SIN)
+    return self._fastsin2(self._reduce_range(x))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG)).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return self._fastsin2(self._reduce_range(self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG)))).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
