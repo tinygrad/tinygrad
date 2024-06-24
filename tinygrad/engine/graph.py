@@ -83,7 +83,7 @@ def _tree(luop:Union[LazyOp, UOp, UPat], cycles, cnt, prefix=""):
     return [f"━⬆︎ goto {cycles[id(luop)][0]}: {luop.op}"]
   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
   lines = [f"━┳ {prefix}{luop.op} {luop.arg}"]
-  childs = [_tree(c, cycles, cnt) for c in (src)]
+  childs = [_tree(c, cycles, cnt) for c in src]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
