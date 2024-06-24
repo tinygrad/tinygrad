@@ -6,7 +6,7 @@ from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType, PtrDType
 from tinygrad.shape.symbolic import sint, Variable
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv, flatten, all_same
 
 # the order of these UOps controls the order of the toposort
@@ -228,10 +228,16 @@ def expand_nodes(parents, expands:List[UOp], base):
     new_uops.append(replace.get(base, base))
   return new_uops
 
+def get_reduce_acc(op, dtype):
+  if op is ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
+  if op is ReduceOps.MAX:
+    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
+    return -math.inf if dtypes.is_float(dtype) else False
+
 acc_number = 0
 def replace_reduce(root):
   global acc_number
-  expands = [x for x in root.src[2:] if x.op is UOps.EXPAND]
+  expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
 
   # NOTE: this is making an assumption about root.src[1], i think root.src[1] should just be moved here
   # never mind, this IF is entirely wrong. you have to check if there's no RANGEs or EXPANDs
@@ -247,10 +253,11 @@ def replace_reduce(root):
     new_uops = [root.src[0]]
 
   # TODO: DEFINE_ACC should have a const input
-  acc = UOp(UOps.DEFINE_ACC, root.dtype, (root.src[1],) + tuple(x for x in root.src[2:] if x not in expands), acc_number)
+  const = UOp.const(root.dtype, get_reduce_acc(root.arg, root.dtype))
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x not in expands), (acc_number,))
   acc_number += 1
   ret = acc
-  for xx in new_uops: ret = UOp.alu(root.arg, ret, xx)
+  for xx in new_uops: ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
 
 def replace_contract(root:UOp):

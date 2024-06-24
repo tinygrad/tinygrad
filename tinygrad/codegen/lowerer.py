@@ -1,12 +1,12 @@
 from __future__ import annotations
 from typing import List, Tuple, cast, Optional, Any, Dict, Final, DefaultDict
-import math, functools
+import functools
 from dataclasses import replace
 from collections import defaultdict
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps, MemBuffer, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
@@ -67,12 +67,6 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
     local_idxs = nli + local_idxs[-(maxdim-1):]
   return local_idxs, loop_local_idxs
 
-def get_reduce_acc(reduceop:LazyOp):
-  if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(reduceop.dtype) else 0
-  if reduceop.op is ReduceOps.MAX:
-    if dtypes.is_int(reduceop.dtype): return 0 if dtypes.is_unsigned(reduceop.dtype) else -2**(reduceop.dtype.itemsize*8-1)
-    return -math.inf if dtypes.is_float(reduceop.dtype) else False
-
 class Lowerer(Kernel):
   def to_uop(self, x:LazyOp) -> UOp:
     if uop:=self.uop_cache.get(x, None): return uop
@@ -102,9 +96,8 @@ class Lowerer(Kernel):
     if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg.scalar(), in_uops)
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
-      op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, x.op)]
       # NOTE: always using ridxs is fine here
-      ret = UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(self.ridxs[i] for i in x.arg), op)
+      ret = UOp(UOps.REDUCE, x.dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
       # ugh, hack for multireduce...you probably have to do this to the RANGEs too
       new_ridxs = []
       for ri in self.ridxs:
@@ -112,7 +105,7 @@ class Lowerer(Kernel):
           new_ridxs.append(UOp(ri.op, ri.dtype, ri.src, ri.arg + 10000))
         else:
           new_ridxs.append(ri)
-      self.ridxs = new_ridxs
+      self.ridxs: List[UOp] = new_ridxs
       return ret
     return UOp.alu(x.op, *in_uops)
 
@@ -165,7 +158,7 @@ class Lowerer(Kernel):
 
     if DEBUG >= 5:
       from tinygrad.engine.graph import print_tree
-      for a in modified_ast: print_tree(a)
+      for mast in modified_ast: print_tree(mast)
 
     if self.opts.has_local:
       # define indexes
