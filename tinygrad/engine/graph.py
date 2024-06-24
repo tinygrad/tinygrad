@@ -75,14 +75,14 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
       # realized but unseen?
       G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{nm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
 
-def _tree(luop:Union[LazyOp, UOp, UPat], cycles, cnt, prefix=""):
+def _tree(luop:Union[LazyOp, UOp, UPat], cycles, cnt):
   cnt[0] += 1
   src = luop.src if isinstance(luop.src, (list, tuple)) else [] if luop.src is None else [luop.src]
-  if len(src) == 0: return [f"━━ {prefix}{luop.op} {luop.arg}"]
+  if len(src) == 0: return [f"━━ {luop.op} {luop.arg}"]
   if (lid := id(luop)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
     return [f"━⬆︎ goto {cycles[id(luop)][0]}: {luop.op}"]
   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
-  lines = [f"━┳ {prefix}{luop.op} {luop.arg}"]
+  lines = [f"━┳ {luop.op} {luop.arg}"]
   childs = [_tree(c, cycles, cnt) for c in src]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
