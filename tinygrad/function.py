@@ -399,7 +399,7 @@ class Sin(Function):
   def forward(self, x: LazyBuffer, fast:bool=False) -> LazyBuffer:
     self.x = x
     self.fast = fast or self.device in ["PTX", "NV", "CUDA"]
-    self.fast_approx = x.dtype in [dtypes.float16, dtypes.float32, dtypes.float64]
+    self.fast_approx = x.dtype in [dtypes.float32, dtypes.float64]
     if self.fast_approx:
       return _xsin(x, fast=self.fast)
 
