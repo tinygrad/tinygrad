@@ -77,12 +77,13 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
 
 def _tree(luop:Union[LazyOp, UOp, UPat], cycles, cnt, prefix=""):
   cnt[0] += 1
-  if luop.src is None or (type(luop.src) in [list, tuple] and len(luop.src) == 0): return [f"━━ {prefix}{luop.op.name if luop.op else '?'} {'?' if luop.arg is None else luop.arg}"]
+  src = luop.src if isinstance(luop.src, (list, tuple)) else [] if luop.src is None else [luop.src]
+  if len(src) == 0: return [f"━━ {prefix}{luop.op} {'?' if luop.arg is None else luop.arg}"]
   if (lid := id(luop)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
-    return [f"━⬆︎ goto {cycles[id(luop)][0]}: {luop.op.name if luop.op else '?'}"]
+    return [f"━⬆︎ goto {cycles[id(luop)][0]}: {luop.op}"]
   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
-  lines = [f"━┳ {prefix}{luop.op.name if luop.op else '?'} {luop.arg if luop.arg else ''}"]
-  childs = [] if luop.src is None else [_tree(c, cycles, cnt) for c in (luop.src if not isinstance(luop.src, UPat) else [luop.src])]
+  lines = [f"━┳ {prefix}{luop.op} {luop.arg if luop.arg else ''}"]
+  childs = [_tree(c, cycles, cnt) for c in (src)]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
