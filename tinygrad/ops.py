@@ -146,6 +146,7 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
 
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
+# the living definition of LazyOps
 def verify_lazyop(*ast:LazyOp):
   children: DefaultDict[LazyOp, Dict[LazyOp, None]] = defaultdict(dict)
   in_degree: DefaultDict[LazyOp, int] = defaultdict(int)
@@ -161,12 +162,14 @@ def verify_lazyop(*ast:LazyOp):
   sts: Dict[LazyOp, ShapeTracker] = {}
   while q:
     op, st = q.popleft()
-    if op.op in ReduceOps:
-      new_shape = tuple(1 if i in op.arg else s for i,s in enumerate(st.shape))
-      st = ShapeTracker.from_shape(new_shape)
-    else:
-      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {sts[x].shape}, got {st.shape}"
+    if op.op not in ReduceOps:
+      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {sts[x].shape} != {st.shape}"
     sts[op] = st
     for x in children[op]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: q.append((x, st))
+      if in_degree[x] == 0:
+        if x.op in ReduceOps:
+          new_shape = tuple(1 if i in x.arg else s for i,s in enumerate(st.shape))
+          st = ShapeTracker.from_shape(new_shape)
+        elif x.op in BufferOps: st = x.arg.st
+        q.append((x, st))

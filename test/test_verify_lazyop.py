@@ -54,5 +54,11 @@ class TestVerifyLazyOp(unittest.TestCase):
     out = LazyOp(BufferOps.STORE, (a+b, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((32, 32))))
     lower(out)
 
+  def test_reduce_store(self):
+    a = LazyOp(BufferOps.LOAD, arg=MemBuffer(1, dtypes.int, ShapeTracker.from_shape((32, 1))))
+    r = LazyOp(ReduceOps.SUM, (a, ), (0, ))
+    out = LazyOp(BufferOps.STORE, (r, ), MemBuffer(0, dtypes.int, ShapeTracker.from_shape((32, 1))))
+    with self.assertRaises(InvalidLazyOpException): lower(out)
+
 if __name__ == '__main__':
   unittest.main()
