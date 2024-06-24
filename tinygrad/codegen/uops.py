@@ -91,14 +91,18 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 # *** simplification logic ***
 
-@dataclass(frozen=True)
+@dataclass
 class UPat:
-  op: Optional[Union[UOps, Set[UOps]]] = None
+  op: Optional[Union[UOps, Set[UOps]]] = ()
   arg: Any = None
   src: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
   name: Optional[str] = None
-  dtype: Optional[Union[DType, Set[DType]]] = None
+  dtype: Optional[Union[DType, Set[DType]]] = ()
   allow_len: Set[int] = field(default_factory=set)
+
+  def __post_init__(self):
+    if isinstance(self.op, UOps): self.op = (self.op,)
+    if isinstance(self.dtype, DType): self.dtype = (self.dtype,)
 
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
@@ -110,8 +114,8 @@ def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinsta
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return False
-  if pat.op is not None and __unmatch(pat.op, uop.op):return False
-  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
+  if pat.op and uop.op not in pat.op: return False
+  if pat.dtype and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False7723bfe5 (perf: dtype as tuple)
   if pat.arg is not None and __unmatch(pat.arg, uop.arg):return False
   if pat.src is None: return True
   # only one if it's a tuple
@@ -135,7 +139,7 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       if isinstance(p, UOp): p = UPat.compile(p)
       assert p.op is not None
-      if isinstance(p.op, set):
+      if isinstance(p.op, (set, tuple)):
         for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
