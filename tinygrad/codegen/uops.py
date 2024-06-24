@@ -96,8 +96,7 @@ class UPat:
   src: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
   name: Optional[str] = None
   dtype: Optional[Union[DType, Set[DType]]] = None
-  allow_len: Set[int] = field(default_factory=set)
-  
+  allow_len: Set[int] = field(default_factory=set)  
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
@@ -146,8 +145,7 @@ class PatternMatcher:
       store: Dict[str, UOp] = {}
       if _match(uop, p, store):
         ret = fxn(**store)
-        if isinstance(ret, tuple):
-          return ret[0], ret[1]
+        if isinstance(ret, tuple): return ret[0], ret[1]
         return ret, None
     return None, None
 
@@ -174,43 +172,17 @@ def loop_collapse(negate=False):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
-  (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
-    UPat(UOps.ALU, BinaryOps.ADD, src=[
-      UPat(name="idx"), 
-      UPat(UOps.ALU, BinaryOps.MUL, src=[
-        UPat(UOps.CONST, name="mval"), 
-        UPat(UOps.RANGE, src=(
-          UPat(name="loop_start"), 
-          UPat(name="loop_end")
-        ))
-      ])
-    ]),
-    UPat(UOps.CONST, name="compval"))),
-    UPat(UOps.CONST, name="multconst"),
-    UPat(UOps.CONST, 0)
-  ),
-  ), loop_collapse(negate=False)),
-  (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
-    UPat(UOps.ALU, BinaryOps.ADD, src=[
-      UPat(name="idx"), 
-      UPat(UOps.ALU, UnaryOps.NEG, src=[
-        UPat(UOps.RANGE, src=(
-          UPat(name="loop_start"), 
-          UPat(name="loop_end")
-        ))
-      ])
-    ]),
-    UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse(negate=True)),  
+   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
+    UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
+      src=[UPat(UOps.CONST, name="mval"), UPat(UOps.RANGE, src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
+      UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
+   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
+    UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, UnaryOps.NEG, 
+      src=[UPat(UOps.RANGE, src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
+      UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse(negate=True)),  
   # sum collapse to mul (with possible GEP)
-  (UPat(UOps.PHI, src=(
-    UPat(UOps.DEFINE_ACC, name="phi_input", src=(
-      UPat(UOps.RANGE, name="loop"),
-    )),
-    UPat(UOps.ALU, BinaryOps.ADD, src=(
-      UPat(name="val1"), 
-      UPat(name="val2")
-    )))),
-    sum_collapse),
+  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=(UPat(UOps.RANGE, name="loop"),)),
+                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.RANGE, name="loop"),)),)),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # deal with UNMUL
@@ -329,7 +301,7 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
-  def graph_rewrite(self, sink:UOp, pm:PatternMatcher, counter=None):
+  def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", 1)
     run_cnt = 0
@@ -337,7 +309,6 @@ class UOpGraph:
       changed = 0
       @functools.lru_cache
       def rewrite(u:UOp) -> UOp:
-        if counter: counter[u] += 1
         nonlocal changed
         recurse_cnt = 0
         up = u
@@ -360,11 +331,10 @@ class UOpGraph:
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
   
-  def graph_rewrite_bottomup_no_backtrack(self, sink: UOp, pm: PatternMatcher, counter=None):
+  def graph_rewrite_bottomup_no_backtrack(self, sink: UOp, pm: PatternMatcher):
     sink = UOp(UOps.SINK, None, (sink,))
     @functools.lru_cache
     def rewrite(_uop: UOp):
-      if counter: counter[_uop] += 1
       rewritten = None
       _rewritten, require_further_processing = pm.rewrite(_uop)
       while _rewritten:
@@ -373,7 +343,7 @@ class UOpGraph:
         _rewritten, _ = pm.rewrite(rewritten)
       if rewritten and require_further_processing:
         # Non-top level nodes may satisfy further patterns
-        return self.graph_rewrite_bottomup_no_backtrack(rewritten, pm, counter)
+        return self.graph_rewrite_bottomup_no_backtrack(rewritten, pm)
       return rewritten
 
     nodes = []
