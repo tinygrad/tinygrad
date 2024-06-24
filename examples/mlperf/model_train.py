@@ -500,7 +500,7 @@ def train_bert():
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=config["GLOBAL_BATCH_SIZE"] * config["TRAIN_STEPS"])
 
   # ** resume from checkpointing **
-  start_step = 0
+  start_step = 1
   previous_step = None
   if ckpt:=getenv("RESUME", ""):
     load_training_state(model, optimizer_group, scheduler_group, safe_load(ckpt))
@@ -574,7 +574,7 @@ def train_bert():
             f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
 
     # ** eval loop **
-    if (i % eval_step_freq == 0 and i > 0) or (BENCHMARK and i == BENCHMARK):
+    if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START)
       train_step_bert.reset()
@@ -654,7 +654,7 @@ def train_bert():
     if getenv("CKPT", 1) and i % save_ckpt_freq == 0:
       if MLLOGGER and RUNMLPERF:
         if previous_step:
-          MLLOGGER.end(key=mllog_constants.BLOCK_STOP, metadata={"first_step_num": i + 1, "step_count": i - previous_step})
+          MLLOGGER.end(key=mllog_constants.BLOCK_STOP, metadata={"first_step_num": i, "step_count": i - previous_step})
         MLLOGGER.start(key="checkpoint_start", metadata={"step_num" : i})
       if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
       if WANDB and wandb.run is not None:
