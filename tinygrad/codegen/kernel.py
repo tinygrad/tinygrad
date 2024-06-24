@@ -91,6 +91,7 @@ class Kernel:
     # the local aliased buffers for A and B
     self.bufs_for_tensor_core: Dict[LazyOp, Tuple[int, int]] = {}
     self.dont_use_locals: bool = False
+    self.amx: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -395,6 +396,20 @@ class Kernel:
       return True
     except KernelOptError:
       return False
+
+  def apply_amx(self):
+    if self.opts.device == "AMX" and (r:=self.reduceop) is not None and r.op is ReduceOps.SUM and r.dtype is dtypes.float:
+      if (mul_op:=r.src[0]).op is not BinaryOps.MUL: return False
+      for src in mul_op.src:
+        if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
+
+      amx_size = 128//self.outbufs[0].dtype.itemsize
+      if not all(x == self.full_shape[0] and x % amx_size == 0 and x > amx_size for x in self.full_shape): return False
+      for axis in [-2, -1]:
+        self.apply_opt(Opt(OptOps.UNROLL, axis, amx_size))
+      self.amx=amx_size
+      return True
+    return False
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")

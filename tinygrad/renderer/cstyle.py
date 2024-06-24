@@ -131,7 +131,7 @@ class CStyleLanguage(Renderer):
           val = self.code_for_op[args](*operands, dtype)
           assert child_count[u] != 0, f"childless ALU op found {u}"
           # TODO: fix index rendering issue. fix clang nested max macro issue
-          if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
+          if child_count[u] == 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('alu',u)} = {val};")
         elif uop is UOps.SPECIAL:
           kk(f"int {args[1]} = {self.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
@@ -164,12 +164,13 @@ class CStyleLanguage(Renderer):
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
+        elif uop is UOps.MMA: r[u] = f"__mma_{args[1][1]}_{args[2].name}(&{r[src[0]]}, &{r[src[1]]}, &acc)"
+        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(args[0], dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
-          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
+          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + ((f"[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}") if args is not None else f"[{(r[src[1]])}]") # noqa: E501
         else: raise RuntimeError(f"failed to render {uop}")
 
     return self.render_kernel(name, kernel, bufs, uops)
@@ -184,6 +185,37 @@ class ClangRenderer(CStyleLanguage):
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+
+class AMXRenderer(ClangRenderer):
+  device = "AMX"
+  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx:str, local=False) -> str:
+    if(var_name.startswith('__mma')): return var_name.replace('acc', f'{buf_name}[{idx}]')+";"
+    return super().render_store(buf_name, buf_dtype, var_name, var_dtype, idx, local)
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
+    prefix = [
+      '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
+      '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
+    ]
+    for arg in set([uop.arg for uop in uops if uop.op is UOps.MMA]):
+      amx_op = 12 if (dtype := arg[2]) is dtypes.float else 10
+      M, N, K, l, ll = arg[4]
+      prefix.append(
+        f"""void __mma_{K}_{dtype.name}(const {dtype.name}* restrict data1, const {dtype.name}* restrict data2, {dtype.name}* restrict data0) {{
+  AMX_SET(0); // set
+  for(int lidx0=0; lidx0<{K}; lidx0++){{
+    AMX(0, data2, 1ull<<62 | lidx0*{dtype.itemsize}*{M*l}); AMX(1, data1, 1ull<<62 | lidx0*{dtype.itemsize}*{N*ll}); // ldx, ldy
+    AMX({amx_op}, 0, 0ull); AMX({amx_op}, 0, 1ull<<20 | 64<<10); AMX({amx_op}, 0, 2ull<<20 | 64); AMX({amx_op}, 0, 3ull<<20 | 64<<10 | 64); // fma
+  }}
+  for(int ridx2 = 0; ridx2<{(arg[3]//2)}; ridx2++){{
+    AMX(5, data0, 1ull<<62 | (ridx2*{dtype.itemsize}ull)<<56   | ridx2*{dtype.itemsize}*{N*l}); // stz
+    AMX(5, data0, 1ull<<62 | (ridx2*{dtype.itemsize}ull+2)<<56 | ridx2*{dtype.itemsize}*{N*l}+{(arg[3]//2)}*{dtype.itemsize}*{N*l}); // stz
+  }}
+  AMX_SET(1); // clr
+}}""",
+      )
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
