@@ -22,6 +22,7 @@ def get_grouped_dims(prefix:str, off:int, dims:Tuple[sint, ...], max_sizes:Optio
 
   Keyword arguments:
   prefix -- the prefix to use for the size Variable names.
+  off -- the starting index for the size Variable names.
   dims -- the global or local dims of the full shape.
   max_sizes -- the maximum values for each size in (x, y, z) order.
   reverse_dims -- reverse the order of the dims as they are mapped into size, i.e. if True, the right dim will go to the left size (.x).
@@ -34,41 +35,39 @@ def get_grouped_dims(prefix:str, off:int, dims:Tuple[sint, ...], max_sizes:Optio
 
   # initialize the map of dims to size with a single dim in each size axis
   # TODO: support sint properly
-  size_dims:List[List[Tuple[int, sint]]] = [[(dim_idx, dim)] for dim_idx, dim in enumerate(dims)]
+  size_dims:List[List[Tuple[int, sint, sint]]] = [[(dim_idx, dim, dim if isinstance(dim, int) else dim.max+1)] for dim_idx, dim in enumerate(dims)]
 
   # reverse the order of the dims to size map, if desired (currently for globals where smallest stride is on the right)
   # TODO: remove reverse_dims, the mapping of dims to size for globals should be cosearched with memory layouts for optimal peformance
   if reverse_dims: size_dims = size_dims[::-1]
 
   # ensure that the initial dims initially fit the valid size axes
-  for size_idx, max_sz in [(i, sz) for i, sz in enumerate(max_sizes[:len(size_dims)]) if size_dims[i][0][1] > sz]:
+  for size_idx in range(min(len(max_sizes), len(size_dims))):
     # if the initial dim is too large, split the dim to separate size axes, if possible
-    dim_idx, dim_max = size_dims[size_idx][0]
-    assert isinstance(dim_max, int), "variable shape too large for size"
-    for factor in range(2, int(dim_max**0.5)+1):
-      if dim_max % factor == 0 and dim_max // factor <= max_sz:
-        size_dims = size_dims[:size_idx] + [[(dim_idx, dim_max//factor)], [(dim_idx, factor)]] + size_dims[size_idx+1:]
+    dim_idx, dim, dim_max = size_dims[size_idx][0]
+    if dim_max <= (max_sz:=max_sizes[size_idx]): continue
+    assert isinstance(dim, int), "variable shape too large for size"
+    for factor in range(2, int(dim**0.5)+1):
+      if dim % factor == 0 and dim // factor <= max_sz:
+        size_dims = size_dims[:size_idx] + [[(dim_idx, dim//factor, dim//factor)], [(dim_idx, factor, factor)]] + size_dims[size_idx+1:]
         break
-    assert size_dims[size_idx][0][1] <= max_sz, f"dim at {size_idx} too large and non-factorable: {dim_max} > {max_sz}"
+    assert size_dims[size_idx][0][2] <= max_sz, f"dim at {size_idx} too large and non-factorable: {dim} > {max_sz}"
 
   # compress the extra dims, collapsing them onto the left-most valid size axis
-  # for run_process_replay, collapse onto the right-most dim to compare the outputs.  TODO: remove
-  if reverse_dims: size_dims, max_sizes = size_dims[::-1], max_sizes[::-1]
   cur_size_idx = 0
   while len(size_dims) > len(max_sizes):
-    if prod([dim_max for (_, dim_max) in size_dims[cur_size_idx]])*size_dims[cur_size_idx+1][0][1] < max_sizes[cur_size_idx]:
+    if prod([dim_max for (_, _, dim_max) in size_dims[cur_size_idx]])*size_dims[cur_size_idx+1][0][2] <= max_sizes[cur_size_idx]:
       size_dims = size_dims[:cur_size_idx] + [size_dims[cur_size_idx] + size_dims[cur_size_idx+1]] + size_dims[cur_size_idx+2:]
     elif cur_size_idx < len(max_sizes)-1: cur_size_idx += 1
     else: raise AssertionError(f"cannot fit dims in size: {dims=} {max_sizes=}")
-  if reverse_dims: size_dims, max_sizes = size_dims[::-1], max_sizes[::-1]
 
   # construct the final dim idx variables from the the portions of the size variables
-  sizes, idxs = [prod([dim_max for (_, dim_max) in size_dim]) for size_dim in size_dims], [NumNode(0)] * len(dims)
+  sizes, idxs = [prod([dim for (_, dim, _) in size_dim]) for size_dim in size_dims], [NumNode(0)] * len(dims)
   size_vars = loop_idxs = [Variable(f"{prefix}{len(sizes)-1-(i+off) if reverse_dims else i+off}", 0, s-1) for i,s in enumerate(sizes)]
   for size_idx, size_var in enumerate(size_vars):
-    for dim_idx, dim_max in size_dims[size_idx]:
-      idxs[dim_idx] += (size_var % dim_max) * (idxs[dim_idx].max+1)
-      size_var //= dim_max
+    for dim_idx, dim, _ in size_dims[size_idx]:
+      idxs[dim_idx] += (size_var % dim) * (idxs[dim_idx].max+1)
+      size_var //= dim
 
   # pad the final sizes array to the proper length if necessary
   return idxs, [x for x in loop_idxs if not isinstance(x, NumNode)], sizes + [1]*(len(max_sizes)-len(sizes))
@@ -146,7 +145,7 @@ class Linearizer(Kernel):
       key = f"{'' if acc is None else self.reduceops.index(acc)}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          self.load_cache[key] = UOp(UOps.DEFINE_ACC, localtype, loop_ctx, (self.get_reduce_acc(acc), i, acc_count))
+          self.load_cache[key] = UOp(UOps.DEFINE_ACC, localtype, (UOp.const(localtype.scalar(), self.get_reduce_acc(acc)), *loop_ctx), (i, acc_count))
           acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = UOp.const(localtype, this_const)
