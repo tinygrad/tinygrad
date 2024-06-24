@@ -96,7 +96,8 @@ class UPat:
   src: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
   name: Optional[str] = None
   dtype: Optional[Union[DType, Set[DType]]] = None
-  allow_len: Set[int] = field(default_factory=set)  
+  allow_len: Set[int] = field(default_factory=set)
+
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
