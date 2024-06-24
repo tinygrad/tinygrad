@@ -78,11 +78,11 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
 def _tree(luop:Union[LazyOp, UOp, UPat], cycles, cnt, prefix=""):
   cnt[0] += 1
   src = luop.src if isinstance(luop.src, (list, tuple)) else [] if luop.src is None else [luop.src]
-  if len(src) == 0: return [f"━━ {prefix}{luop.op} {'?' if luop.arg is None else luop.arg}"]
+  if len(src) == 0: return [f"━━ {prefix}{luop.op} {luop.arg}"]
   if (lid := id(luop)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
     return [f"━⬆︎ goto {cycles[id(luop)][0]}: {luop.op}"]
   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
-  lines = [f"━┳ {prefix}{luop.op} {luop.arg if luop.arg else ''}"]
+  lines = [f"━┳ {prefix}{luop.op} {luop.arg}"]
   childs = [_tree(c, cycles, cnt) for c in (src)]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
@@ -90,7 +90,7 @@ def _tree(luop:Union[LazyOp, UOp, UPat], cycles, cnt, prefix=""):
 def print_tree(luop:Union[LazyOp, UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(luop, {}, [-1]))]))
 
 def graph_uops(uops:List[UOp]):
-  colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
+  colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffcs0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
             UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0",
             UOps.RANGE: "#c8a0e0", UOps.PHI: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0"}
   G = nx.DiGraph()
