@@ -97,16 +97,7 @@ class Lowerer(Kernel):
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
       # NOTE: always using ridxs is fine here
-      ret = UOp(UOps.REDUCE, x.dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
-      # ugh, hack for multireduce...you probably have to do this to the RANGEs too
-      new_ridxs = []
-      for ri in self.ridxs:
-        if ri.op is UOps.EXPAND:
-          new_ridxs.append(UOp(ri.op, ri.dtype, ri.src, ri.arg + 10000))
-        else:
-          new_ridxs.append(ri)
-      self.ridxs: List[UOp] = new_ridxs
-      return ret
+      return UOp(UOps.REDUCE, x.dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
