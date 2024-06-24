@@ -247,7 +247,7 @@ def replace_reduce(root):
     new_uops = [root.src[0]]
 
   # TODO: DEFINE_ACC should have a const input
-  acc = UOp(UOps.DEFINE_ACC, root.dtype, tuple(x for x in root.src[2:] if x not in expands), (root.src[1].arg, acc_number))
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, (root.src[1],) + tuple(x for x in root.src[2:] if x not in expands), acc_number)
   acc_number += 1
   ret = acc
   for xx in new_uops: ret = UOp.alu(root.arg, ret, xx)
@@ -496,19 +496,20 @@ class UOpGraph:
     sink = self.graph_rewrite(sink, constant_folder)
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
-    # do contracts/reduces
-    sink = self.graph_rewrite(sink, contractor)
-    sink = self.graph_rewrite(sink, reducer)
+    if not getenv("DEBUG_EXPAND", 0):
+      # do contracts/reduces
+      sink = self.graph_rewrite(sink, contractor)
+      sink = self.graph_rewrite(sink, reducer)
 
-    # do upcasts (after reduce unrolls and rewrites)
-    all_parents = set([sink]).union(sink.parents)
-    expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
-    if len(expands):
-      new_nodes = expand_nodes(all_parents, expands, sink)
-      sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
+      # do upcasts (after reduce unrolls and rewrites)
+      all_parents = set([sink]).union(sink.parents)
+      expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
+      if len(expands):
+        new_nodes = expand_nodes(all_parents, expands, sink)
+        sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
 
-    # do graph rewrite (2)
-    sink = self.graph_rewrite(sink, constant_folder)
+      # do graph rewrite (2)
+      sink = self.graph_rewrite(sink, constant_folder)
 
     # filter nodes that don't link to a sink
     # BFS toposort
