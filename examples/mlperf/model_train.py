@@ -418,10 +418,10 @@ def train_bert():
 
       diskcache_clear()
       MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
-      MLLOGGER.start(key=mllog_constants.INIT_START)
+      MLLOGGER.start(key=mllog_constants.INIT_START, value=None)
 
     if RUNMLPERF:
-      MLLOGGER.start(key=mllog_constants.RUN_START)
+      MLLOGGER.start(key=mllog_constants.RUN_START, value=None)
   else:
     MLLOGGER = None
 
@@ -486,15 +486,16 @@ def train_bert():
 
       MLLOGGER.event(key=mllog_constants.OPT_NAME, value="LAMB")
       MLLOGGER.event(key=mllog_constants.OPT_BASE_LR, value=config["OPT_BASE_LEARNING_RATE"])
-      MLLOGGER.event(key=mllog_constants.OPT_WEIGHT_DECAY, value=config["DECAY"])
+      MLLOGGER.event(key=mllog_constants.OPT_LAMB_WEIGHT_DECAY, value=config["DECAY"])
       MLLOGGER.event(key=mllog_constants.OPT_LAMB_BETA_1, value=optimizer_wd.b1)
       MLLOGGER.event(key=mllog_constants.OPT_LAMB_BETA_2, value=optimizer_wd.b2)
       MLLOGGER.event(key=mllog_constants.OPT_LAMB_LR_DECAY_POLY_POWER, value=config["POLY_POWER"])
       MLLOGGER.event(key=mllog_constants.OPT_LAMB_EPSILON, value=config["EPSILON"])
 
       MLLOGGER.event(key=mllog_constants.OPT_LR_WARMUP_STEPS, value=config["NUM_WARMUP_STEPS"])
+      MLLOGGER.event(key=mllog_constants.NUM_WARMUP_STEPS, value=config["NUM_WARMUP_STEPS"])
       MLLOGGER.event(key='start_warmup_step', value=0)
-      MLLOGGER.event(key='opt_learning_rate_trainnig_steps', value=config["TRAIN_STEPS"])
+      MLLOGGER.event(key='opt_learning_rate_training_steps', value=config["TRAIN_STEPS"])
       MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
       MLLOGGER.event(key=mllog_constants.EVAL_SAMPLES, value=config["EVAL_BS"] * config["MAX_EVAL_STEPS"])
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=config["GLOBAL_BATCH_SIZE"] * config["TRAIN_STEPS"])
@@ -576,7 +577,7 @@ def train_bert():
     # ** eval loop **
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
       if MLLOGGER and RUNMLPERF:
-        MLLOGGER.start(key=mllog_constants.EVAL_START)
+        MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": 1, "epoch_count": 1, "step_num": i})
       train_step_bert.reset()
       eval_lm_losses = []
       eval_clsf_losses = []
@@ -612,7 +613,7 @@ def train_bert():
         if BENCHMARK and j == BENCHMARK:
           # assume INITMLPERF has BENCHMARK set
           if MLLOGGER and INITMLPERF:
-            MLLOGGER.event(key=mllog_constants.INIT_STOP)
+            MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
 
       eval_step_bert.reset()
@@ -630,8 +631,8 @@ def train_bert():
                     "eval/clsf_accuracy": avg_clsf_acc, "eval/forward_time": avg_fw_time})
 
       if MLLOGGER and RUNMLPERF:
-        MLLOGGER.end(key=mllog_constants.EVAL_STOP, value=i, metadata={"step_num": i})
-        MLLOGGER.event(key=mllog_constants.EVAL_ACCURACY, value=avg_lm_acc, metadata={"masked_lm_accuracy": avg_lm_acc})
+        MLLOGGER.end(key=mllog_constants.EVAL_STOP, value=i, metadata={"epoch_count": 1, "step_num": i, "samples_count": config["EVAl_BS"] * config["MAX_EVAL_STEPS"]})
+        MLLOGGER.event(key=mllog_constants.EVAL_ACCURACY, value=avg_lm_acc, metadata={"epoch_num": 1, "masked_lm_accuracy": avg_lm_acc})
 
       # save model if achieved target
       if not achieved and avg_lm_acc >= target:
@@ -654,8 +655,8 @@ def train_bert():
     if getenv("CKPT", 1) and i % save_ckpt_freq == 0:
       if MLLOGGER and RUNMLPERF:
         if previous_step:
-          MLLOGGER.end(key=mllog_constants.BLOCK_STOP, metadata={"first_step_num": i, "step_count": i - previous_step})
-        MLLOGGER.start(key="checkpoint_start", metadata={"step_num" : i})
+          MLLOGGER.end(key=mllog_constants.BLOCK_STOP, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "first_step_num": i, "step_num": i, "step_count": i - previous_step})
+        MLLOGGER.start(key="checkpoint_start", value=None, metadata={"step_num" : i})
       if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
       if WANDB and wandb.run is not None:
         fn = f"{ckpt_dir}/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}.safe"
@@ -670,8 +671,8 @@ def train_bert():
         print(f"Removing old ckpt {last}")
         os.remove(os.path.join(ckpt_dir, last))
       if MLLOGGER and RUNMLPERF:
-        MLLOGGER.end(key="checkpoint_stop", metadata={"step_num": i})
-        MLLOGGER.start(key=mllog_constants.BLOCK_START, metadata={"first_step_num": i+1})
+        MLLOGGER.end(key="checkpoint_stop", value=None, metadata={"step_num": i})
+        MLLOGGER.start(key=mllog_constants.BLOCK_START, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "step_num": i, "first_step_num": i+1})
         previous_step = i
 
 def train_maskrcnn():
