@@ -166,6 +166,30 @@ class TestUOpGraph(TestUOps):
 
 
 class TestBottomupVsTopdownRewrite(TestUOps):  
+  def test_sum_collapse(self):
+    def factory():
+      global_buffer0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
+      global_buffer1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, False))
+      const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
+      const_1 = UOp(UOps.CONST, dtypes.float, (), 1.0)
+
+      loop = UOp(UOps.RANGE, dtypes.float, (
+          UOp(UOps.CONST, dtypes.int, arg=0),
+          UOp(UOps.CONST, dtypes.int, arg=10)
+      ), (2.0,0.0))
+      acc = UOp(UOps.DEFINE_ACC, dtypes.float, (loop,), (0.0,0.0,0.0))
+      alu = UOp(UOps.ALU, dtypes.float, (
+          UOp(UOps.LOAD, dtypes.float, (global_buffer1, const_0)),
+          acc,
+        ), BinaryOps.ADD)
+      phi = UOp(UOps.PHI, dtypes.float, (
+          acc,
+          alu,
+      ))
+      store = UOp(UOps.STORE, None, (global_buffer0, const_1, phi))
+      return store
+    self.setup_and_assert_uop_graph_equal(factory)  
+    
   def test_arange(self):
     def factory():
       const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
@@ -270,172 +294,6 @@ class TestBottomupVsTopdownRewrite(TestUOps):
       )),
       UOp(UOps.CONST, dtypes.float, arg=float('inf')),
     )))
-
-class TestPatternRewriteArange(TestUOps):
-  def __init__(self, *args, **kwargs):
-    super(TestUOps, self).__init__(*args, **kwargs)
-    self.minimal_patterns = [
-      (-1*UOp.var('x'), lambda x: -x),
-      (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
-   
-      (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
-        UPat(UOps.ALU, BinaryOps.ADD, src=[
-          UPat(name="idx"), 
-        UPat(UOps.ALU, UnaryOps.NEG, src=[
-        UPat(UOps.RANGE, src=(
-          UPat(name="loop_start"), 
-          UPat(name="loop_end")
-        ))
-      ])
-      ]),
-      UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse(negate=True)),  
-      (UPat(UOps.PHI, src=(
-        UPat(UOps.DEFINE_ACC, name="phi_input", src=(
-          UPat(UOps.RANGE, name="loop"),
-        )),
-        UPat(UOps.ALU, BinaryOps.ADD, src=(
-          UPat(name="val1"),
-          UPat(name="val2")
-        )))),
-        sum_collapse
-      ),
-      (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
-      (UPat(UOps.ALU, BinaryOps.MUL, src=[
-        UPat(UOps.CONST, name="c1"),
-        UPat(UOps.UNMUL, src=[
-          UPat(UOps.CONST, name="c2"),
-          UPat(name="v")
-        ])
-      ]), lambda c1,c2,v: v if c1.arg == c2.arg else None),
-      (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.const(acc.dtype, acc.arg[0])),
-      (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
-      (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x,
-      ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
-    ]
-    def uop_factory():
-      const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
-      const_neg_1 = UOp(UOps.CONST, dtypes.float, (), -1.0)
-      const_1 = UOp(UOps.CONST, dtypes.float, (), 1.0)
-      const_2 = UOp(UOps.CONST, dtypes.float, (), 2.0)
-      const_neg_2 = UOp(UOps.CONST, dtypes.float, (), -2.0)
-      const_3 = UOp(UOps.CONST, dtypes.float, (), 3.0)
-      _special = UOp(UOps.SPECIAL, dtypes.float, (), (0, 'gidx0', 4))
-      _global = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
-      _range = UOp(UOps.RANGE, dtypes.float, (const_0,const_2), (2, 0))
-      _acc = UOp(UOps.DEFINE_ACC, dtypes.float, (_range,), (0,0,0))
-      special_mul_one = UOp(UOps.ALU, dtypes.float, (_special, const_neg_1), BinaryOps.MUL) # rewrite
-      range_mul_one = UOp(UOps.ALU, dtypes.float, (_range, const_neg_1), BinaryOps.MUL) # rewrite
-      add_two_muls = UOp(UOps.ALU, dtypes.float, (special_mul_one, range_mul_one), BinaryOps.ADD) # rewrite
-      cmplt = UOp(UOps.ALU, dtypes.bool, (add_two_muls, const_neg_2), BinaryOps.CMPLT)
-      _where = UOp(UOps.ALU, dtypes.float, (cmplt, const_3, const_0), TernaryOps.WHERE)
-      add_where_acc = UOp(UOps.ALU, dtypes.float, (_where, _acc), BinaryOps.ADD)
-      phi = UOp(UOps.PHI, dtypes.float, (_acc, add_where_acc))
-      store = UOp(UOps.STORE, None, (_global, _special, phi))
-      return store
-
-    self.uop_factory = uop_factory
-  
-  def test_required_minimal_pattern(self):
-    """
-    Isolate the minimal patterns that is actually used during a bottom up rewrite
-    """
-    old_pattern_matcher = constant_folder
-    new_pattern_matcher = PatternMatcher(self.minimal_patterns)
-    self.setup_and_assert_old_pattern_topdown_vs_new_pattern_bottomup(
-      old_pattern_matcher,
-      new_pattern_matcher,
-      self.uop_factory
-    )
-  
-  def test_rewritten_patterns(self):
-    """
-    Test the pattern that should produce node that do not need further bottom up processing
-    """
-    pass
-
-
-class TestPatternRewriteSumCollapse(TestUOps):
-  def __init__(self, *args, **kwargs):
-    super(TestUOps, self).__init__(*args, **kwargs)
-    self.minimal_patterns = [
-      (UPat(UOps.PHI, src=(
-        UPat(UOps.DEFINE_ACC, name="phi_input", src=(
-          UPat(UOps.RANGE, name="loop"),
-        )),
-        UPat(UOps.ALU, BinaryOps.ADD, src=(
-          UPat(name="val1"), 
-          UPat(name="val2")
-        )))),
-        sum_collapse),
-      (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.const(acc.dtype, acc.arg[0])),
-      (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=tuple()), UPat(name="x"))), lambda x: x),
-      (UPat(UOps.PHI, src=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
-      (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
-      (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
-      (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
-    ]
-    def uop_factory():
-      global_buffer0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
-      global_buffer1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, False))
-      const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
-      const_1 = UOp(UOps.CONST, dtypes.float, (), 1.0)
-
-      loop = UOp(UOps.RANGE, dtypes.float, (
-          UOp(UOps.CONST, dtypes.int, arg=0),
-          UOp(UOps.CONST, dtypes.int, arg=10)
-      ), (2.0,0.0))
-      acc = UOp(UOps.DEFINE_ACC, dtypes.float, (loop,), (0.0,0.0,0.0))
-      alu = UOp(UOps.ALU, dtypes.float, (
-          UOp(UOps.LOAD, dtypes.float, (global_buffer1, const_0)),
-          acc,
-        ), BinaryOps.ADD)
-      phi = UOp(UOps.PHI, dtypes.float, (
-          acc,
-          alu,
-      ))
-      store = UOp(UOps.STORE, None, (global_buffer0, const_1, phi))
-      return store
-    self.uop_factory = uop_factory
-  
-  def test_required_minimal_pattern(self):
-    """
-    Isolate the minimal patterns that is actually used during a bottom up rewrite
-    """
-    old_pattern_matcher = constant_folder
-    new_pattern_matcher = PatternMatcher(self.minimal_patterns)
-    self.setup_and_assert_old_pattern_topdown_vs_new_pattern_bottomup(
-      old_pattern_matcher,
-      new_pattern_matcher,
-      self.uop_factory
-    )
-  
-
-
-
-class TestPatternRewriteOldWithTopdownVsNewWithBottomup(TestUOps):  
-  def test_nested_add_on_negated_special(self):
-    def uop_factory():
-      return UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-        UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-          UOp(UOps.ALU, dtypes.float, arg=UnaryOps.NEG, src=(
-            UOp(UOps.SPECIAL, dtypes.int, arg=(0, 'gidx0', 4)),
-          )),
-          UOp(UOps.CONST, dtypes.float, arg=1.0)
-        )),
-        UOp(UOps.CONST, dtypes.float, arg=1.0)
-      ))
-    old_patterns = constant_folder
-    new_patterns = PatternMatcher([
-         (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
-        ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
-    ])
-    self.setup_and_assert_old_pattern_topdown_vs_new_pattern_bottomup(
-      old_patterns,
-      new_patterns,
-      uop_factory
-    )
-
-
 
   
 
