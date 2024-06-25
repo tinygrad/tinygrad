@@ -168,7 +168,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
-def expand_nodes(parents, expands:List[UOp], base):
+def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
   # get children and define_accs
   children = defaultdict(list)
   define_accs = []
@@ -210,7 +210,7 @@ def expand_nodes(parents, expands:List[UOp], base):
   replacements = {r:r.src for r in expands}
 
   # get nodes on the path from root to the expand node
-  new_uops = []
+  new_uops: List[UOp] = []
   acc_number = 0
   for rp in itertools.product(*replacements.values()):
     replace = dict(zip(replacements.keys(), rp))
@@ -303,7 +303,11 @@ def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, (idx+const) if const is not None else idx, new_var))
 
-float4_folding = [
+float4_folding = PatternMatcher([
+  # float4 add reorder. NOTE: n-ary ADD will fix this.
+  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
+    UOp.var("idx")+(UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")))).name("load"),
+    lambda buf, load, idx, idx2, ex: UOp(UOps.LOAD, load.dtype, (buf, idx+idx2+ex), load.arg)),
   # float4 load/store
   #(UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
   #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"))).name("load"), float4_expand_load),
@@ -323,7 +327,7 @@ float4_folding = [
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx"), UOp.var("var"))), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
-]
+])
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
@@ -426,7 +430,7 @@ constant_folder = PatternMatcher([
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)), lambda: UOp(UOps.NOOP)),
 ])
 
-constant_folder_w_f4 = PatternMatcher(float4_folding + constant_folder.patterns)
+constant_folder_w_f4 = PatternMatcher(float4_folding.patterns + constant_folder.patterns)
 
 # *** uop graph ***
 
