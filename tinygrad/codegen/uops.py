@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar, TYPE_CHECKING
 import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -8,6 +8,9 @@ from tinygrad.dtype import ConstType, dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv, flatten, all_same
+
+if TYPE_CHECKING:
+  from tinygrad.renderer import Renderer
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -297,8 +300,8 @@ def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, (idx+const) if const is not None else idx, new_var))
 
-# this is symbolic 2.0
-constant_folder = PatternMatcher([
+# TODO: gate clang to not use this
+float4_folding = [
   # float4 load/store
   #(UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
   #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"))).name("load"), float4_expand_load),
@@ -318,6 +321,10 @@ constant_folder = PatternMatcher([
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx"), UOp.var("var"))), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
+]
+
+# this is symbolic 2.0
+constant_folder = PatternMatcher([
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
@@ -417,13 +424,16 @@ constant_folder = PatternMatcher([
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)), lambda: UOp(UOps.NOOP)),
 ])
 
+constant_folder_w_f4 = PatternMatcher(float4_folding + constant_folder.patterns)
+
 # *** uop graph ***
 
 class UOpGraph:
-  def __init__(self, sinks:List[UOp]):
+  def __init__(self, sinks:List[UOp], opts:Optional[Renderer]=None):
     self.sinks: List[UOp] = sinks
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
+    self.folder = constant_folder if opts is None or not opts.supports_float4 else constant_folder_w_f4
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
@@ -511,8 +521,8 @@ class UOpGraph:
     sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
 
     # do graph rewrite
-    sink = self.graph_rewrite(sink, constant_folder)
-    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+    sink = self.graph_rewrite(sink, self.folder)
+    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
     if not getenv("DEBUG_EXPAND", 0):
       # do contracts/reduces
@@ -527,7 +537,7 @@ class UOpGraph:
         sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
 
       # do graph rewrite (2)
-      sink = self.graph_rewrite(sink, constant_folder)
+      sink = self.graph_rewrite(sink, self.folder)
 
     # filter nodes that don't link to a sink
     # BFS toposort

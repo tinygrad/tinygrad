@@ -184,7 +184,7 @@ class Lowerer(Kernel):
     for a in range(self.first_reduce, self.first_reduce+self.group_for_reduces):
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(self.full_shape[a])), (1000+a, True))
 
-    self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast])
+    self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast], self.opts)
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
