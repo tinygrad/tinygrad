@@ -46,11 +46,11 @@ def exponent_mask(d: DType) -> int:
 
 def float_to_bits(d: LazyBuffer) -> LazyBuffer:
   cast_to = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[d.dtype]
-  return d.cast(cast_to, True)
+  return d.cast(cast_to, True, True)
 
 def bits_to_float(d: LazyBuffer, float_dtype: DType) -> LazyBuffer:
   cast_to = {dtypes.uint64: dtypes.float64, dtypes.uint32: dtypes.float32, dtypes.uint16: float_dtype}[d.dtype]
-  return d.cast(cast_to, True)
+  return d.cast(cast_to, True, True)
 
 # **** utils ****
 def rintk(d: LazyBuffer) -> LazyBuffer:
@@ -78,9 +78,9 @@ def ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   d = d.cast(dtypes.float64) if d.device != "METAL" else d
   cast_map = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
   e = e.cast(cast_map[d.dtype])
-  m1 = d.cast(cast_map[d.dtype], True)
+  m1 = d.cast(cast_map[d.dtype], True, True)
   m2 = e.e(BinaryOps.SHL, e.const(significand_bits(d.dtype)))
-  return m1.e(BinaryOps.ADD, m2).cast(d.dtype, True).cast(dtype)
+  return m1.e(BinaryOps.ADD, m2).cast(d.dtype, True, True).cast(dtype)
 
 def pow2if(q: LazyBuffer, float_dtype: DType):
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype}[q.dtype]
