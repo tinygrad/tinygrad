@@ -437,7 +437,7 @@ class TestLinearizer(unittest.TestCase):
     assert accs[0].dtype == stores[0].src[-1].dtype == dtypes.float.vec(4)
     assert stores[0].src[0].op is UOps.DEFINE_LOCAL
     # the second store is to gds with no upcasts
-    assert accs[1].dtype == stores[1].src[-1].dtype == dtypes.float
+    assert accs[1].dtype == stores[1].src[2].dtype == dtypes.float
     assert stores[1].src[0].op is UOps.DEFINE_GLOBAL
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
@@ -767,7 +767,7 @@ class TestLinearizer(unittest.TestCase):
     assert stores[0].src[-1].op is not UOps.CAST
 
     # the global store doesn't change
-    assert stores[1].src[-1].dtype == dtypes.float
+    assert stores[1].src[2].dtype == dtypes.float
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_skip_unmatching_upcasts(self):

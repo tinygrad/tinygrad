@@ -78,7 +78,7 @@ class Lowerer(Kernel):
     if x.op in BufferOps:
       idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
       # TODO: check has_valid in UPat, not here
-      has_valid = valid.op is not UOps.CONST or valid.arg is not True
+      has_valid = valid.op is not UOps.CONST or (valid.arg is not True and valid.arg != 1)
       if x.op is BufferOps.CONST:
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(x.arg.dtype, x.arg.val), UOp.const(x.arg.dtype, 0))
       if x.arg.idx == -1:
@@ -90,6 +90,7 @@ class Lowerer(Kernel):
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
+      if self.group_for_reduces > 0 and x.arg.idx == 0: valid, has_valid = valid * self.idxs[self.first_reduce].eq(0), True
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
