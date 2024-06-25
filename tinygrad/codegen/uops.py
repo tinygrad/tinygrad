@@ -4,7 +4,7 @@ import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from tinygrad.dtype import ConstType, dtypes, DType, PtrDType
+from tinygrad.dtype import ConstType, dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv, flatten, all_same
@@ -285,12 +285,14 @@ reducer = PatternMatcher([
 ])
 
 def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), const=None):
+  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
   if load.dtype.scalar() != load.dtype: return None  # how does this happen?
   if const is not None and const.arg%4 != 0: return None
   vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, (idx+const) if const is not None else idx))
   return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
 
 def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None):
+  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
   if const is not None and const.arg%4 != 0: return None
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, (idx+const) if const is not None else idx, new_var))
@@ -300,21 +302,21 @@ constant_folder = PatternMatcher([
   # float4 load/store
   #(UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
   #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"))).name("load"), float4_expand_load),
-  (UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int))).name("load"),
     float4_expand_load),
-  (UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
-  (UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))).name("load"), float4_expand_load),
   #(UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
   #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"), UOp.var("var"))), float4_contract_store),
-  (UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int), UOp.var("var"))),
     float4_contract_store),
-  (UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx"), UOp.var("var"))), float4_contract_store),
-  (UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(

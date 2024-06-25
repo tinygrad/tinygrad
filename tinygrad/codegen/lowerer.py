@@ -89,7 +89,7 @@ class Lowerer(Kernel):
                   (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
-        return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype, 0)) if has_valid else ()) + barrier)
+        return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
@@ -97,7 +97,7 @@ class Lowerer(Kernel):
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
       # NOTE: always using ridxs is fine here
-      return UOp(UOps.REDUCE, x.dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
+      return UOp(UOps.REDUCE, x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
