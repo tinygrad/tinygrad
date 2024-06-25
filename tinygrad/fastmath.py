@@ -84,7 +84,7 @@ def ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
 
 def pow2if(q: LazyBuffer, float_dtype: DType):
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype}[q.dtype]
-  return q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)).e(BinaryOps.SHL, q.const(significand_bits(final_dtype))).cast(final_dtype, True)
+  return q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)).e(BinaryOps.SHL, q.const(significand_bits(final_dtype))).cast(final_dtype, True, True) # noqa: E501
 
 def ldexp2kf(d: LazyBuffer, e: LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype) and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
