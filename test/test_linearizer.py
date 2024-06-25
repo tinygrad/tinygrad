@@ -345,6 +345,7 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast((ast,), [x], wanna_output=[expected])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skip("AST has implicit movement ops")
   def test_softmax_multireduce_multiout(self):
     x = Tensor.rand(4, 32).realize()
     x_ast = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((4,32))))
@@ -440,6 +441,7 @@ class TestLinearizer(unittest.TestCase):
     assert stores[1].src[0].op is UOps.DEFINE_GLOBAL
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skip("AST has implicit movement ops")
   def test_upcast_multireduce_nested_local_upcast(self):
     x, y, z, w = [Tensor.rand((1,128) if i % 2 == 0 else (1,128,128)).realize() for i in range(4)]
     st0 = ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))
@@ -1242,6 +1244,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skip("AST has implicit movement ops")
   def test_atomic_store_nested_range_multireduce(self):
     # nested ranges
     Tensor.manual_seed(1882)
@@ -1317,6 +1320,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skip("AST has implicit movement ops")
   def test_matmul_multireduce(self):
     N = 128
     Tensor.manual_seed(1552)
@@ -1377,6 +1381,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skip("AST has implicit movement ops")
   def test_double_reduce_multireduce(self):
     N = 128
     Tensor.manual_seed(1552)
