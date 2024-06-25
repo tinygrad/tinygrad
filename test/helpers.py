@@ -1,5 +1,6 @@
 import sys, unittest
 import numpy as np
+import math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.codegen.uops import UOp
 from tinygrad.tensor import _to_np_dtype
@@ -124,13 +125,18 @@ def print_uop_tree(uop: UOp, node_visit_counter: Optional[NodeVisitCounter] = No
     print(printable)
   return printable
 
+def arg_equal(arg1, arg2):
+  if isinstance(arg1, float) and isinstance(arg2, float) and math.isnan(arg1) and math.isnan(arg2):
+    return True
+  return arg1 == arg2
+
 def compare_uop_tree(uop1: UOp, uop2: UOp):
   def recursively_compare(uop1: UOp, uop2: UOp):
     if uop1.op != uop2.op:
       return False, f"op mismatch: {uop1.op} != {uop2.op}"
     if uop1.dtype != uop2.dtype:
       return False, f"dtype mismatch: {uop1.dtype} != {uop2.dtype}"
-    if uop1.arg != uop2.arg:
+    if not arg_equal(uop1.arg, uop2.arg):
       return False, f"arg mismatch: {uop1.arg} != {uop2.arg}"
     if len(uop1.src) != len(uop2.src):
       return False, f"src length mismatch: {len(uop1.src)} != {len(uop2.src)}"
