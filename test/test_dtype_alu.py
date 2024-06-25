@@ -26,7 +26,7 @@ if Device.DEFAULT == "LLVM":
   binary_operations.remove(operator.lt)
   binary_operations.remove(operator.eq)
 
-integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor)]
+integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and), (Tensor.bitwise_or, np.bitwise_or)] # noqa: E501
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
 
