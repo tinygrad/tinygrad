@@ -290,12 +290,14 @@ reducer = PatternMatcher([
 def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), const=None):
   if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
   if load.dtype.scalar() != load.dtype: return None  # how does this happen?
+  if idx.op is UOps.CONST and idx.arg%4 != 0: return None  # NOTE: must be aligned. this is incomplete
   if const is not None and const.arg%4 != 0: return None
   vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, (idx+const) if const is not None else idx))
   return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
 
 def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None):
   if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
+  if idx.op is UOps.CONST and idx.arg%4 != 0: return None  # NOTE: must be aligned. this is incomplete
   if const is not None and const.arg%4 != 0: return None
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, (idx+const) if const is not None else idx, new_var))
