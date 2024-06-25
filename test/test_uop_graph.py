@@ -263,7 +263,13 @@ class TestBottomupVsTopdownRewrite(TestUOps):
     sa(lambda: UOp.load(UOp.var(), UOp.var(), UOp.const(None, 0), UOp.cvar("var"), UOp.var()))
     sa(lambda: UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 1)))
     sa(lambda: UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)))
-
+    sa(lambda: UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+      UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+        UOp(UOps.CONST, dtypes.float, arg=0.0),
+        UOp(UOps.CONST, dtypes.float, arg=0.0),
+      )),
+      UOp(UOps.CONST, dtypes.float, arg=float('inf')),
+    )))
 
 class TestPatternRewriteArange(TestUOps):
   def __init__(self, *args, **kwargs):
