@@ -1551,13 +1551,12 @@ class TestKernelOpts(unittest.TestCase):
   def test_padto_sum_not_ok(self):
     N = 18 * 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
-    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))).exp()
+    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))).sqrt()
     # exp is not safe to pad
-    # not wokring as of now
-    #with self.assertRaises(KernelOptError):
-    #  helper_linearizer_opt(a.exp().sum(), [[Opt(OptOps.PADTO, 0, 32)],])
-    #with self.assertRaises(KernelOptError):
-    #  helper_linearizer_opt(a.exp().sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a.exp().sum(), [[Opt(OptOps.PADTO, 0, 32)],])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a.exp().sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
     b = a < -1
     # lt is not safe to pad
