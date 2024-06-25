@@ -195,7 +195,7 @@ class TestUOpGraph(TestUOps):
     self.setup_and_assert_uop_graph_equal(factory)
 
 
-class TestBottomupVsTopdownRewrite(TestUOps):  
+class TestBottomupVsTopdownRewrite(TestUOps):
   def test_sum_collapse(self):
     def factory():
       global_buffer0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
@@ -218,8 +218,8 @@ class TestBottomupVsTopdownRewrite(TestUOps):
       ))
       store = UOp(UOps.STORE, None, (global_buffer0, const_1, phi))
       return store
-    self.setup_and_assert_uop_graph_equal(factory)  
-    
+    self.setup_and_assert_uop_graph_equal(factory)
+
   def test_arange(self):
     def factory():
       const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
@@ -241,7 +241,7 @@ class TestBottomupVsTopdownRewrite(TestUOps):
       phi = UOp(UOps.PHI, dtypes.float, (_acc, add_where_acc))
       store = UOp(UOps.STORE, None, (_global, _special, phi))
       return store
-    self.setup_and_assert_uop_graph_equal(factory)  
+    self.setup_and_assert_uop_graph_equal(factory)
 
   def test_pattern_that_can_be_inlined(self):
     sa = self.setup_and_assert_uop_graph_equal
@@ -278,8 +278,8 @@ class TestBottomupVsTopdownRewrite(TestUOps):
       UOp(UOps.CONST, dtypes.float, arg=1.0)
     ), TernaryOps.WHERE))
     sa(lambda: UOp(UOps.ALU, dtypes.float, (
-      UOp(UOps.CONST, dtypes.bool, arg=False), 
-      UOp(UOps.CONST, dtypes.float, arg=1.0), 
+      UOp(UOps.CONST, dtypes.bool, arg=False),
+      UOp(UOps.CONST, dtypes.float, arg=1.0),
       UOp(UOps.CONST, dtypes.float, arg=2.0)
     ), TernaryOps.WHERE))
     sa(lambda: UOp(UOps.CAST, dtypes.int, (

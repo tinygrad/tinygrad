@@ -63,7 +63,7 @@ class NodeVisitCounter:
 
   def __setitem__(self, key: UOp, value: int) -> None:
     self.counter[key] = value
-  
+
   @property
   def total(self):
     return sum(self.counter.values())
@@ -162,8 +162,8 @@ def create_uop_linearize_and_compare_bottomup_topdown(uop_factory: Callable[[], 
   return result, reason_and_tree
 
 def create_compare_old_pattern_topdown_vs_new_pattern_bottomup(
-  old_pattern_matcher: PatternMatcher, 
-  new_pattern_matcher: PatternMatcher, 
+  old_pattern_matcher: PatternMatcher,
+  new_pattern_matcher: PatternMatcher,
   uop_factory: Callable[[], UOp]
 ):
   def create_graph():
@@ -194,9 +194,9 @@ class TestUOps(unittest.TestCase):
     for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
 
   def setup_and_assert_old_pattern_topdown_vs_new_pattern_bottomup(
-      self, 
-      old_pattern_matcher: PatternMatcher, 
-      new_pattern_matcher: PatternMatcher, 
+      self,
+      old_pattern_matcher: PatternMatcher,
+      new_pattern_matcher: PatternMatcher,
       uop_factory: Callable[[], UOp]):
     result, reason = create_compare_old_pattern_topdown_vs_new_pattern_bottomup(
       old_pattern_matcher,
