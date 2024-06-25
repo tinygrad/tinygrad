@@ -659,6 +659,27 @@ class TestLinearizer(unittest.TestCase):
     with self.assertRaises(AssertionError):
       get_grouped_dims("gidx", 0, (Variable("start_pos", 0, 16),3,4), (16,16,16,), False,)
 
+  def test_div_collapse(self):
+    def helper(t, msg, max_ops=0):
+      sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
+      assert len(sched) == 1
+
+      lin = Linearizer(*sched[0].ast)
+      assert sum(u.arg is UnaryOps.RECIP for u in lin.linearize().uops) == max_ops, msg
+
+    a = Tensor.rand((4,4))
+    b = Tensor.rand((4,4))
+    d = Tensor.rand((4,4))
+
+    c = (a*b)/b
+    helper(c, "found UnaryOps.RECIP in (a*b)/b operation")
+
+    c = a/a
+    helper(c, "found UnaryOps.RECIP in (a/a) operation")
+
+    c = (a/b)/d
+    helper(c, "found multiple UnaryOps.RECIP in (a/b)/d operation", 1)
+
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
     sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
