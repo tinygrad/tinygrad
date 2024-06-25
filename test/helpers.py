@@ -100,7 +100,8 @@ def print_uop_tree(uop: UOp, node_visit_counter: Optional[NodeVisitCounter] = No
     """
     nonlocal printable
     uop_name = f"{uop.op}"
-    uop_name += f" {uop.arg}"
+    uop_name += f" {uop.dtype}" if uop.dtype is not None else ""
+    uop_name += f" {uop.arg}" if uop.arg is not None else ""
     depth_fill = '  '
     depth_fill_if_parent_has_siblings = '┃ '
     depth_space = ''
