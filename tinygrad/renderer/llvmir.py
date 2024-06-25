@@ -133,7 +133,7 @@ class LLVMRenderer(Renderer):
           lvars[u].add_incoming(lvars[src[0]], bb[-2].block)
           loop_blocks.append((bb[-1].block, phis))
         elif uop is UOps.DEFINE_ACC:
-          lvars[u] = const(args[0], dtype)
+          lvars[u] = const(src[0].arg, dtype)
           reduce_phis.append(u)
         elif uop is UOps.LOAD:
           if len(src) > 2:

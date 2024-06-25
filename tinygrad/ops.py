@@ -144,3 +144,26 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.int32: lambda x: ctypes.c_int32(x).value, dtypes.int64: lambda x: ctypes.c_int64(x).value,}
 
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+
+# the living definition of LazyOps
+def verify_lazyop(*ast:LazyOp):
+  sts: Dict[LazyOp, ShapeTracker] = {}
+  def dfs(op:LazyOp, st:ShapeTracker):
+    if op in sts: return
+    for x in op.src: dfs(x, st)
+    # only reduceop is allowed to change shape, limited to turning n to 1
+    if op.op in ReduceOps:
+      expected_shape = tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape))
+      assert st.shape == expected_shape, f"unexpected reduceop shape {st.shape} != {expected_shape}"
+      st = ShapeTracker.from_shape(expected_shape)
+    else:
+      # movementops are pushed to the edges with LOAD
+      if op.op in BufferOps: st = op.arg.st
+      else: st = sts[op.src[0]]
+      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
+    sts[op] = st
+  for i, out in enumerate(ast):
+    assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
+    assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
+    assert out.arg.st.size == ast[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
+    dfs(out, out.arg.st)
