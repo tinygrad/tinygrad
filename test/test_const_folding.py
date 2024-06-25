@@ -28,6 +28,11 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor([1, 2, 3]).neg().mul(-1))
     _check_ast_count(0, Tensor([1, 2, 3]).neg().neg())
 
+  def test_neg_realized_no_fold(self):
+    x = Tensor.randn(32, 32)
+    x = x.clip(0, 1).realize()
+    _check_ast_count(1, x.neg())
+
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
