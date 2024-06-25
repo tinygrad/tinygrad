@@ -6,7 +6,7 @@ from collections import defaultdict
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, BinaryOps, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
@@ -47,13 +47,13 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
   ctx = dict(zip(fake_idxs, idxs))
   return idx.render(render_ops, ctx), valid.render(render_ops, ctx)
 
-  """
-  if isinstance(dtype, ImageDType):
-    idx_x, idx_y = (idx // 4) % dtype.shape[1], (idx // (4 * dtype.shape[1]))
-    ridx = UOp(UOps.CAST, dtypes.int.vec(2), tuple(x.render(render_ops, ctx) for x in (idx_x, idx_y)))
-    return ridx, valid.render(render_ops, ctx)
-  else:
-  """
+"""
+if isinstance(dtype, ImageDType):
+  idx_x, idx_y = (idx // 4) % dtype.shape[1], (idx // (4 * dtype.shape[1]))
+  ridx = UOp(UOps.CAST, dtypes.int.vec(2), tuple(x.render(render_ops, ctx) for x in (idx_x, idx_y)))
+  return ridx, valid.render(render_ops, ctx)
+else:
+"""
 
 # TODO: enable this once UOps is ready to replace symbolic
 """
