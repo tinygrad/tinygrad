@@ -6,10 +6,25 @@ from collections import defaultdict
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, BinaryOps, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
+
+def calc_tc_idxs(local_idxs, local_sizes: List[int], aliases: List[List[int]]):
+  replace_idxs, thread_idxs, thread_idx = [], [], Variable("_uidx_tc", 0, prod(local_sizes)-1)
+  for s in local_sizes:
+    thread_idxs.append(thread_idx % s)
+    thread_idx //= s
+  for alias in aliases:
+    full_var, full_var_sz = NumNode(0), 1
+    if alias[0] != 0:
+      for i in alias:
+        next_var = local_idxs[i-1] if i > 0 else thread_idxs[-i-1]
+        full_var += next_var * full_var_sz
+        full_var_sz *= next_var.max+1
+    replace_idxs.append(full_var)
+  return replace_idxs
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
 def variable_to_uop(x, ctx=None) -> UOp:
@@ -31,6 +46,14 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
   idx, valid = st.expr_idxs(fake_idxs)
   ctx = dict(zip(fake_idxs, idxs))
   return idx.render(render_ops, ctx), valid.render(render_ops, ctx)
+
+  """
+  if isinstance(dtype, ImageDType):
+    idx_x, idx_y = (idx // 4) % dtype.shape[1], (idx // (4 * dtype.shape[1]))
+    ridx = UOp(UOps.CAST, dtypes.int.vec(2), tuple(x.render(render_ops, ctx) for x in (idx_x, idx_y)))
+    return ridx, valid.render(render_ops, ctx)
+  else:
+  """
 
 # TODO: enable this once UOps is ready to replace symbolic
 """
@@ -137,6 +160,9 @@ class Lowerer(Kernel):
         arg = replace(op.arg, st=self.sts[self.bufs.index(op.arg)])
       elif op.op in ReduceOps:
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])
+        #if self.tensor_core is not None and op.op is ReduceOps.SUM and op.src[0].op is BinaryOps.MUL:
+        #  print(self.tensor_core, self.tensor_core_opts)
+        #  return LazyOp(ReduceOps.TC, tuple(fixup_ast(x) for x in op.src[0].src))
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
           local_buffer = MemBuffer(-1, start.dtype, self.sts[-1])

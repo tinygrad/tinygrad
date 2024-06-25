@@ -299,9 +299,9 @@ def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None
 
 float4_folding = PatternMatcher([
   # float4 add reorder. NOTE: n-ary ADD will fix this.
-  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-    UOp.var("idx")+(UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")))).name("load"),
-    lambda buf, load, idx, idx2, ex: UOp(UOps.LOAD, load.dtype, (buf, idx+idx2+ex), load.arg)),
+  #(UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
+  #  UOp.var("idx")+(UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")))).name("load"),
+  #  lambda buf, load, idx, idx2, ex: UOp(UOps.LOAD, load.dtype, (buf, idx+idx2+ex), load.arg)),
   # float4 load/store
   #(UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
   #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"))).name("load"), float4_expand_load),
@@ -322,6 +322,19 @@ float4_folding = PatternMatcher([
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
 ])
+
+"""
+  # collapse ADD
+  (UOp.var("a")+UOp.var("b")+UOp.var("c")+UOp.var("d")+UOp.var("e")+UOp.var("f"), lambda a,b,c,d,e,f: UOp.alu(BinaryOps.ADD, a, b, c, d, e, f)),
+  (UOp.var("a")+UOp.var("b")+UOp.var("c")+UOp.var("d")+UOp.var("e"), lambda a,b,c,d,e: UOp.alu(BinaryOps.ADD, a, b, c, d, e)),
+  (UOp.var("a")+UOp.var("b")+UOp.var("c")+UOp.var("d"), lambda a,b,c,d: UOp.alu(BinaryOps.ADD, a, b, c, d)),
+  (UOp.var("a")+UOp.var("b")+UOp.var("c"), lambda a,b,c: UOp.alu(BinaryOps.ADD, a, b, c)),
+  # collapse MUL
+  (UOp.var("a")*UOp.var("b")*UOp.var("c")*UOp.var("d")*UOp.var("e")*UOp.var("f"), lambda a,b,c,d,e,f: UOp.alu(BinaryOps.MUL, a, b, c, d, e, f)),
+  (UOp.var("a")*UOp.var("b")*UOp.var("c")*UOp.var("d")*UOp.var("e"), lambda a,b,c,d,e: UOp.alu(BinaryOps.MUL, a, b, c, d, e)),
+  (UOp.var("a")*UOp.var("b")*UOp.var("c")*UOp.var("d"), lambda a,b,c,d: UOp.alu(BinaryOps.MUL, a, b, c, d)),
+  (UOp.var("a")*UOp.var("b")*UOp.var("c"), lambda a,b,c: UOp.alu(BinaryOps.MUL, a, b, c)),
+"""
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
