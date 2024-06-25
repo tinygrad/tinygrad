@@ -161,7 +161,7 @@ def sum_collapse(phi_input, loop, val1, val2):
 def loop_collapse(negate=False):
   def _loop_collapse(loop_start, loop_end, compval, idx, multconst,  mval=None):
     if negate:
-      mval = UOp(UOps.CONST, dtypes.float, arg=-1.0)
+      mval = UOp(UOps.CONST, dtypes.int, arg=-1)
     if mval.arg >= 0 or loop_start.arg != 0:
       # TODO: support and test this with other mvals and loop_starts
       if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
