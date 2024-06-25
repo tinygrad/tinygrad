@@ -36,22 +36,24 @@ class HCQGraph(MultiGraphRunner):
       # NV needs constbuffer to be set
       if ji.prg.device.dname.startswith("NV"): to_mv(self.kargs_addrs[j], 0x160).cast('I')[:] = array.array('I', ji.prg.clprg.constbuffer_0)
 
-    # Build queues.
+    # Schedule Dependencies.
+    # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any
+    # graph-related tasks. This synchronization uses a global timeline signal per device. Within the graph, the compute queue coordinates with
+    # global operations and sets a kickoff signal. Any queue accessing a buffer from another device waits for this signal from the device’s
+    # compute queue to ensure exclusive access. The compute queue signals the completion of the graph, synchronizing with the device's copy queue.
     self.comp_queues: Dict[Compiled, Any] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
     self.copy_queues: Dict[Compiled, Any] = {dev: dev.hw_copy_queue_t() for dev in self.devices}
 
-    self.dev_kickoff_signal = {dev: self.devices[0]._get_signal(value=0) for dev in self.devices + ['CPU']}
+    self.signal_sched: Dict[int, Tuple[List, Optional[Tuple], Optional[Tuple]]] = {} # Dict[ji_idx, (deps, sig_info, prof_info)]
+    self.signals: Dict[Any, Any] = collections.defaultdict(lambda: self.devices[0]._get_signal(value=0)) # Dict[queue, signal]
+    self.dev_kickoff_signal = {dev: self.devices[0]._get_signal(value=0) for dev in self.devices + ['CPU']} # Dict[dev, signal]
     self.kickoff_value = 0
 
     self.save_devs: Dict[Any, Set] = collections.defaultdict(set) # Dict[queue, signal]
     for dev in self.devices: self.save_devs[self.comp_queues[dev]].add(dev)
 
-    self.graph_timeline = {dev: 0 for dev in self.devices}
-
-    # Schedule dependencies
-    self.signal_sched: Dict[int, Tuple[List, Optional[Tuple], Optional[Tuple]]] = {} # Dict[ji_idx, (deps, sig_info, prof_info)]
-    self.signals: Dict[Any, Any] = collections.defaultdict(lambda: self.devices[0]._get_signal(value=0)) # Dict[queue, signal]
-    self.last_ji = collections.defaultdict(lambda : None) # Dict[queue, signal]
+    self.graph_timeline = {dev: 0 for dev in self.devices} # Dict[dev, last graph sigval]
+    self.last_ji = collections.defaultdict(lambda: None) # Dict[queue, signal]
 
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev = Device[ji.bufs[1].device] if isinstance(ji.prg, BufferXfer) else ji.prg.device #type:ignore
@@ -84,8 +86,8 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_wait_cmds: Dict[Any, List] = collections.defaultdict(list)
 
     for dev in self.devices:
-      self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1).wait(self.dev_kickoff_signal['CPU'], self.kickoff_value) \
-                           .signal(self.dev_kickoff_signal[dev], self.kickoff_value)
+      self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1) \
+                           .wait(self.dev_kickoff_signal['CPU'], self.kickoff_value).signal(self.dev_kickoff_signal[dev], self.kickoff_value)
 
     for j,ji in enumerate(self.jit_cache):
       deps, signal_value, prof_info = self.signal_sched[j]
