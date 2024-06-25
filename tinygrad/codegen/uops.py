@@ -119,6 +119,7 @@ T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
+  if pat.op and uop.op not in pat.op: return False
   if pat.src:
     for vp in pat.src if isinstance(pat.src, tuple) else [(pat.src,)*len(uop.src)]:
       if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False
@@ -129,9 +130,8 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
         store.update(new_store)
         break
     else: return False  # None of the src matches
-  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return False
-  if pat.op and uop.op not in pat.op: return False
-  if pat.dtype and uop.dtype not in pat.dtype + (None,): return False
+  if pat.dtype and uop.dtype and uop.dtype not in pat.dtype: return False
+  if pat.name is not None and store.setdefault(pat.name,uop) is not uop: return False
   if pat.arg is not None and (uop.arg not in pat.arg if isinstance(pat.arg, (set,tuple)) else pat.arg != uop.arg): return False
   return True
 
@@ -147,7 +147,6 @@ class PatternMatcher:
         for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
-
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
