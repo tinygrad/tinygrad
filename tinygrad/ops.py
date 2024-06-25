@@ -159,5 +159,8 @@ def verify_lazyop(*ast:LazyOp):
       st = ShapeTracker.from_shape(new_shape)
     elif op.op in BufferOps: st = op.arg.st
     sts[op] = st
-  for out in ast:
+  for i, out in enumerate(ast):
+    assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
+    assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
+    assert out.arg.st.size == ast[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
     dfs(out, out.arg.st)
