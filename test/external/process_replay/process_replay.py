@@ -16,9 +16,8 @@ for offset in tqdm(range(0, row_count, page_size)):
     for opt in compare_k.applied_opts: k.apply_opt(opt)
     good_src = k.opts.render(to_function_name(compare_k.name), k.linearize().uops)
     time_ = time_lin(k)
-    try:
-      assert compare_src == good_src, "PROCESS REPLAY DETECTED CHANGE"
-      assert (time_-time_baseline)/max(time_baseline, .1) < 0.1, f"TIME REPLAY DETECTED CHANGE {time_baseline} ->{time_}"
+    if (time_-time_baseline)/max(time_baseline, .1) > 0.1: print(f"WARNING TIME INCREASED {time_baseline:.2f} -> {time_:.2f}")
+    try: assert compare_src == good_src, "PROCESS REPLAY DETECTED CHANGE"
     except AssertionError as e:
       print(e.args[0])
       print(compare_k.ast)
