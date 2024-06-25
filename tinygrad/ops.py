@@ -1,6 +1,5 @@
 from __future__ import annotations
-from collections import defaultdict, deque
-from typing import DefaultDict, Union, Tuple, Any, List, Dict, Callable
+from typing import Union, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes, struct
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -157,7 +156,11 @@ def verify_lazyop(*ast:LazyOp):
       new_shape = tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape))
       assert st.shape == new_shape
       st = ShapeTracker.from_shape(new_shape)
-    elif op.op in BufferOps: st = op.arg.st
+    else:
+      # movementops are pushed to the edges with LOAD
+      if op.op in BufferOps: st = op.arg.st
+      else: st = sts[op.src[0]]
+      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
     sts[op] = st
   for i, out in enumerate(ast):
     assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
