@@ -163,6 +163,36 @@ class TestUOpGraph(TestUOps):
     # only the second store happens
     self.assertEqual(len(uops.uops), 4)
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
+  
+  def test_loop_collapse_match(self):
+    def factory():
+      const0 = UOp(UOps.CONST, dtypes.float, arg=0.0)
+      const_neg1 = UOp(UOps.CONST, dtypes.float, arg=-1.0)
+      const2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
+      const_neg2 = UOp(UOps.CONST, dtypes.float, arg=-2.0)
+      const3 = UOp(UOps.CONST, dtypes.float, arg=3.0)
+      special = UOp(UOps.SPECIAL, dtypes.float, arg=(0, 'gidx0', 4))
+      add = UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+        UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+          special,
+          const_neg1,
+        )),
+        UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+          UOp(UOps.RANGE, dtypes.float, arg=(2, 0), src=(
+            const0,
+            const2
+          )),
+          const_neg1
+        ))
+      ))
+      cmplt = UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPLT, src=(
+        add, const_neg2
+      ))
+      where = UOp(UOps.ALU, dtypes.float, arg=TernaryOps.WHERE, src=(
+        cmplt, const3, const0
+      ))
+      return where
+    self.setup_and_assert_uop_graph_equal(factory)
 
 
 class TestBottomupVsTopdownRewrite(TestUOps):  
