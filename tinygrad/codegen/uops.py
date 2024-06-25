@@ -206,24 +206,18 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
       if in_degree[x] == 0:
         search2.append(x)
 
-  # should be unrolled
-  replacements = {r:r.src for r in expands}
+  # get replacements by index
+  replacements: Dict[int, List[int]] = {}
+  for r in expands:
+    if r.arg in replacements: assert len(replacements[r.arg]) == len(r.src)
+    else: replacements[r.arg] = list(range(0, len(r.src)))
 
   # get nodes on the path from root to the expand node
   new_uops: List[UOp] = []
   acc_number = 0
   for rp in itertools.product(*replacements.values()):
-    replace = dict(zip(replacements.keys(), rp))
-
-    # terrible skip function. TODO: fix this!
-    rr = defaultdict(list)
-    for k,v in replace.items(): rr[k.arg].append(k.src.index(v))
-    should_skip = False
-    for m in rr.values():
-      if not all_same(m):
-        should_skip = True
-        break
-    if should_skip: continue
+    rpk = dict(zip(replacements.keys(), rp))
+    replace = {r:r.src[rpk[r.arg]] for r in expands}
 
     for d in define_accs:
       replace[d] = UOp(d.op, d.dtype, d.src, d.arg + (acc_number,))
