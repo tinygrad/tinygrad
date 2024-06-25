@@ -44,7 +44,7 @@ class HCQGraph(MultiGraphRunner):
     self.comp_queues: Dict[Compiled, Any] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
     self.copy_queues: Dict[Compiled, Any] = {dev: dev.hw_copy_queue_t() for dev in self.devices}
 
-    self.signal_sched: Dict[int, Tuple[List, Optional[Tuple], Optional[Tuple]]] = {} # Dict[ji_idx, (deps, sig_info, prof_info)]
+    self.signal_sched: Dict[int, Tuple[List, Optional[int], Optional[List]]] = {} # Dict[ji_idx, (deps, sigval, prof_info)]
     self.signals: Dict[Any, Any] = collections.defaultdict(lambda: self.devices[0]._get_signal(value=0)) # Dict[queue, signal]
     self.dev_kickoff_signal = {dev: self.devices[0]._get_signal(value=0) for dev in self.devices + ['CPU']} # Dict[dev, signal]
     self.kickoff_value = 0
@@ -53,13 +53,13 @@ class HCQGraph(MultiGraphRunner):
     for dev in self.devices: self.save_devs[self.comp_queues[dev]].add(dev)
 
     self.graph_timeline = {dev: 0 for dev in self.devices} # Dict[dev, last graph sigval]
-    self.last_ji = collections.defaultdict(lambda: None) # Dict[queue, signal]
+    self.last_ji: Dict[Any, Any] = collections.defaultdict(lambda: None) # Dict[queue, signal]
 
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev = Device[ji.bufs[1].device] if isinstance(ji.prg, BufferXfer) else ji.prg.device #type:ignore
       enqueue_queue = self.copy_queues[enqueue_dev] if isinstance(ji.prg, BufferXfer) else self.comp_queues[enqueue_dev]
       out_signal = self.signals[enqueue_queue]
-      writable_buffers = 1 if isinstance(ji.prg, BufferXfer) else ji.prg.p.outcount
+      writable_buffers = ji.prg.p.outcount if isinstance(ji.prg, CompiledRunner) else 1
       deps = self.access_resources(enqueue_queue, ji.bufs[writable_buffers:], ji.bufs[:writable_buffers], j + 1)
 
       if isinstance(ji.prg, CompiledRunner):
@@ -67,7 +67,7 @@ class HCQGraph(MultiGraphRunner):
         if (last_j:=self.last_ji[enqueue_queue]) is not None: deps = [x for x in deps if id(x[0]) != id(out_signal)] + [(out_signal, last_j + 1)]
 
         # Remove self-dependency for AMD or NV with only 1 same-queue dep, since NV chains 2+ execs in this case, eliminating dep need.
-        if (dname:=dev.dname.split(":", 1)[0]) == "AMD" or (dname == "NV" and len(deps) == 1 and id(deps[0][0]) == id(out_signal)):
+        if (dname:=enqueue_dev.dname.split(":", 1)[0]) == "AMD" or (dname == "NV" and len(deps) == 1 and id(deps[0][0]) == id(out_signal)):
           deps = [x for x in deps if id(x[0]) != id(out_signal)]
       elif isinstance(ji.prg, BufferXfer): deps = [x for x in deps if id(x[0]) != id(out_signal)]
 
@@ -76,7 +76,7 @@ class HCQGraph(MultiGraphRunner):
           self.signal_sched[val - 1] = self.signal_sched[val - 1][:1] + (val,) + self.signal_sched[val - 1][2:]
 
       prof_ji_desc = ji.prg.clprg.name if isinstance(ji.prg, CompiledRunner) else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
-      prof_info = (dev._get_signal(), dev._get_signal(), dev, prof_ji_desc, isinstance(ji.prg, BufferXfer)) if PROFILE else None
+      prof_info = ([enqueue_dev._get_signal() for _ in range(2)] + [enqueue_dev, prof_ji_desc, isinstance(ji.prg, BufferXfer)]) if PROFILE else None
       self.signal_sched[j] = (deps, None if isinstance(ji.prg, CompiledRunner) else (j + 1), prof_info)
       self.last_ji[enqueue_queue] = j
 
