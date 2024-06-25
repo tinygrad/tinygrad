@@ -20,9 +20,6 @@ class Model:
 if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = mnist()
 
-  # TODO: remove this when HIP is fixed
-  X_train, X_test = X_train.float(), X_test.float()
-
   model = Model()
   opt = nn.optim.Adam(nn.state.get_parameters(model))
 

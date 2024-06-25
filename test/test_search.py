@@ -71,7 +71,7 @@ class TestBEAM(unittest.TestCase):
     b = Tensor.rand(3)
     realized_ast, _ = helper_realized_ast(a @ b)
     from tinygrad.engine.search import get_linearizer_actions
-    lins = get_linearizer_actions(Linearizer(realized_ast), False).values()
+    lins = get_linearizer_actions(Linearizer(*realized_ast), False).values()
 
     # ensure amt=0 are not duplicated
     if Opt(OptOps.UPCAST, 0, 0) in actions:
