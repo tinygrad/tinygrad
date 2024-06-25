@@ -1,6 +1,6 @@
 
 import math
-from typing import Tuple
+from typing import Tuple, List
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.lazy import LazyBuffer
@@ -31,6 +31,7 @@ def dfdiv2_f2_f2_f2(nx: LazyBuffer, ny: LazyBuffer, dx: LazyBuffer, dy: LazyBuff
   u = qx.e(UnaryOps.NEG).e(BinaryOps.ADD, nx.e(BinaryOps.MUL, t)).e(BinaryOps.ADD, qx.e(BinaryOps.MUL, dx.const(1).e(BinaryOps.ADD, dx.e(BinaryOps.MUL, t).e(UnaryOps.NEG)))) # noqa: E501
   qy = t.e(BinaryOps.MUL, ny.e(BinaryOps.ADD, qx.e(BinaryOps.MUL, dy).e(UnaryOps.NEG))).e(BinaryOps.ADD, u)
   return qx, qy
+
 # *** helper functions for bit manipulation ***
 def significand_bits(d: DType) -> int:
   assert is_dtype_fastmath_supported(d)
@@ -59,6 +60,11 @@ def rintk(d: LazyBuffer) -> LazyBuffer:
 
 def mla(x: LazyBuffer, y: LazyBuffer, z: LazyBuffer) -> LazyBuffer:
   return x.e(BinaryOps.MUL, y).e(BinaryOps.ADD, z)
+
+def polyN(u: LazyBuffer, s: LazyBuffer, coeffs: List[float]) -> LazyBuffer:
+  for c in coeffs:
+    u = mla(u, s, u.const(c))
+  return u
 
 def ilogb2k(d:LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
@@ -230,29 +236,13 @@ def _xsin_base(d: LazyBuffer, fast:bool=False) -> LazyBuffer:
   if fp64_p:
     s2 = s.e(BinaryOps.MUL, s)
     s4 = s2.e(BinaryOps.MUL, s2)
-
     def __poly4(x: LazyBuffer, x2: LazyBuffer, c3, c2, c1, c0) -> LazyBuffer: return mla(x2, mla(x, d.const(c3), d.const(c2)), mla(x, d.const(c1), d.const(c0))) # noqa: E501
     def __poly8(x, x2, x4, c7, c6, c5, c4, c3, c2, c1, c0) -> LazyBuffer: return mla(x4, __poly4(x, x2, c7, c6, c5, c4), __poly4(x, x2, c3, c2, c1, c0)) # noqa: E501
-    u = __poly8(
-      s,
-      s2,
-      s4,
-      -7.97255955009037868891952e-18,
-      2.81009972710863200091251e-15,
-      -7.64712219118158833288484e-13,
-      1.60590430605664501629054e-10,
-      -2.50521083763502045810755e-08,
-      2.75573192239198747630416e-06,
-      -0.000198412698412696162806809,
-      0.00833333333333332974823815,
-    )
+    u = __poly8(s, s2, s4, -7.97255955009037868891952e-18, 2.81009972710863200091251e-15, -7.64712219118158833288484e-13, 1.60590430605664501629054e-10, -2.50521083763502045810755e-08, 2.75573192239198747630416e-06, -0.000198412698412696162806809, 0.00833333333333332974823815) # noqa: E501
     u = mla(u, s, d.const(-0.166666666666666657414808))
     u = mla(s, u.e(BinaryOps.MUL, d), d)
   else:
-    u = d.const(2.6083159809786593541503e-06)
-    u = mla(u, s, u.const(-0.0001981069071916863322258))
-    u = mla(u, s, u.const(0.00833307858556509017944336))
-    u = mla(u, s, u.const(-0.166666597127914428710938))
+    u = polyN(s.const(2.6083159809786593541503e-06), s, [-0.0001981069071916863322258, 0.00833307858556509017944336, -0.166666597127914428710938]) # noqa: E501
     u = mla(s, u.e(BinaryOps.MUL, d), d)
   return u
 
@@ -260,27 +250,11 @@ def _xexp2_base(d: LazyBuffer) -> LazyBuffer:
   fp64_p = d.dtype == dtypes.float64
   q = rintk(d)
   s = d.e(BinaryOps.ADD, q.cast(d.dtype).e(UnaryOps.NEG))
+  # a polynomial approximation with 13 non-zero terms in the range of [−(log 2)/2,(log 2)/2].
   if fp64_p:
-    u = s.const(0.4434359082926529454e-9)
-    u = mla(u, s, s.const(0.7073164598085707425e-8))
-    u = mla(u, s, s.const(0.1017819260921760451e-6))
-    u = mla(u, s, s.const(0.1321543872511327615e-5))
-    u = mla(u, s, s.const(0.1525273353517584730e-4))
-    u = mla(u, s, s.const(0.1540353045101147808e-3))
-    u = mla(u, s, s.const(0.1333355814670499073e-2))
-    u = mla(u, s, s.const(0.9618129107597600536e-2))
-    u = mla(u, s, s.const(0.5550410866482046596e-1))
-    u = mla(u, s, s.const(0.2402265069591012214e+0))
-    u = mla(u, s, s.const(0.6931471805599452862e+0))
-    u = mla(u, s, s.const(0.1000000000000000000e+1))
+    u = polyN(s.const(0.4434359082926529454e-9), s, [0.7073164598085707425e-8, 0.1017819260921760451e-6, 0.1321543872511327615e-5, 0.1525273353517584730e-4, 0.1540353045101147808e-3, 0.1333355814670499073e-2, 0.9618129107597600536e-2, 0.5550410866482046596e-1, 0.2402265069591012214e+0, 0.6931471805599452862e+0, 0.1000000000000000000e+1]) # noqa: E501
   else:
-    u = d.const(0.1535920892e-3)
-    u = mla(u, s, d.const(0.1339262701e-2))
-    u = mla(u, s, d.const(0.9618384764e-2))
-    u = mla(u, s, d.const(0.5550347269e-1))
-    u = mla(u, s, d.const(0.2402264476e+0))
-    u = mla(u, s, d.const(0.6931471825e+0))
-    u = mla(u, s, d.const(0.1000000000e+1))
+    u = polyN(s.const(0.1535920892e-3), s, [0.1339262701e-2, 0.9618384764e-2, 0.5550347269e-1, 0.2402264476e+0, 0.6931471825e+0, 0.1000000000e+1])
   u = ldexp2kf(u, q)
   upper = {dtypes.float64: 1024, dtypes.float32: 128, dtypes.float16: 23.0}[d.dtype]
   lower = {dtypes.float64: -2000, dtypes.float32: -150, dtypes.float16: -150}[d.dtype]
@@ -294,6 +268,7 @@ def _xlog2_base(d: LazyBuffer, denormal: bool) -> LazyBuffer:
   if 0 in d.shape: return d
   fp64_p = d.dtype == dtypes.float64
 
+  # d *= 2**32 * 2**32
   for _ in range(2):
     d = d.e(BinaryOps.MUL, d.const(2 ** 32)) if denormal else d
 
@@ -301,25 +276,16 @@ def _xlog2_base(d: LazyBuffer, denormal: bool) -> LazyBuffer:
   m = ldexp3k(d, e.e(UnaryOps.NEG))
   e = e.e(BinaryOps.ADD, e.const(-64)) if denormal else e
 
-  if fp64_p: # 3.5 ULP
+  if fp64_p:
     x = m.e(BinaryOps.ADD, m.const(-1.0)).e(BinaryOps.MUL, m.e(BinaryOps.ADD, m.const(1.0)).e(UnaryOps.RECIP))
     x2 = x.e(BinaryOps.MUL, x)
-    t = x.const(0.2211941750456081490e+0)
-    t = mla(t, x2, t.const(0.2200768693152277689e+0))
-    t = mla(t, x2, t.const(0.2623708057488514656e+0))
-    t = mla(t, x2, t.const(0.3205977477944495502e+0))
-    t = mla(t, x2, t.const(0.4121985945485324709e+0))
-    t = mla(t, x2, t.const(0.5770780162997058982e+0))
-    t = mla(t, x2, t.const(0.96179669392608091449))
+    t = polyN(x.const(0.2211941750456081490e+0), x2, [0.2200768693152277689e+0, 0.2623708057488514656e+0, 0.3205977477944495502e+0, 0.4121985945485324709e+0, 0.5770780162997058982e+0, 0.96179669392608091449]) # noqa: E501
     s_hi, s_lo = dfadd2_f2_f2_f2(e, e.const(0), *dfmul2_f2_f2_f2(t.const(2.885390081777926774), t.const(0), x, x.const(0)))
     r = mla(t, x.e(BinaryOps.MUL, x2), s_hi.e(BinaryOps.ADD, s_lo))
-  else: # 1.0 ULP
-    # (m-1)/(m+1)
+  else:
     xx, xy = dfdiv2_f2_f2_f2(*dfadd2_f2_f2_f2(m.const(-1), m.const(0), m, m.const(0)), *dfadd2_f2_f2_f2(m.const(1), m.const(0), m, m.const(0)))
     x2 = xx.e(BinaryOps.MUL, xx)
-    t = d.const(0.4374550283e+0)
-    t = mla(t, x2, t.const(0.5764790177e+0))
-    t = mla(t, x2, t.const(0.9618012905120))
+    t = polyN(d.const(0.4374550283e+0), x2, [0.5764790177e+0, 0.9618012905120])
     sx, sy = dfadd2_f2_f2_f2(e, e.const(0), *dfmul2_f2_f2_f2(xx, xy, xx.const(2.8853900432586669922), xy.const(3.2734474483568488616e-08)))
     sx, sy = dfadd2_f2_f2_f2(sx, sy, x2.const(0), x2.e(BinaryOps.MUL, xx).e(BinaryOps.MUL, t))
     r = sx.e(BinaryOps.ADD, sy)
@@ -353,3 +319,4 @@ def xexp2(d: LazyBuffer) -> LazyBuffer:
   x = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
   d = _lazy_map_numbers(d, d.const(math.inf), d.const(0.0), d.const(math.nan), _xexp2_base(x))
   return d
+
