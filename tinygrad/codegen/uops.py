@@ -109,8 +109,7 @@ T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
-  if pat.name in store and store[pat.name] is not uop: return False
-  if pat.name is not None: store[pat.name] = uop
+  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return False
   if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
   if pat.op is not None and __unmatch(pat.op, uop.op): return False
