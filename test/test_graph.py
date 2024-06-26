@@ -146,7 +146,6 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
-  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "Broken #5050")
   def test_copies_2_devs(self):
     d0, d1 = Device.DEFAULT, f"{Device.DEFAULT}:1"
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(3)]
@@ -159,7 +158,6 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
-  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "Broken #5050")
   def test_copies_after_graph_global(self):
     d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
@@ -207,7 +205,6 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
-  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "Broken #5050")
   def test_graph_after_copies_devs(self):
     d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
