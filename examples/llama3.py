@@ -166,6 +166,8 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
       for k,v in nn.state.get_state_dict(model).items():
         if 'scale' in k: v.shard_(device, axis=None)  # from quantized
         elif '.attention.' in k: v.shard_(device, axis=-1)
+        elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
+        elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
         elif '.feed_forward.' in k: v.shard_(device, axis=-1)
         elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
         elif 'output.weight' in k: v.shard_(device, axis=0)
