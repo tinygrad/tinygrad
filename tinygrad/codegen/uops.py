@@ -91,7 +91,7 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 # *** simplification logic ***
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class UPat:
   op: Optional[Union[UOps, Set[UOps]]] = None
   arg: Any = None
