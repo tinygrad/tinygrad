@@ -21,6 +21,8 @@ for offset in tqdm(range(0, row_count, page_size)):
       print("PROCESS REPLAY DETECTED CHANGE")
       print(ast)
       print(applied_opts)
+      print(k.applied_opts)
+      print(device, k.opts.device)
       diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
       for line in diff:
         print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
