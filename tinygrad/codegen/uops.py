@@ -319,6 +319,27 @@ def rec_rewrite(sink:UOp,pm:PatternMatcher, nodes) -> UOp:
     if not changed: return sink
   raise RuntimeError("exceeded 100 rewrite loops!")
 
+#recursive search for the parent child that gives wrong results
+def search_error_graph(d_sink:UOp, pm:PatternMatcher):
+  graph = UOpGraph([d_sink])
+  graph.nodes = {}
+  sink = rec_rewrite(d_sink, pm, graph.nodes.copy())
+  _sink = graph.graph_rewrite(d_sink, pm)
+  if _compare_uops(d_sink, _sink): return None
+  for parent in sink.src: 
+    if (res := search_error_graph(parent, pm)) is not None: return res
+
+  if len(sink.src)>1:
+    for i in range(1, len(sink.src)):
+      option = UOp(sink.op, sink.dtype, sink.src[:i], sink.arg)
+      sink = rec_rewrite(option, pm, graph.nodes.copy())
+      _sink = graph.graph_rewrite(option, pm)
+      if not _compare_uops(option, _sink): return option
+  return sink
+
+def deconstruct_uop(u:UOp):
+  res =  f'UOp(op={u.op}, dtype={u.dtype.name if u.dtype else u.dtype}, src=({"".join(deconstruct_uop(x)+", " for x in u.src)}), arg={u.arg})'
+  return res
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
@@ -397,18 +418,20 @@ class UOpGraph:
     self.nodes: Dict[Tuple, UOp] = {}
 
     # dedup all nodes in graph
-    sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
+    d_sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
 
     # do graph rewrite
-    sink_ = rec_rewrite(sink, constant_folder, self.nodes.copy())
-    sink = self.graph_rewrite(sink, constant_folder)
+    sink_ = rec_rewrite(d_sink, constant_folder, {})
+    sink = self.graph_rewrite(d_sink, constant_folder)
 
     if not _compare_uops(sink, sink_):
       from tinygrad.engine.graph import print_tree
-      print(colored("rewrite mismatch", "red"))
-      print_tree(sink)
-      print_tree(sink_)
-      # raise RuntimeError("rewrite mismatch")
+
+      assert not _compare_uops(rec_rewrite(d_sink, constant_folder, {}), self.graph_rewrite(d_sink, constant_folder)), "ouff"
+      minimal_error_graph = search_error_graph(d_sink, constant_folder)
+      print_tree(minimal_error_graph)
+      print(deconstruct_uop(minimal_error_graph))
+      raise RuntimeError("rewrite mismatch")
 
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
