@@ -320,10 +320,9 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
       children[rewritten] = children[n] # the children of the replaced node are the same as the node itself
       replace_nodes[n] = rewritten
     else:
-      #print("PLACE", len(children[n]), n) # n's placement is FINAL (though sometimes they are unused)
+      # node wasn't rewritten: n's placement is final though it may not be used
       seen.add(n)
 
-      # node wasn't rewritten
       for child in children[n]:
         in_degree[child] -= 1
         if in_degree[child] == 0:
