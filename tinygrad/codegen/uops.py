@@ -288,10 +288,12 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
   in_degree[u] = len(u.src)
 
 # temporary helper for testing
-def _compare_uops(a:UOp, b:UOp):
+def _compare_uops(a:UOp, b:UOp, debug=False):
   @functools.lru_cache(None)
   def cmp(a:UOp, b:UOp):
-    if a.op != b.op or a.dtype != b.dtype or a.arg != b.arg or len(a.src) != len(b.src): return False
+    if a.op != b.op or a.dtype != b.dtype or a.arg != b.arg or len(a.src) != len(b.src): 
+      if debug: print(f"mismatch: {a} != {b}")
+      return False
     return all(cmp(x, y) for x, y in zip(a.src, b.src))
   return cmp(a, b)
 
@@ -320,26 +322,51 @@ def rec_rewrite(sink:UOp,pm:PatternMatcher, nodes) -> UOp:
   raise RuntimeError("exceeded 100 rewrite loops!")
 
 #recursive search for the parent child that gives wrong results
-def search_error_graph(d_sink:UOp, pm:PatternMatcher):
-  graph = UOpGraph([d_sink])
-  graph.nodes = {}
-  sink = rec_rewrite(d_sink, pm, graph.nodes.copy())
-  _sink = graph.graph_rewrite(d_sink, pm)
-  if _compare_uops(d_sink, _sink): return None
+
+def search_error_graph(sink:UOp, pm:PatternMatcher, nodes:Dict[Tuple, UOp]):
+  def _is_problem(u:UOp):
+    a = old_graph_rewrite(u, pm, nodes.copy())
+    b = rec_rewrite(u, pm, nodes.copy())
+    return not _compare_uops(a, b)
+
+  if not _is_problem(sink): return None
   for parent in sink.src: 
-    if (res := search_error_graph(parent, pm)) is not None: return res
+    if (res := search_error_graph(parent, pm, nodes.copy())) is not None: return res
 
   if len(sink.src)>1:
-    for i in range(1, len(sink.src)):
+
+    for i in range(2, len(sink.src)):
       option = UOp(sink.op, sink.dtype, sink.src[:i], sink.arg)
-      sink = rec_rewrite(option, pm, graph.nodes.copy())
-      _sink = graph.graph_rewrite(option, pm)
-      if not _compare_uops(option, _sink): return option
+      if _is_problem(option): return option
   return sink
 
 def deconstruct_uop(u:UOp):
   res =  f'UOp(op={u.op}, dtype={u.dtype.name if u.dtype else u.dtype}, src=({"".join(deconstruct_uop(x)+", " for x in u.src)}), arg={u.arg})'
   return res
+
+def old_graph_rewrite(sink:UOp, pm:PatternMatcher, nodes):
+  # recursive rewrite
+  changed = getenv("UOPS_REWRITE", 1)
+  run_cnt = 0
+  while changed:
+    changed = 0
+    @functools.lru_cache(None)
+    def rewrite(u:UOp) -> UOp:
+      nonlocal changed
+      recurse_cnt = 0
+      up = u
+      # locally recursively rewrite
+      while (rewritten := pm.rewrite(up)):
+        assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
+        up = rewritten
+        recurse_cnt += 1
+      changed += recurse_cnt
+      up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
+      return nodes.setdefault(up.tuple(), up) # replace with cached nodes
+    sink = rewrite(sink)
+    run_cnt += 1
+    assert run_cnt < 100, "exceeded 100 rewrite loops!"
+  return sink
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
@@ -365,30 +392,6 @@ class UOpGraph:
   def print(self):
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
-
-  def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
-    # recursive rewrite
-    changed = getenv("UOPS_REWRITE", 1)
-    run_cnt = 0
-    while changed:
-      changed = 0
-      @functools.lru_cache(None)
-      def rewrite(u:UOp) -> UOp:
-        nonlocal changed
-        recurse_cnt = 0
-        up = u
-        # locally recursively rewrite
-        while (rewritten := pm.rewrite(up)):
-          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
-          up = rewritten
-          recurse_cnt += 1
-        changed += recurse_cnt
-        up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
-        return self.nodes.setdefault(up.tuple(), up) # replace with cached nodes
-      sink = rewrite(sink)
-      run_cnt += 1
-      assert run_cnt < 100, "exceeded 100 rewrite loops!"
-    return sink
 
   def graph_dedup(self, sink:UOp):
     # add nodes to graph in reverse BFS order
@@ -421,16 +424,21 @@ class UOpGraph:
     d_sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
 
     # do graph rewrite
-    sink_ = rec_rewrite(d_sink, constant_folder, {})
-    sink = self.graph_rewrite(d_sink, constant_folder)
+    sink_ = rec_rewrite(d_sink, constant_folder, self.nodes.copy())
+    sink = old_graph_rewrite(d_sink, constant_folder, self.nodes.copy())
 
     if not _compare_uops(sink, sink_):
       from tinygrad.engine.graph import print_tree
 
-      assert not _compare_uops(rec_rewrite(d_sink, constant_folder, {}), self.graph_rewrite(d_sink, constant_folder)), "ouff"
-      minimal_error_graph = search_error_graph(d_sink, constant_folder)
+      assert not _compare_uops(rec_rewrite(d_sink, constant_folder, self.nodes.copy()), old_graph_rewrite(d_sink, constant_folder, self.nodes.copy())), "ouff"
+      minimal_error_graph = search_error_graph(d_sink, constant_folder, self.nodes)
       print_tree(minimal_error_graph)
-      print(deconstruct_uop(minimal_error_graph))
+      # print(deconstruct_uop(minimal_error_graph))
+
+      a = old_graph_rewrite(minimal_error_graph, constant_folder, self.nodes.copy())
+      b = rec_rewrite(minimal_error_graph, constant_folder, self.nodes.copy())
+      assert not _compare_uops(a,b, True)
+      
       raise RuntimeError("rewrite mismatch")
 
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
