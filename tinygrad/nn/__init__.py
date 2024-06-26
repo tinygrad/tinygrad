@@ -3,7 +3,6 @@ from typing import Optional, Union, Tuple, cast
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.nn import optim, state, datasets  # noqa: F401
-from tinygrad.dtype import dtypes
 
 class BatchNorm2d:
   """

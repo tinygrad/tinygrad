@@ -149,6 +149,8 @@ class ResNet:
       if dat.shape == ():
         assert obj.shape == (1,), obj.shape
         dat = dat.reshape(1)
+      if len(obj.shape)==2 and obj.shape[0]==1 and len(dat.shape)==1 and obj.shape[1]==dat.shape[0]:
+        dat = dat.reshape(*obj.shape)
       assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat)
 

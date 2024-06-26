@@ -363,7 +363,7 @@ def train_retinanet():
   MAP_TARGET = 0.34
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   SYNCBN = False
-  SYNCBN = True
+  # SYNCBN = True
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
   loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16] else 1.0
@@ -482,8 +482,8 @@ def train_retinanet():
   def data_get_val(it):
     x, Y_idx, cookie = next(it)
     return x.shard(GPUS, axis=0), Y_idx, cookie
-  for k,v in get_state_dict(model).items():
-    print(k, v.dtype)
+  # for k,v in get_state_dict(model).items():
+  #   print(k, v.dtype)
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # **********TRAIN***************
