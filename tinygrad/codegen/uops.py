@@ -364,12 +364,13 @@ class UOpGraph:
 
     # filter nodes that don't link to a sink
     # BFS toposort
-    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    children: Dict[UOp, List[UOp]] = {}
     in_degree: Dict[UOp, int] = {}
     loops: List[UOp] = []
     ifs: List[UOp] = []
     def add_parents(u:UOp):
       if u in in_degree: return
+      children[u] = []
       in_degree[u] = len(u.src)
       for x in u.src:
         add_parents(x)
