@@ -47,7 +47,8 @@ class TensorCoreOptions:
       elif removed_axis == axes[tc_dim]: axes_exist[tc_dim] = False
     self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
 
-class LocalBuffer(NamedTuple):
+@dataclass(frozen=True)
+class LocalBuffer:
   name: str
   size: int
   dtype: DType = dtypes.float32
