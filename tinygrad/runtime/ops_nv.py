@@ -222,7 +222,7 @@ class NVProgram:
         print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.global_init, self.shmem_usage = None, 0
+    self.rel_info, self.global_init, self.shmem_usage = None, None, 0
     constant_buffers_data = {}
 
     if MOCKGPU:
@@ -241,6 +241,7 @@ class NVProgram:
         if match := re.match(r'\.nv\.constant(\d+)', section_name):
           constant_buffers_data[int(match.group(1))] = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
         if section_name == ".nv.global.init": self.global_init = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
+        elif section_name.startswith(".rel.text"): self.rel_info = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast('I')
         elif section_name == ".nv.info":
           section_data = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
           for i in range(sh_size // 12):
@@ -255,10 +256,6 @@ class NVProgram:
     self.lib_sz = round_up(round_up(self.program.nbytes, 128) + max(0x1000, sum([round_up(x.nbytes, 128) for i,x in constant_buffers_data.items()]) +
                            round_up(0 if self.global_init is None else self.global_init.nbytes, 128)), 0x1000)
     self.lib_gpu = self.device.allocator.alloc(self.lib_sz)
-
-    HWComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).submit(self.device)
-    for st in range(0, len(self.program), 4095):
-      HWComputeQueue().copy_from_cpu(self.lib_gpu.base+st*4, self.program[st:st+4095]).submit(self.device)
 
     self.constbuffer_0 = [0] * 88
     self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
@@ -283,12 +280,29 @@ class NVProgram:
     if 0 in constant_buffers_data: constant_buffers_data.pop(0)
 
     off = round_up(self.program.nbytes, 128)
+
+    if self.rel_info is not None:
+      assert self.global_init is not None
+      global_init_addr = self.lib_gpu.base + off
+      for rel_i in range(0, len(self.rel_info), 4):
+        # print(hex(self.rel_info[rel_i] // 4), hex(self.program[self.rel_info[rel_i] // 4 + 1]))
+
+        assert self.program[self.rel_info[rel_i] // 4 + 1] == 0
+        if self.rel_info[rel_i+2] == 0x39: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr >> 32) # R_CUDA_ABS32_HI_32
+        elif self.rel_info[rel_i+2] == 0x38: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr & 0xffffffff) # R_CUDA_ABS32_LO_32
+        else: raise RuntimeError(f"unknown reloc: {self.rel_info[rel_i+2]}")
+
+    HWComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).submit(self.device)
+    for st in range(0, len(self.program), 4095):
+      HWComputeQueue().copy_from_cpu(self.lib_gpu.base+st*4, self.program[st:st+4095]).submit(self.device)
+
     if self.global_init is not None:
       # Constbuffer 4 contains a pointer to nv.global.init, load section and set up the pointer.
-      assert 4 in constant_buffers_data and constant_buffers_data[4].nbytes == 8
       HWComputeQueue().copy_from_cpu(load_addr:=(self.lib_gpu.base + off), self.global_init).submit(self.device)
-      constant_buffers_data[4][0:2] = memoryview(struct.pack('Q', load_addr)).cast('I')
       off += round_up(self.global_init.nbytes, 128)
+      if 4 in constant_buffers_data: # >= 12.4
+        assert constant_buffers_data[4].nbytes == 8
+        constant_buffers_data[4][0:2] = memoryview(struct.pack('Q', load_addr)).cast('I')
 
     for i,data in constant_buffers_data.items():
       self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (self.lib_gpu.base + off) >> 32)
