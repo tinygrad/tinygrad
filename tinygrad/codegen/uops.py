@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
 import functools, itertools, heapq, math
-from collections import defaultdict
+from collections import defaultdict, deque
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType
@@ -286,12 +286,17 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   in_degree: Dict[UOp, int] = {}
   children: Dict[UOp, List[UOp]] = {}
   get_children_dfs(sink, children, in_degree)
-  queue = [k for k, v in in_degree.items() if v == 0]
+  queue = deque([k for k, v in in_degree.items() if v == 0])
 
   replace_nodes: Dict[UOp, UOp] = {}
+  def get_latest_node(node: UOp) -> UOp:
+    while node in replace_nodes:
+      node = replace_nodes[node]
+    return node
+
   seen = set()
   while len(queue):
-    n = queue.pop(0)
+    n = queue.popleft()
 
     # try to rewrite the node
     rewritten = pm.rewrite(n)
@@ -299,18 +304,19 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
     if rewritten is not None:
       new_in_degree: Dict[UOp, int] = {}
       get_children_dfs(rewritten, children, new_in_degree)
+
       if len(new_in_degree):
-        # adjust the in-degree for nodes we've seen
-        real_in_degree = {}
+        # adjust the in-degree for nodes we've seen or rewritten
         for k in new_in_degree:
-          real_in_degree[k] = sum([1 if x not in seen else 0 for x in k.src])
-        # we have to add any new nodes that were created
-        queue += [k for k, v in real_in_degree.items() if v == 0]
-        in_degree.update(real_in_degree)
-        #print("ID", in_degree[rewritten])
+          new_in_degree[k] = sum(1 for x in k.src if x not in seen)
+
+        # add any new nodes with in-degree 0 to the queue
+        queue.extend(k for k, v in new_in_degree.items() if v == 0)
+        in_degree.update(new_in_degree)
       else:
-        # we try again to rewrite this node
-        queue += [rewritten]
+        # if there's no new parents, we try again to rewrite this node
+        queue.append(rewritten)
+
       children[rewritten] = children[n] # the children of the replaced node are the same as the node itself
       del children[n]
       replace_nodes[n] = rewritten
@@ -322,12 +328,8 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
         in_degree[x] -= 1
         if in_degree[x] == 0:
           # all parents have been seen, rewrite
-          replace_src_list = []
-          for c in x.src:
-            while c in replace_nodes: c = replace_nodes[c]
-            replace_src_list.append(c)
-          replace_src = tuple(replace_src_list)
-          #print(replace_src)
+          replace_src = tuple(get_latest_node(c) for c in x.src)
+
           # nodes here might have some of their parents replaced
           if replace_src != x.src:
             new_x = UOp(x.op, x.dtype, replace_src, x.arg)
@@ -341,8 +343,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   for k,v in in_degree.items():
     assert v == 0, f"node {k} wasn't rendered, still has {v} in_degree"
 
-  # return the last node
-  return n
+  return get_latest_node(sink)
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
