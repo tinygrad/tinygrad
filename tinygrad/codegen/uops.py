@@ -273,8 +273,10 @@ constant_folder = PatternMatcher([
 ])
 
 def _temp_toposort(root:UOp):
+  assert root.op is UOps.STORE
   ret: Dict[UOp, int] = {}
   def dfs(x:UOp, depth):
+    if x.op is UOps.STORE and x != root: return
     if x in ret: return
     for v in x.src: dfs(v, depth+1)
     ret[x] = depth
@@ -289,8 +291,8 @@ def gate_rewrite(root:UOp, gate:UOp, exprs:Dict[UOp, UOp]):
   # the STORE isn't gated
   root.src = root.src[:3]
   # the entire Block is
-  ts = _temp_toposort(root)
-  deepest = sorted(ts.items(), key=lambda x:x[1]).pop()[0]
+  ts = sorted(_temp_toposort(root).items(), key=lambda x:x[1])
+  deepest = ts[-1][0]
   if deepest.op is not UOps.IF: deepest.src = deepest.src + (exprs[gate], )
 
 if_rewrite = PatternMatcher([
