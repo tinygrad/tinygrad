@@ -8,13 +8,17 @@ from tinygrad.helpers import Context, CI, dedup, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner, CompiledRunner
 
+np.random.seed(1337)
+Tensor.manual_seed(1337)
+BUF_SIZE = 4096
+
 cached_prgs = {}
 def helper_exec_op(device, outbuf, inbufs):
   if (device, len(inbufs)) not in cached_prgs:
     with Context(DEBUG=0):
-      fst = [Tensor.randn(4096, dtype=dtypes.int).realize() for i in range(len(inbufs))]
+      fst = [Tensor.randn(BUF_SIZE, dtype=dtypes.int).realize() for i in range(len(inbufs))]
       s = fst[0]
-      for i in range(1, len(inbufs)): s = s.xor(fst[i])
+      for i in range(1, len(inbufs)): s = s + fst[i]
 
       si = create_schedule([s.lazydata])[-1]
       prg = get_runner(device, si.ast)
@@ -27,7 +31,7 @@ def helper_copy_op(device, dest, src):
   return ExecItem(prg, [dest, src])
 
 def helper_alloc_rawbuffer(device, fill=False):
-  rawbuf = Buffer(device, 4096, dtypes.int).ensure_allocated()
+  rawbuf = Buffer(device, BUF_SIZE, dtypes.int).ensure_allocated()
   if fill:
     with Context(DEBUG=0):
       data = np.random.randint(-10000, 10000, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
@@ -97,6 +101,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
+  @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
   def test_order_copy_writed(self):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(4)]
@@ -107,6 +112,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
+  @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
   def test_order_copy_then_read(self):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(4)]
@@ -137,7 +143,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
-  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "Broken, see #5050")
+  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "Broken #5050")
   def test_copies_2_devs(self):
     d0, d1 = Device.DEFAULT, f"{Device.DEFAULT}:1"
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(3)]
@@ -150,7 +156,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
-  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "Broken, see #5050")
+  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "Broken #5050")
   def test_copies_after_graph_global(self):
     d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
@@ -173,14 +179,21 @@ class TestGraph(unittest.TestCase):
       [helper_exec_op(d0, b0[2], [b0[0], b0[1]]), helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
        helper_exec_op(d0, b0[5], [b0[0], b0[2]]), helper_copy_op(d0, b2[0], b0[2]), helper_copy_op(d0, b2[1], b0[5]),
        helper_exec_op(d0, b0[7], [b0[0], b0[2]])],
-      [helper_copy_op(d1, b0[2], b1[0])],
-      [helper_copy_op(d3, b0[2], b3[0])],
+      [helper_copy_op(d1, b0[5], b1[0])],
+      [helper_copy_op(d3, b0[5], b3[0])],
+    ]
+
+    helper_test_graphs(Device[d0].graph, graphs)
+
+    graphs = [
+      [helper_copy_op(d1, b0[5], b1[0])],
+      [helper_copy_op(d3, b0[5], b3[0])],
     ]
 
     helper_test_graphs(Device[d0].graph, graphs)
 
   @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
-  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "Broken, see #5050")
+  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "Broken #5050")
   def test_graph_after_copies_devs(self):
     d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
