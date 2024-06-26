@@ -151,7 +151,7 @@ class LazyBuffer:
     # const folding
     if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
       return self.cast(out_dtype).const(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
-    if op is UnaryOps.NEG and self.base.op is UnaryOps.NEG: return self.base.srcs[0]
+    if op is UnaryOps.NEG and self.base.op is UnaryOps.NEG and self.base.realized is None: return self.base.srcs[0]
     if op in BinaryOps:
       x, y = self, in_srcs[0]
       if op is BinaryOps.ADD:

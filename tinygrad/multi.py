@@ -45,7 +45,7 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
 def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}")
   sz = round_up(lbs[0].shape[axis], len(lbs)) // len(lbs)
-  return [lb.shrink(tuple((0,s) if a != axis else (sz*i,min(s,sz*(i+1))) for a,s in enumerate(lb.shape))) for i,lb in enumerate(lbs)]
+  return [lb.shrink(tuple((0,s) if a != axis else (min(s,sz*i),min(s,sz*(i+1))) for a,s in enumerate(lb.shape))) for i,lb in enumerate(lbs)]
 
 class MultiLazyBuffer:
   def __init__(self, lbs:List[LazyBuffer], axis:Optional[int], real:Optional[List[bool]]=None):
@@ -81,11 +81,11 @@ class MultiLazyBuffer:
       for lb in self.real_lbs:
         if lb.device == device: return lb
       return self.lbs[self.real.index(True)].copy_to_device(device)
-    sz = self.lbs[0].shape[self.axis]
-    llbs = []
-    for i,lb in enumerate([lb.copy_to_device(device) for lb in self.real_lbs]):
-      pad_arg = tuple((0,0) if a != self.axis else (sz*i, max(0, self.shape[self.axis]-sz*(i+1))) for a in range(len(lb.shape)))
-      llbs.append(lb.pad(pad_arg))
+    llbs:List[LazyBuffer] = []
+    for lb,real,(start,end) in zip(self.lbs, self.real, self.bounds):
+      if not real: continue
+      pad_arg = tuple((0,0) if a != self.axis else (start, self.bounds[-1][1]-end) for a in range(len(lb.shape)))
+      llbs.append(lb.copy_to_device(device).pad(pad_arg))
     return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), llbs)
 
   # passthroughs

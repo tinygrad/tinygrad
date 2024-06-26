@@ -433,6 +433,14 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_equal(X.expand((4, 4, 257)).numpy(), np.tile(n, (1, 4, 1)))
       np.testing.assert_equal(X.permute((0, 2, 1)).numpy(), np.transpose(n, (0, 2, 1)))
 
+  def test_uneven_multiple_zeros(self):
+    for data in ([1, 2, 3, 4], [1, 2, 3], [1, 2], [1], []):
+      for N in (1, 2, 3, 4):
+        devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+        # make sure something is computed on each device
+        X = ((Tensor(data).shard(devices, axis=0) + 1).realize() - 1).realize()
+        np.testing.assert_equal(X.numpy(), data)
+
   def test_bn_ast_on_devices(self):
     t = Tensor.empty((16, 64, 112, 112)).shard(devices_4, axis=0)
     bn = nn.BatchNorm2d(64)
