@@ -350,9 +350,10 @@ class UOpGraph:
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
     self.nodes: Dict[Tuple, UOp] = {}
+    sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
     # dedup all nodes in graph
-    sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
+    sink = self.graph_dedup(sink)
 
     # do graph rewrite
     sink = self.graph_rewrite(sink, constant_folder)
@@ -360,7 +361,7 @@ class UOpGraph:
 
     # filter nodes that don't link to a sink
     # BFS toposort
-    graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
     loops:List[UOp] = []
     ifs:List[UOp] = []
@@ -371,16 +372,15 @@ class UOpGraph:
       for x in u.src:
         add_parents(x)
         in_degree[u] += 1
-        graph[x].append(u)
+        children[x].append(u)
       if u.op is UOps.RANGE: loops.append(u)
       if u.op is UOps.IF: ifs.append(u)
-    sink = UOp(UOps.SINK, None, tuple(x for x in sink.src if x.op is not UOps.NOOP))
     add_parents(sink)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
       if x.op is UOps.SINK: return set()
-      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in graph[x] if x.op is not end]))
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
     # scope children impact the toposort and END* insertion
     end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
     scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in (loops+ifs)[::-1]}
@@ -398,7 +398,7 @@ class UOpGraph:
 
     if getenv("FUZZ_UOPS", 0):
       from test.external.fuzz_uops import fuzz_uops
-      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), scope_children)
+      self.fuzz_paths = fuzz_uops(children, in_degree.copy(), scope_children)
 
     self._uops = []
     while queue:
@@ -413,7 +413,7 @@ class UOpGraph:
         if x in ss:
           ss.remove(x)
           if len(ss) == 0: self._uops.append(UOp(end_for_uop[u.op][1], None, (u,)))
-      for u in graph[x]:
+      for u in children[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
 
