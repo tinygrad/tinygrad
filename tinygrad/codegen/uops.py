@@ -282,6 +282,68 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
     children[x].append(u)
   in_degree[u] = len(u.src)
 
+def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
+  in_degree: Dict[UOp, int] = {}
+  children: Dict[UOp, List[UOp]] = {}
+  get_children_dfs(sink, children, in_degree)
+  queue = [k for k, v in in_degree.items() if v == 0]
+
+  replace_nodes: Dict[UOp, UOp] = {}
+  seen = set()
+  while len(queue):
+    n = queue.pop(0)
+
+    # try to rewrite the node
+    rewritten = pm.rewrite(n)
+    #print(f"{n} -> {rewritten}")
+    if rewritten is not None:
+      new_in_degree: Dict[UOp, int] = {}
+      get_children_dfs(rewritten, children, new_in_degree)
+      if len(new_in_degree):
+        # adjust the in-degree for nodes we've seen
+        real_in_degree = {}
+        for k in new_in_degree:
+          real_in_degree[k] = sum([1 if x not in seen else 0 for x in k.src])
+        # we have to add any new nodes that were created
+        queue += [k for k, v in real_in_degree.items() if v == 0]
+        in_degree.update(real_in_degree)
+        #print("ID", in_degree[rewritten])
+      else:
+        # we try again to rewrite this node
+        queue += [rewritten]
+      children[rewritten] = children[n] # the children of the replaced node are the same as the node itself
+      del children[n]
+      replace_nodes[n] = rewritten
+    else:
+      #print("PLACE", len(children[n]), n) # n's placement is FINAL (though sometimes they are unused)
+      seen.add(n)
+      # node wasn't rewritten
+      for x in children[n]:
+        in_degree[x] -= 1
+        if in_degree[x] == 0:
+          # all parents have been seen, rewrite
+          replace_src_list = []
+          for c in x.src:
+            while c in replace_nodes: c = replace_nodes[c]
+            replace_src_list.append(c)
+          replace_src = tuple(replace_src_list)
+          #print(replace_src)
+          # nodes here might have some of their parents replaced
+          if replace_src != x.src:
+            new_x = UOp(x.op, x.dtype, replace_src, x.arg)
+            children[new_x] = children[x] # the children of the replaced node are the same as the node itself
+            del children[x]
+            replace_nodes[x] = new_x
+          else:
+            new_x = x
+          queue.append(new_x)
+
+  for k,v in in_degree.items():
+    assert v == 0, f"node {k} wasn't rendered, still has {v} in_degree"
+
+  # return the last node
+  return n
+
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
     self.sinks: List[UOp] = sinks
@@ -306,30 +368,6 @@ class UOpGraph:
   def print(self):
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
-
-  def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
-    # recursive rewrite
-    changed = getenv("UOPS_REWRITE", 1)
-    run_cnt = 0
-    while changed:
-      changed = 0
-      @functools.lru_cache(None)
-      def rewrite(u:UOp) -> UOp:
-        nonlocal changed
-        recurse_cnt = 0
-        up = u
-        # locally recursively rewrite
-        while (rewritten := pm.rewrite(up)):
-          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
-          up = rewritten
-          recurse_cnt += 1
-        changed += recurse_cnt
-        up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
-        return self.nodes.setdefault(up.tuple(), up) # replace with cached nodes
-      sink = rewrite(sink)
-      run_cnt += 1
-      assert run_cnt < 100, "exceeded 100 rewrite loops!"
-    return sink
 
   def graph_dedup(self, sink:UOp):
     # add nodes to graph in reverse BFS order
@@ -362,8 +400,8 @@ class UOpGraph:
     sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
 
     # do graph rewrite
-    sink = self.graph_rewrite(sink, constant_folder)
-    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+    sink = graph_rewrite(sink, constant_folder)
+    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
     # BFS toposort

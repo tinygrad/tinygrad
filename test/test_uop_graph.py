@@ -3,7 +3,63 @@ from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite
+#from tinygrad.engine.graph import print_tree
+
+simple_pm = PatternMatcher([
+  (UOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
+  (UOp.cvar('x') + UOp.cvar('y'), lambda x,y: UOp.const(dtypes.float, x.arg+y.arg)),
+  ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x + UOp.const(x.dtype, c1.arg+c2.arg)),
+])
+
+class TestGraphRewrite(unittest.TestCase):
+  def test_simple(self):
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    nout = graph_rewrite(c1+c2, simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 3.0)
+
+  def test_double(self):
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    c3 = UOp.const(dtypes.float, 3.0)
+    nout = graph_rewrite(c1+c2+c3, simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 6.0)
+
+  def test_triple(self):
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    c3 = UOp.const(dtypes.float, 3.0)
+    c4 = UOp.const(dtypes.float, 4.0)
+    nout = graph_rewrite(c1+c2+c3+c4, simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 10.0)
+
+  def test_diamond(self):
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    c3 = UOp.const(dtypes.float, 3.0)
+    nout = graph_rewrite((c1+c2)+(c1+c3), simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 7.0)
+
+  def test_magic_4(self):
+    c1 = UOp.const(dtypes.int, 4.0)
+    nout = graph_rewrite(c1, simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 3.0)
+
+  def test_depth_2_fold(self):
+    v = UOp(UOps.DEFINE_VAR, dtypes.float)
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    nout = graph_rewrite(v+c1+c2, simple_pm)
+    self.assertEqual(nout.op, UOps.ALU)
+    self.assertEqual(nout.src[0].op, UOps.DEFINE_VAR)
+    self.assertEqual(nout.src[1].op, UOps.CONST)
+    self.assertEqual(nout.src[1].arg, 3.0)
 
 class TestUOpGraph(TestUOps):
   # TODO: move to test.helpers
