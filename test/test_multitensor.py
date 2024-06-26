@@ -433,6 +433,14 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_equal(X.expand((4, 4, 257)).numpy(), np.tile(n, (1, 4, 1)))
       np.testing.assert_equal(X.permute((0, 2, 1)).numpy(), np.transpose(n, (0, 2, 1)))
 
+  def test_uneven_multiple_zeros(self):
+    for data in ([1, 2, 3, 4], [1, 2, 3], [1, 2], [1], []):
+      for N in (1, 2, 3, 4):
+        devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+        # make sure something is computed on each device
+        X = ((Tensor(data).shard(devices, axis=0) + 1).realize() - 1).realize()
+        np.testing.assert_equal(X.numpy(), data)
+
   def test_bn_ast_on_devices(self):
     t = Tensor.empty((16, 64, 112, 112)).shard(devices_4, axis=0)
     bn = nn.BatchNorm2d(64)
@@ -533,6 +541,12 @@ class TestMultiTensor(unittest.TestCase):
         assert ast.src[0].op is BinaryOps.ADD
         assert ast.src[0].src[0].op is BufferOps.LOAD
         assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 3
+
+  def test_shard_memory(self):
+    devices = (d0, d1, d2, d3)
+    t = Tensor.zeros(16, 16).contiguous()
+    t.shard_(devices, axis=0)
+    assert all([lb is lb.base and lb.buffer.base.size == 4 * 16 for lb in t.lazydata.lbs])
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestHandleData(unittest.TestCase):

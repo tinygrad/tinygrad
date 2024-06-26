@@ -1,6 +1,6 @@
 import unittest, pickle
 import numpy as np
-from tinygrad import Tensor, TinyJit
+from tinygrad import Tensor, TinyJit, Variable
 from tinygrad.engine.schedule import create_schedule
 
 class TestPickle(unittest.TestCase):
@@ -15,6 +15,16 @@ class TestPickle(unittest.TestCase):
     st = pickle.dumps(t)
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t.numpy(), t2.numpy())
+
+  def test_pickle_variable(self):
+    v = Variable("i", 1, 20).bind(10)
+    t1 = Tensor.ones(10, v).contiguous()
+    t2 = Tensor.ones(10, v).contiguous()
+    ret = (t1+t2).sum(1)
+    st = pickle.dumps(ret)
+    del ret
+    vt2 = pickle.loads(st)
+    np.testing.assert_equal(vt2.numpy(), 20)
 
   def test_pickle_buffer_view(self):
     t = Tensor.arange(10, device="CLANG").contiguous().realize()
