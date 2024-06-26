@@ -520,7 +520,7 @@ class Linearizer(Kernel):
     self.linearize()
     info = get_lazyop_info(self.ast[0])
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (name, self.ast, self.opts.device, self.applied_opts, self.uops, src))
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (name, self.ast, self.opts.device, self.applied_opts, src))
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
