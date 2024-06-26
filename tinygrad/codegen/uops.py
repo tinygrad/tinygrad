@@ -274,10 +274,8 @@ constant_folder = PatternMatcher([
 
 def _temp_toposort(root:UOp):
   ret: Dict[UOp, int] = {}
-  cache = set()
   def dfs(x:UOp, depth):
-    if x in cache: return
-    cache.add(x)
+    if x in ret: return
     for v in x.src: dfs(v, depth+1)
     ret[x] = depth
   dfs(root, 0)
@@ -290,7 +288,7 @@ def gate_rewrite(root:UOp, gate:UOp, exprs:Dict[UOp, UOp]):
   if gate not in exprs: exprs[gate] = UOp(UOps.IF, None, (gate, ))
   # the STORE isn't gated
   root.src = root.src[:3]
-  # the entire block is
+  # the entire Block is
   ts = _temp_toposort(root)
   deepest = sorted(ts.items(), key=lambda x:x[1]).pop()[0]
   if deepest.op is not UOps.IF: deepest.src = deepest.src + (exprs[gate], )
