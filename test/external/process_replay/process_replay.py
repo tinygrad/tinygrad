@@ -2,7 +2,6 @@
 # compare kernels created by HEAD against master
 import difflib, pickle
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.device import Device
 from tinygrad.helpers import colored, db_connection, VERSION, getenv, tqdm
 
 page_size = 100
