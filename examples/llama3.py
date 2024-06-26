@@ -207,7 +207,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser()
   parser.add_argument("--download_model", action="store_true", help="Download a 8B model")
-  parser.add_argument("--model", type=Path, required=True, help="Model path")
+  parser.add_argument("--model", type=Path, help="Model path")
   parser.add_argument("--size", choices=["8B", "70B"], default="8B", help="Model size")
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
   parser.add_argument("--quantize", choices=["int8", "nf4"], help="Quantization method")
@@ -229,6 +229,8 @@ if __name__ == "__main__":
     fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00003-of-00004.safetensors", "model-00003-of-00004.safetensors", subdir="llama3-8b-sfr")
     fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", "model-00004-of-00004.safetensors", subdir="llama3-8b-sfr")
     args.model = fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", "model.safetensors.index.json", subdir="llama3-8b-sfr")
+
+  assert args.model is not None, "please provide --model option"
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
   if args.benchmark: Tensor.manual_seed(42)
