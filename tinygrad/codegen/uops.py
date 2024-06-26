@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
-import functools, itertools, heapq, math
+import functools, itertools, heapq
 from collections import defaultdict, deque
 from enum import Enum, auto
 from dataclasses import dataclass, field
@@ -218,7 +218,8 @@ constant_folder = PatternMatcher([
   #x*0 -> 0 or 0*x -> 0
   #if x is nan it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
-  (UOp.var('x') * 0, lambda x: x if isinstance(x.arg, float) and math.isnan(x.arg) else UOp.const(x.dtype, 0)),
+  #(UOp.var('x') * 0, lambda x: x if isinstance(x.arg, float) and math.isnan(x.arg) else UOp.const(x.dtype, 0)),
+  (UOp.var('x', dtypes.int) * 0, lambda x: UOp.const(x.dtype, 0)),
   (UOp.var('x') - UOp.var('x'), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.load(UOp.var("buf"), UOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
@@ -284,9 +285,6 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
   in_degree[u] = len(u.src)
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  #from tinygrad.engine.graph import print_tree
-  #print_tree(sink)
-
   in_degree: Dict[UOp, int] = {}
   children: Dict[UOp, List[UOp]] = {}
   get_children_dfs(sink, children, in_degree)
@@ -294,24 +292,23 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
 
   replace_nodes: Dict[UOp, UOp] = {}
   def get_latest_node(node: UOp) -> UOp:
-    while node in replace_nodes:
-      node = replace_nodes[node]
+    while node in replace_nodes: node = replace_nodes[node]
     return node
 
   seen = set()
-  while len(queue):
+  while queue:
     n = queue.popleft()
 
     # try to rewrite the node
     if (rewritten:=pm.rewrite(n)) is not None:
       if DEBUG >= 5: print(f"{n} -> {rewritten}")
+
       new_in_degree: Dict[UOp, int] = {}
       get_children_dfs(rewritten, children, new_in_degree)
 
       if len(new_in_degree):
         # adjust the in-degree for nodes we've seen or rewritten
-        for k in new_in_degree:
-          new_in_degree[k] = sum(1 for x in k.src if x not in seen)
+        new_in_degree = {k:sum(1 for x in k.src if x not in seen) for k in new_in_degree}
 
         # add any new nodes with in-degree 0 to the queue
         queue.extend(k for k, v in new_in_degree.items() if v == 0)
@@ -325,25 +322,24 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
     else:
       #print("PLACE", len(children[n]), n) # n's placement is FINAL (though sometimes they are unused)
       seen.add(n)
+
       # node wasn't rewritten
-      for x in children[n]:
-        in_degree[x] -= 1
-        if in_degree[x] == 0:
+      for child in children[n]:
+        in_degree[child] -= 1
+        if in_degree[child] == 0:
           # all parents have been seen, rewrite
-          replace_src = tuple(get_latest_node(c) for c in x.src)
+          replace_src = tuple(get_latest_node(c) for c in child.src)
 
           # nodes here might have some of their parents replaced
-          if replace_src != x.src:
-            new_x = UOp(x.op, x.dtype, replace_src, x.arg)
-            children[new_x] = children[x] # the children of the replaced node are the same as the node itself
-            replace_nodes[x] = new_x
+          if replace_src != child.src:
+            new_child = UOp(child.op, child.dtype, replace_src, child.arg)
+            children[new_child] = children[child] # the children of the replaced node are the same as the node itself
+            replace_nodes[child] = new_child
           else:
-            new_x = x
-          queue.append(new_x)
+            new_child = child
 
-  # this check doesn't have to pass
-  #for k,v in in_degree.items():
-  #  assert v == 0, f"node {k} wasn't rendered, still has {v} in_degree"
+          # this node is ready to process
+          queue.append(new_child)
 
   return get_latest_node(sink)
 

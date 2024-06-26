@@ -845,7 +845,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=0))
     helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=5))
   # TODO: fix backward when correction >= n
-  @unittest.skip("fix backward when correction >= n")
   def test_var_one_in_axis(self):
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3)), forward_only=True)
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=0))
@@ -873,7 +872,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=0))
     helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=5))
   # TODO: fix backward when correction >= n
-  @unittest.skip("fix backward when correction >= n")
   def test_std_one_in_axis(self):
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)), forward_only=True)
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=0))
