@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import prod, DEBUG, getenv
+from tinygrad.helpers import prod, DEBUG, getenv, colored
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -282,6 +282,39 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
     children[x].append(u)
   in_degree[u] = len(u.src)
 
+# temporary helper for testing
+def _compare_uops(a:UOp, b:UOp):
+  @functools.lru_cache(None)
+  def cmp(a:UOp, b:UOp):
+    if a.op != b.op or a.dtype != b.dtype or a.arg != b.arg or len(a.src) != len(b.src): return False
+    return all(cmp(x, y) for x, y in zip(a.src, b.src))
+  return cmp(a, b)
+
+def rec_rewrite(sink:UOp,pm:PatternMatcher, nodes) -> UOp:
+  changed = False
+
+  def rewrite(u:UOp):
+    nonlocal changed
+    if u in cache: return cache[u]
+    up = u
+    for i in range(100):
+      key = (up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
+      up = UOp(*key)
+      if not (rewritten := pm.rewrite(up)): break
+      up = rewritten
+      changed = True
+      if i == 99: raise RuntimeError(f"recursive_rewrite looped {u}")
+    cache[u] = up
+    return up
+
+  cache: Dict[UOp, UOp] = {}
+  for i in range(100):
+    changed = False
+    sink = rewrite(sink)
+    if not changed: return sink
+  raise RuntimeError("exceeded 100 rewrite loops!")
+
+
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
     self.sinks: List[UOp] = sinks
@@ -362,7 +395,15 @@ class UOpGraph:
     sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
 
     # do graph rewrite
+    sink_ = rec_rewrite(sink, constant_folder, self.nodes.copy())
     sink = self.graph_rewrite(sink, constant_folder)
+
+    if not _compare_uops(sink, sink_):
+      from tinygrad.engine.graph import print_tree
+      print(colored("rewrite mismatch", "red"))
+      print_tree(sink)
+      print_tree(sink_)
+
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
