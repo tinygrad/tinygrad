@@ -11,14 +11,14 @@ from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-                      base:Optional[LazyBuffer]=None, bitcast_forward:Optional[bool]=False, enable_cache=bool(getenv("LAZYCACHE", 1))):
+                      base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0: op, arg, srcs, base = LoadOps.CONST, 0, (), None
   if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, Variable) else arg, True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
 
-  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, bitcast_forward=bitcast_forward)
+  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
@@ -26,7 +26,7 @@ view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None, bitcast_forward:Optional[bool]=False):
+               base:Optional[LazyBuffer]=None):
     self.device, self.st, self.dtype, self.shape, self.size = device, st, dtype, st.shape, st.size
     self._base: Optional[LazyBuffer] = None
     if base is None:
@@ -34,11 +34,9 @@ class LazyBuffer:
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
       assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
 
-      if (self.op is LoadOps.CONTIGUOUS or self.op is UnaryOps.BITCAST) and srcs[0].st.consecutive and \
-          not srcs[0].is_unrealized_const() and device.split(":")[0] in view_supported_devices and not bitcast_forward:
+      if self.op is LoadOps.VIEW:
         # some LazyBuffers can be processed with only a view, no AST required
         self.buffer: Buffer = srcs[0].base.buffer.view(st.size, dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
-        self.op = LoadOps.VIEW
       else:
         self.buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.buffer.ref(1)
@@ -84,19 +82,21 @@ class LazyBuffer:
     assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
     return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,), src=(x, self.base))
 
-  def contiguous(self):
+  def can_view(self): return self.st.consecutive and not self.is_unrealized_const() and self.device.split(":")[0] in view_supported_devices
+
+  def contiguous(self, allow_buffer_view=True):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
-      ret = self.e(LoadOps.CONTIGUOUS)
+      ret = self.e(LoadOps.VIEW) if allow_buffer_view and self.can_view() else self.e(LoadOps.CONTIGUOUS)
       if (sti := self.st.invert(self.base.shape)) is not None: self.base.contiguous_child = ref(ret), sti
       return ret
     self.base.forced_realize = True
     return self
 
-  def cast(self, dtype:DType, bitcast:bool=False, bitcast_forward:bool=False):
+  def cast(self, dtype:DType, bitcast:bool=False):
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:
-      return create_lazybuffer(self.device, self.st, dtype, LoadOps.CONST, dtypes.as_const(self.base.arg, dtype), bitcast_forward=bitcast_forward)
+      return create_lazybuffer(self.device, self.st, dtype, LoadOps.CONST, dtypes.as_const(self.base.arg, dtype))
     new_shape = self.shape
     if bitcast and self.dtype.itemsize != dtype.itemsize:
       if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
@@ -106,9 +106,9 @@ class LazyBuffer:
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
     elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       # TODO: applying this makes gpt2 slower
-      return self.base.cast(dtype, bitcast, bitcast_forward)._view(self.st)
-    cast_op = UnaryOps.BITCAST if bitcast else UnaryOps.CAST
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,), bitcast_forward=bitcast_forward)
+      return self.base.cast(dtype, bitcast)._view(self.st)
+    cast_op: Union[LoadOps, UnaryOps] = (LoadOps.VIEW if self.can_view() else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST and not isinstance(self.base.arg, Variable)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
