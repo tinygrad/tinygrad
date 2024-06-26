@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 import itertools
-from typing import DefaultDict, NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from typing import DefaultDict, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
