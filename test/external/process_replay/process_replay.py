@@ -12,10 +12,10 @@ row_count = cur.execute(f"select count(*) from 'process_replay_{VERSION}'").fetc
 for offset in tqdm(range(0, row_count, page_size)):
   cur.execute(f"SELECT val FROM 'process_replay_{VERSION}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
-    compare_k, compare_src, time_baseline = pickle.loads(row[0])
-    k = Linearizer(*compare_k.ast, opts=compare_k.opts)
-    for opt in compare_k.applied_opts: k.apply_opt(opt)
-    good_src = k.opts.render(to_function_name(compare_k.name), k.linearize().uops)
+    ast, opts, applied_opts, name, compare_src, time_baseline = pickle.loads(row[0])
+    k = Linearizer(*ast, opts=opts)
+    for opt in applied_opts: k.apply_opt(opt)
+    good_src = k.opts.render(name, k.linearize().uops)
     time_ = timeit(UOpGraph(k.uops.sinks).linearize)
     if (time_ - time_baseline) / max(time_baseline, .1) > 0.1: print(colored(f"PERF: {time_baseline:.2f} -> {time_:.2f}",'red'))
     try: assert compare_src == good_src
