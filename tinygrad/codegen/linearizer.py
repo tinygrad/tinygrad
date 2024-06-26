@@ -517,10 +517,10 @@ class Linearizer(Kernel):
     return ret
 
   def to_program(self) -> Program:
-    if getenv("RUN_PROCESS_REPLAY"): self.applied_opts_cache = None
-    lintime = timeit(self.linearize)
+    self.linearize()
     info = get_lazyop_info(self.ast[0])
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
+    lintime = timeit(UOpGraph(self.uops.sinks).linearize)
     if getenv("RUN_PROCESS_REPLAY"):
       diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src, lintime))
     ops, mem = self.uops.flops_mem()

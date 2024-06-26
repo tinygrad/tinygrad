@@ -3,6 +3,7 @@
 import difflib, pickle
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import colored, db_connection, VERSION, getenv, tqdm, timeit
+from tinygrad.codegen.uops import UOpGraph
 
 page_size = 100
 conn = db_connection()
@@ -15,7 +16,7 @@ for offset in tqdm(range(0, row_count, page_size)):
     k = Linearizer(*ast, opts=opts)
     for opt in applied_opts: k.apply_opt(opt)
     good_src = k.opts.render(name, k.linearize().uops)
-    time_ = timeit(k.linearize)
+    time_ = timeit(UOpGraph(k.uops.sinks).linearize)
     if (time_ - time_baseline) / max(time_baseline, .1) > 0.1: print(colored(f"PERF: {time_baseline:.2f} -> {time_:.2f}",'red'))
     try: assert compare_src == good_src
     except AssertionError as e:
