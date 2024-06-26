@@ -126,7 +126,6 @@ class ResNet:
     return self.forward(x)
 
   def load_from_pretrained(self):
-    import numpy as np
     # TODO replace with fake torch load
 
     model_urls = {
@@ -147,14 +146,8 @@ class ResNet:
         print("skipping fully connected layer")
         continue # Skip FC if transfer learning
 
-      if dat.shape == ():
-        assert obj.shape == (1,), obj.shape
-        dat = dat.reshape(1)
-      if len(obj.shape)==2 and len(dat.shape)==1 and obj.shape[1]==dat.shape[0]:
-        dat = dat.reshape(1, obj.shape[1])
-        dat = np.broadcast_to(dat, obj.shape)
-      assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
-      obj.assign(dat)
+      if 'bn' not in k and 'downsample' not in k: assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
+      obj.assign(dat.reshape(obj.shape))
 
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)
 ResNet34 = lambda num_classes=1000: ResNet(34, num_classes=num_classes)
