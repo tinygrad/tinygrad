@@ -105,11 +105,7 @@ class UPat:
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
 
 T = TypeVar("T")
-def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
-  if isinstance(m1, set):
-    if m2 not in m1: return True
-  elif m2 != m1: return True
-  return False
+def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] is not uop: return False
