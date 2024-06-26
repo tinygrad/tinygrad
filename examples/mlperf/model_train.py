@@ -409,6 +409,7 @@ def train_bert():
     MLLOGGER.logger.propagate = False
 
     if INITMLPERF:
+      assert BENCHMARK, f"BENCHMARK must be set for INITMLPERF"
       MLLOGGER.event(key=mllog_constants.SUBMISSION_ORG, value="tinycorp")
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
@@ -650,6 +651,7 @@ def train_bert():
         achieved = True
         if MLLOGGER and RUNMLPERF:
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
+        # stop once hitting the target
         break
 
     if getenv("CKPT", 1) and i % save_ckpt_freq == 0:

@@ -228,11 +228,11 @@ def get_data_bert(GPUS:list[str], it):
 
 def get_fake_data_bert(GPUS:list[str], BS:int):
   return {
-    "input_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).shard_(GPUS, axis=0),
-    "input_mask": Tensor.zeros((BS, 512), dtype=dtypes.default_float).shard_(GPUS, axis=0),
-    "segment_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).shard_(GPUS, axis=0),
-    "masked_lm_positions": Tensor.zeros((BS, 512), dtype=dtypes.float32).shard_(GPUS, axis=0),
-    "masked_lm_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).shard_(GPUS, axis=0),
-    "masked_lm_weights": Tensor.zeros((BS, 512), dtype=dtypes.float32).shard_(GPUS, axis=0),
-    "next_sentence_labels": Tensor.zeros((BS, 1), dtype=dtypes.float32).shard_(GPUS, axis=0),
+    "input_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "input_mask": Tensor.zeros((BS, 512), dtype=dtypes.default_float).contiguous().shard_(GPUS, axis=0),
+    "segment_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "masked_lm_positions": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "masked_lm_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "masked_lm_weights": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "next_sentence_labels": Tensor.zeros((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
   }
