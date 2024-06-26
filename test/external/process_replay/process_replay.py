@@ -11,7 +11,7 @@ row_count = cur.execute(f"select count(*) from 'process_replay_{VERSION}'").fetc
 for offset in tqdm(range(0, row_count, page_size)):
   cur.execute(f"SELECT val FROM 'process_replay_{VERSION}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
-    name, ast, opts, applied_opts, compare_src = pickle.loads(row[0])
+    ast, opts, applied_opts, name, compare_src = pickle.loads(row[0])
     k = Linearizer(*ast, opts=opts)
     for opt in applied_opts: k.apply_opt(opt)
     good_src = k.opts.render(name, k.linearize().uops)
