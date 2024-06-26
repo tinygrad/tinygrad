@@ -308,7 +308,7 @@ def rec_rewrite(sink:UOp,pm:PatternMatcher, nodes) -> UOp:
     return up
 
   cache: Dict[UOp, UOp] = {}
-  for i in range(100):
+  for _ in range(100):
     changed = False
     sink = rewrite(sink)
     if not changed: return sink
