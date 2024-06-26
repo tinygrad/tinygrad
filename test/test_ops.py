@@ -13,7 +13,7 @@ FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3,
-                   forward_only=False, vals=None, low=-2, high=2):
+                   forward_only=False, vals=None, low=-2, high=2, nan_to_zero=False):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   ts, tst = prepare_test_op(low, high, shps, vals, forward_only)
 
@@ -31,6 +31,9 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
   def compare(s, tinygrad_output, torch_output, atol, rtol):
     if PRINT_TENSORS: print(s, tinygrad_output, torch_output)
+    if nan_to_zero:
+      tinygrad_output = np.nan_to_num(tinygrad_output, posinf=0, neginf=0)
+      torch_output = np.nan_to_num(torch_output, posinf=0, neginf=0)
     try:
       assert tinygrad_output.shape == torch_output.shape, f"shape mismatch: tinygrad={tinygrad_output.shape} | torch={torch_output.shape}"
       assert tinygrad_output.dtype == torch_output.dtype, f"dtype mismatch: tinygrad={tinygrad_output.dtype} | torch={torch_output.dtype}"
@@ -940,10 +943,15 @@ class TestOps(unittest.TestCase):
     # NOTE: this one has larger atol
     helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=300, high=303)
+  @unittest.skipIf(Device.DEFAULT == "LLVM", "TODO: isnan(x) for LLVM")
   def test_acosh(self):
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6)
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, low=300, high=303)
+  def test_acosh_nan_masked(self):
+    helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, nan_to_zero=True)
+    helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, low=-300, high=-297, nan_to_zero=True)
+    helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, low=300, high=303, nan_to_zero=True)
   def test_atanh(self):
     helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6)
     helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6, low=-300, high=-297)

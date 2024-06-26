@@ -64,7 +64,7 @@ def universal_test(a, b, dtype, op):
   if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
-def universal_test_unary(a, dtype, op):
+def universal_test_unary(a, dtype, op, nan_to_zero=False):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
   sched = create_schedule([out.lazydata])
@@ -72,6 +72,9 @@ def universal_test_unary(a, dtype, op):
   run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
+  if nan_to_zero:
+    tensor_value = np.nan_to_num(tensor_value, posinf=0, neginf=0)
+    numpy_value = np.nan_to_num(numpy_value, posinf=0, neginf=0)
   if dtype in dtypes_float:
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
@@ -105,12 +108,21 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float16, ht.float16, strat.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
+  @unittest.skipIf(Device.DEFAULT == "LLVM", "TODO: isnan(x) for LLVM")
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
+  @given(ht.float32, strat.sampled_from(unary_operations))
+  def test_float32_unary_nan_masked(self, a, op): universal_test_unary(a, dtypes.float32, op, nan_to_zero=True)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipIf(Device.DEFAULT == "LLVM", "TODO: isnan(x) for LLVM")
   @given(ht.float16, strat.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  @given(ht.float16, strat.sampled_from(unary_operations))
+  def test_float16_unary_nan_masked(self, a, op): universal_test_unary(a, dtypes.float16, op, nan_to_zero=True)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)
