@@ -211,12 +211,12 @@ constant_folder = PatternMatcher([
   (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
   (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
+  (UOp.var('x') * -1, lambda x: -x),    # x*1 -> x
   (UOp.var('x') // UOp.var('x'), lambda x: UOp.const(x.dtype, 1)), # x//x -> 1
   (UOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (UOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
   (UOp.var('x') / UOp.var('x'), lambda x: UOp.const(x.dtype, 1)), # x/x -> 1
-  (UOp.var('x') / 1, lambda x: x),    # x/1 -> x
-  (UOp.var('x') / -1, lambda x: -x),  # x/-1 -> -x
+  (UOp.var('x') / UOp.cvar('c'), lambda x,c: x*exec_alu(UnaryOps.RECIP, c.dtype, [c.arg])),    # x/c -> x*(1/c)
   (UOp.var('x', dtype=dtypes.bool).max(UOp.const(dtypes.bool, False)), lambda x: x),  # max(x, False) -> x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
