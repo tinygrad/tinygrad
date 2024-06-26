@@ -3,6 +3,7 @@ from typing import Optional, Union, Tuple, cast
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.nn import optim, state, datasets  # noqa: F401
+from tinygrad.dtype import dtypes
 
 class BatchNorm2d:
   """
@@ -32,11 +33,11 @@ class BatchNorm2d:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
+    if affine: self.weight, self.bias = Tensor.ones(sz, dtype=dtypes.float32), Tensor.zeros(sz, dtype=dtypes.float32)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+    self.running_mean, self.running_var = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False), Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.int, requires_grad=False)
 
   def __call__(self, x:Tensor):
     if Tensor.training:
@@ -58,7 +59,7 @@ class BatchNorm2d:
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
       batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
 
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
+    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(dtypes.default_float)
 
 # TODO: these Conv lines are terrible
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
