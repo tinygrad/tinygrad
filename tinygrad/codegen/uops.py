@@ -362,16 +362,14 @@ class UOpGraph:
     # filter nodes that don't link to a sink
     # BFS toposort
     children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    loops:List[UOp] = []
-    ifs:List[UOp] = []
-    nodes: Dict[UOp, None] = {}
+    in_degree: Dict[UOp, int] = {}
+    loops: List[UOp] = []
+    ifs: List[UOp] = []
     def add_parents(u:UOp):
-      if u in nodes: return
-      nodes[u] = None
+      if u in in_degree: return
+      in_degree[u] = len(u.src)
       for x in u.src:
         add_parents(x)
-        in_degree[u] += 1
         children[x].append(u)
       if u.op is UOps.RANGE: loops.append(u)
       if u.op is UOps.IF: ifs.append(u)
@@ -393,7 +391,7 @@ class UOpGraph:
         if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
-    for u in nodes:
+    for u in children:
       if in_degree[u] == 0: push(u)
 
     if getenv("FUZZ_UOPS", 0):

@@ -8,7 +8,7 @@ from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import _to_np_dtype
 
-def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int], loops_children:Dict[UOp, Set[UOp]]):
+def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:Dict[UOp, int], loops_children:Dict[UOp, Set[UOp]]):
   paths: List[List[UOp]] = []
   # TODO: express DEFINE_ACC and loop children conditions in the graph, builtin.
   for p in find_all_toposorts(graph, in_degree):
