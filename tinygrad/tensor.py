@@ -2490,7 +2490,6 @@ class Tensor:
     print(Tensor([True, True, False, False]).xor(Tensor([True, False, True, False])).numpy())
     ```
     """
-    assert dtypes.is_int(self.dtype)
     return F.Xor.apply(*self._broadcasted(x, reverse))
 
   def lshift(self, x:int):
