@@ -37,7 +37,9 @@ def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
         k = timed[0][1]
         if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
   # TODO: check the correctness inline once compare_linearizer is in core
-  if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
+  if logkerns is not None:
+    logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
+    logkerns.close()
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
   return k
 
