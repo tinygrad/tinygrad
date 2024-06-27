@@ -75,7 +75,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
       else: sched, _ = Tensor.schedule_with_vars(y, x.grad, *[t.grad for t in optim.params])
 
       for _ in range(JITCNT):
-        run_schedule([si for si in sched])
+        run_schedule(list(sched))
 
     CNT = getenv("CNT", 5)
     best_tm = None
