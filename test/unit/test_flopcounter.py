@@ -19,7 +19,7 @@ class TestFlopCounter(unittest.TestCase):
     #lin.hand_coded_optimizations()
     lin.linearize()
     ops, mem = lin.uops.flops_mem(ignore_indexing=True)
-    run_count = prod((lin.global_size if lin.global_size else []) + (lin.local_size if lin.local_size else []))
+    run_count = prod((lin.global_size or []) + (lin.local_size or []))
     self.assertEqual(info.flops, ops*run_count)
     print(info.flops, info.mem_estimate, "vs", ops*run_count, mem*run_count)
     #lin.uops.print()

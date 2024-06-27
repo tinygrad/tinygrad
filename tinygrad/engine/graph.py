@@ -1,4 +1,4 @@
-import os, atexit, functools
+import os, atexit, functools, contextlib
 from collections import defaultdict
 from typing import List, Any, DefaultDict, Union
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
@@ -8,8 +8,7 @@ from tinygrad.codegen.uops import UOps, UOp, UPat
 from tinygrad.shape.symbolic import NumNode
 from tinygrad.lazy import LazyBuffer
 
-try: import networkx as nx
-except ImportError: pass
+with contextlib.suppress(ImportError): import networkx as nx
 
 # **** debugging and graphing ****
 
