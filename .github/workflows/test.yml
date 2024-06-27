@@ -35,7 +35,7 @@ jobs:
       run: |
         RAW_COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
         COMMIT_MESSAGE=$(printf '%q' "$RAW_COMMIT_MESSAGE")
-        RAW_PR_TITLE="${{ github.event.pull_request.title }}"
+        RAW_PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
         PR_TITLE=$(printf '%q' "$RAW_PR_TITLE")
 
         if { echo "$COMMIT_MESSAGE" | grep -q "run_process_replay" || echo "$PR_TITLE" | grep -q "run_process_replay" || [ "${{ github.event.inputs.run_process_replay }}" = "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
