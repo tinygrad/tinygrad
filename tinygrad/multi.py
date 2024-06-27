@@ -54,7 +54,7 @@ class MultiLazyBuffer:
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
     if axis is not None:
       splits = list(itertools.accumulate([lb.shape[axis] for lb in lbs], initial=0))
-      self.bounds = [(st,ed) for st,ed in zip(splits, splits[1:])]
+      self.bounds = list(zip(splits, splits[1:]))
 
   @property
   def shape(self):
