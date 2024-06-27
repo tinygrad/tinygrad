@@ -273,7 +273,7 @@ class HWCopyQueue(HWQueue):
 
   def timestamp(self, sig: hsa.amd_signal_t):
     self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
-             *data64_le(ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'start_ts').offset)])
+             *data64_le(ctypes.addressof(sig) + hsa.amd_signal_t.start_ts.offset)])
     return self._mark_command_end()
 
   def submit(self, device:AMDDevice):
