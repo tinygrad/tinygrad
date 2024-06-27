@@ -770,7 +770,7 @@ class Tensor:
     new_shape = tuple([s if s is not None else self.shape[i] for i,s in enumerate(argfix(shape, *args))])
     # resolve -1
     if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
-    elif c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
+    if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
 
   def expand(self, shape, *args) -> Tensor:
