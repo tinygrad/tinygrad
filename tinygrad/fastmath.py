@@ -74,13 +74,11 @@ def ilogb2k(d:LazyBuffer) -> LazyBuffer:
 
 def ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype) and is_dtype_fastmath_supported(e.dtype)
-  dtype = d.dtype
-  d = d.cast(dtypes.float64) if d.device != "METAL" else d
   cast_map = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
   e = e.cast(cast_map[d.dtype])
   m1 = d.cast(cast_map[d.dtype], True, True)
   m2 = e.e(BinaryOps.SHL, e.const(significand_bits(d.dtype)))
-  return m1.e(BinaryOps.ADD, m2).cast(d.dtype, True, True).cast(dtype)
+  return m1.e(BinaryOps.ADD, m2).cast(d.dtype, True, True).cast(d.dtype)
 
 def pow2if(q: LazyBuffer, float_dtype: DType):
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype}[q.dtype]
