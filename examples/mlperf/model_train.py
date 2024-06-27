@@ -356,7 +356,7 @@ def train_retinanet():
   HOSTNAME = getenv('SLURM_STEP_NODELIST', 'other')
   EPOCHS = 5
   BS = getenv('BS', 32)
-  BS_EVAL = getenv('BS_EVAL', BS)
+  BS_EVAL = getenv('BS_EVAL', 32)
   LR = 0.000085
   MAP_TARGET = 0.34
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
@@ -364,7 +364,7 @@ def train_retinanet():
   # SYNCBN = True
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16] else 1.0
+  loss_scaler = 512.0 if dtypes.default_float in [dtypes.float16] else 1.0
 
   if WANDB:
     import wandb
