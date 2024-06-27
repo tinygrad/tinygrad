@@ -307,30 +307,6 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
-  # def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
-  #   # recursive rewrite
-  #   changed = getenv("UOPS_REWRITE", 1)
-  #   run_cnt = 0
-  #   @functools.lru_cache(None)
-  #   def rewrite(u:UOp) -> UOp:
-  #     nonlocal changed
-  #     recurse_cnt = 0
-  #     up = u
-  #     # locally recursively rewrite
-  #     while (rewritten := pm.rewrite(up)):
-  #       assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
-  #       up = rewritten
-  #       recurse_cnt += 1
-  #     changed += recurse_cnt
-  #     up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
-  #     return self.nodes.setdefault(up.tuple(), up) # replace with cached nodes
-  #   while changed:
-  #     changed = 0
-  #     sink = rewrite(sink)
-  #     run_cnt += 1
-  #     assert run_cnt < 100, "exceeded 100 rewrite loops!"
-  #   return sink
-
   def graph_rewrite(self, sink, pm):
     @functools.lru_cache(None)
     def rewrite(pm: PatternMatcher, up:UOp) -> UOp:
