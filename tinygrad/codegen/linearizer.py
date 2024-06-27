@@ -125,7 +125,7 @@ class Linearizer(Kernel):
 
     dim, amt = None, 1
     # float 4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [4,2]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [16,8,4,2]:
       dim, amt = upcast_dim[0], len(float4_expand)
       g_idx, g_valid = self.sts[i].expr_idxs(idxs[:dim] + [float4_expand[0]] + idxs[dim+1:])
       # do not use float4 if idx is not aligned
@@ -145,7 +145,7 @@ class Linearizer(Kernel):
       key = f"{'' if acc is None else self.reduceops.index(acc)}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          self.load_cache[key] = UOp(UOps.DEFINE_ACC, localtype, (UOp.const(localtype.scalar(), self.get_reduce_acc(acc)), *loop_ctx), (i, acc_count))
+          self.load_cache[key] = UOp(UOps.DEFINE_ACC, localtype, (UOp.const(localtype.scalar(), self.get_reduce_acc(acc)), *loop_ctx), (i, acc_count, 'zreg' if self.amx else 'None')) # noqa: E501
           acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = UOp.const(localtype, this_const)
@@ -188,7 +188,7 @@ class Linearizer(Kernel):
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4,8,16]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (float4_expand[0],) + k[upcast_dim[0]+1:]
@@ -308,12 +308,12 @@ class Linearizer(Kernel):
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       if self.amx:
-        dto = dtypes.float.vec(4)
+        dto = dtypes.float.vec(16)
         print('AMX operation magic starts now!')
         accs_uops = [UOp(UOps.CAST, dto, tuple(accs[reduceop][x:x+dto.count])) for x in range(0, len(accs[reduceop]), dto.count)]
         cast_buf1 = UOp(UOps.CAST, dto, tuple(loaded_buffers[self.bufs[1]][0:dto.count]))
         cast_buf2 = UOp(UOps.CAST, dto, tuple([loaded_buffers[self.bufs[2]][x*dto.count] for x in range(dto.count)]))
-        mma = UOp(UOps.MMA, dto, (cast_buf1, cast_buf2)+tuple(accs_uops), ("4_4", (4,4)))
+        mma = UOp(UOps.MMA, dto, (cast_buf1, cast_buf2)+tuple(accs_uops), ("16_16", (16,16)))
         accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for z, acc in enumerate(accs[reduceop])]
       else:
         def gate_acc(r, idxs): return [

@@ -403,13 +403,13 @@ class Kernel:
       return False
 
   def apply_amx(self):
-    if AMX and (r:=self.reduceop) is not None and r.op is ReduceOps.SUM and r.dtype is dtypes.float:
+    if AMX and (r:=self.reduceop) is not None and r.op is ReduceOps.SUM and (r.dtype in [dtypes.float, dtypes.double]):
       if (mul_op:=r.src[0]).op is not BinaryOps.MUL: return False
       for src in mul_op.src:
         if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
 
       # amx_size = 128//self.outbufs[0].dtype.itemsize
-      amx_size=4
+      amx_size=16
 
       if not all(x == self.full_shape[0] and x % amx_size == 0 and x > amx_size for x in self.full_shape): return False
 

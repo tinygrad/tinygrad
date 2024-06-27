@@ -80,6 +80,9 @@ class CStyleLanguage(Renderer):
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.count == 1 else str(var_dtype.count)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.count > 1:
+      if(var_name.startswith('zreg')):
+        i = int(var_name[4:var_name.index(".")])
+        return f"__stz(&{buf_name}[{idx}], {i*4%64});"
       prefix = self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix
       return f"*(({prefix}{self.render_dtype(buf_dtype)}{var_dtype.count}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
@@ -168,12 +171,15 @@ class CStyleLanguage(Renderer):
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
         elif uop is UOps.MMA: kk(f"__mma_{args[0]}({r[src[0]]}, {r[src[1]]});")
-        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
+        elif uop is UOps.DEFINE_ACC:
+          if len(args) == 3 and args[2] == 'zreg': ssa('zreg',u)
+          else: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
-          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
+          # r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
+          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 16 else f".{'abcdefghijklmnop'[args]}")
         else: raise RuntimeError(f"failed to render {uop}")
 
     return self.render_kernel(name, kernel, bufs, uops)
@@ -191,16 +197,34 @@ class ClangRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix = ["""
-typedef struct {
-    float x, y, z, w;
-} float4;
+    kernel.insert(42, '      AMX_SET(1);')
+    kernel.insert(5,  '      AMX_SET(0);')
+    prefix = [
+'#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
+'#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
+"""
+typedef struct { float a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p; } float16;
 
-float4 make_float4(float x, float y, float z, float w) {
-    float4 result = {x, y, z, w};
+float16 make_float16(float a, float b, float c, float d,
+                     float e, float f, float g, float h,
+                     float i, float j, float k, float l,
+                     float m, float n, float o, float p) {
+    float16 result = {a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p};
     return result;
 }
-"""]
+""",
+"""
+void __stz(float* restrict data0, int zreg){{ AMX(5, data0, 0ull<<62 | (zreg*1ull)<<56); }}
+""",
+"""
+void __mma_16_16(float16 data1, float16 data2){{
+  int *a_pk = (int *) (&data1);
+  int *b_pk = (int *) (&data2);
+  AMX(0, b_pk, 0ull<<62); AMX(1, a_pk, 0ull<<62);
+  AMX(12, 0, 0ull);
+}}
+"""
+]
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
