@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast, Generator, Tuple
 import time
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int
+from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING
 from tinygrad.ops import BufferOps, LoadOps, LazyOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -188,5 +188,5 @@ capturing: List = []  # put classes with an add method in here
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None, do_update_stats=True):
   for ei in lower_schedule(schedule):
-    if len(capturing): capturing[0].add(ei)
+    if len(capturing) and CAPTURING: capturing[0].add(ei)
     ei.run(var_vals, do_update_stats=do_update_stats)
