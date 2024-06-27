@@ -6,92 +6,73 @@ import numpy as np
 import random
 from tinygrad import Tensor, dtypes, Device
 from pycocotools.coco import COCO
-# 608566/1170301
 
-class ConvertCocoPolysToMask(object):
-  def __init__(self, filter_iscrowd=True):
-    self.filter_iscrowd = filter_iscrowd
+SIZE = (800, 800)
 
-  def __call__(self, image, target):
-    w,h = image.size
-    image_id = target["image_id"]
-    anno = target["annotations"]
-    if self.filter_iscrowd:
-      anno = [obj for obj in anno if obj['iscrowd'] == 0]
+def prep_data(image, target):
+  w,h = image.size
+  image_id = target["image_id"]
+  anno = target["annotations"]
+  boxes = [obj["bbox"] for obj in anno]
+  
+  # guard against no boxes via resizing
+  boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
+  boxes[:, 2:] += boxes[:, :2]
+  boxes[:, 0::2] = boxes[:, 0::2].clip(0, w)
+  boxes[:, 1::2] = boxes[:, 1::2].clip(0, h)
+  
+  classes = [obj["category_id"] for obj in anno]
+  classes = np.array(classes, dtype=np.int16)
 
-    boxes = [obj["bbox"] for obj in anno]
-    if len(boxes) == 0:
-      print('ZERO_BOX', image_id, boxes)
-    # guard against no boxes via resizing
-    boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
-    boxes[:, 2:] += boxes[:, :2]
-    boxes[:, 0::2] = boxes[:, 0::2].clip(0, w)
-    boxes[:, 1::2] = boxes[:, 1::2].clip(0, h)
-    
-    classes = [obj["category_id"] for obj in anno]
-    classes = np.array(classes, dtype=np.int16)
+  keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+  boxes = boxes[keep]
+  classes = classes[keep]
 
-    keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
-
-    boxes = boxes[keep]
-    classes = classes[keep]
-
-    target = {}
-    target["boxes"] = resize_boxes_np(boxes, image.size[::-1], (800, 800)).astype(np.float32)
-    # print('BOXES:TENSCONV', target["boxes"].numpy())
-    target["labels"] = classes
-    target["image_id"] = image_id
-
-    return image, target
-
+  target = {}
+  target["boxes"] = resize_boxes_np(boxes, image.size[::-1], SIZE).astype(np.float32)
+  target["labels"] = classes
+  target["image_id"] = image_id
+  return image, target
 class CocoDetection:
-  def __init__(self, img_folder, ann_file, transforms=None):
+  def __init__(self, img_folder, ann_file):
     self.root = img_folder
     self.coco = COCO(ann_file)
     self.ids = list(sorted(self.coco.imgs.keys()))
-    self._transforms = transforms
+    self._transforms = prep_data
 
   def _load_image(self, id: int) -> Image.Image:
     path = self.coco.loadImgs(self.ids[id])[0]["file_name"]
     return Image.open(os.path.join(self.root, path)).convert("RGB")
 
-  def _load_target(self, id: int) -> List[Any]:
-    return self.coco.loadAnns(self.coco.getAnnIds(self.ids[id]))
+  def _load_target(self, id: int) -> List[Any]: return self.coco.loadAnns(self.coco.getAnnIds(self.ids[id]))
 
-  def __len__(self) -> int:
-    return len(self.ids)
+  def __len__(self) -> int: return len(self.ids)
+
   def __getitem__(self, index):
     img = self._load_image(index)
     orig_size = img.size
-
     target = self._load_target(index)
 
     image_id = self.ids[index]
     target = dict(image_id=image_id, annotations=target)
     if self._transforms is not None:
-      # print('HIT')
       img, target = self._transforms(img, target)
       target['image_size'] = orig_size
     return img, target
-  
+
 def get_openimages(name, root, image_set):
   PATHS = {
       "train": os.path.join(root, "train"),
       "val":   os.path.join(root, "validation"),
   }
 
-  t = ConvertCocoPolysToMask(filter_iscrowd=False)
-
   img_folder = os.path.join(PATHS[image_set], "data")
   ann_file = os.path.join(PATHS[image_set], "labels", f"{name}.json")
 
-  dataset = CocoDetection(img_folder, ann_file, transforms=t)
+  dataset = CocoDetection(img_folder, ann_file)
   return dataset
 
-SIZE = (800, 800)
-
-def resize_img(img:Image.Image):
-  return img.resize(SIZE, resample = Image.BILINEAR)
+def resize_img(img:Image.Image): return img.resize(SIZE, resample = Image.BILINEAR)
 def resize_boxes_np(boxes, original_size: List[int], new_size: List[int]):
   ratios = [
       s / s_orig
@@ -119,66 +100,34 @@ def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray):
   inter = wh[:, :, 0] * wh[:, :, 1]
   union = area1[:, None] + area2 - inter
   return inter / union
-class Matcher_np(object):
-  BELOW_LOW_THRESHOLD = -1
-  BETWEEN_THRESHOLDS = -2
-  def __init__(self, high_threshold, low_threshold, allow_low_quality_matches=False):
 
-    self.BELOW_LOW_THRESHOLD = -1
-    self.BETWEEN_THRESHOLDS = -2
-    assert low_threshold <= high_threshold
-    self.high_threshold = high_threshold
-    self.low_threshold = low_threshold
-    self.allow_low_quality_matches = allow_low_quality_matches
+def matcher_np(match_quality_matrix:np.ndarray):
+  assert match_quality_matrix.size != 0, 'Need valid matrix'
 
-  def __call__(self, match_quality_matrix:np.ndarray):
-
-    if match_quality_matrix.size == 0:
-      # empty targets or proposals not supported during training
-      if match_quality_matrix.shape[0] == 0:
-        raise ValueError(
-            "No ground-truth boxes available for one of the images "
-            "during training")
-      else:
-        raise ValueError(
-            "No proposal boxes available for one of the images "
-            "during training")
-
-    # match_quality_matrix is M (gt) x N (predicted)
-    # Max over gt elements (dim 0) to find best gt candidate for each prediction
-    matched_vals, matches = match_quality_matrix.max(axis=0), match_quality_matrix.argmax(axis=0)
-
-    if self.allow_low_quality_matches:
-      all_matches = np.copy(matches)
-    else:
-      all_matches = None
-
-    # Assign candidate matches with low quality to negative (unassigned) values
-    below_low_threshold = matched_vals < self.low_threshold
-    between_thresholds = (matched_vals >= self.low_threshold) & (
-        matched_vals < self.high_threshold
-    )
-
-    matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
-    matches[between_thresholds] = self.BETWEEN_THRESHOLDS
-    if self.allow_low_quality_matches:
-      assert all_matches is not None
-      self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
-    return matches
-
-  def set_low_quality_matches_(self, matches:np.ndarray, all_matches:np.ndarray, match_quality_matrix:np.ndarray):
+  def set_low_quality_matches_(matches:np.ndarray, all_matches:np.ndarray, match_quality_matrix:np.ndarray):
     # For each gt, find the prediction with which it has highest quality
     highest_quality_foreach_gt= match_quality_matrix.max(axis=1)
     # Find highest quality match available, even if it is low, including ties
-    gt_pred_pairs_of_highest_quality = np.nonzero(
-        match_quality_matrix == highest_quality_foreach_gt[:, None]
-    )
+    gt_pred_pairs_of_highest_quality = np.nonzero(match_quality_matrix == highest_quality_foreach_gt[:, None])
     pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
     matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
 
-def matcher_iou_func(box, anchor):
-  M_NP = Matcher_np(0.5, 0.4, True)
-  return M_NP(box_iou_np(box, anchor))
+  # match_quality_matrix is M (gt) x N (predicted)
+  # Max over gt elements (dim 0) to find best gt candidate for each prediction
+  matched_vals, matches = match_quality_matrix.max(axis=0), match_quality_matrix.argmax(axis=0)
+  all_matches = np.copy(matches)
+
+  # Assign candidate matches with low quality to negative (unassigned) values
+  below_low_threshold = matched_vals < 0.4
+  between_thresholds = (matched_vals >= 0.4) & (matched_vals < 0.5)
+  matches[below_low_threshold] = -1
+  matches[between_thresholds] = -2
+
+  assert all_matches is not None
+  set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+  return matches
+
+def matcher_iou_func(box, anchor): return matcher_np(box_iou_np(box, anchor))
 
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 import pickle, random

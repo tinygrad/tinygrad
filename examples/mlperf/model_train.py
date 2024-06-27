@@ -355,10 +355,8 @@ def train_retinanet():
   WANDB = getenv('WANDB')
   HOSTNAME = getenv('SLURM_STEP_NODELIST', 'other')
   EPOCHS = 5
-  BS = getenv('BS', 52)
+  BS = getenv('BS', 32)
   BS_EVAL = getenv('BS_EVAL', BS)
-  WARMUP_EPOCHS = 1
-  WARMUP_FACTOR = 0.001
   LR = 0.000085
   MAP_TARGET = 0.34
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
@@ -371,27 +369,10 @@ def train_retinanet():
   if WANDB:
     import wandb
     wandb.init(project='RetinaNet')
-  
+ 
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
-  from extra.models import retinanet
-  from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
 
-  prior_probability=0.01
-  retinanet.Conv2dNormal = Conv2dNormal
-  retinanet.Conv2dNormal_prior_prob = functools.partial(Conv2dNormal, b=-math.log((1 - prior_probability) / prior_probability))
-  retinanet.Conv2dKaiming = Conv2dKaiming
-
-  from extra.models.retinanet import AnchorGenerator
-  anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
-  aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
-  anchor_generator = AnchorGenerator(
-      anchor_sizes, aspect_ratios
-  )
-
-  from extra.models import resnet
-  from examples.hlb_cifar10 import UnsyncedBatchNorm
-  from tinygrad.nn.optim import Adam
   from extra.datasets.openimages_new import get_openimages, batch_load_retinanet, batch_load_retinanet_val
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO
@@ -400,12 +381,23 @@ def train_retinanet():
   NAME = 'openimages-mlperf'
   coco_train = get_openimages(NAME,ROOT, 'train')
   coco_val = get_openimages(NAME,ROOT, 'val')
+
+  from extra.models import retinanet
+  from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
+  from extra.models import resnet
+  from examples.hlb_cifar10 import UnsyncedBatchNorm
+  from tinygrad.nn.optim import Adam
+
+  retinanet.Conv2dNormal = Conv2dNormal
+  retinanet.Conv2dNormal_prior_prob = functools.partial(Conv2dNormal, b=-math.log(99))
+  retinanet.Conv2dKaiming = Conv2dKaiming
+
   def cust_call(self, x:Tensor):
     batch_mean = self.running_mean
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
     batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
-
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(dtypes.default_float)
+
   resnet.Conv2d = Conv2dHeNormal
   resnet.Linear = Linear
   resnet.BatchNorm = functools.partial(BatchNorm2d, eps=0.0)
@@ -413,34 +405,25 @@ def train_retinanet():
   if not SYNCBN: resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
   resnet_model = resnet.ResNeXt50_32X4D()
   resnet_model.load_from_pretrained()
-  model = retinanet.RetinaNet(resnet_model, num_anchors=anchor_generator.num_anchors_per_location()[0])
+
+  from extra.models.retinanet import anchor_generator
+ 
+  model = retinanet.RetinaNet(resnet_model)
   model.backbone.body.fc = None
   # model.load_from_pretrained()
 
   for k, v in get_state_dict(model).items():
-    if 'head' in k and ('clas' in k or 'reg' in k ):
-      v.requires_grad = True
+    if 'head' in k and ('clas' in k or 'reg' in k ): v.requires_grad = True
     elif k.split('.')[2] in ["layer4", "layer3", "layer2"] and 'bn' not in k and 'weight' in k:
       if 'downsample' in k:
-        if 'downsample.0' in k:
-          v.requires_grad = True
-        else:
-          v.requires_grad = False
-      else:
-        v.requires_grad = True
-    elif 'fpn' in k:
-      v.requires_grad = True
-    else:
-      v.requires_grad = False
-    if not SYNCBN and ("running_mean" in k or "running_var" in k):
-      v.realize().shard_(GPUS, axis=0)
-    else:
-      v.realize().to_(GPUS)
-  
-  # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B100_E0_11703.safe")
-  # model.load_checkpoint("./ckpts/retinanet_4xgpu018_B32_E0.safe")
-  # model.load_from_pretrained()
-
+        if 'downsample.0' in k: v.requires_grad = True
+        else: v.requires_grad = False
+      else: v.requires_grad = True
+    elif 'fpn' in k: v.requires_grad = True
+    else: v.requires_grad = False
+    if not SYNCBN and ("running_mean" in k or "running_var" in k): v.realize().shard_(GPUS, axis=0)
+    else: v.realize().to_(GPUS)
+ 
   parameters = get_parameters(model)
   optimizer = Adam(parameters, lr=LR)
 
@@ -453,7 +436,7 @@ def train_retinanet():
   def train_step(X, boxes_temp, labels_temp, matched_idxs):
     Tensor.training = True
     optimizer.zero_grad()
-    b,r,c = model(normalize(X), True)
+    _,r,c = model(normalize(X), True)
     loss_reg = mdl_reg_loss(r.cast(dtypes.float32), matched_idxs, boxes_temp)
     loss_class = mdl_class_loss(c.cast(dtypes.float32), matched_idxs, labels_temp)
     loss = loss_reg+loss_class
@@ -464,7 +447,7 @@ def train_retinanet():
   @TinyJit
   def val_step(X):
     Tensor.training = False
-    b,r,c = model(normalize(X), True)
+    _,r,c = model(normalize(X), True)
     out = (r.cat(c.sigmoid(), dim=-1)).cast(dtypes.float32)
     return out.realize()
 
@@ -478,12 +461,11 @@ def train_retinanet():
 
   def data_get(it):
     x, yb, yl, ym, cookie = next(it)
-    return x.shard(GPUS, axis=0), yb.shard(GPUS, axis=0), yl.shard(GPUS, axis=0), ym.shard(GPUS, axis=0), cookie 
+    return x.shard(GPUS, axis=0), yb.shard(GPUS, axis=0), yl.shard(GPUS, axis=0), ym.shard(GPUS, axis=0), cookie
   def data_get_val(it):
     x, Y_idx, cookie = next(it)
     return x.shard(GPUS, axis=0), Y_idx, cookie
-  # for k,v in get_state_dict(model).items():
-  #   print(k, v.dtype)
+
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # **********TRAIN***************
@@ -499,13 +481,10 @@ def train_retinanet():
       loss, proc = train_step(proc[0], proc[1], proc[2], proc[3]), proc[4]
 
       pt = time.perf_counter()
-      try:
-        next_proc = data_get(it)
-      except StopIteration:
-        next_proc = None
+      try: next_proc = data_get(it)
+      except StopIteration: next_proc = None
 
       dt = time.perf_counter()
-
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
       loss = loss.numpy().item()
       cl = time.perf_counter()
@@ -522,15 +501,12 @@ def train_retinanet():
       proc, next_proc = next_proc, None  # return old cookie
       cnt+=1
 
-
     if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
     fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
     state_dict = get_state_dict(model)
-    for k,v in state_dict.items():
-      state_dict[k] = v.cast(dtypes.float32)
     safe_save(state_dict, fn)
     print(f" *** Model saved to {fn} ***")
-    
+   
     # ***********EVAL******************
     bt = time.time()
     if getenv("RESET_STEP", 1): train_step.reset()
@@ -557,19 +533,15 @@ def train_retinanet():
       with Tensor.inference_mode():
         out, proc = val_step(proc[0]), proc[2]
 
-      try:
-        next_proc = data_get_val(it)
-      except StopIteration:
-        next_proc = None
+      try: next_proc = data_get_val(it)
+      except StopIteration: next_proc = None
 
       out = out.numpy()
       predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
       coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(),
-                         "score": score} for i, prediction in enumerate(predictions) 
+                         "score": score} for i, prediction in enumerate(predictions)
                          for box, score, label in zip(*prediction.values())]
 
-      # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
-      # REFERNCE PUSHES EMPTY COCO OBJ
       with redirect_stdout(None):
         coco_eval.cocoDt = coco_val.coco.loadRes(coco_results) if coco_results else COCO()
         coco_eval.params.imgIds = img_ids
@@ -577,25 +549,23 @@ def train_retinanet():
       evaluated_imgs.extend(img_ids)
       coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
       eval_times.append(time.time()-st)
-      # print(colored(f'{cnt} EVAL_STEP || {eval_times[-1]}', 'red'))
       cnt=cnt+1
-      proc, next_proc = next_proc, None  # return old cookie
+      proc, next_proc = next_proc, None
       # if cnt>30: break
 
     coco_eval.params.imgIds = evaluated_imgs
     coco_eval._paramsEval.imgIds = evaluated_imgs
-    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+    coco_eval.evalImgs = [x for batch in coco_evalimgs for x in batch]
     coco_eval.accumulate()
     coco_eval.summarize()
     eval_acc = coco_eval.stats[0]
     print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-bt}', 'green'))
     if getenv("RESET_STEP", 1): val_step.reset()
 
-    
     if eval_acc>MAP_TARGET:
       print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch, eval_acc)
+      break
 
-      
 def train_unet3d():
   # TODO: Unet3d
   pass

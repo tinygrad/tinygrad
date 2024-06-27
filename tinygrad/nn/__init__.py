@@ -36,7 +36,8 @@ class BatchNorm2d:
     if affine: self.weight, self.bias = Tensor.ones(sz, dtype=dtypes.float32), Tensor.zeros(sz, dtype=dtypes.float32)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False), Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False)
+    self.running_mean = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False)
+    self.running_var = Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.int, requires_grad=False)
 
   def __call__(self, x:Tensor):

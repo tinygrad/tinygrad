@@ -11,8 +11,7 @@ Conv2dNormal = nn.Conv2d
 Conv2dNormal_prior_prob = nn.Conv2d
 Conv2dKaiming = nn.Conv2d
 
-def cust_bin_cross_logits(inputs, targets):
-  return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
+def cust_bin_cross_logits(inputs, targets): return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
 
 def sigmoid_focal_loss(inputs: Tensor, targets: Tensor, mask: Tensor,
     alpha: float = 0.25, gamma: float = 2):
@@ -74,17 +73,15 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
-def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
-  wx, wy, ww, wh = weights
-
+def encode_boxes(reference_boxes, proposals):
   ex_ctr = proposals[:, :, 0:2] + 0.5 * (proposals[:, :, 2:4] - proposals[:, :, 0:2])
   gt_ctr = reference_boxes[:, :, 0:2] + 0.5 * (reference_boxes[:, :, 2:4] - reference_boxes[:, :, 0:2])
 
   return Tensor.stack(
-    wx * (gt_ctr[:, :, 0] - ex_ctr[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0]),
-    wy * (gt_ctr[:, :, 1] - ex_ctr[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1]),
-    ww * ((reference_boxes[:, :, 2] - reference_boxes[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0])).log(),
-    wh * ((reference_boxes[:, :, 3] - reference_boxes[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1])).log()
+    (gt_ctr[:, :, 0] - ex_ctr[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0]),
+    (gt_ctr[:, :, 1] - ex_ctr[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1]),
+    ((reference_boxes[:, :, 2] - reference_boxes[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0])).log(),
+    ((reference_boxes[:, :, 3] - reference_boxes[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1])).log()
   , dim=2)
 
 def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
@@ -113,55 +110,12 @@ def cust_meshgrid(x:Tensor, y:Tensor):
   x = x.reshape(xs, 1).expand((xs,ys))
   return x, y
 
-class AnchorGenerator:
-  def __init__(self, sizes=((128, 256, 512),), aspect_ratios=((0.5, 1.0, 2.0),)):
-    if not isinstance(sizes[0], (list, tuple)):
-      # TODO change this
-      sizes = tuple((s,) for s in sizes)
-    if not isinstance(aspect_ratios[0], (list, tuple)):
-      aspect_ratios = (aspect_ratios,) * len(sizes)
-    assert len(sizes) == len(aspect_ratios)
-
-    self.sizes = sizes
-    self.aspect_ratios = aspect_ratios
-    self.cell_anchors = [self.generate_anchors(size, aspect_ratio)
-                          for size, aspect_ratio in zip(sizes, aspect_ratios)]
-
-  # TODO: https://github.com/pytorch/pytorch/issues/26792
-  # For every (aspect_ratios, scales) combination, output a zero-centered anchor with those values.
-  # (scales, aspect_ratios) are usually an element of zip(self.scales, self.aspect_ratios)
-  # This method assumes aspect ratio = height / width for an anchor.
-  def generate_anchors(self, scales: List[int], aspect_ratios: List[float], dtype=dtypes.float):
-    scales = Tensor(list(scales), dtype=dtype)
-    aspect_ratios = Tensor(list(aspect_ratios), dtype=dtype)
-    h_ratios = aspect_ratios.sqrt()
-    w_ratios = 1 / h_ratios
-    ws = (w_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
-    hs = (h_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
-    base_anchors = Tensor.stack(-ws, -hs, ws, hs, dim=1) / 2
-    return base_anchors.round()
-
-  def set_cell_anchors(self, dtype):
-    self.cell_anchors = [cell_anchor.cast(dtype)
-                          for cell_anchor in self.cell_anchors]
-
-  def num_anchors_per_location(self):
-    return [len(s) * len(a) for s, a in zip(self.sizes, self.aspect_ratios)]
-
-  # For every combination of (a, (g, s), i) in (self.cell_anchors, zip(grid_sizes, strides), 0:2),
-  # output g[i] anchors that are s[i] distance apart in direction i, with the same dimensions as a.
-  def grid_anchors(self, grid_sizes: List[List[int]], strides: List[List[Tensor]]) -> List[Tensor]:
+def anchor_generator(image_list_shape, feature_maps) -> List[Tensor]:
+  def grid_anchors(grid_sizes: List[List[int]], strides: List[List[Tensor]]) -> List[Tensor]:
     anchors = []
-    cell_anchors = self.cell_anchors
     assert cell_anchors is not None
-    if not (len(grid_sizes) == len(strides) == len(cell_anchors)):
-      raise ValueError("Anchors should be Tuple[Tuple[int]] because each feature "
-                        "map could potentially have different sizes and aspect ratios. "
-                        "There needs to be a match between the number of "
-                        "feature maps passed and the number of sizes / aspect ratios specified.")
 
-    for size, stride, base_anchors in zip(
-        grid_sizes, strides, cell_anchors):
+    for size, stride, base_anchors in zip(grid_sizes, strides, cell_anchors):
       grid_height, grid_width = size
       stride_height, stride_width = stride
       shifts_x = Tensor.arange(0, grid_width, dtype=dtypes.float) * stride_width
@@ -175,25 +129,33 @@ class AnchorGenerator:
       # offset each zero-centered base anchor by the center of the output anchor.
       anchors.append((shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4))
     return anchors
+  
+  def generate_anchors(scales: List[int], aspect_ratios: List[float], dtype=dtypes.float):
+    scales = Tensor(list(scales), dtype=dtype)
+    aspect_ratios = Tensor(list(aspect_ratios), dtype=dtype)
+    h_ratios = aspect_ratios.sqrt()
+    w_ratios = 1 / h_ratios
+    ws = (w_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
+    hs = (h_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
+    base_anchors = Tensor.stack(-ws, -hs, ws, hs, dim=1) / 2
+    return base_anchors.round()
+  sizes = ((32, 40, 50), (64, 80, 101), (128, 161, 203), (256, 322, 406), (512, 645, 812))
+  aspect_ratios = ((0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0))
+  
+  cell_anchors = [generate_anchors(size, aspect_ratio)
+                          for size, aspect_ratio in zip(sizes, aspect_ratios)]
+  grid_sizes = [feature_map for feature_map in feature_maps]
+  image_size = image_list_shape[-2:]
+  strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
+              Tensor(image_size[1] // g[1], dtype=dtypes.int64)] for g in grid_sizes]
+  anchors_over_all_feature_maps = grid_anchors(grid_sizes, strides)
+  anchors: List[List[Tensor]] = []
 
-  def forward(self, image_list_shape, feature_maps) -> List[Tensor]:
-    grid_sizes = [feature_map for feature_map in feature_maps]
-    image_size = image_list_shape[-2:]
-
-    strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
-                Tensor(image_size[1] // g[1], dtype=dtypes.int64)] for g in grid_sizes]
-    
-    anchors_over_all_feature_maps = self.grid_anchors(grid_sizes, strides)
-    anchors: List[List[Tensor]] = []
-
-    for _ in range(image_list_shape[0]):
-      anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
-      anchors.append(anchors_in_image)
-    anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
-    return anchors
-
-  def __call__(self, image_list, feature_maps):
-    return self.forward(image_list, feature_maps)
+  for _ in range(image_list_shape[0]):
+    anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
+    anchors.append(anchors_in_image)
+  anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
+  return anchors
 
 class RetinaNet:
   def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None):
@@ -321,8 +283,7 @@ class ClassificationHead:
     labels_temp = (labels_temp+1)*foreground_idxs-1
     gt_classes_target = labels_temp.one_hot(logits_class.shape[-1])
     valid_idxs = matched_idxs != -2
-    return (sigmoid_focal_loss(logits_class, gt_classes_target, 
-                            valid_idxs.reshape(batch_size,-1,1))/num_foreground).mean()
+    return (sigmoid_focal_loss(logits_class, gt_classes_target, valid_idxs.reshape(batch_size,-1,1))/num_foreground).mean()
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
