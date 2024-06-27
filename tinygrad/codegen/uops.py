@@ -167,6 +167,11 @@ constant_folder = PatternMatcher([
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
       src=[UPat(UOps.CONST, name="mval"), UPat(UOps.RANGE, src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
       UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
+  (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
+    UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU,
+      UnaryOps.NEG, src=[UPat(UOps.RANGE, src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
+      UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))),
+      lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # sum collapse to mul (with possible GEP)
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
@@ -289,8 +294,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   def __inner_rewrite(n:UOp) -> UOp:
     replace_src = tuple(__inner_rewrite(x) for x in n.src)
     if replace_src != n.src: n = UOp(n.op, n.dtype, replace_src, n.arg)
-    while (new_n := pm.rewrite(n)): n = __inner_rewrite(new_n)
-    return n
+    return __inner_rewrite(new_n) if (new_n := pm.rewrite(n)) else n
   return __inner_rewrite(sink)
 
 class UOpGraph:
