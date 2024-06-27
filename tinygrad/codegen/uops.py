@@ -288,14 +288,14 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
     children[x].append(u)
   in_degree[u] = len(u.src)
 
-def graph_rewrite(sink:UOp, pm:PatternMatcher):
+def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
   replace: Dict[UOp, UOp] = {}
-  def __inner_rewrite(n:UOp):
+  def __inner_rewrite(n:UOp) -> UOp:
     if n in replace: return replace[n]
-    key = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
-    if found := nodes.get(key): replace[n] = found
-    else: nodes[key] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*key))) else x
+    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
+    if found := nodes.get(replace_source): replace[n] = found
+    else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
     return replace[n]
   return __inner_rewrite(sink)
 
