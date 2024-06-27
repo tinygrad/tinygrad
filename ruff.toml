@@ -26,6 +26,7 @@ lint.select = [
   "C416",   # unnecessary-comprehension
   "RET506", # superfluous-else-raise
   "RET507", # superfluous-else-continue
+  "A",      # builtin-variable-shadowing, builtin-argument-shadowing, builtin-attribute-shadowing
 ]
 
 line-length = 150
