@@ -11,7 +11,7 @@ def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
 
 class HIPProgram:
-  def __init__(self, device:int, name:str, lib:bytes):
+  def __init__(self, device:HIPDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
 
     if DEBUG >= 6:
