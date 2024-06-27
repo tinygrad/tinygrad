@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
 import functools, itertools, heapq, math
-from collections import defaultdict, deque
+from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType
@@ -300,7 +300,6 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher):
       nodes[key] = replace[x] = _dedup(new_x) if (new_x := pm.rewrite(n)) else n
     return replace[x]
   return _dedup(sink)
-
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
