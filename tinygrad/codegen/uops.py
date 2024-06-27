@@ -295,7 +295,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher):
     if x in replace: return replace[x]
     key = (x.op, x.dtype, tuple(_dedup(y) for y in x.src), x.arg)
     if found := nodes.get(key): replace[x] = found
-    else: 
+    else:
       n = UOp(*key)
       nodes[key] = replace[x] = _dedup(new_x) if (new_x := pm.rewrite(n)) else n
     return replace[x]
