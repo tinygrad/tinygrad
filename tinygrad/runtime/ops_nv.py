@@ -285,9 +285,6 @@ class NVProgram:
       assert self.global_init is not None
       global_init_addr = self.lib_gpu.base + off
       for rel_i in range(0, len(self.rel_info), 4):
-        # print(hex(self.rel_info[rel_i] // 4), hex(self.program[self.rel_info[rel_i] // 4 + 1]))
-
-        assert self.program[self.rel_info[rel_i] // 4 + 1] == 0
         if self.rel_info[rel_i+2] == 0x39: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr >> 32) # R_CUDA_ABS32_HI_32
         elif self.rel_info[rel_i+2] == 0x38: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr & 0xffffffff) # R_CUDA_ABS32_LO_32
         else: raise RuntimeError(f"unknown reloc: {self.rel_info[rel_i+2]}")
@@ -297,10 +294,10 @@ class NVProgram:
       HWComputeQueue().copy_from_cpu(self.lib_gpu.base+st*4, self.program[st:st+4095]).submit(self.device)
 
     if self.global_init is not None:
-      # Constbuffer 4 contains a pointer to nv.global.init, load section and set up the pointer.
       HWComputeQueue().copy_from_cpu(load_addr:=(self.lib_gpu.base + off), self.global_init).submit(self.device)
       off += round_up(self.global_init.nbytes, 128)
       if 4 in constant_buffers_data: # >= 12.4
+        # Constbuffer 4 contains a pointer to nv.global.init, load section and set up the pointer.
         assert constant_buffers_data[4].nbytes == 8
         constant_buffers_data[4][0:2] = memoryview(struct.pack('Q', load_addr)).cast('I')
 
