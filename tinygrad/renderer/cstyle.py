@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Tuple, Union, DefaultDict, cast, Litera
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import strip_parens, getenv, prod, dedup
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 from tinygrad.renderer import Renderer, TensorCore
@@ -143,7 +143,7 @@ class CStyleLanguage(Renderer):
           if len(src) > 3: val = self.code_for_op[TernaryOps.WHERE](r[src[2]], val, r[src[3]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
-          kk(f"{r[src[0]]} = {r[src[1]]};")
+          if not AMX: kk(f"{r[src[0]]} = {r[src[1]]};")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           if uop is UOps.BITCAST:
@@ -167,6 +167,7 @@ class CStyleLanguage(Renderer):
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
+        elif uop is UOps.MMA: kk(f"__mma_{args[0]}({r[src[0]]}, {r[src[1]]});")
         elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
@@ -179,7 +180,8 @@ class CStyleLanguage(Renderer):
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
-  supports_float4 = False
+  supports_float4 = True
+  float4 = "make_float4"
   has_local = False
   global_max = None
 
@@ -187,6 +189,19 @@ class ClangRenderer(CStyleLanguage):
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    prefix = ["""
+typedef struct {
+    float x, y, z, w;
+} float4;
+
+float4 make_float4(float x, float y, float z, float w) {
+    float4 result = {x, y, z, w};
+    return result;
+}
+"""]
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"

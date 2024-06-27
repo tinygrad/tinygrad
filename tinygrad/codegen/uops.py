@@ -18,7 +18,7 @@ class UOps(Enum):
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
   # math ops
   CAST = auto(); BITCAST = auto() # noqa: E702
-  ALU = auto(); WMMA = auto() # noqa: E702
+  ALU = auto(); WMMA = auto(); MMA = auto(); # noqa: E702
   # memory/assignment ops
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   # control flow ops
@@ -446,7 +446,7 @@ class UOpGraph:
         mem += u.src[2].dtype.itemsize * mults
       elif u.op is UOps.ALU and u not in dont_count:
         flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
-      elif u.op is UOps.WMMA and u not in dont_count:
+      elif u.op in [UOps.WMMA, UOps.MMA] and u not in dont_count:
         assert u.arg[1] is not None
         flops += 2 * prod(u.arg[1]) // 32 * mults
     return flops, mem

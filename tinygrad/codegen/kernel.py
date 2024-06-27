@@ -6,7 +6,7 @@ from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, Cons
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType, DType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
+from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import View, strides_for_shape
@@ -95,6 +95,8 @@ class Kernel:
     # the local aliased buffers for A and B
     self.bufs_for_tensor_core: Dict[LazyOp, Tuple[int, int]] = {}
     self.dont_use_locals: bool = False
+
+    self.amx: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -400,6 +402,29 @@ class Kernel:
     except KernelOptError:
       return False
 
+  def apply_amx(self):
+    if AMX and (r:=self.reduceop) is not None and r.op is ReduceOps.SUM and r.dtype is dtypes.float:
+      if (mul_op:=r.src[0]).op is not BinaryOps.MUL: return False
+      for src in mul_op.src:
+        if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
+
+      # amx_size = 128//self.outbufs[0].dtype.itemsize
+      amx_size=4
+
+      if not all(x == self.full_shape[0] and x % amx_size == 0 and x > amx_size for x in self.full_shape): return False
+
+      self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
+      self.apply_opt(Opt(OptOps.UPCAST, 1, amx_size))
+      # self.apply_opt(Opt(OptOps.UNROLL, 0, amx_size))
+      # self.apply_opt(Opt(OptOps.UNROLL, 0, amx_size))
+
+
+      # for axis in [-2, -1]:
+      #   self.apply_opt(Opt(OptOps.UNROLL, axis, amx_size))
+      self.amx=amx_size
+      return True
+    return False
+
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
 
@@ -451,7 +476,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not(self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.threads)), "can't upcast TC locals")
-      check(amt <= 8, "don't upcast more than 8")
+      check(amt <= 32 if AMX else amt <= 32, "don't upcast more than 32 for AMX or 8 otherwise")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCASTMID:                  # white
