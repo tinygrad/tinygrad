@@ -57,7 +57,7 @@ class Structure(ctypes.Structure, AsDictMixin):
 
         args = dict(zip(self.__class__._field_names_(), args))
         args.update(kwds)
-        super(Structure, self).__init__(**args)
+        super().__init__(**args)
 
     @classmethod
     def _field_names_(cls):

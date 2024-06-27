@@ -538,21 +538,21 @@ class NVDevice(HCQCompatCompiled):
     NVDevice.devices.append(self)
 
   @classmethod
-  def _read_signal(self, sig): return sig[0]
+  def _read_signal(cls, sig): return sig[0]
 
   @classmethod
-  def _read_timestamp(self, sig): return sig[1]
+  def _read_timestamp(cls, sig): return sig[1]
 
   @classmethod
-  def _set_signal(self, sig, value): sig[0] = value
+  def _set_signal(cls, sig, value): sig[0] = value
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs) -> memoryview:
-    self._set_signal(sig := self.signals_pool.pop(), value)
+  def _get_signal(cls, value=0, **kwargs) -> memoryview:
+    cls._set_signal(sig := cls.signals_pool.pop(), value)
     return sig
 
   @classmethod
-  def _wait_signal(self, signal, value=0, timeout=10000):
+  def _wait_signal(cls, signal, value=0, timeout=10000):
     start_time = time.time() * 1000
     while time.time() * 1000 - start_time < timeout:
       if signal[0] >= value: return

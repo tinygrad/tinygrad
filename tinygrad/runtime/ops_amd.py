@@ -439,17 +439,17 @@ class AMDDevice(HCQCompatCompiled):
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
 
   @classmethod
-  def _read_signal(self, sig): return sig.value
+  def _read_signal(cls, sig): return sig.value
 
   @classmethod
-  def _read_timestamp(self, sig): return sig.start_ts
+  def _read_timestamp(cls, sig): return sig.start_ts
 
   @classmethod
-  def _set_signal(self, sig, value): sig.value = value
+  def _set_signal(cls, sig, value): sig.value = value
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs) -> hsa.amd_signal_t:
-    self._set_signal(ret := self.signals_pool.pop(), value)
+  def _get_signal(cls, value=0, **kwargs) -> hsa.amd_signal_t:
+    cls._set_signal(ret := cls.signals_pool.pop(), value)
     if (sync_event:=kwargs.get('sync_event')) is not None:
       ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       ret.event_id = sync_event.event_id
@@ -457,7 +457,7 @@ class AMDDevice(HCQCompatCompiled):
     return ret
 
   @classmethod
-  def _wait_signal(self, signal:hsa.amd_signal_t, value=0, timeout=10000):
+  def _wait_signal(cls, signal:hsa.amd_signal_t, value=0, timeout=10000):
     assert signal.event_id != 0, "can't wait on this signal"
     evt_arr = (kfd.struct_kfd_event_data)(event_id=signal.event_id)
 

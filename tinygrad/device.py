@@ -208,19 +208,19 @@ class HCQCompatCompiled(Compiled):
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
   @classmethod
-  def _read_signal(self, sig): raise NotImplementedError("need _read_signal") # reads a value for a signal
+  def _read_signal(cls, sig): raise NotImplementedError("need _read_signal") # reads a value for a signal
 
   @classmethod
-  def _read_timestamp(self, sig): raise NotImplementedError("need _read_timestamp") # reads a timestamp for a signal
+  def _read_timestamp(cls, sig): raise NotImplementedError("need _read_timestamp") # reads a timestamp for a signal
 
   @classmethod
-  def _set_signal(self, sig, value): raise NotImplementedError("need _set_signal") # sets a value for a signal
+  def _set_signal(cls, sig, value): raise NotImplementedError("need _set_signal") # sets a value for a signal
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs): raise NotImplementedError("need _get_signal") # allocates a new signal
+  def _get_signal(cls, value=0, **kwargs): raise NotImplementedError("need _get_signal") # allocates a new signal
 
   @classmethod
-  def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
+  def _wait_signal(cls, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
 
   def _gpu2cpu_time(self, gpu_time, is_copy): raise NotImplementedError("need _gpu2cpu_time")
 
