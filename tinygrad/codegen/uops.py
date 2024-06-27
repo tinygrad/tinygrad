@@ -315,7 +315,7 @@ class UOpGraph:
         assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
         up = rewritten
         recurse_cnt += 1
-      up = UOp(up.op, up.dtype, tuple(rewrite(pm, x) for x in up.src), up.arg)
+      up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
       return self.nodes.setdefault(up.tuple(), up)
     changed = getenv("UOPS_REWRITE", True)
     run_cnt = 0
