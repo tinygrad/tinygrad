@@ -183,7 +183,7 @@ jobs:
     - name: Run GPT2 w HALF
       run: NV=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
-      run: NV=1 JIT=1 HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAST_BEFORE_VIEW=0 JIT_BATCH_SIZE=4 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+      run: NV=1 JIT=1 HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAST_BEFORE_VIEW=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA)
