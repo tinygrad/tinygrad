@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
 import functools, itertools, heapq, math
-from collections import defaultdict
+from collections import defaultdict, deque
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType
@@ -27,7 +27,7 @@ class UOps(Enum):
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
-@dataclass(eq=False)
+@dataclass(frozen=True, eq=False)
 class UOp:
   op: UOps
   dtype: Optional[DType] = None
@@ -53,12 +53,14 @@ class UOp:
   def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
   def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
+  def __truediv__(self, x): return UOp.alu(BinaryOps.MUL, self, UOp.alu(UnaryOps.RECIP, ufix(self.dtype, x)))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
   def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
   def ge(self, x): return -self.lt(x)
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
   def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
   @staticmethod
+  @functools.lru_cache(maxsize=None)
   def const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
@@ -104,15 +106,10 @@ class UPat:
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
 
 T = TypeVar("T")
-def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
-  if isinstance(m1, set):
-    if m2 not in m1: return True
-  elif m2 != m1: return True
-  return False
+def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
-  if pat.name in store and store[pat.name] is not uop: return False
-  if pat.name is not None: store[pat.name] = uop
+  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return False
   if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
   if pat.op is not None and __unmatch(pat.op, uop.op): return False
@@ -221,8 +218,12 @@ constant_folder = PatternMatcher([
   (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
   (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
-  (UOp.var('x') // 1, lambda x: x),   # x/1 -> x
-  (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x
+  (UOp.var('x') * -1, lambda x: -x),  # x*-1 -> -x
+  (UOp.var('x') // UOp.var('x'), lambda x: UOp.const(x.dtype, 1)), # x//x -> 1
+  (UOp.var('x') // 1, lambda x: x),   # x//1 -> x
+  (UOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
+  (UOp.var('x') / UOp.var('x'), lambda x: UOp.const(x.dtype, 1)), # x/x -> 1
+  (UOp.var('x') / UOp.cvar('c'), lambda x,c: x*exec_alu(UnaryOps.RECIP, c.dtype, [c.arg])),    # x/c -> x*(1/c)
   (UOp.var('x', dtype=dtypes.bool).max(UOp.const(dtypes.bool, False)), lambda x: x),  # max(x, False) -> x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
@@ -241,10 +242,14 @@ constant_folder = PatternMatcher([
   (UOp.var("x") % UOp.const(None, 1), lambda x: UOp.const(x.dtype, 0)),
   # (x*c0)+(x*c1) -> x*(c0+c1)
   (UOp.var("x") * UOp.cvar("c0") + UOp.var("x") * UOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  # (x*c0)/c0 -> x
+  # (x*c0)//c0 -> x
   ((UOp.var("x") * UOp.cvar("c0")) // UOp.cvar("c0"), lambda x,c0: x if c0.arg != 0 else None),
-  # (x/c0)/c1 -> x/(c0*c1)
+  # (x*x2)/x2 -> x
+  ((UOp.var("x") * UOp.var("x2")) / UOp.var("x2"), lambda x,x2: x),
+  # (x//c0)//c1 -> x//(c0*c1)
   ((UOp.var("x") // UOp.cvar("c0")) // UOp.cvar("c1"), lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
+  # (x/x1)/x2 -> x/(x1*x2)
+  ((UOp.var("x") / UOp.var("x2")) / UOp.var("x3"), lambda x,x2,x3: x/(x2*x3)),
   # c0 + x < c1 -> x < c1 - c0
   ((UOp.cvar("c0") + UOp.var("x")).lt(UOp.cvar("c1")),
     lambda x,c0,c1: UOp.lt(x, UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, -c0.arg])))),
@@ -273,9 +278,20 @@ constant_folder = PatternMatcher([
   (UOp.load(UOp.var(), UOp.var(), UOp.const(None, 0), UOp.cvar("var"), UOp.var()), lambda var: var),
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 1)), UOp.store),
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)), lambda: UOp(UOps.NOOP)),
+  # remove NOOPs from SINK
+  (UPat(UOps.SINK, name="root"),
+    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None)
 ])
 
 # *** uop graph ***
+
+def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
+  if u in children: return
+  children[u] = []
+  for x in u.src:
+    get_children_dfs(x, children, in_degree)
+    children[x].append(u)
+  in_degree[u] = len(u.src)
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
@@ -308,7 +324,7 @@ class UOpGraph:
     run_cnt = 0
     while changed:
       changed = 0
-      @functools.lru_cache
+      @functools.lru_cache(None)
       def rewrite(u:UOp) -> UOp:
         nonlocal changed
         recurse_cnt = 0
@@ -321,12 +337,8 @@ class UOpGraph:
           recurse_cnt += 1
           rewritten, _ = pm.rewrite(up)
         changed += recurse_cnt
-        # NOTE: this changes UOp, so we have to delete caches
-        up.src = tuple(rewrite(x) for x in up.src)
-        if 'parents' in up.__dict__: delattr(up, 'parents')
-        if 'cmp_tuple' in up.__dict__: delattr(up, 'cmp_tuple')
-        # replace with cached nodes
-        return self.nodes.setdefault(up.tuple(), up)
+        up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
+        return self.nodes.setdefault(up.tuple(), up) # replace with cached nodes
       sink = rewrite(sink)
       run_cnt += 1
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
@@ -368,28 +380,22 @@ class UOpGraph:
   def graph_dedup(self, sink:UOp):
     # add nodes to graph in reverse BFS order
     # dedup all nodes
-    # TODO: i feel like this BFS is written in a few places, possible to library it?
-    unprocessed_nodes = [sink]
-    early_in_degree: Dict[UOp, int] = {}
-    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    while len(unprocessed_nodes):
-      n = unprocessed_nodes.pop(0)
-      if n in early_in_degree: continue
-      early_in_degree[n] = len(n.src)
-      for x in n.src: children[x].append(n)
-      unprocessed_nodes += list(n.src)
-    early_queue = [k for k, v in early_in_degree.items() if v == 0]
+    in_degree: Dict[UOp, int] = {}
+    children: Dict[UOp, List[UOp]] = {}
+    get_children_dfs(sink, children, in_degree)
+
+    queue = deque([k for k, v in in_degree.items() if v == 0])
     replace_nodes: Dict[UOp, UOp] = {}
-    while len(early_queue):
-      n = early_queue.pop(0)
+    while queue:
+      n = queue.popleft()
       if n in replace_nodes: continue
       key = (n.op, n.dtype, tuple(replace_nodes.get(x, x) for x in n.src), n.arg)
       if found:=self.nodes.get(key): replace_nodes[n] = found
       else: replace_nodes[n] = self.nodes[key] = UOp(*key)
       for x in children[n]:
-        early_in_degree[x] -= 1
-        if early_in_degree[x] == 0:
-          early_queue.append(x)
+        in_degree[x] -= 1
+        if in_degree[x] == 0:
+          queue.append(x)
     return replace_nodes.get(sink, sink)
 
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
@@ -406,22 +412,9 @@ class UOpGraph:
 
     # filter nodes that don't link to a sink
     # BFS toposort
-    graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    loops:List[UOp] = []
-    ifs:List[UOp] = []
-    nodes: Dict[UOp, None] = {}
-    def add_parents(u:UOp):
-      if u in nodes: return
-      nodes[u] = None
-      for x in u.src:
-        add_parents(x)
-        in_degree[u] += 1
-        graph[x].append(u)
-      if u.op is UOps.RANGE: loops.append(u)
-      if u.op is UOps.IF: ifs.append(u)
-    sink = UOp(UOps.SINK, None, tuple(x for x in sink.src if x.op is not UOps.NOOP))
-    add_parents(sink)
+    graph: Dict[UOp, List[UOp]] = {}
+    in_degree: Dict[UOp, int] = {}
+    get_children_dfs(sink, graph, in_degree)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
@@ -429,6 +422,7 @@ class UOpGraph:
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in graph[x] if x.op is not end]))
     # scope children impact the toposort and END* insertion
     end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
+    loops, ifs = [x for x in in_degree if x.op is UOps.RANGE], [x for x in in_degree if x.op is UOps.IF]
     scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in (loops+ifs)[::-1]}
 
     queue:List[Tuple[int, UOp]] = []
@@ -439,7 +433,7 @@ class UOpGraph:
         if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
-    for u in nodes:
+    for u in graph:
       if in_degree[u] == 0: push(u)
 
     if getenv("FUZZ_UOPS", 0):
