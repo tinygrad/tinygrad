@@ -462,6 +462,9 @@ class UOpGraph:
           assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), \
               f"input dtype mismatch {dtypes.int} != {src[0].dtype=} != {src[1].dtype=}"
           assert dtypes.is_int(dtype), f"{arg} output dtype mismatch {dtype=} != {dtypes.int}"
+        elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
+          # the distance to shift isn't typechecked
+          assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
         elif arg in BinaryOps:
           assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
         elif arg == TernaryOps.WHERE:
