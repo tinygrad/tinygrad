@@ -231,7 +231,7 @@ class TestBottomupVsTopdownRewrite(TestUOps):
       _special = UOp(UOps.SPECIAL, dtypes.float, (), (0, 'gidx0', 4))
       _global = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
       _range = UOp(UOps.RANGE, dtypes.float, (const_0,const_2), (2, 0))
-      _acc = UOp(UOps.DEFINE_ACC, dtypes.float, (_range,), (0,0,0))
+      _acc = UOp(UOps.DEFINE_ACC, dtypes.float, (const_0, _range,), (0,0,0))
       special_mul_one = UOp(UOps.ALU, dtypes.float, (_special, const_neg_1), BinaryOps.MUL) # rewrite
       range_mul_one = UOp(UOps.ALU, dtypes.float, (_range, const_neg_1), BinaryOps.MUL) # rewrite
       add_two_muls = UOp(UOps.ALU, dtypes.float, (special_mul_one, range_mul_one), BinaryOps.ADD) # rewrite
