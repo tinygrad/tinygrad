@@ -35,14 +35,13 @@ jobs:
       run: |
         RAW_COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
         COMMIT_MESSAGE=$(printf '%q' "$RAW_COMMIT_MESSAGE")
-        RAW_PR_TITLE="${{ github.event.pull_request.title }}"
+        RAW_PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
         PR_TITLE=$(printf '%q' "$RAW_PR_TITLE")
-        if { echo "$COMMIT_MESSAGE" | grep -q "run_process_replay" || \
-             [ "${{ github.event.inputs.run_process_replay }}" == "true" ] || \
-             echo "$PR_TITLE" | grep -q "run_process_replay"; } && [ "$GITHUB_REF_NAME" != "master" ]; then
+
+        if { echo "$COMMIT_MESSAGE" | grep -q "run_process_replay" || echo "$PR_TITLE" | grep -q "run_process_replay" || [ "${{ github.event.inputs.run_process_replay }}" = "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
           echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
           echo "enabled process replay"
-          if echo "$COMMIT_MESSAGE" | grep -q "no_assert"; then
+          if { echo "$COMMIT_MESSAGE" | grep -q "no_assert" || echo "$PR_TITLE" | grep -q "no_assert"; }; then
             echo "ASSERT_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
             echo "running process replay in diff-only mode"
           else
