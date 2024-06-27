@@ -299,6 +299,17 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   while queue:
     n = queue.popleft()
 
+    # are any parents of n rewritten?
+    replace_src = tuple(get_latest_node(c) for c in n.src)
+    if replace_src != n.src:
+      new_n = UOp(n.op, n.dtype, replace_src, n.arg)
+      children[new_n] = children[n] # the children of the replaced node are the same as the node itself
+      replace_nodes[n] = new_n
+      n = new_n
+
+    # confirm all (rewritten) parents have been seen
+    for c in n.src: assert c in seen, f"didn't see parent {c}"
+
     # try to rewrite the node
     if (rewritten:=pm.rewrite(n)) is not None:
       if DEBUG >= 5: print(f"{n} -> {rewritten}")
@@ -320,27 +331,17 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
       children[rewritten] = children[n] # the children of the replaced node are the same as the node itself
       replace_nodes[n] = rewritten
     else:
-      # node wasn't rewritten: n's placement is final though it may not be used
+      # this node is placed
       seen.add(n)
 
+      # node wasn't rewritten: n's placement is final though it may not be used
       for child in children[n]:
         in_degree[child] -= 1
-        if in_degree[child] == 0:
-          # all parents have been seen, rewrite
-          replace_src = tuple(get_latest_node(c) for c in child.src)
+        if in_degree[child] == 0: queue.append(child) # this node is ready to process
 
-          # nodes here might have some of their parents replaced
-          if replace_src != child.src:
-            new_child = UOp(child.op, child.dtype, replace_src, child.arg)
-            children[new_child] = children[child] # the children of the replaced node are the same as the node itself
-            replace_nodes[child] = new_child
-          else:
-            new_child = child
-
-          # this node is ready to process
-          queue.append(new_child)
-
-  return get_latest_node(sink)
+  ret = get_latest_node(sink)
+  assert ret in seen, "graph iteration didn't complete!"
+  return ret
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
