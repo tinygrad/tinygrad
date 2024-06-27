@@ -411,7 +411,7 @@ class Kernel:
       # amx_size = 128//self.outbufs[0].dtype.itemsize
       amx_size=16
 
-      if not all(x == self.full_shape[0] and x % amx_size == 0 and x > amx_size for x in self.full_shape): return False
+      if not all(x % amx_size == 0 and x > amx_size for x in self.full_shape): return False
 
       self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
       self.apply_opt(Opt(OptOps.UPCAST, 1, amx_size))
