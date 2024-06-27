@@ -7,7 +7,7 @@ import numpy as np
 from typing import List, Optional, Union
 from tinygrad import nn, dtypes
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, LoadOps, ReduceOps, UnaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, LoadOps, ReduceOps, UnaryOps
 from tinygrad.helpers import DEBUG, flatten, getenv
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.graph import print_tree
@@ -43,15 +43,14 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
   return sched
 
 class CycleBitcast(Function):
-  def bitwise_cast(self, x: LazyBuffer, k: int):
-    return x.e(BinaryOps.ADD, x.const(k)).cast(dtypes.int32, True, True)
+  def bitwise_cast(self, x: LazyBuffer):
+    return x.cast(dtypes.int32, True, True)
 
   def forward(self, x: LazyBuffer):
     x = x.cast(dtypes.float32)
-    y = x.cast(dtypes.float32).e(UnaryOps.SIN)
-    z = x.cast(dtypes.int32).e(BinaryOps.MUL, self.bitwise_cast(x, 2)).e(BinaryOps.MUL, self.bitwise_cast(y, 3))
-    z = z.e(BinaryOps.CMPNE, z.const(0)).e(TernaryOps.WHERE, z.cast(dtypes.float32), x)
-    return z
+    a = self.bitwise_cast(x)
+    b = self.bitwise_cast(x.e(UnaryOps.NEG))
+    return a.e(BinaryOps.ADD, b)
 
 class TestUOpSchedule(unittest.TestCase):
   def test_multiple_bitcast_in_function(self):
