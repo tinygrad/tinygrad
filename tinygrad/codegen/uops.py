@@ -299,7 +299,7 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
 def _compare_uops(a:UOp, b:UOp, debug=False):
   @functools.lru_cache(None)
   def cmp(a:UOp, b:UOp):
-    if a.arg != b.arg and not(math.isnan(a.arg) and math.isnan(b.arg)):
+    if a.arg != b.arg and not(isinstance(a.arg,float) and isinstance(b.arg,float) and math.isnan(a.arg) and math.isnan(b.arg)):
       if not isinstance(a.arg, float) or not isinstance(b.arg, float) or abs(a.arg-b.arg) > 1e-6:
         if debug: print(f"arg mismatch: {a.arg} != {b.arg}")
         return False
