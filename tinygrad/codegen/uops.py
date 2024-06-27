@@ -285,63 +285,13 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
   in_degree[u] = len(u.src)
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  in_degree: Dict[UOp, int] = {}
-  children: Dict[UOp, List[UOp]] = {}
-  get_children_dfs(sink, children, in_degree)
-  queue = deque([k for k, v in in_degree.items() if v == 0])
-
-  replace_nodes: Dict[UOp, UOp] = {}
-  def get_latest_node(node: UOp) -> UOp:
-    while node in replace_nodes: node = replace_nodes[node]
-    return node
-
-  seen = set()
-  while queue:
-    n = queue.popleft()
-
-    # are any parents of n rewritten?
-    replace_src = tuple(get_latest_node(c) for c in n.src)
-    if replace_src != n.src:
-      new_n = UOp(n.op, n.dtype, replace_src, n.arg)
-      children[new_n] = children[n] # the children of the replaced node are the same as the node itself
-      replace_nodes[n] = new_n
-      n = new_n
-
-    # confirm all (rewritten) parents have been seen
-    for c in n.src: assert c in seen, f"didn't see parent {c}"
-
-    # try to rewrite the node
-    if (rewritten:=pm.rewrite(n)) is not None:
-      if DEBUG >= 5: print(f"{n} -> {rewritten}")
-
-      new_in_degree: Dict[UOp, int] = {}
-      get_children_dfs(rewritten, children, new_in_degree)
-
-      if len(new_in_degree):
-        # adjust the in-degree for nodes we've seen or rewritten
-        new_in_degree = {k:sum(1 for x in k.src if x not in seen) for k in new_in_degree}
-
-        # add any new nodes with in-degree 0 to the queue
-        queue.extend(k for k, v in new_in_degree.items() if v == 0)
-        in_degree.update(new_in_degree)
-      else:
-        # if there's no new parents, we try again to rewrite this node
-        queue.append(rewritten)
-
-      children[rewritten] = children[n] # the children of the replaced node are the same as the node itself
-      replace_nodes[n] = rewritten
-    else:
-      # this node is placed
-      seen.add(n)
-
-      # node wasn't rewritten: n's placement is final though it may not be used
-      for child in children[n]:
-        in_degree[child] -= 1
-        if in_degree[child] == 0: queue.append(child) # this node is ready to process
-
-  ret = get_latest_node(sink)
-  assert ret in seen, "graph iteration didn't complete!"
-  return ret
+  @functools.lru_cache(None)
+  def __inner_rewrite(n:UOp) -> UOp:
+    replace_src = tuple(__inner_rewrite(x) for x in n.src)
+    if replace_src != n.src: n = UOp(n.op, n.dtype, replace_src, n.arg)
+    while (new_n := pm.rewrite(n)): n = __inner_rewrite(new_n)
+    return n
+  return __inner_rewrite(sink)
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
