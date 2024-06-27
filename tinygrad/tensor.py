@@ -2459,6 +2459,7 @@ class Tensor:
     print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
     ```
     """
+    assert dtypes.is_int(self.dtype)
     return F.BitwiseAnd.apply(*self._broadcasted(x, reverse))
 
   def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
@@ -2473,6 +2474,7 @@ class Tensor:
     print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
     ```
     """
+    assert dtypes.is_int(self.dtype)
     return F.BitwiseOr.apply(*self._broadcasted(x, reverse))
 
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
@@ -2488,6 +2490,7 @@ class Tensor:
     print(Tensor([True, True, False, False]).xor(Tensor([True, False, True, False])).numpy())
     ```
     """
+    assert dtypes.is_int(self.dtype)
     return F.Xor.apply(*self._broadcasted(x, reverse))
 
   def lshift(self, x:int):
