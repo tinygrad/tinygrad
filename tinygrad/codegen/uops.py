@@ -27,7 +27,7 @@ class UOps(Enum):
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=False, eq=False)
 class UOp:
   op: UOps
   dtype: Optional[DType] = None
