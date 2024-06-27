@@ -199,7 +199,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   conn = db_connection()
   cur = conn.cursor()
   try:
-    res = cur.execute(f"SELECT val FROM '{table}_{VERSION}' WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
+    res = cur.execute(f"SELECT val FROM '{table}_{VERSION}' WHERE {' AND '.join([f'{x}=?' for x in key])}", tuple(key.values()))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
   if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
@@ -213,7 +213,7 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   cur = conn.cursor()
   if table not in _db_tables:
     TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
-    ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
+    ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key)
     cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
   cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))  # noqa: E501

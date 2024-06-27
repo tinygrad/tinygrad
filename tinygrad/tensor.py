@@ -993,7 +993,7 @@ class Tensor:
       # inject 1's for the extra dims added in create masks
       reshape_arg = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
       # sum reduce the extra dims introduced in create masks
-      ret = (ret.reshape(reshape_arg) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
+      ret = (ret.reshape(reshape_arg) * mask).sum(tuple(i + len(big_shape) for i in idx), acc_dtype=ret.dtype)
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):

@@ -27,7 +27,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
       if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
       graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
-      for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
+      for (j,i) in graph_runner.input_replace: graph_runner.jit_cache[j].bufs[i] = None
       graphed_jit_cache.append(ExecItem(graph_runner, cast(List[Optional[Buffer]], input_rawbuffers)))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
@@ -190,7 +190,7 @@ class TinyJit(Generic[ReturnType]):
       for ei in self.jit_cache: ei.run(var_vals, jit=True)
 
     # clear jit inputs
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
+    for (j,i) in self.input_replace: self.jit_cache[j].bufs[i] = None
 
     self.cnt += 1
     return self.ret

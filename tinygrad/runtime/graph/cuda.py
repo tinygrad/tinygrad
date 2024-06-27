@@ -15,7 +15,7 @@ class CUDAGraph(MultiGraphRunner):
     # Check all jit items are compatible.
     if not all(isinstance(ji.prg, (CompiledRunner, BufferXfer)) for ji in jit_cache): raise GraphException
 
-    self.jc_idx_with_updatable_rawbufs = dedup([x[0] for x in self.input_replace.keys()])
+    self.jc_idx_with_updatable_rawbufs = dedup([x[0] for x in self.input_replace])
     self.updatable_nodes: Dict[int, Tuple[Any, Any, Any, bool]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
 
     self.graph = init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))

@@ -114,7 +114,7 @@ class TestSafetensors(unittest.TestCase):
     from safetensors import safe_open
     with safe_open(fn, framework="pt", device="cpu") as f:
       assert sorted(f.keys()) == sorted(state_dict.keys())
-      for k in f.keys():
+      for k in f.keys():  # noqa: SIM118
         np.testing.assert_array_equal(f.get_tensor(k).numpy(), state_dict[k].numpy())
 
   def test_efficientnet_safetensors(self):
@@ -131,7 +131,7 @@ class TestSafetensors(unittest.TestCase):
     from safetensors import safe_open
     with safe_open(temp("eff0"), framework="pt", device="cpu") as f:
       assert sorted(f.keys()) == sorted(state_dict.keys())
-      for k in f.keys():
+      for k in f.keys():  # noqa: SIM118
         np.testing.assert_array_equal(f.get_tensor(k).numpy(), state_dict[k].numpy())
 
   def test_huggingface_enet_safetensors(self):

@@ -139,7 +139,7 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
       tf.logging.info("tokens: %s" % " ".join(
           [tokenization.printable_text(x) for x in instance.tokens]))
 
-      for feature_name in features.keys():
+      for feature_name in features:
         feature = features[feature_name]
         values = []
         if feature.int64_list.value:

@@ -239,7 +239,7 @@ ptx_matcher = PatternMatcher([
     lambda root, muls, non_muls: UOp(UOps.ALU, root.dtype, muls.src + (non_muls,), TernaryOps.MULACC)),
   *[(UPat(UOps.ALU, op, dtype=dtypes.half, name="x"),
     lambda x: UOp(UOps.CAST, dtypes.half, (UOp(x.op, dtypes.float32, tuple([UOp(UOps.CAST, dtypes.float32, (vv,)) for vv in x.src]), x.arg),)))
-    for op in PTXRenderer.asm_for_op.keys() if op not in PTXRenderer.supports_half],
+    for op in PTXRenderer.asm_for_op if op not in PTXRenderer.supports_half],
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat(name="x"),UPat(name="y"),UPat(name="z"),UPat(name="k"))),
     lambda root,x,y,z,k: UOp(UOps.CAST, dtypes.bool, (UOp(root.op, dtypes.int8, (x,y,z,UOp(UOps.CAST, dtypes.uint8, (k,)))),), root.arg)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat(),UPat())),
