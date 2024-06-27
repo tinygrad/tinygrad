@@ -77,7 +77,7 @@ def expand_idxs(nodes:Sequence[Node]) -> Tuple[Union[Variable, NumNode], ...]:
   eidxs = [expand_idx(node) for node in nodes]
   return tuple([v if v not in eidxs[:j] else NumNode(0) for j, v in enumerate(eidxs)])  # take only first occurrence of expand variable
 def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,...]]:
-  yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
+  yield from (x[::-1] for x in itertools.product(*[list(range(v.min, v.max + 1)) for v in idxs[::-1]]))
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
@@ -290,7 +290,7 @@ class Linearizer(Kernel):
       # cast initial accs
       wmmas = [UOp(UOps.CAST, (dt3:=tc.dtype_out.vec(wmma_sz[2])), tuple(accs[reduceop][x:x+wmma_sz[2]]))
                for x in range(0, len(accs[reduceop]), wmma_sz[2])]
-      for it in [x[::-1] for x in itertools.product(*[x for x in [range(sz) for _,sz in upcasts[0]][::-1]])]:
+      for it in [x[::-1] for x in itertools.product(*list([range(sz) for _,sz in upcasts[0]][::-1]))]:
         offs = [x*y for (x,y) in zip([sum([prod(x) for x in zip(it, [stride for stride,_ in y])]) for y in upcasts], wmma_sz)]
         ops = (UOp(UOps.CAST, tc.dtype_in.vec(wmma_sz[0]), tuple(locals_to_store[0][2][offs[0]:offs[0]+wmma_sz[0]])),
                 UOp(UOps.CAST, tc.dtype_in.vec(wmma_sz[1]), tuple(locals_to_store[1][2][offs[1]:offs[1]+wmma_sz[1]])),
@@ -522,7 +522,7 @@ class Linearizer(Kernel):
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
     if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src))
     ops, mem = self.uops.flops_mem()
-    run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
+    run_count = prod((self.global_size or []) + (self.local_size or []))
     # NOTE: we use min here to ignore the indexing FLOPS
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
                    self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

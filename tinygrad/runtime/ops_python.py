@@ -63,11 +63,11 @@ class PythonProgram:
               if g: _store(m, o, v)
           i += 1
           continue
-        elif uop is UOps.ENDRANGE:
+        if uop is UOps.ENDRANGE:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        elif uop in (UOps.BARRIER, UOps.IF, UOps.ENDIF):
+        if uop in (UOps.BARRIER, UOps.IF, UOps.ENDIF):
           # in the python emulator, the warp is always in sync
           i += 1
           continue

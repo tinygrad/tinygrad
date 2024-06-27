@@ -58,7 +58,7 @@ def get_child(obj, key):
 def get_shape(x) -> Tuple[int, ...]:
   if not isinstance(x, (list, tuple)): return ()
   subs = [get_shape(xi) for xi in x]
-  if not all_same([sub for sub in subs]): raise ValueError(f"inhomogeneous shape from {x}")
+  if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
@@ -234,7 +234,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
-  else: fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
+  else: fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / (name or hashlib.md5(url.encode('utf-8')).hexdigest())
   if not fp.is_file() or not allow_caching:
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200

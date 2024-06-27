@@ -395,7 +395,7 @@ class AMDAllocator(HCQCompatAllocator):
       return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
     except OSError as e:
       if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory") from e
-      else: raise
+      raise
 
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
 

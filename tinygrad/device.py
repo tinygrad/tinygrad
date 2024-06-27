@@ -180,8 +180,8 @@ class Compiler:
 
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
-    self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler if compiler else Compiler(), runtime, graph
-    self.renderer = renderer if renderer else Renderer()
+    self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
+    self.renderer = renderer or Renderer()
   def synchronize(self): pass  # override this in your device
 
 # **************** for HCQ Compatible Devices ****************
