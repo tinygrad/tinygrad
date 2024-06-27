@@ -23,6 +23,7 @@ lint.select = [
   "W291",   # trailing-whitespace
   "W293",   # blank-line-with-whitespace
   "UP039",  # unnecessary-class-parentheses
+  "A",   # builtin-variable-shadowing, builtin-argument-shadowing, builtin-attribute-shadowing
 ]
 
 line-length = 150
