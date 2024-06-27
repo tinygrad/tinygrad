@@ -172,7 +172,11 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
         elif uop is UOps.MMA: kk(f"__mma_{args[0]}({r[src[0]]}, {r[src[1]]});")
         elif uop is UOps.DEFINE_ACC:
-          if len(args) == 3 and args[2] == 'zreg': ssa('zreg',u)
+          if len(args) == 3 and args[2] == 'zreg':
+            ssa('zreg',u)
+            if(args[1] == 0):
+              kk("AMX_SET(1);")
+              kk("AMX_SET(0);")
           else: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
@@ -197,8 +201,8 @@ class ClangRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    kernel.insert(41, '      AMX_SET(1);')
-    kernel.insert(4,  '      AMX_SET(0);')
+    kernel.insert(0, '  AMX_SET(0);')
+    kernel.insert(len(kernel), '  AMX_SET(1);')
     prefix = [
 '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
 '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
