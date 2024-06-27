@@ -126,6 +126,7 @@ class ResNet:
     return self.forward(x)
 
   def load_from_pretrained(self):
+    import numpy as np
     # TODO replace with fake torch load
 
     model_urls = {
@@ -147,6 +148,8 @@ class ResNet:
         continue # Skip FC if transfer learning
 
       if 'bn' not in k and 'downsample' not in k: assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
+      else: 
+        if len(obj.shape)==2: dat = np.broadcast_to(dat, obj.shape)
       obj.assign(dat.reshape(obj.shape))
 
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)
