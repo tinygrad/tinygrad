@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
+import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, Compiler, CompileError, BufferOptions
@@ -458,10 +458,7 @@ class NVDevice(HCQCompatCompiled):
       fd_uvm_2 = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.root = rm_alloc(self.fd_ctl, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
       uvm.initialize(self.fd_uvm)
-      try:
-        uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm)
-      except RuntimeError:
-        pass  # this error is okay, CUDA hits it too
+      with contextlib.suppress(RuntimeError): uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm) # this error is okay, CUDA hits it too
 
       NVDevice.gpus_info = (nv_gpu.nv_ioctl_card_info_t*64)()
       nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, NVDevice.gpus_info)
