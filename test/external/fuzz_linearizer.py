@@ -147,7 +147,7 @@ def fuzz_linearizer(lin: Linearizer, rtol=1e-2, atol=1e-2):
       if depth == 0 and getenv("FUZZ_REQUIRE_TC", 0):
         tc_acts = {i: k for k in actions.values() if k.applied_opts[0].op == OptOps.TC}
         if len(tc_acts) == 0: return failures
-        else: actions = tc_acts
+        actions = tc_acts
 
       test_lins = list(actions.values())
       if FUZZ_ALL_ACTIONS: print(f"testing {lin.applied_opts=} with {len(actions)} actions")

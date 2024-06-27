@@ -28,12 +28,9 @@ else:
 
 def colorize_float(x):
   ret = f"{x:7.2f}x"
-  if x < 0.75:
-    return colored(ret, 'green')
-  elif x > 1.15:
-    return colored(ret, 'red')
-  else:
-    return colored(ret, 'yellow')
+  if x < 0.75: return colored(ret, 'green')
+  if x > 1.15: return colored(ret, 'red')
+  return colored(ret, 'yellow')
 
 save_ops, save_mem = 0, 0
 CNT = getenv("CNT", 8)

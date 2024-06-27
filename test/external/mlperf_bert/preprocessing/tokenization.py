@@ -88,17 +88,15 @@ def convert_to_unicode(text):
   if six.PY3:
     if isinstance(text, str):
       return text
-    elif isinstance(text, bytes):
+    if isinstance(text, bytes):
       return text.decode("utf-8", "ignore")
-    else:
-      raise ValueError("Unsupported string type: %s" % (type(text)))
+    raise ValueError("Unsupported string type: %s" % (type(text)))
   elif six.PY2:
     if isinstance(text, str):
       return text.decode("utf-8", "ignore")
-    elif isinstance(text, unicode): # noqa: F821
+    if isinstance(text, unicode): # noqa: F821
       return text
-    else:
-      raise ValueError("Unsupported string type: %s" % (type(text)))
+    raise ValueError("Unsupported string type: %s" % (type(text)))
   else:
     raise ValueError("Not running on Python2 or Python 3?")
 
@@ -111,17 +109,15 @@ def printable_text(text):
   if six.PY3:
     if isinstance(text, str):
       return text
-    elif isinstance(text, bytes):
+    if isinstance(text, bytes):
       return text.decode("utf-8", "ignore")
-    else:
-      raise ValueError("Unsupported string type: %s" % (type(text)))
+    raise ValueError("Unsupported string type: %s" % (type(text)))
   elif six.PY2:
     if isinstance(text, str):
       return text
-    elif isinstance(text, unicode): # noqa: F821
+    if isinstance(text, unicode): # noqa: F821
       return text.encode("utf-8")
-    else:
-      raise ValueError("Unsupported string type: %s" % (type(text)))
+    raise ValueError("Unsupported string type: %s" % (type(text)))
   else:
     raise ValueError("Not running on Python2 or Python 3?")
 

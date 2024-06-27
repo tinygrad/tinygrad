@@ -73,10 +73,9 @@ def pad_or_trim_tensor(tensor, target_len=480000):
   curr_len = len(tensor)
   if curr_len == target_len:
     return tensor
-  elif curr_len < target_len:
+  if curr_len < target_len:
     return torch.cat((tensor, torch.zeros(target_len - curr_len)))
-  else:
-    return tensor[:target_len]
+  return tensor[:target_len]
 
 
 if __name__ == '__main__':

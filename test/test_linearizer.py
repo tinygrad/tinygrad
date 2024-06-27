@@ -1100,7 +1100,7 @@ def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs:Dict[int,Ten
   def _deep_replace(op:LazyOp, offset=0):
     if op.op is BufferOps.LOAD:
       if op.arg.idx+offset in _replace_idxs: return _replace_idxs[op.arg.idx+offset]
-      else: arg = MemBuffer(op.arg.idx+offset, op.arg.dtype, op.arg.st)
+      arg = MemBuffer(op.arg.idx+offset, op.arg.dtype, op.arg.st)
     else: arg = op.arg
     return LazyOp(op.op, tuple(_deep_replace(x, offset) for x in op.src), arg)
   # limitation: r0 and r1 cannot share inputs.
