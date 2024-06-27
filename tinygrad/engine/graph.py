@@ -4,7 +4,7 @@ from typing import List, Any, DefaultDict, Union
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters, getenv
-from tinygrad.codegen.linearizer import UOps, UOp
+from tinygrad.codegen.uops import UOps, UOp, UPat
 from tinygrad.shape.symbolic import NumNode
 from tinygrad.lazy import LazyBuffer
 
@@ -75,18 +75,19 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
       # realized but unseen?
       G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{nm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
 
-def _tree(luop:Union[LazyOp,UOp], cycles, cnt, prefix=""):
+def _tree(dag:Union[LazyOp, UOp, UPat], cycles, cnt):
   cnt[0] += 1
-  if len(luop.src) == 0: return [f"━━ {prefix}{luop.op.name} {luop.arg if luop.arg else ''}"]
-  if (lid := id(luop)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
-    return [f"━⬆︎ goto {cycles[id(luop)][0]}: {luop.op.name}"]
+  src = dag.src if isinstance(dag.src, (list, tuple)) else [] if dag.src is None else [dag.src]
+  if len(src) == 0: return [f"━━ {dag.op} {dag.arg}"]
+  if (lid := id(dag)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
+    return [f"━⬆︎ goto {cycles[id(dag)][0]}: {dag.op}"]
   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
-  lines = [f"━┳ {prefix}{luop.op.name} {luop.arg if luop.arg else ''}"]
-  childs = [_tree(c, cycles, cnt) for c in luop.src[:]]
+  lines = [f"━┳ {dag.op} {dag.arg}"]
+  childs = [_tree(c, cycles, cnt) for c in src]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
-def print_tree(luop:Union[LazyOp,UOp]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(luop, {}, [-1]))]))
+def print_tree(dag:Union[LazyOp, UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(dag, {}, [-1]))]))
 
 def graph_uops(uops:List[UOp]):
   colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
@@ -95,6 +96,6 @@ def graph_uops(uops:List[UOp]):
   G = nx.DiGraph()
   for u in uops:
     if u.op in {UOps.ENDRANGE, UOps.ENDIF}: continue
-    G.add_node(uops.index(u), label=f"{str(u.op)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.op, "#ffffff"))  # noqa: E501
+    G.add_node(uops.index(u), label=f"{str(u.op)[5:]}{(' '+str(u.arg).replace(':', '')) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.op, "#ffffff"))  # noqa: E501
     for v in u.src: G.add_edge(uops.index(v), uops.index(u))
   save_graph(G, f'{GRAPHPATH}.uops', '-Grankdir=LR')

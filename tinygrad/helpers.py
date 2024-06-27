@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
-import itertools, urllib.request, subprocess, shutil, math
+import itertools, urllib.request, subprocess, shutil, math, json
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
@@ -103,7 +103,7 @@ class ContextVar:
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
 WINO, THREEFRY, CACHECOLLECTING = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CACHECOLLECTING", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
-MULTIOUTPUT = ContextVar("MULTIOUTPUT", 1)
+MULTIOUTPUT, PROFILE = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0)
 
 # **************** global state Counters ****************
 
@@ -143,6 +143,34 @@ class Profiling(contextlib.ContextDecorator):
         print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
               colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
+
+class ProfileLogger:
+  writers: int = 0
+  mjson: List[Dict] = []
+  actors: Dict[str, int] = {}
+  subactors: Dict[Tuple[str, str], int] = {}
+  path = getenv("PROFILE_OUTPUT_FILE", temp("tinygrad_profile.json"))
+
+  def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
+
+  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor)]
+
+  def __del__(self):
+    for name,st,et,actor_name,subactor_name in self.events:
+      if actor_name not in self.actors:
+        self.actors[actor_name] = (pid:=len(self.actors))
+        self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+
+      if (subactor_key:=(actor_name,subactor_name)) not in self.subactors:
+        self.subactors[subactor_key] = (tid:=len(self.subactors))
+        self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
+
+      self.mjson.append({"name": name, "ph": "X", "pid": self.actors[actor_name], "tid": self.subactors.get(subactor_key, -1), "ts":st, "dur":et-st})
+
+    ProfileLogger.writers -= 1
+    if ProfileLogger.writers == 0:
+      with open(self.path, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
+      print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/ to open it.")
 
 # *** universal database cache ***
 
@@ -211,7 +239,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      progress_bar = tinytqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}: ")
+      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}: ")
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): progress_bar.update(f.write(chunk))
@@ -249,9 +277,9 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
-class tinytqdm:
+class tqdm:
   def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:int=-1, rate:int=100):
-    self.iter, self.desc, self.dis, self.unit, self.unit_scale, self.rate = iterable, desc, disable, unit, unit_scale, rate
+    self.iter, self.desc, self.dis, self.unit, self.unit_scale, self.rate = iterable, f"{desc}: " if desc else "", disable, unit, unit_scale, rate
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, len(iterable) if total==-1 else total
     self.update(0)
   def __iter__(self):
@@ -260,6 +288,7 @@ class tinytqdm:
         yield item
         self.update(1)
     finally: self.update(close=True)
+  def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
     if (self.i % self.skip != 0 and not close) or self.dis: return
@@ -276,3 +305,6 @@ class tinytqdm:
     sz = max(term-5-len(suf)-len(self.desc), 1)
     bar = f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}' if self.t else f'\r{self.desc}{suf}{" "*term}'
     print(bar[:term+1],flush=True,end='\n'*close,file=sys.stderr)
+
+class trange(tqdm):
+  def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)

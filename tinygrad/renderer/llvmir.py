@@ -1,9 +1,8 @@
 from typing import Final, Dict, Callable, Any, List, Optional
 from llvmlite import ir
-from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
-from tinygrad.codegen.uops import UOpGraph
+from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 from tinygrad.renderer import Renderer
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
@@ -133,7 +132,7 @@ class LLVMRenderer(Renderer):
           lvars[u].add_incoming(lvars[src[0]], bb[-2].block)
           loop_blocks.append((bb[-1].block, phis))
         elif uop is UOps.DEFINE_ACC:
-          lvars[u] = const(args[0], dtype)
+          lvars[u] = const(src[0].arg, dtype)
           reduce_phis.append(u)
         elif uop is UOps.LOAD:
           if len(src) > 2:

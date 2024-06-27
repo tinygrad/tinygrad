@@ -2,7 +2,7 @@ from collections import OrderedDict
 import unicodedata
 import numpy as np
 from tinygrad.nn import state
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, dtypes
 from tinygrad.helpers import getenv
 
 #
@@ -225,3 +225,14 @@ def get_data_bert(GPUS:list[str], it):
   data: dict[str, Tensor] = next(it)
   for key in data.keys(): data[key].shard_(GPUS, axis=0)
   return data
+
+def get_fake_data_bert(GPUS:list[str], BS:int):
+  return {
+    "input_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "input_mask": Tensor.zeros((BS, 512), dtype=dtypes.default_float).contiguous().shard_(GPUS, axis=0),
+    "segment_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "masked_lm_positions": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "masked_lm_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "masked_lm_weights": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "next_sentence_labels": Tensor.zeros((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+  }
