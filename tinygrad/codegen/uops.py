@@ -143,11 +143,11 @@ class PatternMatcher:
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): 
         res = fxn(**store)
-        if res is not None and  DEBUG.value>=1:
-          from temp.utils.visual import viscompare
-          from tinygrad.engine.graph import print_tree
-          print_tree(p)
-          viscompare(uop, res)
+        # if res is not None and  DEBUG.value>=1:
+          # from temp.utils.visual import viscompare
+          # from tinygrad.engine.graph import print_tree
+          # print_tree(p)
+          # viscompare(uop, res)
         return res
     return None
 
