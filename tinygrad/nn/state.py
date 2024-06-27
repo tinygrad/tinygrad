@@ -194,7 +194,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
     with tarfile.open(fn, "r") as tar:
       storages_offset = tar.getmember('storages').offset_data
       f = unwrap(tar.extractfile('storages'))
-      for i in range(TorchPickle(f).load()):  # num_storages
+      for _ in range(TorchPickle(f).load()):  # num_storages
         (key, _, storage_type), sz = TorchPickle(f).load(), struct.unpack('<q', f.read(8))[0]
         offsets[key] = storages_offset + f.tell()
         f.seek(sz*storage_type.itemsize, 1)

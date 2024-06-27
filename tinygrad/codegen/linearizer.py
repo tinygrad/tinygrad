@@ -362,7 +362,7 @@ class Linearizer(Kernel):
       self.load_cache.clear()
 
       if reduceop is not self.reduceops[-1]:
-        for j in self.upcast_in_mid_reduce_axes:
+        for _ in self.upcast_in_mid_reduce_axes:
           self.upcasted -= 1
           self.group_for_reduces += 1
         assert self.buf_uops[out_buf] is not None, "Local reduce buf must have been uoped at this point"

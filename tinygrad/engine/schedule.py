@@ -350,7 +350,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
     if i == last_appearance[buf]:
       if assigned[buf] not in local_cache[key]: local_cache[key].append(assigned[buf])
 
-  for i,u in enumerate(buffers):
+  for u in buffers:
     for buf in u:
       # all unallocated unparented buffers are fair game to replace
       if buf.is_allocated() or buf.lb_refcount > 0: continue
