@@ -28,8 +28,7 @@ class TinyNet:
     out = self.x.matmul(self.W).relu()
     # print(out.detach().numpy())
     out = out.log_softmax(1)
-    out = out.mul(self.m).add(self.m).sum()
-    return out
+    return out.mul(self.m).add(self.m).sum()
 
 def step(tensor, optim, steps=1, teeny=False, **kwargs):
   net = TeenyNet(tensor) if teeny else TinyNet(tensor)

@@ -156,13 +156,11 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
 
 
 def create_int_feature(values):
-  feature = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
-  return feature
+  return tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
 
 
 def create_float_feature(values):
-  feature = tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
-  return feature
+  return tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
 
 
 def create_training_instances(input_files, tokenizer, max_seq_length,

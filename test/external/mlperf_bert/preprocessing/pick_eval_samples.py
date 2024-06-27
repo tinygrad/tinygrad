@@ -75,13 +75,11 @@ def decode_record(record):
 
 
 def create_int_feature(values):
-  feature = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
-  return feature
+  return tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
 
 
 def create_float_feature(values):
-  feature = tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
-  return feature
+  return tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
 
 
 if __name__ == '__main__':

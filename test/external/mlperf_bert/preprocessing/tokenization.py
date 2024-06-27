@@ -159,10 +159,7 @@ def convert_ids_to_tokens(inv_vocab, ids):
 def whitespace_tokenize(text):
   """Runs basic whitespace cleaning and splitting on a piece of text."""
   text = text.strip()
-  if not text:
-    return []
-  tokens = text.split()
-  return tokens
+  return [] if not text else text.split()
 
 
 class FullTokenizer(object):
@@ -230,8 +227,7 @@ class BasicTokenizer(object):
         token = self._run_strip_accents(token)
       split_tokens.extend(self._run_split_on_punc(token))
 
-    output_tokens = whitespace_tokenize(" ".join(split_tokens))
-    return output_tokens
+    return whitespace_tokenize(" ".join(split_tokens))
 
   def _run_strip_accents(self, text):
     """Strips accents from a piece of text."""

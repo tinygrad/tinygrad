@@ -28,8 +28,7 @@ class TinyNet:
   def forward(self):
     out = self.x.matmul(self.W).relu()
     out = out.log_softmax(1)
-    out = out.mul(self.m).add(self.m).sum()
-    return out
+    return out.mul(self.m).add(self.m).sum()
 
 class TinyNetTF:
   def __init__(self):
@@ -42,8 +41,7 @@ class TinyNetTF:
     out = tf.nn.relu(out)
     out = tf.nn.log_softmax(out, axis=1)
     out = tf.multiply(out, self.m) + self.m
-    out = tf.reduce_sum(out)
-    return out
+    return tf.reduce_sum(out)
 
 def step(optim, steps=1, kwargs={}, scheduler=None, schedopts=None, do_optim=True):
   net = TinyNet()

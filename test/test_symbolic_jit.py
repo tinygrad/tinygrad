@@ -45,8 +45,7 @@ class TestSymbolicJit(unittest.TestCase):
   def test_mixed_with_no_symbol_kernel(self):
     def f(a, b):
       s = (a@b).realize()
-      s = (s+s).realize() # this one does not have symbols in input
-      return s
+      return (s+s).realize() # this one does not have symbols in input
     jf = TinyJit(f)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)

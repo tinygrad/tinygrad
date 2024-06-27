@@ -12,9 +12,7 @@ def run_onnx_torch(onnx_model, inputs):
   import torch
   from onnx2torch import convert
   torch_model = convert(onnx_model).float()
-  with torch.no_grad():
-    torch_out = torch_model(*[torch.tensor(x) for x in inputs.values()])
-  return torch_out
+  with torch.no_grad(): return torch_model(*[torch.tensor(x) for x in inputs.values()])
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
@@ -33,8 +31,7 @@ class TestOnnxModel(unittest.TestCase):
         "nav_features": np.zeros((1, 256)),
         "features_buffer": np.zeros((1, 99, 128)),
     }
-      inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in np_inputs.items()}
-      return inputs
+      return {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in np_inputs.items()}
 
     for _ in range(7):
       inputs = get_inputs()

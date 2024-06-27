@@ -42,8 +42,7 @@ def kstest(l1, l2):
       d = dtemp
   ne = float(n1 * n2) / float(n1 + n2)
   nesq = math.sqrt(ne)
-  prob = ksprob((nesq + 0.12 + 0.11 / nesq) * d)
-  return prob
+  return ksprob((nesq + 0.12 + 0.11 / nesq) * d)
 
 def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(20, 23), alpha=0.04):
   Tensor.manual_seed(1337)
