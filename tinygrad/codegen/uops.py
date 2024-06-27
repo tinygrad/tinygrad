@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
-import functools, itertools, heapq
+import functools, itertools, heapq, math
 from collections import defaultdict, deque
 from enum import Enum, auto
 from dataclasses import dataclass, field
@@ -196,10 +196,6 @@ constant_folder = PatternMatcher([
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
   (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
-  # -(-x) -> x
-  (-(-UOp.var('x')), lambda x: x),
-  # -1*x -> -x
-  (-1*UOp.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
   (UOp.var().lt(UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
   (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
@@ -209,6 +205,7 @@ constant_folder = PatternMatcher([
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
+  (-(-UOp.var('x')), lambda x: x),    # -(-x) -> x
   (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
   (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
@@ -223,8 +220,9 @@ constant_folder = PatternMatcher([
   #x*0 -> 0 or 0*x -> 0
   #if x is nan it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
-  #(UOp.var('x') * 0, lambda x: x if isinstance(x.arg, float) and math.isnan(x.arg) else UOp.const(x.dtype, 0)),
-  (UOp.var('x', dtypes.int) * 0, lambda x: UOp.const(x.dtype, 0)),
+  (UOp.var('x') * 0, lambda x: x if isinstance(x.arg, float) and math.isnan(x.arg) else UOp.const(x.dtype, 0)),
+  # NOTE: this is a safe zero folding rule
+  #(UOp.var('x', dtypes.int) * 0, lambda x: UOp.const(x.dtype, 0)),
   (UOp.var('x') - UOp.var('x'), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.load(UOp.var("buf"), UOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
