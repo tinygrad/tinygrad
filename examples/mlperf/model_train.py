@@ -356,7 +356,7 @@ def train_retinanet():
   HOSTNAME = getenv('SLURM_STEP_NODELIST', 'other')
   EPOCHS = 5
   BS = getenv('BS', 32)
-  BS_EVAL = getenv('BS_EVAL', 32)
+  BS_EVAL = getenv('BS_EVAL', BS if BS<32 else 32)
   LR = 0.000085
   MAP_TARGET = 0.34
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
@@ -365,7 +365,8 @@ def train_retinanet():
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
   loss_scaler = 512.0 if dtypes.default_float in [dtypes.float16] else 1.0
-
+  TEST = getenv('TEST', 0)
+  BENCHMARK = getenv("BENCHMARK", 10000)
   if WANDB:
     import wandb
     wandb.init(project='RetinaNet')
@@ -377,10 +378,11 @@ def train_retinanet():
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO
   from tinygrad.nn import BatchNorm2d
-  ROOT = 'extra/datasets/open-images-v6TEST'
-  NAME = 'openimages-mlperf'
-  coco_train = get_openimages(NAME,ROOT, 'train')
-  coco_val = get_openimages(NAME,ROOT, 'val')
+  if not TEST:
+    ROOT = 'extra/datasets/open-images-v6TEST'
+    NAME = 'openimages-mlperf'
+    coco_train = get_openimages(NAME,ROOT, 'train')
+    coco_val = get_openimages(NAME,ROOT, 'val')
 
   from extra.models import retinanet
   from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
@@ -465,15 +467,24 @@ def train_retinanet():
   def data_get_val(it):
     x, Y_idx, cookie = next(it)
     return x.shard(GPUS, axis=0), Y_idx, cookie
+  def fake_data_get(bs=BS):
+    x = Tensor.zeros(bs, 800, 800, 3, dtype=dtypes.uint8).contiguous()
+    yb = Tensor.zeros(bs, 120087, 4, dtype=dtypes.float32).contiguous()
+    yl = Tensor.ones(bs, 120087, dtype=dtypes.int16).contiguous()
+    ym = Tensor.ones(bs, 120087, dtype=dtypes.int64).contiguous()
+    return x.shard(GPUS, axis=0), yb.shard(GPUS, axis=0), yl.shard(GPUS, axis=0), ym.shard(GPUS, axis=0), 0
 
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # **********TRAIN***************
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    batch_loader = batch_load_retinanet(coco_train, bs=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP)
-    it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
-    cnt, proc = 0, data_get(it)
+    if TEST:
+      cnt, proc = 0, fake_data_get(BS)
+    else:
+      batch_loader = batch_load_retinanet(coco_train, bs=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP)
+      it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
+      cnt, proc = 0, data_get(it)
 
     st = time.perf_counter()
     while proc is not None:
@@ -481,7 +492,9 @@ def train_retinanet():
       loss, proc = train_step(proc[0], proc[1], proc[2], proc[3]), proc[4]
 
       pt = time.perf_counter()
-      try: next_proc = data_get(it)
+      try: 
+        if TEST: next_proc = fake_data_get(BS)
+        else: next_proc = data_get(it)
       except StopIteration: next_proc = None
 
       dt = time.perf_counter()
@@ -500,6 +513,8 @@ def train_retinanet():
       st = cl
       proc, next_proc = next_proc, None  # return old cookie
       cnt+=1
+      if TEST and cnt>BENCHMARK:
+        return
 
     if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
     fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
