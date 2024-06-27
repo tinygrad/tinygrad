@@ -54,7 +54,7 @@ class MultiLazyBuffer:
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
     if axis is not None:
       splits = list(itertools.accumulate([lb.shape[axis] for lb in lbs], initial=0))
-      self.bounds = [(st,ed) for st,ed in zip(splits, splits[1:])]
+      self.bounds = list(zip(splits, splits[1:]))
 
   @property
   def shape(self):
@@ -73,7 +73,7 @@ class MultiLazyBuffer:
   def from_sharded(lb:LazyBuffer, devices:Tuple[str, ...], axis:Optional[int]=None):
     lbs = [lb.contiguous() if lb.base != lb and not lb.is_unrealized_unmasked_const() else lb] * len(devices)
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(to_sharded(lbs, axis) if axis is not None else lbs, devices)]
-    return MultiLazyBuffer([lb if lb.is_unrealized_unmasked_const() else lb.contiguous() for lb in sharded_lbs], axis)
+    return MultiLazyBuffer([lb if lb.is_unrealized_unmasked_const() else lb.contiguous(allow_buffer_view=False) for lb in sharded_lbs], axis)
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     if self.axis is None:

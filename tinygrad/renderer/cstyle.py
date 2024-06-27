@@ -105,6 +105,7 @@ class CStyleLanguage(Renderer):
 
     child_count = Counter(v for ru in uops for v in ru.src)
 
+    seen_vars = set()
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       # these four uops don't have output dtypes
@@ -158,6 +159,8 @@ class CStyleLanguage(Renderer):
           kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_VAR:
+          assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
+          seen_vars.add(args.expr)
           bufs.append((args.expr, (dtype,False)))
           r[u] = args.expr
         elif uop is UOps.DEFINE_GLOBAL:
