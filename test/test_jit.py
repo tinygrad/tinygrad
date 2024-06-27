@@ -6,7 +6,7 @@ from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, Context
 from tinygrad.dtype import dtypes
 
 def _simple_test(add, extract=lambda x: x, N=10):
@@ -65,6 +65,17 @@ class TestJit(unittest.TestCase):
         a = Tensor.randn(10, 10)
         b = Tensor.randn(10, 10)
         add(a, b)
+
+  def test_jit_zero_does_not_jit(self):
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    with Context(JIT=0):
+      for i in range(5):
+        a = Tensor([i])
+        b = Tensor([i])
+        c = add(a, b)
+        np.testing.assert_allclose(c.numpy(), 2*i)
+      assert_jit_cache_len(add, 0)
 
   def test_jit_shape_mismatch(self):
     @TinyJit
