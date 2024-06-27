@@ -27,6 +27,7 @@ lint.select = [
   "RET506", # superfluous-else-raise
   "RET507", # superfluous-else-continue
   "A",      # builtin-variable-shadowing, builtin-argument-shadowing, builtin-attribute-shadowing
+  "SIM105", # suppressible-exception
 ]
 
 line-length = 150
