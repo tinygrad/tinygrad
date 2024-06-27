@@ -77,6 +77,30 @@ class TestJit(unittest.TestCase):
         np.testing.assert_allclose(c.numpy(), 2*i)
       assert_jit_cache_len(add, 0)
 
+  def test_jit_not_capturing(self):
+    @TinyJit
+    def add(a, b):
+      Tensor.zeros(4, 4).contiguous().realize()  # no-op kernel is captured
+      return (a+b).realize()
+    for i in range(5):
+      a = Tensor([i])
+      b = Tensor([i])
+      c = add(a, b)
+      np.testing.assert_allclose(c.numpy(), 2*i)
+    assert_jit_cache_len(add, 2)
+
+    @TinyJit
+    def add2(a, b):
+      with Context(CAPTURING=0):  # not captured
+        Tensor.zeros(4, 4).contiguous().realize()
+      return (a+b).realize()
+    for i in range(5):
+      a = Tensor([i])
+      b = Tensor([i])
+      c = add2(a, b)
+      np.testing.assert_allclose(c.numpy(), 2*i)
+    assert_jit_cache_len(add2, 1)
+
   def test_jit_shape_mismatch(self):
     @TinyJit
     def add(a, b): return (a+b).realize()
