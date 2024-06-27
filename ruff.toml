@@ -23,6 +23,8 @@ lint.select = [
   "W291",   # trailing-whitespace
   "W293",   # blank-line-with-whitespace
   "UP039",  # unnecessary-class-parentheses
+  "RET507", # superfluous-else-continue
+  "RET506", # superfluous-else-raise
 ]
 
 line-length = 150
