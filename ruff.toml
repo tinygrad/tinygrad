@@ -27,6 +27,7 @@ lint.select = [
   "RET506", # superfluous-else-raise
   "RET507", # superfluous-else-continue
   "A",      # builtin-variable-shadowing, builtin-argument-shadowing, builtin-attribute-shadowing
+  "FURB110",# if-exp-instead-of-or-operator
 ]
 
 line-length = 150
