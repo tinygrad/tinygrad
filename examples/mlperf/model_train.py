@@ -555,7 +555,7 @@ def train_retinanet():
 
     coco_eval.params.imgIds = evaluated_imgs
     coco_eval._paramsEval.imgIds = evaluated_imgs
-    coco_eval.evalImgs = [x for batch in coco_evalimgs for x in batch]
+    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
     coco_eval.accumulate()
     coco_eval.summarize()
     eval_acc = coco_eval.stats[0]
