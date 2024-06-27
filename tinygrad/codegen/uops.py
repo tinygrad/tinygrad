@@ -141,7 +141,7 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): 
+      if _match(uop, p, store):
         res = fxn(**store)
         # if res is not None and  DEBUG.value>=1:
           # from temp.utils.visual import viscompare
@@ -303,7 +303,7 @@ def _compare_uops(a:UOp, b:UOp, debug=False):
       if not isinstance(a.arg, float) or not isinstance(b.arg, float) or abs(a.arg-b.arg) > 1e-6:
         if debug: print(f"arg mismatch: {a.arg} != {b.arg}")
         return False
-    if a.op != b.op or a.dtype != b.dtype or len(a.src) != len(b.src): 
+    if a.op != b.op or a.dtype != b.dtype or len(a.src) != len(b.src):
       if debug: print(f"mismatch: {a} != {b}")
       return False
     return all(cmp(x, y) for x, y in zip(a.src, b.src))
@@ -343,7 +343,7 @@ def search_error_graph(sink:UOp, pm:PatternMatcher, nodes:Dict[Tuple, UOp]):
     return not _compare_uops(a, b)
 
   if not _is_problem(sink): return None
-  for parent in sink.src: 
+  for parent in sink.src:
     if (res := search_error_graph(parent, pm, nodes.copy())) is not None: return res
 
   if len(sink.src)>1:
@@ -442,7 +442,7 @@ class UOpGraph:
     if not _compare_uops(sink, sink_):
       from tinygrad.engine.graph import print_tree
 
-      assert not _compare_uops(rec_rewrite(d_sink, constant_folder, self.nodes.copy()), old_graph_rewrite(d_sink, constant_folder, self.nodes.copy())), "ouff"
+      assert not _compare_uops(rec_rewrite(d_sink, constant_folder, self.nodes.copy()), old_graph_rewrite(d_sink, constant_folder, self.nodes.copy()))
       minimal_error_graph = search_error_graph(d_sink, constant_folder, self.nodes)
       print_tree(minimal_error_graph)
       print(deconstruct_uop(minimal_error_graph))
@@ -455,10 +455,10 @@ class UOpGraph:
       print_tree(b)
 
       assert not _compare_uops(a,b, True)
-      
+
       raise RuntimeError("rewrite mismatch")
 
-    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+    if extra_pm: sink = old_graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns), self.nodes)
 
     # filter nodes that don't link to a sink
     # BFS toposort
