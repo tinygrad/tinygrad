@@ -291,15 +291,13 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
 def graph_rewrite(sink:UOp, pm:PatternMatcher):
   nodes: Dict[Tuple, UOp] = {}
   replace: Dict[UOp, UOp] = {}
-  def _dedup(x:UOp):
-    if x in replace: return replace[x]
-    key = (x.op, x.dtype, tuple(_dedup(y) for y in x.src), x.arg)
-    if found := nodes.get(key): replace[x] = found
-    else:
-      n = UOp(*key)
-      nodes[key] = replace[x] = _dedup(new_x) if (new_x := pm.rewrite(n)) else n
-    return replace[x]
-  return _dedup(sink)
+  def __inner_rewrite(n:UOp):
+    if n in replace: return replace[n]
+    key = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
+    if found := nodes.get(key): replace[n] = found
+    else: nodes[key] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(n:=UOp(*key))) else n
+    return replace[n]
+  return __inner_rewrite(sink)
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
@@ -331,11 +329,8 @@ class UOpGraph:
     #assert self._uops is None, "already linearized"
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
-    # # dedup all nodes in graph
+    # dedup all nodes and do graph rewrite
     sink = graph_rewrite(sink, constant_folder)
-
-    # do graph rewrite
-    # sink = graph_rewrite(sink, constant_folder)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
