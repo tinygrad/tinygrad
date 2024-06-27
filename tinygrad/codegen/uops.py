@@ -141,7 +141,14 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): return fxn(**store)
+      if _match(uop, p, store): 
+        res = fxn(**store)
+        if res is not None and  DEBUG.value>=1:
+          from temp.utils.visual import viscompare
+          from tinygrad.engine.graph import print_tree
+          print_tree(p)
+          viscompare(uop, res)
+        return res
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -298,6 +305,7 @@ def _compare_uops(a:UOp, b:UOp, debug=False):
     return all(cmp(x, y) for x, y in zip(a.src, b.src))
   return cmp(a, b)
 
+
 def rec_rewrite(sink:UOp,pm:PatternMatcher, nodes) -> UOp:
   changed = False
 
@@ -307,7 +315,7 @@ def rec_rewrite(sink:UOp,pm:PatternMatcher, nodes) -> UOp:
     up = u
     for i in range(100):
       key = (up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
-      up = UOp(*key)
+      up = nodes.setdefault(key, UOp(*key))
       if not (rewritten := pm.rewrite(up)): break
       up = rewritten
       changed = True
@@ -434,10 +442,15 @@ class UOpGraph:
       assert not _compare_uops(rec_rewrite(d_sink, constant_folder, self.nodes.copy()), old_graph_rewrite(d_sink, constant_folder, self.nodes.copy())), "ouff"
       minimal_error_graph = search_error_graph(d_sink, constant_folder, self.nodes)
       print_tree(minimal_error_graph)
-      # print(deconstruct_uop(minimal_error_graph))
+      print(deconstruct_uop(minimal_error_graph))
 
       a = old_graph_rewrite(minimal_error_graph, constant_folder, self.nodes.copy())
       b = rec_rewrite(minimal_error_graph, constant_folder, self.nodes.copy())
+
+      print(colored(" *** diff *** ", "red"))
+      print_tree(a)
+      print_tree(b)
+
       assert not _compare_uops(a,b, True)
       
       raise RuntimeError("rewrite mismatch")
