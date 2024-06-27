@@ -1,4 +1,4 @@
-from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
+from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable, Set
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
 from dataclasses import replace
@@ -124,7 +124,7 @@ def beam_search(lin:Linearizer, rawbufs:List[Buffer], amt:int, allow_test_size=T
     return ret
 
   beam: List[Tuple[Linearizer, float]] = [(lin, float("inf"))]
-  bad_action = set()
+  bad_action: Optional[Set[Opt]] = set()
   seen_libs = set()
 
   default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV"} else 0
