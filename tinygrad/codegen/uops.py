@@ -295,7 +295,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher):
     if n in replace: return replace[n]
     key = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
     if found := nodes.get(key): replace[n] = found
-    else: nodes[key] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(n:=UOp(*key))) else n
+    else: nodes[key] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*key))) else x
     return replace[n]
   return __inner_rewrite(sink)
 
