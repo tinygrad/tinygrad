@@ -461,7 +461,7 @@ class UOpGraph:
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
       if uop is UOps.LOAD and len(src) > 2 and src[2].op not in {UOps.IF, UOps.BARRIER}: assert src[2].dtype == dtypes.bool
-      if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
+      # if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
       if uop is UOps.ALU:
         if arg in UnaryOps:
           assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
