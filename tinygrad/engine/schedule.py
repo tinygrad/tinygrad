@@ -312,6 +312,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
     for x in graph[ps.outputs[0]]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(prescheduled[x])
+  if logops: logops.close()
 
   if SAVE_SCHEDULE:
     def _save():
