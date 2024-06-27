@@ -23,6 +23,7 @@ lint.select = [
   "W291",   # trailing-whitespace
   "W293",   # blank-line-with-whitespace
   "UP039",  # unnecessary-class-parentheses
+  "FURB110",# if-exp-instead-of-or-operator
 ]
 
 line-length = 150
