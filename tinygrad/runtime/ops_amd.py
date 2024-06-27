@@ -50,7 +50,7 @@ def ioctls_from_header():
 kio = ioctls_from_header()
 
 SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 65536
-SIGNAL_VALUE_OFFSET = getattr(hsa.amd_signal_t, 'value').offset
+SIGNAL_VALUE_OFFSET = hsa.amd_signal_t.value.offset
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ = 0x0106
 regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0107
@@ -172,7 +172,7 @@ class HWPM4Queue(HWQueue):
 
   def timestamp(self, sig):
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0,
-                      address=ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'start_ts').offset)
+                      address=ctypes.addressof(sig) + hsa.amd_signal_t.start_ts.offset)
     return self._mark_command_end()
 
   def signal(self, signal:hsa.amd_signal_t, value=0):

@@ -2950,8 +2950,8 @@ for device in Device._devices: setattr(Tensor, f"{device.lower()}", functools.pa
 
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
-  setattr(Tensor, "conv2d", Tensor.image_conv2d)
-  setattr(Tensor, "dot", Tensor.image_dot)
+  setattr(Tensor, "conv2d", Tensor.image_conv2d)  # noqa: B010
+  setattr(Tensor, "dot", Tensor.image_dot)  # noqa: B010
 
 # TODO: eventually remove this
 def custom_random(out:Buffer):
