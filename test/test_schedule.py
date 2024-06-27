@@ -7,13 +7,15 @@ import numpy as np
 from typing import List, Optional, Union
 from tinygrad import nn, dtypes
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, LoadOps, ReduceOps
+from tinygrad.ops import BinaryOps, LoadOps, ReduceOps, UnaryOps, TernaryOps
 from tinygrad.helpers import DEBUG, flatten, getenv
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported
+from tinygrad.function import Function
+from tinygrad.lazy import LazyBuffer
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
@@ -39,6 +41,23 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
     l.hand_coded_optimizations()
     l.linearize()
   return sched
+
+class CycleBitcast(Function):
+  def bitwise_cast(self, x: LazyBuffer, k: int):
+    return x.e(BinaryOps.ADD, x.const(k)).cast(dtypes.int32, True, True)
+
+  def forward(self, x: LazyBuffer):
+    x = x.cast(dtypes.float32)
+    y = x.cast(dtypes.float32).e(UnaryOps.SIN)
+    z = x.cast(dtypes.int32).e(BinaryOps.MUL, self.bitwise_cast(x, 2)).e(BinaryOps.MUL, self.bitwise_cast(y, 3))
+    z = z.e(BinaryOps.CMPNE, z.const(0)).e(TernaryOps.WHERE, z.cast(dtypes.float32), x)
+    return z
+
+class TestUOpSchedule(unittest.TestCase):
+  def test_multiple_bitcast_in_function(self):
+    a = Tensor.empty()
+    b = CycleBitcast.apply(a)
+    check_schedule(b, 1)
 
 class TestSchedule(unittest.TestCase):
   def test_basic_binop_fusion(self):
