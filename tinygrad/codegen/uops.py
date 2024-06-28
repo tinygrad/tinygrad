@@ -379,15 +379,19 @@ class UOpGraph:
     return sink
   
   def graph_rewrite_bottomup_no_backtrack(self, sink: UOp, pm: PatternMatcher):
+    
     sink = UOp(UOps.SINK, None, (sink,))
     @functools.lru_cache
     def rewrite(_uop: UOp):
       rewritten = None
-      _rewritten, require_further_processing = pm.rewrite(_uop)
+      require_further_processing = False
+      _rewritten, _require_further_processing = pm.rewrite(_uop)
+      require_further_processing = require_further_processing or _require_further_processing
       while _rewritten:
         # Top level node may satisfy some further patterns
         rewritten = _rewritten
-        _rewritten, _ = pm.rewrite(rewritten)
+        _rewritten, _require_further_processing = pm.rewrite(rewritten)
+        require_further_processing = require_further_processing or _require_further_processing
       if rewritten and require_further_processing:
         # Non-top level nodes may satisfy further patterns
         return self.graph_rewrite_bottomup_no_backtrack(rewritten, pm)
@@ -443,7 +447,6 @@ class UOpGraph:
     # do graph rewrite
     sink = self.graph_rewrite_bottomup_no_backtrack(sink, constant_folder)
     if extra_pm: sink = self.graph_rewrite_bottomup_no_backtrack(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
-
     # filter nodes that don't link to a sink
     # BFS toposort
     graph: Dict[UOp, List[UOp]] = {}
