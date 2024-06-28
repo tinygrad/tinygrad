@@ -348,7 +348,6 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
-<<<<<<< HEAD
   def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", 1)
@@ -429,54 +428,6 @@ class UOpGraph:
           queue.append(x)
     return replace_nodes.get(sink, sink)
 
-||||||| f1c7944c
-  def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
-    # recursive rewrite
-    changed = getenv("UOPS_REWRITE", 1)
-    run_cnt = 0
-    while changed:
-      changed = 0
-      @functools.lru_cache(None)
-      def rewrite(u:UOp) -> UOp:
-        nonlocal changed
-        recurse_cnt = 0
-        up = u
-        # locally recursively rewrite
-        while (rewritten := pm.rewrite(up)):
-          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
-          up = rewritten
-          recurse_cnt += 1
-        changed += recurse_cnt
-        up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
-        return self.nodes.setdefault(up.tuple(), up) # replace with cached nodes
-      sink = rewrite(sink)
-      run_cnt += 1
-      assert run_cnt < 100, "exceeded 100 rewrite loops!"
-    return sink
-
-  def graph_dedup(self, sink:UOp):
-    # add nodes to graph in reverse BFS order
-    # dedup all nodes
-    in_degree: Dict[UOp, int] = {}
-    children: Dict[UOp, List[UOp]] = {}
-    get_children_dfs(sink, children, in_degree)
-
-    queue = deque([k for k, v in in_degree.items() if v == 0])
-    replace_nodes: Dict[UOp, UOp] = {}
-    while queue:
-      n = queue.popleft()
-      if n in replace_nodes: continue
-      key = (n.op, n.dtype, tuple(replace_nodes.get(x, x) for x in n.src), n.arg)
-      if found:=self.nodes.get(key): replace_nodes[n] = found
-      else: replace_nodes[n] = self.nodes[key] = UOp(*key)
-      for x in children[n]:
-        in_degree[x] -= 1
-        if in_degree[x] == 0:
-          queue.append(x)
-    return replace_nodes.get(sink, sink)
-
-=======
->>>>>>> master
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
@@ -486,16 +437,8 @@ class UOpGraph:
     sink = graph_dedup(sink)
 
     # do graph rewrite
-<<<<<<< HEAD
     sink = self.graph_rewrite_bottomup_no_backtrack(sink, constant_folder)
     if extra_pm: sink = self.graph_rewrite_bottomup_no_backtrack(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
-||||||| f1c7944c
-    sink = self.graph_rewrite(sink, constant_folder)
-    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
-=======
-    sink = graph_rewrite(sink, constant_folder)
-    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
->>>>>>> master
 
     # filter nodes that don't link to a sink
     # BFS toposort
