@@ -171,8 +171,8 @@ def loop_collapse(negate=False):
 constant_folder = PatternMatcher([
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
-    UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, UnaryOps.NEG, 
-      src=[UPat(UOps.RANGE, src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
+    UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="idx"), UPat(UOps.ALU, UnaryOps.NEG, 
+      src=[UPat(UOps.RANGE, src=(UPat(name="loop_start"), UPat(name="loop_end")))]))),
       UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse(negate=True)),  
 
    (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
