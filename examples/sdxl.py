@@ -239,17 +239,17 @@ class UNetModel:
         if ds in attention_resolutions:
           n_heads = ch // d_head
           layers.append(UNet.SpatialTransformer(ch, n_heads, d_head, ctx_dim, depth=transformer_depth[idx]))
-        
+
         self.input_blocks.append(layers)
         input_block_channels.append(ch)
-      
+
       if idx != len(channel_mult) - 1:
         self.input_blocks.append([
           UNet.Downsample(ch),
         ])
         input_block_channels.append(ch)
         ds *= 2
-    
+
     n_heads = ch // d_head
     self.middle_block: List = [
       UNet.ResBlock(ch, time_embed_dim, ch),
@@ -265,11 +265,11 @@ class UNetModel:
           UNet.ResBlock(ch + ich, time_embed_dim, model_channels*mult),
         ]
         ch = model_channels * mult
-        
+
         if ds in attention_resolutions:
           n_heads = ch // d_head
           layers.append(UNet.SpatialTransformer(ch, n_heads, d_head, ctx_dim, depth=transformer_depth[idx]))
-        
+
         if idx > 0 and i == self.num_res_blocks[idx]:
           layers.append(UNet.Upsample(ch))
           ds //= 2
@@ -532,7 +532,7 @@ class Closed:
       x = self.embeddings(input_ids, Tensor.arange(input_ids.shape[1]).reshape(1, -1))
       x = self.encoder(x, Tensor.full((1, 1, 77, 77), float("-inf")).triu(1), self.ret_layer_idx)
       return self.final_layer_norm(x) if (self.ret_layer_idx is None) else x
-  
+
   class ClipTextModel:
     def __init__(self):
       self.text_model = Closed.ClipTextTransformer(ret_layer_idx=11)
@@ -544,7 +544,7 @@ class FrozenClosedClipEmbedder(Embedder):
     self.tokenizer   = Tokenizer.ClipTokenizer()
     self.transformer = Closed.ClipTextModel()
     self.input_key   = "txt"
-  
+
   def __call__(self, text:Tensor) -> Tensor:
     tokens = Tensor(self.tokenizer.encode(text))
     return self.transformer.text_model(tokens.reshape(1,-1))
@@ -567,7 +567,7 @@ class Open:
 
     def __call__(self, x:Tensor, attn_mask:Optional[Tensor]=None) -> Tensor:
       T,B,C = x.shape
-      
+
       proj = x.linear(self.in_proj_weight.T, self.in_proj_bias)
       proj = proj.unflatten(-1, (3,C)).unsqueeze(0).transpose(0,-2)
       q,k,v = proj.chunk(3)
@@ -587,7 +587,7 @@ class Open:
     def __init__(self, dims, hidden_dims):
       self.c_fc   = Linear(dims, hidden_dims)
       self.c_proj = Linear(hidden_dims, dims)
-    
+
     def __call__(self, x:Tensor) -> Tensor:
       return x.sequential([self.c_fc, Tensor.gelu, self.c_proj])
 
@@ -600,7 +600,7 @@ class Open:
 
       self.ln_2 = LayerNorm(dims)
       self.mlp  = Open.Mlp(dims, int(dims * mlp_ratio))
-    
+
     def __call__(self, x:Tensor, attn_mask:Optional[Tensor]=None) -> Tensor:
       x = x + self.attn(self.ln_1(x), attn_mask=attn_mask)
       x = x + self.mlp(self.ln_2(x))
@@ -613,7 +613,7 @@ class Open:
       self.resblocks = [
         Open.ResidualAttentionBlocks(dims, n_heads, mlp_ratio) for _ in range(layers)
       ]
-    
+
     def __call__(self, x:Tensor, attn_mask:Optional[Tensor]=None) -> Tensor:
       x = x.transpose(0, 1).contiguous()
       for r in self.resblocks:
@@ -631,7 +631,7 @@ class Open:
       self.transformer = Open.ClipTransformer(dims, layers, n_heads)
       self.ln_final = LayerNorm(dims)
       self.text_projection = Tensor.empty(dims, dims)
-    
+
     @property
     def attn_mask(self) -> Tensor:
       if not hasattr(self, "_attn_mask"):
@@ -657,7 +657,7 @@ class FrozenOpenClipEmbedder(Embedder):
     self.model = Open.ClipTextTransformer(dims)
     self.input_key = "txt"
     self.tokenizer = Tokenizer.ClipTokenizer()
-  
+
   def text_transformer_forward(self, x:Tensor, attn_mask:Optional[Tensor]=None):
     for r in self.model.transformer.resblocks:
       x, penultimate = r(x, attn_mask=attn_mask), x
@@ -700,10 +700,10 @@ class Conditioner:
     ]
     for input_key in concat_embedders:
       self.embedders.append(ConcatTimestepEmbedderND(256, input_key))
-  
+
   def get_keys(self) -> Set[str]:
     return set(e.input_key for e in self.embedders)
-  
+
   def __call__(self, batch:Dict, force_zero_embeddings:List=[]) -> Dict[str,Tensor]:
     output: Dict[str,Tensor] = {}
 
@@ -819,7 +819,7 @@ class FirstStage:
         for _ in range(num_res_blocks):
           block.append(FirstStage.ResnetBlock(block_in, block_out))
           block_in = block_out
-        
+
         downsample = tensor_identity if (i_level == len(ch_mult)-1) else FirstStage.Downsample(block_in)
         self.down.append(BlockEntry(block, downsample))
 
@@ -827,14 +827,14 @@ class FirstStage:
 
       self.norm_out = GroupNorm(32, block_in)
       self.conv_out = Conv2d(block_in, 2*z_ch, kernel_size=3, stride=1, padding=1)
-    
+
     def __call__(self, x:Tensor) -> Tensor:
       h = self.conv_in(x)
       for down in self.down:
         for block in down.block:
           h = block(h)
         h = down.downsample(h)
-      
+
       h = h.sequential([self.mid.block_1, self.mid.attn_1, self.mid.block_2])
       h = h.sequential([self.norm_out,    Tensor.swish,    self.conv_out   ])
       return h
@@ -846,7 +846,7 @@ class FirstStage:
       block_in = ch * ch_mult[-1]
       curr_res = resolution // 2 ** (len(ch_mult) - 1)
       self.z_shape = (1, z_ch, curr_res, curr_res)
-      
+
       self.conv_in = Conv2d(z_ch, block_in, kernel_size=3, stride=1, padding=1)
 
       self.mid = FirstStage.MidEntry(block_in)
@@ -862,13 +862,13 @@ class FirstStage:
         for _ in range(num_res_blocks + 1):
           block.append(FirstStage.ResnetBlock(block_in, block_out))
           block_in = block_out
-        
+
         upsample = tensor_identity if i_level == 0 else FirstStage.Upsample(block_in)
         self.up.insert(0, BlockEntry(block, upsample)) # type: ignore
-      
+
       self.norm_out = GroupNorm(32, block_in)
       self.conv_out = Conv2d(block_in, out_ch, kernel_size=3, stride=1, padding=1)
-    
+
     def __call__(self, z:Tensor) -> Tensor:
       h = z.sequential([self.conv_in, self.mid.block_1, self.mid.attn_1, self.mid.block_2])
 
@@ -1065,7 +1065,7 @@ if __name__ == "__main__":
     Tensor.manual_seed(args.seed)
 
   model = SDXL(configs["SDXL_Base"])
-  
+
   default_weight_url = 'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors'
   weights = args.weights if args.weights else fetch(default_weight_url, 'sd_xl_base_1.0.safetensors')
   load_state_dict(model, safe_load(weights), strict=True)
