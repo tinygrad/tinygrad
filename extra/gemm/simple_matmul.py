@@ -3,9 +3,9 @@ from tinygrad.helpers import getenv
 from tinygrad import dtypes, Tensor
 dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
 acc_dtype = dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None
-N = getenv("N", 1024)
-M = getenv("M", 1024)
-K = getenv("K", 1024)
+N = getenv("N", 4096)
+M = getenv("M", N)
+K = getenv("K", N)
 CNT = getenv("CNT", 10)
 ATOL = getenv("ATOL", 1e-4)
 RTOL = getenv("RTOL", 3e-2)

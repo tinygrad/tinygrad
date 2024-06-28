@@ -145,7 +145,7 @@ class CStyleLanguage(Renderer):
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
           if not r[src[0]].startswith('zreg'): kk(f"{r[src[0]]} = {r[src[1]]};")
-          else: kk(f"// {r[src[0]][:r[src[0]].index('.')]};")
+          else: kk(f"// phi {r[src[0]][:r[src[0]].index('.')]}")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           if uop is UOps.BITCAST:
@@ -187,7 +187,7 @@ class CStyleLanguage(Renderer):
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
-  supports_float4 = True
+  supports_float4 = False
   float4 = "make_float4"
   has_local = False
   global_max = None
