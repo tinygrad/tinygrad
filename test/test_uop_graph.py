@@ -234,7 +234,7 @@ class TestUOpGraph(TestUOps):
     # only the second store happens
     self.assertEqual(len(uops.uops), 4)
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
-  
+
   def test_loop_collapse_match(self):
     def factory():
       const0 = UOp(UOps.CONST, dtypes.float, arg=0.0)
@@ -396,7 +396,7 @@ class TestBottomupVsTopdownRewrite(TestUOps):
       UOp(UOps.CONST, dtypes.float, arg=float('inf')),
     )))
 
-  
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
