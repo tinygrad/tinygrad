@@ -473,7 +473,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not(self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.threads)), "can't upcast TC locals")
-      check(amt <= 32 if getenv("AMX",0) else amt <= 32, "don't upcast more than 32 for AMX or 8 otherwise")
+      check(amt <= 32 if getenv("AMX",0) else amt <= 8, "don't upcast more than 32 for AMX or 8 otherwise")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCASTMID:                  # white

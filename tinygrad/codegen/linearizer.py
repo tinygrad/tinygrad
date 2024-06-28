@@ -300,6 +300,13 @@ class Linearizer(Kernel):
       # phi the last wmmas back to accs
       accs[reduceop] = [UOp(UOps.PHI, tc.dtype_out, (acc, UOp(UOps.GEP, tc.dtype_out, (wmmas[z//wmma_sz[2]],), z%wmma_sz[2])))
                         for z, acc in enumerate(accs[reduceop])]
+    elif self.amx:
+      dto = self.amx.dtype_out
+      accs_uops = [UOp(UOps.CAST, dto, tuple(accs[reduceop][x:x+dto.count])) for x in range(0, len(accs[reduceop]), dto.count)]
+      cast_buf1 = UOp(UOps.CAST, dto, tuple(self.global_load(1,[global_idxs[0]]+[NumNode(0)]+reduce_idxs+[full_upcast_idxs[0]]+[NumNode(0)])))
+      cast_buf2 = UOp(UOps.CAST, dto, tuple(self.global_load(2,[NumNode(0)]+[global_idxs[1]]+reduce_idxs+[NumNode(0)]+[full_upcast_idxs[1]])))
+      mma = UOp(UOps.MMA, dto, (cast_buf1,cast_buf2)+tuple(accs_uops), (str(self.amx), self.amx.dims))
+      accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for z, acc in enumerate(accs[reduceop])]
     else:
       assert not locals_to_store, "storing locals isn't supported here"
 
@@ -307,21 +314,13 @@ class Linearizer(Kernel):
       loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[reduceop][i]) if i in self.local_alias else i,
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
-      if self.amx:
-        dto = self.amx.dtype_out
-        accs_uops = [UOp(UOps.CAST, dto, tuple(accs[reduceop][x:x+dto.count])) for x in range(0, len(accs[reduceop]), dto.count)]
-        cast_buf1 = UOp(UOps.CAST, dto, tuple(loaded_buffers[self.bufs[1]][0:dto.count]))
-        cast_buf2 = UOp(UOps.CAST, dto, tuple([loaded_buffers[self.bufs[2]][x*dto.count] for x in range(dto.count)]))
-        mma = UOp(UOps.MMA, dto, (cast_buf1,cast_buf2)+tuple(accs_uops), (str(self.amx), self.amx.dims))
-        accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for z, acc in enumerate(accs[reduceop])]
-      else:
-        def gate_acc(r, idxs): return [
-          UOp.alu(TernaryOps.WHERE, valid.render(render_ops, self.loop_uops), acc, UOp.const(r.dtype, 0)) if valid.min == 0 and valid.max == 1 else acc
-          for valid, acc in zip(expand_node(self.sts[self.full_buf_index].expr_idxs(idxs)[1], expand_idxs(idxs)), accs[r])]
-        local_accs = {r: gate_acc(r,global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for r in accs}
+      def gate_acc(r, idxs): return [
+        UOp.alu(TernaryOps.WHERE, valid.render(render_ops, self.loop_uops), acc, UOp.const(r.dtype, 0)) if valid.min == 0 and valid.max == 1 else acc
+        for valid, acc in zip(expand_node(self.sts[self.full_buf_index].expr_idxs(idxs)[1], expand_idxs(idxs)), accs[r])]
+      local_accs = {r: gate_acc(r,global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for r in accs}
 
-        # run early AST (with reduce)
-        self.ast_parse(reduceop, local_accs, self.acc_offsets(self.full_buf_index), loaded_buffers, reduce_acc=accs[reduceop])
+      # run early AST (with reduce)
+      self.ast_parse(reduceop, local_accs, self.acc_offsets(self.full_buf_index), loaded_buffers, reduce_acc=accs[reduceop])
 
     # end the reduce loop
     self.load_cache.clear()
