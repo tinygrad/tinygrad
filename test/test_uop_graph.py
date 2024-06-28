@@ -249,7 +249,7 @@ class TestUOpGraph(TestUOps):
           const_neg1,
         )),
         UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
-          UOp(UOps.RANGE, dtypes.float, arg=(2, 0), src=(
+          UOp(UOps.RANGE, dtypes.float, arg=(2, 0, 0), src=(
             const0,
             const2
           )),
@@ -301,7 +301,7 @@ class TestBottomupVsTopdownRewrite(TestUOps):
       const_3 = UOp(UOps.CONST, dtypes.float, (), 3.0)
       _special = UOp(UOps.SPECIAL, dtypes.float, (), (0, 'gidx0', 4))
       _global = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
-      _range = UOp(UOps.RANGE, dtypes.float, (const_0,const_2), (2, 0))
+      _range = UOp(UOps.RANGE, dtypes.float, (const_0,const_2), (2, 0, 0))
       _acc = UOp(UOps.DEFINE_ACC, dtypes.float, (const_0, _range,), (0,0,0))
       special_mul_one = UOp(UOps.ALU, dtypes.float, (_special, const_neg_1), BinaryOps.MUL) # rewrite
       range_mul_one = UOp(UOps.ALU, dtypes.float, (_range, const_neg_1), BinaryOps.MUL) # rewrite

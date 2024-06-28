@@ -298,7 +298,11 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   def __inner_rewrite(n:UOp) -> UOp:
     replace_src = tuple(__inner_rewrite(x) for x in n.src)
     if replace_src != n.src: n = UOp(n.op, n.dtype, replace_src, n.arg)
-    return __inner_rewrite(new_n) if (new_n := pm.rewrite(n)) else n
+    new_n, _ = pm.rewrite(n)
+    if new_n:
+      return __inner_rewrite(new_n)
+    else:
+      return n
   return __inner_rewrite(sink)
 
 def graph_dedup(sink:UOp):
