@@ -513,7 +513,7 @@ class AMDDevice(HCQCompatCompiled):
     engines = self.properties['array_count'] // self.properties['simd_arrays_per_engine']
     self.tmpring_size = (wave_scratch_len // 256) << 12 | (self.scratch_len // (wave_scratch_len * engines))
 
-    self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000, ctx_save_restore_size=0x2C02000, eop_buffer_size=0x1000)
+    self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x100000, ctx_save_restore_size=0x2C02000, eop_buffer_size=0x1000)
     self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HWPM4Queue, HWCopyQueue,
@@ -526,12 +526,13 @@ class AMDDevice(HCQCompatCompiled):
   def _alloc_queue(self, type, ring_size, ctx_save_restore_size=None, eop_buffer_size=None) -> AMDQueueDesc:
     gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     ring = self._gpu_alloc(ring_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    ctx_save_restore = self._gpu_alloc(ctx_save_restore_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if ctx_save_restore_size else ctx_save_restore_size
-    eop_buffer = self._gpu_alloc(eop_buffer_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if eop_buffer_size else eop_buffer_size
+    cwsr_ctx = self._gpu_alloc(ctx_save_restore_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if ctx_save_restore_size else None
+    eop_buffer = self._gpu_alloc(eop_buffer_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if eop_buffer_size else None
     queue = kio.create_queue(AMDDevice.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
       queue_type=type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
-      eop_buffer_address=eop_buffer.va_addr, eop_buffer_size=eop_buffer.size, ctx_save_restore_address=ctx_save_restore.va_addr,
-      ctx_save_restore_size=ctx_save_restore.size, write_pointer_address=gart.va_addr, read_pointer_address=gart.va_addr + 8)
+      eop_buffer_address=eop_buffer.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.size if eop_buffer else 0,
+      ctx_save_restore_address=cwsr_ctx.va_addr if cwsr_ctx else 0, ctx_save_restore_size=cwsr_ctx.size if cwsr_ctx else 0,
+      write_pointer_address=gart.va_addr, read_pointer_address=gart.va_addr + 8)
 
     if not hasattr(self, 'doorbells'):
       self.doorbells_base = queue.doorbell_offset & (~0x1fff) # doorbell is two pages
