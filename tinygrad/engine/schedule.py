@@ -316,7 +316,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   if SAVE_SCHEDULE:
     def _save():
       print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
-      pickle.dump(SCHEDULES, open(fp, "wb"))
+      with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
     if len(SCHEDULES) == 0: atexit.register(_save)
     SCHEDULES.extend((ps.ast for ps in prescheduled.values()) if getenv("CAPTURE_AST") else [(graph, prescheduled)])
   # confirm everything was scheduled correctly

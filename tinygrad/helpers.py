@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
-import itertools, urllib.request, subprocess, shutil, math
+import itertools, urllib.request, subprocess, shutil, math, json
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
@@ -58,7 +58,7 @@ def get_child(obj, key):
 def get_shape(x) -> Tuple[int, ...]:
   if not isinstance(x, (list, tuple)): return ()
   subs = [get_shape(xi) for xi in x]
-  if not all_same([sub for sub in subs]): raise ValueError(f"inhomogeneous shape from {x}")
+  if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
@@ -101,9 +101,9 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
-WINO, THREEFRY, CACHECOLLECTING = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CACHECOLLECTING", 1)
+WINO, THREEFRY, CAPTURING = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CAPTURING", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
-MULTIOUTPUT = ContextVar("MULTIOUTPUT", 1)
+MULTIOUTPUT, PROFILE = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0)
 
 # **************** global state Counters ****************
 
@@ -143,6 +143,34 @@ class Profiling(contextlib.ContextDecorator):
         print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
               colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
+
+class ProfileLogger:
+  writers: int = 0
+  mjson: List[Dict] = []
+  actors: Dict[str, int] = {}
+  subactors: Dict[Tuple[str, str], int] = {}
+  path = getenv("PROFILE_OUTPUT_FILE", temp("tinygrad_profile.json"))
+
+  def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
+
+  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor)]
+
+  def __del__(self):
+    for name,st,et,actor_name,subactor_name in self.events:
+      if actor_name not in self.actors:
+        self.actors[actor_name] = (pid:=len(self.actors))
+        self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+
+      if (subactor_key:=(actor_name,subactor_name)) not in self.subactors:
+        self.subactors[subactor_key] = (tid:=len(self.subactors))
+        self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
+
+      self.mjson.append({"name": name, "ph": "X", "pid": self.actors[actor_name], "tid": self.subactors.get(subactor_key, -1), "ts":st, "dur":et-st})
+
+    ProfileLogger.writers -= 1
+    if ProfileLogger.writers == 0:
+      with open(self.path, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
+      print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/ to open it.")
 
 # *** universal database cache ***
 
@@ -206,7 +234,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
-  else: fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
+  else: fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / (name or hashlib.md5(url.encode('utf-8')).hexdigest())
   if not fp.is_file() or not allow_caching:
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200

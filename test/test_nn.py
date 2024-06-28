@@ -16,14 +16,14 @@ class TestNN(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no int64 on WebGPU")
   def test_sparse_cat_cross_entropy(self):
     # create in tinygrad
-    input = Tensor.randn(5, 5)
+    input_tensor = Tensor.randn(5, 5)
     target = Tensor([0, 0, 0, 1, 2])  # torch doesn't support target=-1
-    torch_input = torch.tensor(input.numpy())
+    torch_input = torch.tensor(input_tensor.numpy())
     torch_target = torch.tensor(target.numpy(), dtype=torch.long)
 
     for smoothing in [0.0, 0.1, 0.5, 1.0]:
       for ignore_index in [-1, 0, 2]:
-        loss = input.sparse_categorical_crossentropy(target, label_smoothing=smoothing, ignore_index=ignore_index)
+        loss = input_tensor.sparse_categorical_crossentropy(target, label_smoothing=smoothing, ignore_index=ignore_index)
         torch_loss = torch.nn.CrossEntropyLoss(reduction='mean', label_smoothing=smoothing, ignore_index=ignore_index)(torch_input, torch_target)
         np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
 

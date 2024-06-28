@@ -770,7 +770,7 @@ class Tensor:
     new_shape = tuple([s if s is not None else self.shape[i] for i,s in enumerate(argfix(shape, *args))])
     # resolve -1
     if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
-    elif c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
+    if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
 
   def expand(self, shape, *args) -> Tensor:
@@ -1564,11 +1564,11 @@ class Tensor:
     formula = formula.replace(" ", "")
     inputs_str, output = formula.split("->") if "->" in formula else (formula, \
                                                                        ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
-    inputs = [x for x in inputs_str.split(',')]
+    inputs = inputs_str.split(',')
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
 
     # map the value of each letter in the formula
-    letter_val = sorted(merge_dicts([{letter:dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(inputs, xs)]).items())
+    letter_val = sorted(merge_dicts([dict(zip(letters, tensor.shape)) for letters, tensor in zip(inputs, xs)]).items())
 
     xs_:List[Tensor] = []
     lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in inputs]
@@ -1796,9 +1796,13 @@ class Tensor:
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
-    assert all_int((r,c)), "does not support symbolic"
-    if r == 0: return Tensor.zeros((r, c), **kwargs)
-    return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-diagonal, c-diagonal, **kwargs).unsqueeze(0).expand(r,c)
+    assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
+    if r == 0 or c == 0 or diagonal >= c: return Tensor.zeros(r,c,**kwargs)
+    if r+diagonal <= 0: return Tensor.ones(r,c,**kwargs)
+    s = r+c-1
+    # build a (s, s) upper triangle
+    t = Tensor.ones(s,s,**kwargs).pad((None,(0,s))).flatten().shrink(((0,s*(2*s-1)),)).reshape(s,-1).shrink((None,(0,s)))
+    return t[:r,-diagonal:c-diagonal] if diagonal <= 0 else t[diagonal:r+diagonal,:c]
 
   def triu(self, diagonal:int=0) -> Tensor:
     """
@@ -1821,7 +1825,7 @@ class Tensor:
     print(t.triu(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device).where(self, 0).cast(self.dtype)
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device, dtype=dtypes.bool).where(self, 0).cast(self.dtype)
 
   def tril(self, diagonal:int=0) -> Tensor:
     """
@@ -1844,7 +1848,7 @@ class Tensor:
     print(t.tril(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device).where(0, self).cast(self.dtype)
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device, dtype=dtypes.bool).where(0, self).cast(self.dtype)
 
   # ***** unary ops *****
 

@@ -166,6 +166,8 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
       for k,v in nn.state.get_state_dict(model).items():
         if 'scale' in k: v.shard_(device, axis=None)  # from quantized
         elif '.attention.' in k: v.shard_(device, axis=-1)
+        elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
+        elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
         elif '.feed_forward.' in k: v.shard_(device, axis=-1)
         elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
         elif 'output.weight' in k: v.shard_(device, axis=0)
@@ -207,7 +209,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser()
   parser.add_argument("--download_model", action="store_true", help="Download a 8B model")
-  parser.add_argument("--model", type=Path, required=True, help="Model path")
+  parser.add_argument("--model", type=Path, help="Model path")
   parser.add_argument("--size", choices=["8B", "70B"], default="8B", help="Model size")
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
   parser.add_argument("--quantize", choices=["int8", "nf4"], help="Quantization method")
@@ -229,6 +231,8 @@ if __name__ == "__main__":
     fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00003-of-00004.safetensors", "model-00003-of-00004.safetensors", subdir="llama3-8b-sfr")
     fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", "model-00004-of-00004.safetensors", subdir="llama3-8b-sfr")
     args.model = fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", "model.safetensors.index.json", subdir="llama3-8b-sfr")
+
+  assert args.model is not None, "please provide --model option"
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
   if args.benchmark: Tensor.manual_seed(42)
@@ -402,16 +406,17 @@ if __name__ == "__main__":
       last_tok = tok
       generated += tokenizer.decode([tok])
       print(generated)
-    EXPECTED_TEXT = {
-      1: "Hello! How can I help you today? If you have any questions or need assistance with anything,",
-      2: "Hello! How can I help you today? If you have any questions, need assistance or just want",
-      3: "Hello! How can I help you today? If you have any questions or need assistance, feel free",
-      4: "Hello! How can I assist you today? If you have any questions, need information, or require",
-      5: "Hello! How can I assist you today? If you have any questions or need help with something",
-      6: "Hello! How can I assist you today? If you have any questions, need information, or require",
-    }
-    assert generated == EXPECTED_TEXT[args.shard], f"{generated=} {EXPECTED_TEXT[args.shard]}"
-    print("\n" + colored("output validated", "green"))  # NOTE: "\n" inside colored does not render the color in github action
+    if "LLaMA-3/8B-SF-DPO" in args.model.as_posix():
+      EXPECTED_TEXT = {
+        1: "Hello! How can I help you today? If you have any questions or need assistance with anything,",
+        2: "Hello! How can I help you today? If you have any questions, need assistance or just want",
+        3: "Hello! How can I help you today? If you have any questions or need assistance, feel free",
+        4: "Hello! How can I assist you today? If you have any questions, need information, or require",
+        5: "Hello! How can I assist you today? If you have any questions or need help with something",
+        6: "Hello! How can I assist you today? If you have any questions, need information, or require",
+      }
+      assert generated == EXPECTED_TEXT[args.shard], f"{generated=} {EXPECTED_TEXT[args.shard]}"
+      print("\n" + colored("output validated", "green"))  # NOTE: "\n" inside colored does not render the color in github action
   else:
     prompt = [tokenizer.bos_id] + encode_message("system", "You are an helpful assistant.")
 

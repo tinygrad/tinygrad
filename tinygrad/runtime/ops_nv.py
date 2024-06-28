@@ -1,9 +1,9 @@
 from __future__ import annotations
-import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
+import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
+from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod, PROFILE
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler
 import tinygrad.runtime.autogen.cuda as cuda
@@ -103,9 +103,11 @@ class HWQueue:
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
     return self._mark_command_end()
 
+  def timestamp(self, signal): return HWQueue.signal(self, signal, timestamp=True)
+
   def signal(self, signal, value=0, timestamp=False):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
-            (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
+               (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
     return self._mark_command_end()
 
@@ -152,7 +154,7 @@ class HWComputeQueue(HWQueue):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_OFFSET_OUT_UPPER, 2), *nvdata64(gpuaddr)]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LINE_LENGTH_IN, 2), len(data)*4, 0x1]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LAUNCH_DMA, 1), 0x41]
-    self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + [x for x in data]
+    self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + list(data)
     return self._mark_command_end()
 
   def exec(self, prg, kernargs, global_size=(1,1,1), local_size=(1,1,1), signal=None, signal_value=0):
@@ -220,7 +222,7 @@ class NVProgram:
         print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.global_init, self.shmem_usage = None, 0
+    self.rel_info, self.global_init, self.shmem_usage = None, None, 0
     constant_buffers_data = {}
 
     if MOCKGPU:
@@ -239,6 +241,7 @@ class NVProgram:
         if match := re.match(r'\.nv\.constant(\d+)', section_name):
           constant_buffers_data[int(match.group(1))] = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
         if section_name == ".nv.global.init": self.global_init = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
+        elif section_name.startswith(".rel.text"): self.rel_info = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast('I')
         elif section_name == ".nv.info":
           section_data = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
           for i in range(sh_size // 12):
@@ -253,10 +256,6 @@ class NVProgram:
     self.lib_sz = round_up(round_up(self.program.nbytes, 128) + max(0x1000, sum([round_up(x.nbytes, 128) for i,x in constant_buffers_data.items()]) +
                            round_up(0 if self.global_init is None else self.global_init.nbytes, 128)), 0x1000)
     self.lib_gpu = self.device.allocator.alloc(self.lib_sz)
-
-    HWComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).submit(self.device)
-    for st in range(0, len(self.program), 4095):
-      HWComputeQueue().copy_from_cpu(self.lib_gpu.base+st*4, self.program[st:st+4095]).submit(self.device)
 
     self.constbuffer_0 = [0] * 88
     self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
@@ -281,12 +280,26 @@ class NVProgram:
     if 0 in constant_buffers_data: constant_buffers_data.pop(0)
 
     off = round_up(self.program.nbytes, 128)
+
+    if self.rel_info is not None:
+      assert self.global_init is not None
+      global_init_addr = self.lib_gpu.base + off
+      for rel_i in range(0, len(self.rel_info), 4):
+        if self.rel_info[rel_i+2] == 0x39: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr >> 32) # R_CUDA_ABS32_HI_32
+        elif self.rel_info[rel_i+2] == 0x38: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr & 0xffffffff) # R_CUDA_ABS32_LO_32
+        else: raise RuntimeError(f"unknown reloc: {self.rel_info[rel_i+2]}")
+
+    HWComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).submit(self.device)
+    for st in range(0, len(self.program), 4095):
+      HWComputeQueue().copy_from_cpu(self.lib_gpu.base+st*4, self.program[st:st+4095]).submit(self.device)
+
     if self.global_init is not None:
-      # Constbuffer 4 contains a pointer to nv.global.init, load section and set up the pointer.
-      assert 4 in constant_buffers_data and constant_buffers_data[4].nbytes == 8
       HWComputeQueue().copy_from_cpu(load_addr:=(self.lib_gpu.base + off), self.global_init).submit(self.device)
-      constant_buffers_data[4][0:2] = memoryview(struct.pack('Q', load_addr)).cast('I')
       off += round_up(self.global_init.nbytes, 128)
+      if 4 in constant_buffers_data: # >= 12.4
+        # Constbuffer 4 contains a pointer to nv.global.init, load section and set up the pointer.
+        assert constant_buffers_data[4].nbytes == 8
+        constant_buffers_data[4][0:2] = memoryview(struct.pack('Q', load_addr)).cast('I')
 
     for i,data in constant_buffers_data.items():
       self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (self.lib_gpu.base + off) >> 32)
@@ -314,21 +327,24 @@ class NVProgram:
 
     # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
     if MOCKGPU: self.constbuffer_0[0:2] = [len(args), len(vals)]
-    kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.base)] + [val for val in vals]
+    kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.base)] + list(vals)
+
+    sig_st, sig_en = (self.device._get_signal(), self.device._get_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
 
     queue = HWComputeQueue()
     queue.wait(self.device.timeline_signal, self.device.timeline_value - 1)
-    if wait: queue.signal(self.device.time_event_st, timestamp=True)
+    if wait or PROFILE: queue.timestamp(sig_st)
     queue.copy_from_cpu(self.device.kernargs_ptr, self.constbuffer_0 + kernargs)
     queue.exec(self, self.device.kernargs_ptr, global_size, local_size)
-    if wait: queue.signal(self.device.time_event_en, timestamp=True)
+    if wait or PROFILE: queue.timestamp(sig_en)
     queue.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
     self.device.kernargs_ptr += self.kernargs_alloc_size
 
+    if PROFILE: self.device.sig_prof_records.append((sig_st, sig_en, self.name, False))
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
-      return (self.device.time_event_en[1] - self.device.time_event_st[1]) / 1e9
+      return (sig_en[1] - sig_st[1]) / 1e9
 
 class NVAllocator(HCQCompatAllocator):
   def __init__(self, device:NVDevice): super().__init__(device)
@@ -453,10 +469,7 @@ class NVDevice(HCQCompatCompiled):
       fd_uvm_2 = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.root = rm_alloc(self.fd_ctl, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
       uvm.initialize(self.fd_uvm)
-      try:
-        uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm)
-      except RuntimeError:
-        pass  # this error is okay, CUDA hits it too
+      with contextlib.suppress(RuntimeError): uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm) # this error is okay, CUDA hits it too
 
       NVDevice.gpus_info = (nv_gpu.nv_ioctl_card_info_t*64)()
       nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, NVDevice.gpus_info)
@@ -498,7 +511,7 @@ class NVDevice(HCQCompatCompiled):
       uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuUuidB=nv_gpu.struct_nv_uuid(uuid=dev.gpu_uuid))
 
     if NVDevice.signals_page is None:
-      NVDevice.signals_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
+      NVDevice.signals_page = self._gpu_system_alloc(16 * 65536, map_to_cpu=True)
       NVDevice.signals_pool = [to_mv(self.signals_page.base + off, 16).cast("Q") for off in range(0, NVDevice.signals_page.length, 16)]
     else: self._gpu_map(NVDevice.signals_page)
 
@@ -535,14 +548,11 @@ class NVDevice(HCQCompatCompiled):
 
     NVDevice.devices.append(self)
 
-  def synchronize(self):
-    NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
-    self.cmdq_wptr = 0
-
-    if self.timeline_value > (1 << 63): self._wrap_timeline_signal()
-
   @classmethod
   def _read_signal(self, sig): return sig[0]
+
+  @classmethod
+  def _read_timestamp(self, sig): return sig[1]
 
   @classmethod
   def _set_signal(self, sig, value): sig[0] = value
@@ -558,6 +568,15 @@ class NVDevice(HCQCompatCompiled):
     while time.time() * 1000 - start_time < timeout:
       if signal[0] >= value: return
     raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
+
+  def _gpu2cpu_time(self, gpu_time, is_copy): return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e3
+
+  def synchronize(self):
+    NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
+    self.cmdq_wptr = 0
+
+    if self.timeline_value > (1 << 63): self._wrap_timeline_signal()
+    if PROFILE: self._prof_process_events()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
     notifier = self._gpu_system_alloc(48 << 20)
