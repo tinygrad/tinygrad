@@ -137,10 +137,10 @@ class PatternMatcher:
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
-  def rewrite(self, uop:UOp) -> Optional[UOp]:
+  def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): return fxn(**store)
+      if _match(uop, p, store): return fxn(**store, **(ctx or {}))
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -277,6 +277,34 @@ constant_folder = PatternMatcher([
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None)
 ])
 
+def _temp_toposort(root:UOp):
+  assert root.op is UOps.STORE
+  ret: Dict[UOp, int] = {}
+  def dfs(x:UOp, depth):
+    if x.op is UOps.STORE and x != root: return
+    if x in ret: return
+    for v in x.src: dfs(v, depth+1)
+    ret[x] = depth
+  dfs(root, 0)
+  return ret
+
+def gate_rewrite(root:UOp, gate:UOp, exprs:Dict[UOp, UOp]):
+  if getenv("GRAPHROOT"):
+    from tinygrad.engine.graph import graph_uops
+    graph_uops(list(_temp_toposort(root)))
+  if gate not in exprs: exprs[gate] = UOp(UOps.IF, None, (gate, ))
+  # the STORE isn't gated
+  root = UOp(root.op, root.dtype, root.src[:3], root.arg)
+  # the entire Block is
+  ts = sorted(_temp_toposort(root).items(), key=lambda x:x[1])
+  deepest = ts[-1][0]
+  if deepest.op is not UOps.IF: deepest = UOp(deepest.op, deepest.dtype, deepest.src + (exprs[gate], ), deepest.arg)
+  return root
+
+if_rewrite = PatternMatcher([
+  (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.var("gate")).name("root"), gate_rewrite),
+])
+
 # *** uop graph ***
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
@@ -287,14 +315,14 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
     children[x].append(u)
   in_degree[u] = len(u.src)
 
-def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
   replace: Dict[UOp, UOp] = {}
   def __inner_rewrite(n:UOp) -> UOp:
     if n in replace: return replace[n]
     replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
     if found := nodes.get(replace_source): replace[n] = found
-    else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
+    else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source), ctx)) else x
     return replace[n]
   return __inner_rewrite(sink)
 
@@ -331,6 +359,9 @@ class UOpGraph:
     # dedup all nodes and do graph rewrite
     sink = graph_rewrite(sink, constant_folder)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+
+    # rewrite gated LOAD/STOREs as IF blocks
+    sink = graph_rewrite(sink, if_rewrite, ctx={"exprs": {}})
 
     # filter nodes that don't link to a sink
     # BFS toposort
