@@ -80,9 +80,7 @@ class CStyleLanguage(Renderer):
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.count == 1 else str(var_dtype.count)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.count > 1:
-      if(var_name.startswith('zreg')):
-        name = int(var_name[4:var_name.index('.')]) if '.' in var_name else int(var_name[4:])
-        return f"__stz(&{buf_name}[{idx}], {name*buf_dtype.itemsize%64}); // {var_name}"
+      if(var_name.startswith('zreg')): return f"__stz(&{buf_name}[{idx}], {int(var_name[4:var_name.index('.')])*buf_dtype.itemsize%64});"
       prefix = self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix
       return f"*(({prefix}{self.render_dtype(buf_dtype)}{var_dtype.count}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
@@ -147,7 +145,6 @@ class CStyleLanguage(Renderer):
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
           if not r[src[0]].startswith('zreg'): kk(f"{r[src[0]]} = {r[src[1]]};")
-          else: kk(f"// phi {r[src[0]]}")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           if uop is UOps.BITCAST:
@@ -171,11 +168,12 @@ class CStyleLanguage(Renderer):
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.MMA: kk(f"__{args[0]}({r[src[0]]}, {r[src[1]]}); // {', '.join([r[src[x]] for x in range(2, len(src))])}")
+        elif uop is UOps.MMA: kk(f"__{args[0]}({r[src[0]]}, {r[src[1]]});")
         elif uop is UOps.DEFINE_ACC:
-          if len(args) == 3 and args[2] == 'zreg':
+          if not(len(args) == 3 and args[2] == 'zreg'): kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
+          else:
+            ssa('zreg',u)
             if(args[1] == 0): kk("AMX_SET(1); AMX_SET(0);")
-          else: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
