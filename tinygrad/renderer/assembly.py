@@ -265,5 +265,5 @@ ptx_matcher = PatternMatcher([
                                                                               UPat(name="alu"))),  # no const here
     lambda root, alu: UOp(root.op, root.dtype,
       (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
-        UOp.const(dtypes.int64, 0))+root.src[2:])),
+        UOp.const(dtypes.int64, 0))+root.src[2:]), True),
 ])
