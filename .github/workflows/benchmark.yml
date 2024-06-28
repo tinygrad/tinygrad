@@ -39,6 +39,8 @@ jobs:
     # run: echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
     - name: Run Stable Diffusion
       run: JIT=2 THREEFRY=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+    - name: Run SDXL
+      run: JIT=2 THREEFRY=1 python3 examples/sdxl.py --seed 0 --noshow | tee sdxl.txt
     - name: Run model inference benchmark
       run: METAL=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -103,6 +105,7 @@ jobs:
           matmul.txt
           matmul_half.txt
           sd.txt
+          sdxl.txt
           beautiful_mnist.txt
           train_cifar.txt
           train_cifar_half.txt
@@ -156,6 +159,8 @@ jobs:
       run: CUDA=1 PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run Stable Diffusion
       run: NV=1 THREEFRY=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+    - name: Run SDXL
+      run: NV=1 THREEFRY=1 python3 examples/sdxl.py --seed 0 --noshow | tee sdxl.txt
     - name: Run LLaMA
       run: |
         NV=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -195,6 +200,7 @@ jobs:
           matmul_ptx.txt
           matmul_nv.txt
           sd.txt
+          sdxl.txt
           llama_unjitted.txt
           llama_jitted.txt
           llama_beam.txt
@@ -309,6 +315,8 @@ jobs:
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run Stable Diffusion
       run: AMD=1 THREEFRY=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+    - name: Run SDXL
+      run: AMD=1 THREEFRY=1 python3 examples/sdxl.py --seed 0 --noshow | tee sdxl.txt
     - name: Run LLaMA 7B
       run: |
         AMD=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -359,6 +367,7 @@ jobs:
           matmul.txt
           matmul_amd.txt
           sd.txt
+          sdxl.txt
           mixtral.txt
 
   testmoreamdbenchmark:
