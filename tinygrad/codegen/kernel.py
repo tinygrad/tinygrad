@@ -101,7 +101,6 @@ class Kernel:
     # the local aliased buffers for A and B
     self.bufs_for_tensor_core: Dict[LazyOp, Tuple[int, int]] = {}
     self.dont_use_locals: bool = False
-
     self.amx: Optional[AMX] = None
 
     # group simplifies
@@ -409,18 +408,17 @@ class Kernel:
       return False
 
   def apply_amx(self):
-    if getenv("AMX", 0) and (r:=self.reduceop) is not None and r.op is ReduceOps.SUM and (r.dtype in [dtypes.float, dtypes.double]):
-      if (mul_op:=r.src[0]).op is not BinaryOps.MUL: return False
-      for src in mul_op.src:
-        if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
+    if not (getenv("AMX", 0) and (r:=self.reduceop) is not None and r.op is ReduceOps.SUM and (r.dtype is dtypes.float)): return False
+    if (mul_op:=r.src[0]).op is not BinaryOps.MUL: return False
+    for src in mul_op.src:
+      if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
 
-      if not all(x % (amx_size:=64//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
+    if not all(x % (amx_size:=64//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
 
-      self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
-      self.apply_opt(Opt(OptOps.UPCAST, 1, amx_size))
-      self.amx=AMX(dims=(amx_size, amx_size), dtype_out=r.dtype.vec(amx_size))
-      return True
-    return False
+    self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
+    self.apply_opt(Opt(OptOps.UPCAST, 1, amx_size))
+    self.amx=AMX(dims=(amx_size, amx_size), dtype_out=r.dtype.vec(amx_size))
+    return True
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
