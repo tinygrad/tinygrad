@@ -1,22 +1,19 @@
 # This file incorporates code from the following:
 # Github Name                    | License | Link
-# tinygrad/tinygrad              | MIT     | https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/LICENSE
 # Stability-AI/generative-models | MIT     | https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/LICENSE-CODE
 # mlfoundations/open_clip        | MIT     | https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/LICENSE
 
-from tinygrad.tensor import Tensor, dtypes
+from tinygrad import Tensor, TinyJit, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import safe_load, load_state_dict
-from tinygrad.helpers import fetch
-from tinygrad import TinyJit
+from tinygrad.helpers import fetch, trange
+from examples.stable_diffusion import ClipTokenizer, ResnetBlock, Mid, Downsample, Upsample
 import numpy as np
 
 from typing import Dict, List, Union, Callable, Optional, Any, Set, Tuple
-import os, math, re, gzip, argparse, tempfile
+import math, argparse, tempfile
 from abc import ABC, abstractmethod
-from functools import lru_cache
 from pathlib import Path
-from tqdm import trange
 from PIL import Image
 
 
@@ -163,26 +160,6 @@ class UNet:
       return x + x_in
 
 
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L235
-  class Downsample:
-    def __init__(self, channels:int):
-      self.op = Conv2d(channels, channels, 3, stride=2, padding=1)
-
-    def __call__(self, x:Tensor) -> Tensor:
-      return self.op(x)
-
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L242
-  class Upsample:
-    def __init__(self, channels:int):
-      self.conv = Conv2d(channels, channels, 3, padding=1)
-
-    def __call__(self, x:Tensor) -> Tensor:
-      bs,c,py,px = x.shape
-      z = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
-      return self.conv(z)
-
-
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L251
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -245,7 +222,7 @@ class UNetModel:
 
       if idx != len(channel_mult) - 1:
         self.input_blocks.append([
-          UNet.Downsample(ch),
+          Downsample(ch),
         ])
         input_block_channels.append(ch)
         ds *= 2
@@ -271,7 +248,7 @@ class UNetModel:
           layers.append(UNet.SpatialTransformer(ch, n_heads, d_head, ctx_dim, depth=transformer_depth[idx]))
 
         if idx > 0 and i == self.num_res_blocks[idx]:
-          layers.append(UNet.Upsample(ch))
+          layers.append(Upsample(ch))
           ds //= 2
         self.output_blocks.append(layers)
 
@@ -316,119 +293,6 @@ class UNetModel:
 class DiffusionModel:
   def __init__(self, *args, **kwargs):
     self.diffusion_model = UNetModel(*args, **kwargs)
-
-
-class Tokenizer:
-  """
-  Namespace for CLIP Text Tokenizer components.
-  """
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L409
-  @staticmethod
-  def get_pairs(word):
-    """
-    Return set of symbol pairs in a word.
-    Word is represented as tuple of symbols (symbols being variable-length strings).
-    """
-    return set(zip(word, word[1:]))
-  @staticmethod
-  def whitespace_clean(text):
-    text = re.sub(r'\s+', ' ', text)
-    text = text.strip()
-    return text
-  @staticmethod
-  def bytes_to_unicode():
-    """
-    Returns list of utf-8 byte and a corresponding list of unicode strings.
-    The reversible bpe codes work on unicode strings.
-    This means you need a large # of unicode characters in your vocab if you want to avoid UNKs.
-    When you're at something like a 10B token dataset you end up needing around 5K for decent coverage.
-    This is a significant percentage of your normal, say, 32K bpe vocab.
-    To avoid that, we want lookup tables between utf-8 bytes and unicode strings.
-    And avoids mapping to whitespace/control characters the bpe code barfs on.
-    """
-    bs = list(range(ord("!"), ord("~")+1))+list(range(ord("¡"), ord("¬")+1))+list(range(ord("®"), ord("ÿ")+1))
-    cs = bs[:]
-    n = 0
-    for b in range(2**8):
-      if b not in bs:
-        bs.append(b)
-        cs.append(2**8+n)
-        n += 1
-    cs = [chr(n) for n in cs]
-    return dict(zip(bs, cs))
-  @lru_cache()
-  @staticmethod
-  def default_bpe():
-    # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
-    return fetch("https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz", "bpe_simple_vocab_16e6.txt.gz")
-  class ClipTokenizer:
-    def __init__(self):
-      self.byte_encoder = Tokenizer.bytes_to_unicode()
-      merges = gzip.open(Tokenizer.default_bpe()).read().decode("utf-8").split('\n')
-      merges = merges[1:49152-256-2+1]
-      merges = [tuple(merge.split()) for merge in merges]
-      vocab = list(Tokenizer.bytes_to_unicode().values())
-      vocab = vocab + [v+'</w>' for v in vocab]
-      for merge in merges:
-        vocab.append(''.join(merge))
-      vocab.extend(['<|startoftext|>', '<|endoftext|>'])
-      self.encoder = dict(zip(vocab, range(len(vocab))))
-      self.bpe_ranks = dict(zip(merges, range(len(merges))))
-      self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
-      self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
-
-    def bpe(self, token):
-      if token in self.cache:
-        return self.cache[token]
-      word = tuple(token[:-1]) + ( token[-1] + '</w>',)
-      pairs = Tokenizer.get_pairs(word)
-
-      if not pairs:
-        return token+'</w>'
-
-      while True:
-        bigram = min(pairs, key = lambda pair: self.bpe_ranks.get(pair, float('inf')))
-        if bigram not in self.bpe_ranks:
-          break
-        first, second = bigram
-        new_word = []
-        i = 0
-        while i < len(word):
-          try:
-            j = word.index(first, i)
-            new_word.extend(word[i:j])
-            i = j
-          except Exception:
-            new_word.extend(word[i:])
-            break
-
-          if word[i] == first and i < len(word)-1 and word[i+1] == second:
-            new_word.append(first+second)
-            i += 2
-          else:
-            new_word.append(word[i])
-            i += 1
-        new_word = tuple(new_word)
-        word = new_word
-        if len(word) == 1:
-          break
-        pairs = Tokenizer.get_pairs(word)
-      word = ' '.join(word)
-      self.cache[token] = word
-      return word
-
-    def encode(self, text:str, pad_with_zeros:bool=False):
-      bpe_tokens: List[int] = []
-      text = Tokenizer.whitespace_clean(text.strip()).lower()
-      for token in re.findall(self.pat, text):
-        token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
-        bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
-      # Truncation, keeping two slots for start and end tokens.
-      if len(bpe_tokens) > 75:
-        bpe_tokens = bpe_tokens[:75]
-      return [49406] + bpe_tokens + [49407] + ([0] if pad_with_zeros else [49407]) * (77 - len(bpe_tokens) - 2)
-
 
 
 class Embedder(ABC):
@@ -541,7 +405,7 @@ class Closed:
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L331
 class FrozenClosedClipEmbedder(Embedder):
   def __init__(self):
-    self.tokenizer   = Tokenizer.ClipTokenizer()
+    self.tokenizer   = ClipTokenizer()
     self.transformer = Closed.ClipTextModel()
     self.input_key   = "txt"
 
@@ -638,25 +502,13 @@ class Open:
         self._attn_mask = Tensor.full((77, 77), float("-inf")).triu(1)
       return self._attn_mask
 
-    def __call__(self, text:Tensor) -> Tensor:
-      seq_len = text.shape[1]
-
-      x = self.token_embedding(text)
-      x = x + self.positional_embedding[:seq_len]
-      x = self.transformer(x, attn_mask=self.attn_mask)
-      x = self.ln_final(x)
-
-      pooled = x[Tensor.arange(x.shape[0]), text.argmax(dim=-1)]
-      pooled = pooled @ self.text_projection
-      return pooled
-
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L396
 class FrozenOpenClipEmbedder(Embedder):
   def __init__(self, dims:int=1280):
     self.model = Open.ClipTextTransformer(dims)
     self.input_key = "txt"
-    self.tokenizer = Tokenizer.ClipTokenizer()
+    self.tokenizer = ClipTokenizer()
 
   def text_transformer_forward(self, x:Tensor, attn_mask:Optional[Tensor]=None):
     for r in self.model.transformer.resblocks:
@@ -669,7 +521,7 @@ class FrozenOpenClipEmbedder(Embedder):
     x = self.model.token_embedding(tokens).add(self.model.positional_embedding).permute(1,0,2)
     x, penultimate = self.text_transformer_forward(x, attn_mask=self.model.attn_mask)
     x = self.model.ln_final(x)
-    pooled = x[Tensor.arange(x.shape[0]), tokens.argmax(axis=-1).numpy().item()] @ self.model.text_projection
+    pooled = x[Tensor.arange(x.shape[0]), tokens.argmax(axis=-1)] @ self.model.text_projection
 
     return penultimate, pooled
 
@@ -733,23 +585,6 @@ class FirstStage:
   Namespace for First Stage Model components
   """
 
-  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/model.py#L94
-  class ResnetBlock:
-    def __init__(self, in_dim:Tensor, out_dim:Optional[Tensor]=None):
-      out_dim = out_dim if out_dim is not None else in_dim
-
-      self.norm1 = GroupNorm(32, in_dim)
-      self.conv1 = Conv2d(in_dim, out_dim, 3, stride=1, padding=1)
-      self.norm2 = GroupNorm(32, out_dim)
-      self.conv2 = Conv2d(out_dim, out_dim, 3, stride=1, padding=1)
-      self.nin_shortcut = tensor_identity if in_dim == out_dim else Conv2d(in_dim, out_dim, 1, stride=1, padding=0)
-
-    def __call__(self, x:Tensor) -> Tensor:
-      h = x.sequential([self.norm1, Tensor.swish, self.conv1])
-      h = h.sequential([self.norm2, Tensor.swish, self.conv2])
-      return self.nin_shortcut(x) + h
-
-
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/model.py#L74
   # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L102
   class Downsample:
@@ -772,35 +607,6 @@ class FirstStage:
       return self.conv(x)
 
 
-  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/model.py#L204
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L17
-  class AttnBlock:
-    def __init__(self, dim:int):
-      self.norm = GroupNorm(32, dim)
-      self.q = Conv2d(dim, dim, 1)
-      self.k = Conv2d(dim, dim, 1)
-      self.v = Conv2d(dim, dim, 1)
-      self.proj_out = Conv2d(dim, dim, 1)
-
-    # copied from AttnBlock in ldm repo
-    def __call__(self, x:Tensor) -> Tensor:
-      h_ = self.norm(x)
-      q,k,v = self.q(h_), self.k(h_), self.v(h_)
-
-      # compute attention
-      b,c,h,w = q.shape
-      q,k,v = [x.reshape(b,c,h*w).transpose(1,2) for x in (q,k,v)]
-      h_ = Tensor.scaled_dot_product_attention(q,k,v).transpose(1,2).reshape(b,c,h,w)
-      return x + self.proj_out(h_)
-
-
-  class MidEntry:
-    def __init__(self, block_in:int):
-      self.block_1 = FirstStage.ResnetBlock(block_in)
-      self.attn_1  = FirstStage.AttnBlock  (block_in)
-      self.block_2 = FirstStage.ResnetBlock(block_in)
-
-
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/model.py#L487
   class Encoder:
     def __init__(self, ch:int, in_ch:int, out_ch:int, z_ch:int, ch_mult:List[int], num_res_blocks:int, resolution:int):
@@ -808,7 +614,7 @@ class FirstStage:
       in_ch_mult = (1,) + tuple(ch_mult)
 
       class BlockEntry:
-        def __init__(self, block:List[FirstStage.ResnetBlock], downsample):
+        def __init__(self, block:List[ResnetBlock], downsample):
           self.block = block
           self.downsample = downsample
       self.down: List[BlockEntry] = []
@@ -817,13 +623,13 @@ class FirstStage:
         block_in  = ch * in_ch_mult[i_level]
         block_out = ch * ch_mult   [i_level]
         for _ in range(num_res_blocks):
-          block.append(FirstStage.ResnetBlock(block_in, block_out))
+          block.append(ResnetBlock(block_in, block_out))
           block_in = block_out
 
         downsample = tensor_identity if (i_level == len(ch_mult)-1) else FirstStage.Downsample(block_in)
         self.down.append(BlockEntry(block, downsample))
 
-      self.mid = FirstStage.MidEntry(block_in)
+      self.mid = Mid(block_in)
 
       self.norm_out = GroupNorm(32, block_in)
       self.conv_out = Conv2d(block_in, 2*z_ch, kernel_size=3, stride=1, padding=1)
@@ -849,10 +655,10 @@ class FirstStage:
 
       self.conv_in = Conv2d(z_ch, block_in, kernel_size=3, stride=1, padding=1)
 
-      self.mid = FirstStage.MidEntry(block_in)
+      self.mid = Mid(block_in)
 
       class BlockEntry:
-        def __init__(self, block:List[FirstStage.ResnetBlock], upsample:Callable[[Any],Any]):
+        def __init__(self, block:List[ResnetBlock], upsample:Callable[[Any],Any]):
           self.block = block
           self.upsample = upsample
       self.up: List[BlockEntry] = []
@@ -860,10 +666,10 @@ class FirstStage:
         block = []
         block_out = ch * ch_mult[i_level]
         for _ in range(num_res_blocks + 1):
-          block.append(FirstStage.ResnetBlock(block_in, block_out))
+          block.append(ResnetBlock(block_in, block_out))
           block_in = block_out
 
-        upsample = tensor_identity if i_level == 0 else FirstStage.Upsample(block_in)
+        upsample = tensor_identity if i_level == 0 else Upsample(block_in)
         self.up.insert(0, BlockEntry(block, upsample)) # type: ignore
 
       self.norm_out = GroupNorm(32, block_in)
@@ -933,7 +739,7 @@ class SDXL:
     self.model = DiffusionModel(**config["model"])
 
     self.discretization = LegacyDDPMDiscretization()
-    self.sigmas = self.discretization(config["denoiser"]["num_idx"], flip=True).numpy()
+    self.sigmas = self.discretization(config["denoiser"]["num_idx"], flip=True)
 
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/inference/helpers.py#L173
   def create_conditioning(self, pos_prompt:str, img_width:int, img_height:int, aesthetic_score:float=5.0) -> Tuple[Dict,Dict]:
@@ -957,10 +763,10 @@ class SDXL:
   def denoise(self, x:Tensor, sigma:Tensor, cond:Dict) -> Tensor:
 
     def sigma_to_idx(s:Tensor) -> Tensor:
-      dists = s - Tensor(self.sigmas).unsqueeze(1)
+      dists = s - self.sigmas.unsqueeze(1)
       return dists.abs().argmin(axis=0).view(*s.shape)
 
-    sigma = Tensor(self.sigmas[sigma_to_idx(sigma).numpy()])
+    sigma = self.sigmas[sigma_to_idx(sigma)]
     sigma_shape = sigma.shape
     sigma = append_dims(sigma, x)
 
@@ -1068,7 +874,7 @@ if __name__ == "__main__":
 
   default_weight_url = 'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors'
   weights = args.weights if args.weights else fetch(default_weight_url, 'sd_xl_base_1.0.safetensors')
-  load_state_dict(model, safe_load(weights), strict=True)
+  load_state_dict(model, safe_load(weights), strict=False)
 
   N = 1
   C = 4
