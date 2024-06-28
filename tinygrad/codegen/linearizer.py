@@ -157,7 +157,7 @@ class Linearizer(Kernel):
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
           rendered_idx = UOp(UOps.CAST, dtypes.int.vec(2), tuple(x.render(render_ops, self.loop_uops) for x in image_idx))
-          valid_tuple = (valid.render(render_ops, self.loop_uops), UOp.const(buf.dtype.base.vec(4), invalid_value)) if valid.min == 0 else tuple()
+          valid_tuple = (valid.render(render_ops, self.loop_uops).cast(dtypes.bool), UOp.const(buf.dtype.base.vec(4), invalid_value)) if valid.min == 0 else tuple()
           self.load_cache[key] = UOp(UOps.LOAD, buf.dtype.base.vec(4),
                                                (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
           if localtype == localtype.scalar():
@@ -173,7 +173,7 @@ class Linearizer(Kernel):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           rendered_idx = idx.render(render_ops, self.loop_uops)
-          valid_tuple = (valid.render(render_ops, self.loop_uops), UOp.const(localtype, invalid_value)) if valid.min == 0 else tuple()
+          valid_tuple = (valid.render(render_ops, self.loop_uops).cast(dtypes.bool), UOp.const(localtype, invalid_value)) if valid.min == 0 else tuple()
           self.load_cache[key] = UOp(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
       ret.append(UOp(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
@@ -212,7 +212,7 @@ class Linearizer(Kernel):
         rendered_idx = idx.render(render_ops, self.loop_uops)
       # TODO: let UPat check this once it's fast
       if valid.min == 1: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var)))
-      else: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(render_ops, self.loop_uops))))
+      else: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(render_ops, self.loop_uops).cast(dtypes.bool))))
     return stores
 
   # render loop
