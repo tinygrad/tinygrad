@@ -302,8 +302,8 @@ class Linearizer(Kernel):
                         for z, acc in enumerate(accs[reduceop])]
     elif self.amx:
       dto = self.amx.dtype_out
-      cast_buf1 = UOp(UOps.CAST, dto, tuple(self.global_load(1,[global_idxs[0]]+[NumNode(0)]+reduce_idxs+[full_upcast_idxs[0]]+[NumNode(0)])))
-      cast_buf2 = UOp(UOps.CAST, dto, tuple(self.global_load(2,[NumNode(0)]+[global_idxs[1]]+reduce_idxs+[NumNode(0)]+[full_upcast_idxs[1]])))
+      cast_buf1 = UOp(UOps.CAST, dto, tuple(self.global_load(1,global_idxs+reduce_idxs+[full_upcast_idxs[0]]+[NumNode(0)])))
+      cast_buf2 = UOp(UOps.CAST, dto, tuple(self.global_load(2,global_idxs+reduce_idxs+[NumNode(0)]+[full_upcast_idxs[1]])))
       def avoid_GEP(casting): return casting.src[0].src[0] if(all(s.op is UOps.GEP for s in casting.src)) else casting
       mma = UOp(UOps.MMA, dto, (avoid_GEP(cast_buf1),avoid_GEP(cast_buf2))+tuple(accs[reduceop]), (str(self.amx), self.amx.dims))
       accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for acc in accs[reduceop]]

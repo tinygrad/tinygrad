@@ -416,7 +416,7 @@ class Kernel:
     if not all(x % (amx_size:=64//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
 
     self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
-    self.apply_opt(Opt(OptOps.UPCAST, 1, amx_size))
+    self.apply_opt(Opt(OptOps.UNROLL, -1, amx_size)) # unroll to support matvec, otherwise cannot upcast reduce dim
     self.amx=AMX(dims=(amx_size, amx_size), dtype_out=r.dtype.vec(amx_size))
     return True
 
