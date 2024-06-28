@@ -7,7 +7,8 @@ from tinygrad import Tensor, TinyJit, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import safe_load, load_state_dict
 from tinygrad.helpers import fetch, trange
-from examples.stable_diffusion import ClipTokenizer, ResnetBlock, Mid, Downsample, Upsample
+from examples.stable_diffusion import ClipTokenizer, ResnetBlock, ResBlock, Mid, Downsample, Upsample, CrossAttention, FeedForward, BasicTransformerBlock
+from examples.stable_diffusion import CLIPEncoderLayer as ClipEncoderLayer, CLIPTextEmbeddings as ClipTextEmbeddings
 import numpy as np
 
 from typing import Dict, List, Union, Callable, Optional, Any, Set, Tuple
@@ -44,91 +45,19 @@ class UNet:
   """
   Namespace for UNet model components.
   """
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L136
-  class ResBlock:
-    def __init__(self, channels:int, emb_channels:int, out_channels:int):
-      self.in_layers = [
-        GroupNorm(32, channels),
-        Tensor.silu,
-        Conv2d(channels, out_channels, 3, padding=1),
-      ]
-      self.emb_layers = [
-        Tensor.silu,
-        Linear(emb_channels, out_channels),
-      ]
-      self.out_layers = [
-        GroupNorm(32, out_channels),
-        Tensor.silu,
-        lambda x: x,  # needed for weights loading code to work
-        Conv2d(out_channels, out_channels, 3, padding=1),
-      ]
-      self.skip_connection = Conv2d(channels, out_channels, 1) if channels != out_channels else tensor_identity
-
-    def __call__(self, x:Tensor, emb:Tensor) -> Tensor:
-      h = x.sequential(self.in_layers)
-      emb_out = emb.sequential(self.emb_layers)
-      h = h + emb_out.reshape(*emb_out.shape, 1, 1)
-      h = h.sequential(self.out_layers)
-      return self.skip_connection(x) + h
-
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L163
-  class CrossAttention:
-    def __init__(self, query_dim:int, ctx_dim:int, n_heads:int, d_head:int):
-      self.to_q = Linear(query_dim, n_heads*d_head, bias=False)
-      self.to_k = Linear(ctx_dim,   n_heads*d_head, bias=False)
-      self.to_v = Linear(ctx_dim,   n_heads*d_head, bias=False)
-      self.num_heads = n_heads
-      self.head_size = d_head
-      self.to_out = [Linear(n_heads*d_head, query_dim)]
-
-    def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
-      ctx = x if ctx is None else ctx
-      q,k,v = self.to_q(x), self.to_k(ctx), self.to_v(ctx)
-      q,k,v = [y.reshape(x.shape[0], -1, self.num_heads, self.head_size).transpose(1,2) for y in (q,k,v)]
-      attention = Tensor.scaled_dot_product_attention(q, k, v).transpose(1,2)
-      h_ = attention.reshape(x.shape[0], -1, self.num_heads * self.head_size)
-      return h_.sequential(self.to_out)
-
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L180
-  class GEGLU:
-    def __init__(self, dim_in:int, dim_out:int):
-      self.proj = Linear(dim_in, dim_out * 2)
-      self.dim_out = dim_out
-
-    def __call__(self, x:Tensor) -> Tensor:
-      x, gate = self.proj(x).chunk(2, dim=-1)
-      return x * gate.gelu()
-
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L189
-  class FeedForward:
-    def __init__(self, dim:int, mult:int=4):
-      self.net = [
-        UNet.GEGLU(dim, dim*mult),
-        lambda x: x,  # needed for weights loading code to work
-        Linear(dim*mult, dim)
-      ]
-
-    def __call__(self, x:Tensor) -> Tensor:
-      return x.sequential(self.net)
-
-
   # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L200
   class BasicTransformerBlock:
     def __init__(self, dim:int, ctx_dim:int, n_heads:int, d_head:int):
-      self.attn1 = UNet.CrossAttention(dim, dim, n_heads, d_head)
-      self.ff    = UNet.FeedForward(dim)
-      self.attn2 = UNet.CrossAttention(dim, ctx_dim, n_heads, d_head)
+      self.attn1 = CrossAttention(dim, dim, n_heads, d_head)
+      self.ff    = FeedForward(dim)
+      self.attn2 = CrossAttention(dim, ctx_dim, n_heads, d_head)
       self.norm1 = LayerNorm(dim)
       self.norm2 = LayerNorm(dim)
       self.norm3 = LayerNorm(dim)
 
     def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
       x = x + self.attn1(self.norm1(x))
-      x = x + self.attn2(self.norm2(x), ctx=ctx)
+      x = x + self.attn2(self.norm2(x), context=ctx)
       x = x + self.ff(self.norm3(x))
       return x
 
@@ -210,7 +139,7 @@ class UNetModel:
     for idx, mult in enumerate(channel_mult):
       for _ in range(self.num_res_blocks[idx]):
         layers: List[Any] = [
-          UNet.ResBlock(ch, time_embed_dim, model_channels*mult),
+          ResBlock(ch, time_embed_dim, model_channels*mult),
         ]
         ch = mult * model_channels
         if ds in attention_resolutions:
@@ -229,9 +158,9 @@ class UNetModel:
 
     n_heads = ch // d_head
     self.middle_block: List = [
-      UNet.ResBlock(ch, time_embed_dim, ch),
+      ResBlock(ch, time_embed_dim, ch),
       UNet.SpatialTransformer(ch, n_heads, d_head, ctx_dim, depth=transformer_depth[-1]),
-      UNet.ResBlock(ch, time_embed_dim, ch),
+      ResBlock(ch, time_embed_dim, ch),
     ]
 
     self.output_blocks = []
@@ -239,7 +168,7 @@ class UNetModel:
       for i in range(self.num_res_blocks[idx] + 1):
         ich = input_block_channels.pop()
         layers = [
-          UNet.ResBlock(ch + ich, time_embed_dim, model_channels*mult),
+          ResBlock(ch + ich, time_embed_dim, model_channels*mult),
         ]
         ch = model_channels * mult
 
@@ -270,7 +199,7 @@ class UNetModel:
     x   = x  .cast(dtypes.float16)
 
     def run(x:Tensor, bb) -> Tensor:
-      if isinstance(bb, UNet.ResBlock): x = bb(x, emb)
+      if isinstance(bb, ResBlock): x = bb(x, emb)
       elif isinstance(bb, UNet.SpatialTransformer): x = bb(x, ctx)
       else: x = bb(x)
       return x
@@ -306,75 +235,10 @@ class Closed:
   """
   Namespace for OpenAI CLIP model components.
   """
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L329
-  class ClipMlp:
-    def __init__(self):
-      self.fc1 = Linear(768, 3072)
-      self.fc2 = Linear(3072, 768)
-
-    def __call__(self, h:Tensor) -> Tensor:
-      h = self.fc1(h)
-      h = h.quick_gelu()
-      h = self.fc2(h)
-      return h
-
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L340
-  class ClipAttention:
-    def __init__(self):
-      self.embed_dim = 768
-      self.num_heads = 12
-      self.head_dim = self.embed_dim // self.num_heads
-      self.k_proj = Linear(self.embed_dim, self.embed_dim)
-      self.v_proj = Linear(self.embed_dim, self.embed_dim)
-      self.q_proj = Linear(self.embed_dim, self.embed_dim)
-      self.out_proj = Linear(self.embed_dim, self.embed_dim)
-
-    def __call__(self, hidden_states:Tensor, causal_attention_mask:Tensor) -> Tensor:
-      bsz, tgt_len, embed_dim = hidden_states.shape
-      q,k,v = self.q_proj(hidden_states), self.k_proj(hidden_states), self.v_proj(hidden_states)
-      q,k,v = [x.reshape(bsz, tgt_len, self.num_heads, self.head_dim).transpose(1, 2) for x in (q,k,v)]
-      attn_output = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=causal_attention_mask)
-      return self.out_proj(attn_output.transpose(1, 2).reshape(bsz, tgt_len, embed_dim))
-
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L357
-  class ClipEncoderLayer:
-    def __init__(self):
-      self.self_attn = Closed.ClipAttention()
-      self.layer_norm1 = LayerNorm(768)
-      self.mlp = Closed.ClipMlp()
-      self.layer_norm2 = LayerNorm(768)
-
-    def __call__(self, hidden_states:Tensor, causal_attention_mask:Tensor) -> Tensor:
-      residual = hidden_states
-      hidden_states = self.layer_norm1(hidden_states)
-      hidden_states = self.self_attn(hidden_states, causal_attention_mask)
-      hidden_states = residual + hidden_states
-
-      residual = hidden_states
-      hidden_states = self.layer_norm2(hidden_states)
-      hidden_states = self.mlp(hidden_states)
-      hidden_states = residual + hidden_states
-
-      return hidden_states
-
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L386
-  class ClipTextEmbeddings:
-    def __init__(self):
-      self.token_embedding    = Embedding(49408, 768)
-      self.position_embedding = Embedding(77, 768)
-
-    def __call__(self, input_ids:Tensor, position_ids:Tensor) -> Tensor:
-      return self.token_embedding(input_ids) + self.position_embedding(position_ids)
-
-
   # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L377
   class ClipEncoder:
     def __init__(self, layer_count:int=12):
-      self.layers = [Closed.ClipEncoderLayer() for _ in range(layer_count)]
+      self.layers = [ClipEncoderLayer() for _ in range(layer_count)]
 
     def __call__(self, x:Tensor, causal_attention_mask:Tensor, ret_layer_idx:Optional[int]=None) -> Tensor:
       # the indexing of layers is NOT off by 1, the original code considers the "input" as the first hidden state
@@ -387,7 +251,7 @@ class Closed:
   # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L394
   class ClipTextTransformer:
     def __init__(self, ret_layer_idx:Optional[int]=None):
-      self.embeddings       = Closed.ClipTextEmbeddings()
+      self.embeddings       = ClipTextEmbeddings()
       self.encoder          = Closed.ClipEncoder()
       self.final_layer_norm = LayerNorm(768)
       self.ret_layer_idx    = ret_layer_idx
