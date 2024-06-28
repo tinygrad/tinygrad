@@ -80,9 +80,7 @@ class CStyleLanguage(Renderer):
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.count == 1 else str(var_dtype.count)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.count > 1:
-      if(var_name.startswith('zreg')):
-        i = int(var_name[4:var_name.index(".")])
-        return f"__stz(&{buf_name}[{idx}], {i*4%64});"
+      if(var_name.startswith('zreg')): return f"__stz(&{buf_name}[{idx}], {int(var_name[4:var_name.index('.')])*4%64});"
       prefix = self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix
       return f"*(({prefix}{self.render_dtype(buf_dtype)}{var_dtype.count}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
@@ -146,7 +144,7 @@ class CStyleLanguage(Renderer):
           if len(src) > 3: val = self.code_for_op[TernaryOps.WHERE](r[src[2]], val, r[src[3]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
-          if not getenv("AMX",0): kk(f"{r[src[0]]} = {r[src[1]]};")
+          if not r[src[0]].startswith('zreg'): kk(f"{r[src[0]]} = {r[src[1]]};")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           if uop is UOps.BITCAST:
@@ -203,13 +201,11 @@ class ClangRenderer(CStyleLanguage):
     prefix = [
 '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
 '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
-"""
-typedef struct { float a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p; } float16;
+"""typedef struct { float a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p; } float16;
 float16 make_float16(float a, float b, float c, float d, float e, float f, float g, float h, float i, float j, float k, float l, float m, float n, float o, float p) {
     float16 result = {a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p};
     return result;
-}
-""",
+}""",
 "void __stz(float* restrict data0, int zreg){ AMX(5, data0, 0ull<<62 | (zreg*1ull)<<56); }",
 "void __MMA_16_16_float16(float16 data1, float16 data2){ AMX(0, (int *) (&data2), 0ull<<62); AMX(1, (int *) (&data1), 0ull<<62); AMX(12, 0, 0ull); }"
 ]
