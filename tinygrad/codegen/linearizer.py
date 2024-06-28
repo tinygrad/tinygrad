@@ -302,11 +302,15 @@ class Linearizer(Kernel):
                         for z, acc in enumerate(accs[reduceop])]
     elif self.amx:
       dto = self.amx.dtype_out
-      accs_uops = [UOp(UOps.CAST, dto, tuple(accs[reduceop][x:x+dto.count])) for x in range(0, len(accs[reduceop]), dto.count)]
+      accs_src = [accs[reduceop][x].src[0] for x in range(0, dto.count)]
+      # accs_uops = [UOp(UOps.CAST, dto, tuple(accs[reduceop][x:x+dto.count])) for x in range(0, len(accs[reduceop]), dto.count)]
       cast_buf1 = UOp(UOps.CAST, dto, tuple(self.global_load(1,[global_idxs[0]]+[NumNode(0)]+reduce_idxs+[full_upcast_idxs[0]]+[NumNode(0)])))
       cast_buf2 = UOp(UOps.CAST, dto, tuple(self.global_load(2,[NumNode(0)]+[global_idxs[1]]+reduce_idxs+[NumNode(0)]+[full_upcast_idxs[1]])))
-      mma = UOp(UOps.MMA, dto, (cast_buf1,cast_buf2)+tuple(accs_uops), (str(self.amx), self.amx.dims))
-      accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for z, acc in enumerate(accs[reduceop])]
+      # mma = UOp(UOps.MMA, dto, (cast_buf1,cast_buf2)+tuple(accs_uops), (str(self.amx), self.amx.dims))
+      # mma = UOp(UOps.MMA, dto, (cast_buf1,cast_buf2)+tuple(accs[reduceop]), (str(self.amx), self.amx.dims))
+      mma = UOp(UOps.MMA, dto, (cast_buf1,cast_buf2)+tuple(accs_src), (str(self.amx), self.amx.dims))
+      accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for acc in accs[reduceop]]
+      # accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for acc in accs_uops]
     else:
       assert not locals_to_store, "storing locals isn't supported here"
 
