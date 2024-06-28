@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, ContextVar, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -106,7 +106,6 @@ class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
     return list({id(x):x for x in wait_nodes}.values())
 
 ReturnType = TypeVar('ReturnType')
-IN_JIT = ContextVar('IN_JIT', 0)
 class TinyJit(Generic[ReturnType]):
   def __init__(self, fxn:Callable[..., ReturnType]):
     self.fxn = fxn
@@ -146,15 +145,15 @@ class TinyJit(Generic[ReturnType]):
                                                 [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
     st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
     if not JIT or self.cnt == 0:
-      if IN_JIT: raise RuntimeError("having TinyJit inside another TinyJit is not supported")
       # jit ignore
-      with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value, IN_JIT=1):
+      with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
         self.ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
     elif self.cnt == 1:
       # jit capture
       self.expected_names: List[Union[int, str]] = names
       self.expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = st_vars_dtype_device
+      if capturing: raise RuntimeError("having TinyJit inside another TinyJit is not supported")
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)
