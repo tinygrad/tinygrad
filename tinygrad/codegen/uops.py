@@ -275,24 +275,32 @@ constant_folder = PatternMatcher([
 def _temp_toposort(root:UOp):
   assert root.op is UOps.STORE
   ret: Dict[UOp, int] = {}
+  children: Dict[UOp, Dict[UOp, None]] = defaultdict(dict)
   def dfs(x:UOp, depth):
     if x.op is UOps.STORE and x != root: return
     if x in ret: return
-    for v in x.src: dfs(v, depth+1)
+    for v in x.src:
+      dfs(v, depth+1)
+      children[v][x] = None
     ret[x] = depth
   dfs(root, 0)
-  return ret
+  return ret, children
 
 def gate_rewrite(root:UOp, gate:UOp, exprs:Dict[UOp, UOp]):
   if getenv("GRAPHROOT"):
     from tinygrad.engine.graph import graph_uops
-    graph_uops(list(_temp_toposort(root)))
+    graph_uops(list(_temp_toposort(root)[0]))
   if gate not in exprs: exprs[gate] = UOp(UOps.IF, None, (gate, ))
   # the STORE isn't gated
   root.src = root.src[:3]
   # the entire Block is
-  ts = sorted(_temp_toposort(root).items(), key=lambda x:x[1])
+  ts, children = _temp_toposort(root)
+  ts = sorted(ts.items(), key=lambda x:x[1])
   deepest = ts[-1][0]
+  if deepest.op is UOps.BARRIER:
+    load = children[deepest]
+    assert len(load) == 1
+    deepest = next(iter(load.keys()))
   if deepest.op is not UOps.IF: deepest.src = deepest.src + (exprs[gate], )
 
 if_rewrite = PatternMatcher([
