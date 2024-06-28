@@ -153,7 +153,7 @@ class PM4Executor(AMDQueue):
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
-    if err: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
+    if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
   def _exec_event_write(self, n):
     assert n == 0
