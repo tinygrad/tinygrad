@@ -21,7 +21,7 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 try:
   remu = ctypes.CDLL("/usr/local/lib/libremu.so")
-  remu.run_asm.restype = ctypes.c_uint32
+  remu.run_asm.restype = ctypes.c_int32
   remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
 except Exception: pass
 
@@ -152,7 +152,8 @@ class PM4Executor(AMDQueue):
       if st <= prg_addr <= st+sz: prg_sz = sz - (prg_addr - st)
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
-    remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
+    err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
+    if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
   def _exec_event_write(self, n):
     assert n == 0
