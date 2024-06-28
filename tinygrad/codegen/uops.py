@@ -292,14 +292,14 @@ def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), const=None):
   if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
   if load.dtype.scalar() != load.dtype: return None  # how does this happen?
   if const is not None: idx = idx + const
-  if not idx.divides(4): return None
+  if not idx.divides(len(ex.src)): return None
   vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
   return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
 
 def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None):
   if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
   if const is not None: idx = idx + const
-  if not idx.divides(4): return None
+  if not idx.divides(len(ex.src)): return None
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, idx, new_var))
 
