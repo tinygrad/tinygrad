@@ -205,26 +205,13 @@ class ClangRenderer(CStyleLanguage):
 '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
 """
 typedef struct { float a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p; } float16;
-
-float16 make_float16(float a, float b, float c, float d,
-                     float e, float f, float g, float h,
-                     float i, float j, float k, float l,
-                     float m, float n, float o, float p) {
+float16 make_float16(float a, float b, float c, float d, float e, float f, float g, float h, float i, float j, float k, float l, float m, float n, float o, float p) {
     float16 result = {a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p};
     return result;
 }
 """,
-"""
-void __stz(float* restrict data0, int zreg){{ AMX(5, data0, 0ull<<62 | (zreg*1ull)<<56); }}
-""",
-"""
-void __MMA_16_16_float16(float16 data1, float16 data2){{
-  int *a_pk = (int *) (&data1);
-  int *b_pk = (int *) (&data2);
-  AMX(0, b_pk, 0ull<<62); AMX(1, a_pk, 0ull<<62);
-  AMX(12, 0, 0ull);
-}}
-"""
+"void __stz(float* restrict data0, int zreg){ AMX(5, data0, 0ull<<62 | (zreg*1ull)<<56); }",
+"void __MMA_16_16_float16(float16 data1, float16 data2){ AMX(0, (int *) (&data2), 0ull<<62); AMX(1, (int *) (&data1), 0ull<<62); AMX(12, 0, 0ull); }"
 ]
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
