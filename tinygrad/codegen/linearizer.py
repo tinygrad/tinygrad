@@ -77,7 +77,7 @@ def expand_idxs(nodes:Sequence[Node]) -> Tuple[Union[Variable, NumNode], ...]:
   eidxs = [expand_idx(node) for node in nodes]
   return tuple([v if v not in eidxs[:j] else NumNode(0) for j, v in enumerate(eidxs)])  # take only first occurrence of expand variable
 def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,...]]:
-  yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
+  yield from (x[::-1] for x in itertools.product(*[list(range(v.min, v.max + 1)) for v in idxs[::-1]]))
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
@@ -216,10 +216,10 @@ class Linearizer(Kernel):
     return stores
 
   # render loop
-  def render_loop(self, xx:List[Variable], depth:int) -> Tuple[UOp, ...]:
+  def render_loop(self, xx:List[Variable], depth:int, reduce:bool) -> Tuple[UOp, ...]:
     new_loops = {x.expr:UOp(UOps.RANGE, dtypes.int32, (
       UOp.const(dtypes.int, x.min) if isinstance(x.min, int) else cast(Node, x.min).render(render_ops, self.loop_uops),
-      UOp.const(dtypes.int, x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(render_ops, self.loop_uops)), arg=(depth,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
+      UOp.const(dtypes.int, x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(render_ops, self.loop_uops)), arg=(depth,i,reduce)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
@@ -268,7 +268,7 @@ class Linearizer(Kernel):
                       global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, fake_reduce_idxs,
                       alias_buf_idxs:List[Tuple[int, int, List]]) -> Tuple[List[NumNode|Variable], List[NumNode|Variable]]:
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs, (i:=self.reduceops.index(reduceop))*2+2)
+    loop_ctx = self.render_loop(reduce_idxs, (i:=self.reduceops.index(reduceop))*2+2, True)
 
     # define accumulator - modify idxs if necessary for TC
     out_buf = -len(self.reduceops)+i if self.group_for_reduces else 0
@@ -290,7 +290,7 @@ class Linearizer(Kernel):
       # cast initial accs
       wmmas = [UOp(UOps.CAST, (dt3:=tc.dtype_out.vec(wmma_sz[2])), tuple(accs[reduceop][x:x+wmma_sz[2]]))
                for x in range(0, len(accs[reduceop]), wmma_sz[2])]
-      for it in [x[::-1] for x in itertools.product(*[x for x in [range(sz) for _,sz in upcasts[0]][::-1]])]:
+      for it in [x[::-1] for x in itertools.product(*list([range(sz) for _,sz in upcasts[0]][::-1]))]:
         offs = [x*y for (x,y) in zip([sum([prod(x) for x in zip(it, [stride for stride,_ in y])]) for y in upcasts], wmma_sz)]
         ops = (UOp(UOps.CAST, tc.dtype_in.vec(wmma_sz[0]), tuple(locals_to_store[0][2][offs[0]:offs[0]+wmma_sz[0]])),
                 UOp(UOps.CAST, tc.dtype_in.vec(wmma_sz[1]), tuple(locals_to_store[1][2][offs[1]:offs[1]+wmma_sz[1]])),
@@ -346,7 +346,7 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # late reduce loop
-      loop_ctx = self.render_loop(end_local_idxs, i*2+3)
+      loop_ctx = self.render_loop(end_local_idxs, i*2+3, True)
 
       # define late accumulator
       accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
@@ -435,7 +435,7 @@ class Linearizer(Kernel):
         self.loop_uops.update({x.expr:UOp(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
       self.global_size, self.local_size = None, None
-      self.render_loop(loop_global_idxs+loop_local_idxs, 1)
+      self.render_loop(loop_global_idxs+loop_local_idxs, 1, False)
 
     # define idxs for aliased buffers TODO: this doesn't belong in Kernel, but it can't exist in Block either (because of multireduce tensor cores)
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
@@ -519,10 +519,10 @@ class Linearizer(Kernel):
   def to_program(self) -> Program:
     self.linearize()
     info = get_lazyop_info(self.ast[0])
-    src = self.opts.render(to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self, src))
+    src = self.opts.render(name:=to_function_name(self.name), self.uops)
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src))
     ops, mem = self.uops.flops_mem()
-    run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
+    run_count = prod((self.global_size or []) + (self.local_size or []))
     # NOTE: we use min here to ignore the indexing FLOPS
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
                    self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

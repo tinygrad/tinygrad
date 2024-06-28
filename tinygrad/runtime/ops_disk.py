@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, mmap, _posixshmem, io, ctypes, ctypes.util, platform
+import os, mmap, _posixshmem, io, ctypes, ctypes.util, platform, contextlib
 from typing import Optional, Generator, Tuple, Callable, List
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
@@ -94,7 +94,8 @@ class DiskDevice(Compiled):
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
       if os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
       self.mem = mmap.mmap(self.fd, self.size)
-    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self.mem.madvise(hp) # type: ignore
+    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
+      with contextlib.suppress(OSError): self.mem.madvise(hp) # some systems have transparent_hugepage disabled
   def _might_close(self):
     self.count -= 1
     if self.count == 0:

@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import replace
-from typing import DefaultDict, Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
@@ -8,7 +8,7 @@ from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import _to_np_dtype
 
-def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int], loops_children:Dict[UOp, Set[UOp]]):
+def fuzz_uops(graph:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int], loops_children:Dict[UOp, Set[UOp]]):
   paths: List[List[UOp]] = []
   # TODO: express DEFINE_ACC and loop children conditions in the graph, builtin.
   for p in find_all_toposorts(graph, in_degree):
@@ -50,7 +50,7 @@ class UOpsFuzzerRunner(CompiledRunner):
           print(colored(name, "red"))
           raise e
 
-def find_all_toposorts(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int]) -> List[Tuple[UOp, ...]]:
+def find_all_toposorts(graph:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]) -> List[Tuple[UOp, ...]]:
   visited: Set[UOp] = set()
   ret: List[Tuple[UOp, ...]] = []
   path: List[UOp] = []
