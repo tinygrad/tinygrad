@@ -6,7 +6,7 @@
 from tinygrad import Tensor, TinyJit, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import safe_load, load_state_dict
-from tinygrad.helpers import fetch, trange
+from tinygrad.helpers import fetch, trange, colored, THREEFRY
 from examples.stable_diffusion import ClipTokenizer, ResnetBlock, Mid, Downsample, Upsample
 import numpy as np
 
@@ -854,9 +854,10 @@ class DPMPP2MSampler:
 
 
 if __name__ == "__main__":
+  default_prompt = "a horse sized cat eating a bagel"
   parser = argparse.ArgumentParser(description="Run SDXL", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--steps',    type=int,   default=5, help="The number of diffusion steps")
-  parser.add_argument('--prompt',   type=str,   default="a horse sized cat eating a bagel", help="Description of image to generate")
+  parser.add_argument('--steps',    type=int,   default=10, help="The number of diffusion steps")
+  parser.add_argument('--prompt',   type=str,   default=default_prompt, help="Description of image to generate")
   parser.add_argument('--out',      type=str,   default=Path(tempfile.gettempdir()) / "rendered.png", help="Output filename")
   parser.add_argument('--seed',     type=int,   help="Set the random latent seed")
   parser.add_argument('--guidance', type=float, default=6.0, help="Prompt strength")
@@ -910,3 +911,11 @@ if __name__ == "__main__":
 
   if not args.noshow:
     im.show()
+
+  # validation!
+  if args.prompt == default_prompt and args.steps == 10 and args.seed == 0 and args.guidance == 6.0 and args.width == args.height == 1024 \
+    and not args.weights and THREEFRY:
+    ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "sdxl_seed0.png")))
+    distance = (((x - ref_image).cast(dtypes.float) / ref_image.max())**2).mean().item()
+    assert distance < 3e-4, colored(f"validation failed with {distance=}", "red")
+    print(colored(f"output validated with {distance=}", "green"))
