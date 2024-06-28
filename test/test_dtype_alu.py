@@ -26,7 +26,9 @@ if Device.DEFAULT == "LLVM":
   binary_operations.remove(operator.lt)
   binary_operations.remove(operator.eq)
 
-integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and), (Tensor.bitwise_or, np.bitwise_or)] # noqa: E501
+integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
+                                                 (Tensor.bitwise_or, np.bitwise_or)]
+bitshift_ops = [(Tensor.rshift, np.right_shift), (Tensor.lshift, np.left_shift)]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
 
@@ -144,6 +146,18 @@ class TestDTypeALU(unittest.TestCase):
 
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
+
+  @given(strat.integers(min_value=0, max_value=2**64-1), strat.integers(min_value=0, max_value=63), strat.sampled_from(bitshift_ops))
+  def test_bitshift_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
+
+  @given(strat.integers(min_value=0, max_value=2**32-1), strat.integers(min_value=0, max_value=31), strat.sampled_from(bitshift_ops))
+  def test_bitshift_uint32(self, a, b, op): universal_test(a, b, dtypes.uint32, op)
+
+  @given(strat.integers(min_value=0, max_value=2**16-1), strat.integers(min_value=0, max_value=15), strat.sampled_from(bitshift_ops))
+  def test_bitshift_uint16(self, a, b, op): universal_test(a, b, dtypes.uint16, op)
+
+  @given(strat.integers(min_value=0, max_value=2**8-1), strat.integers(min_value=0, max_value=7), strat.sampled_from(bitshift_ops))
+  def test_bitshift_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)
 
   # Metal and CUDACPU and HIP behave differently than numpy in CI for overflows
   skip_overflow = CI and (Device.DEFAULT in {"AMD", "NV"} or getenv("CUDACPU"))
