@@ -153,7 +153,7 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       self.expected_names: List[Union[int, str]] = names
       self.expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = st_vars_dtype_device
-      if capturing: raise RuntimeError("having TinyJit inside another TinyJit is not supported")
+      if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)
