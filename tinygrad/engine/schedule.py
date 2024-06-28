@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
 from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
+from tinygrad.engine.api import ScheduleItem
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType
@@ -16,21 +17,6 @@ sys.setrecursionlimit(10000)
 
 # optionally log the ops to disk
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
-
-# *** ScheduleItem return type ***
-
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: Tuple[LazyOp, ...]
-  bufs: Tuple[Buffer, ...]
-  @property
-  def outputs(self) -> Tuple[Buffer, ...]:
-    """Read/write or write only buffers in the schedule."""
-    return self.bufs[:len(self.ast)]
-  @property
-  def inputs(self) -> Tuple[Buffer, ...]:
-    """Read only buffers in the schedule."""
-    return self.bufs[len(self.ast):]
 
 # *** DAG transformation: List[LazyBuffer] -> ScheduleItem ***
 
@@ -291,8 +277,14 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
 
 # *** DAG ordering: breadth first search ***
 
-SCHEDULES: List = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  if getenv("V2", 1):
+    from tinygrad.engine.schedule2 import create_schedule
+    return create_schedule(outs, seen)
+  return _create_schedule_with_vars(outs, seen)
+
+SCHEDULES: List = []
+def _create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
   graph, in_degree, prescheduled = _graph_schedule(outs, seen)
   queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
@@ -301,6 +293,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   kernel_number = GlobalCounters.kernel_count
   while queue:
     ps = queue.popleft()
+    print(ps.outputs[0])
     for buf in ps.outputs: seen.add(buf)
     if GRAPH:
       kernel_number += 1
