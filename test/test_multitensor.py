@@ -829,9 +829,9 @@ class TestBatchNorm(unittest.TestCase):
           p.to_(devices)
 
       synced_out = synced_bn(x)
-      synced_si = [si for si in create_schedule(synced_out.lazydata.lbs)]
+      synced_si = list(create_schedule(synced_out.lazydata.lbs))
       unsynced_out = unsynced_bn(x)
-      unsynced_si = [si for si in create_schedule(unsynced_out.lazydata.lbs)]
+      unsynced_si = list(create_schedule(unsynced_out.lazydata.lbs))
 
     # TODO: test synced / unsynced batchnorm cross device kernel and copies
     assert synced_si

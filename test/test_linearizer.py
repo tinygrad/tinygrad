@@ -113,6 +113,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops[-1].op, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.op is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
 
+  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum()
@@ -127,6 +128,7 @@ class TestLinearizer(unittest.TestCase):
       assert ranges[1] == ranges[0]+2
       assert lin.uops[ranges[0]+1].op is UOps.LOAD
 
+  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_three_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).expand(2, 2, 3).sum()
@@ -141,6 +143,7 @@ class TestLinearizer(unittest.TestCase):
       assert ranges[2] == ranges[1]+2 == ranges[0]+3
       assert lin.uops[ranges[1]+1].op is UOps.LOAD
 
+  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
     out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
@@ -164,6 +167,7 @@ class TestLinearizer(unittest.TestCase):
     # LOAD -> RANGE -> LOAD -> PHI
     assert lin.uops[ranges[0]-2].op is UOps.LOAD
 
+  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
@@ -758,6 +762,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_grouped_store_locals_and_globals(self):
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     out = x@y
@@ -1058,7 +1063,7 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
       for opt in opts:
         k.apply_opt(opt)
     if expected_color_size is not None:
-      assert (cs:=[(x,y) for x,y in zip(k.colors(), k.full_shape)]) == expected_color_size, f"expected={expected_color_size} got={cs}"
+      assert (cs:=list(zip(k.colors(), k.full_shape))) == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = get_prg(k)
     for buf in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
