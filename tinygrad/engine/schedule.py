@@ -35,7 +35,6 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   if buf != buf.base:
     st = buf.st + st
     buf = buf.base
-  print(buf.op, st)
   # all buffers here are base now
   assert buf.op is not None
 
