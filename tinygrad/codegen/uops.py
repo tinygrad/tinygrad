@@ -334,14 +334,15 @@ class UOpGraph:
 
     # filter nodes that don't link to a sink
     # BFS toposort
-    graph: Dict[UOp, List[UOp]] = {}
+    children: Dict[UOp, List[UOp]] = {}
     in_degree: Dict[UOp, int] = {}
-    get_children_dfs(sink, graph, in_degree)
+    get_children_dfs(sink, children, in_degree)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
       if x.op is UOps.SINK: return set()
-      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in graph[x] if x.op is not end]))
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
+
     # scope children impact the toposort and END* insertion
     end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
     loops, ifs = [x for x in in_degree if x.op is UOps.RANGE], [x for x in in_degree if x.op is UOps.IF]
@@ -355,12 +356,12 @@ class UOpGraph:
         if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
-    for u in graph:
+    for u in children:
       if in_degree[u] == 0: push(u)
 
     if getenv("FUZZ_UOPS", 0):
       from test.external.fuzz_uops import fuzz_uops
-      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), scope_children)
+      self.fuzz_paths = fuzz_uops(children, in_degree.copy(), scope_children)
 
     self._uops = []
     while queue:
@@ -375,7 +376,7 @@ class UOpGraph:
         if x in ss:
           ss.remove(x)
           if len(ss) == 0: self._uops.append(UOp(end_for_uop[u.op][1], None, (u,)))
-      for u in graph[x]:
+      for u in children[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
 
