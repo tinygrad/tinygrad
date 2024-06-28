@@ -2501,7 +2501,7 @@ class Tensor:
     print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
     ```
     """
-    assert dtypes.is_unsigned(self.dtype) and dtypes.is_unsigned(self.dtype), f"not supported {self.dtype=} {x=}"
+    assert dtypes.is_unsigned(self.dtype), f"not supported {self.dtype=} {x=}"
     return F.LeftShift.apply(*self._broadcasted(x, False))
 
   def rshift(self, x:Union[Tensor, ConstType]):
@@ -2513,7 +2513,7 @@ class Tensor:
     print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
     ```
     """
-    assert dtypes.is_unsigned(self.dtype) and dtypes.is_unsigned(self.dtype), f"not supported {self.dtype=} {x=}"
+    assert dtypes.is_unsigned(self.dtype), f"not supported {self.dtype=} {x=}"
     return F.RightShift.apply(*self._broadcasted(x, False))
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
