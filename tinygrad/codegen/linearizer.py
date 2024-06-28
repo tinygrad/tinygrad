@@ -308,12 +308,11 @@ class Linearizer(Kernel):
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       if self.amx:
-        dto = dtypes.float.vec(16)
-        print('AMX operation magic starts now!')
+        dto = self.amx.dtype_out
         accs_uops = [UOp(UOps.CAST, dto, tuple(accs[reduceop][x:x+dto.count])) for x in range(0, len(accs[reduceop]), dto.count)]
         cast_buf1 = UOp(UOps.CAST, dto, tuple(loaded_buffers[self.bufs[1]][0:dto.count]))
         cast_buf2 = UOp(UOps.CAST, dto, tuple([loaded_buffers[self.bufs[2]][x*dto.count] for x in range(dto.count)]))
-        mma = UOp(UOps.MMA, dto, (cast_buf1, cast_buf2)+tuple(accs_uops), ("16_16", (16,16)))
+        mma = UOp(UOps.MMA, dto, (cast_buf1,cast_buf2)+tuple(accs_uops), (str(self.amx), self.amx.dims))
         accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for z, acc in enumerate(accs[reduceop])]
       else:
         def gate_acc(r, idxs): return [

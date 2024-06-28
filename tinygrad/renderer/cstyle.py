@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Tuple, Union, DefaultDict, cast, Litera
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
+from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 from tinygrad.renderer import Renderer, TensorCore
@@ -146,7 +146,7 @@ class CStyleLanguage(Renderer):
           if len(src) > 3: val = self.code_for_op[TernaryOps.WHERE](r[src[2]], val, r[src[3]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
-          if not AMX: kk(f"{r[src[0]]} = {r[src[1]]};")
+          if not getenv("AMX",0): kk(f"{r[src[0]]} = {r[src[1]]};")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           if uop is UOps.BITCAST:
@@ -170,19 +170,16 @@ class CStyleLanguage(Renderer):
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.MMA: kk(f"__mma_{args[0]}({r[src[0]]}, {r[src[1]]});")
+        elif uop is UOps.MMA: kk(f"__{args[0]}({r[src[0]]}, {r[src[1]]});")
         elif uop is UOps.DEFINE_ACC:
           if len(args) == 3 and args[2] == 'zreg':
             ssa('zreg',u)
-            if(args[1] == 0):
-              kk("AMX_SET(1);")
-              kk("AMX_SET(0);")
+            if(args[1] == 0): kk("AMX_SET(1); AMX_SET(0);")
           else: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
-          # r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
           r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 16 else f".{'abcdefghijklmnop'[args]}")
         else: raise RuntimeError(f"failed to render {uop}")
 
@@ -221,7 +218,7 @@ float16 make_float16(float a, float b, float c, float d,
 void __stz(float* restrict data0, int zreg){{ AMX(5, data0, 0ull<<62 | (zreg*1ull)<<56); }}
 """,
 """
-void __mma_16_16(float16 data1, float16 data2){{
+void __MMA_16_16_float16(float16 data1, float16 data2){{
   int *a_pk = (int *) (&data1);
   int *b_pk = (int *) (&data2);
   AMX(0, b_pk, 0ull<<62); AMX(1, a_pk, 0ull<<62);
