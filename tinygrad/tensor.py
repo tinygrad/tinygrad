@@ -2498,7 +2498,7 @@ class Tensor:
     Equivalent to `self << x`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(Tensor([2], dtype=dtypes.uint8)).numpy())
+    print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
     ```
     """
     assert dtypes.is_unsigned(self.dtype) and dtypes.is_unsigned(self.dtype), f"not supported {self.dtype=} {x=}"
@@ -2510,7 +2510,7 @@ class Tensor:
     Equivalent to `self >> x`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(Tensor([2], dtype=dtypes.uint8)).numpy())
+    print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
     ```
     """
     assert dtypes.is_unsigned(self.dtype) and dtypes.is_unsigned(self.dtype), f"not supported {self.dtype=} {x=}"
