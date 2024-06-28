@@ -1549,23 +1549,21 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(a.sum(0).exp(), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_sum_not_ok(self):
-    #N = 18 * 18
+    N = 18 * 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
-    #a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))).sqrt()
+    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))).sqrt()
     # exp is not safe to pad
-    # currently not working?
-    #with self.assertRaises(KernelOptError):
-    #  helper_linearizer_opt(a.exp().sum(), [[Opt(OptOps.PADTO, 0, 32)],])
-    #with self.assertRaises(KernelOptError):
-    #  helper_linearizer_opt(a.exp().sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
-
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a.exp().sum(), [[Opt(OptOps.PADTO, 0, 32)],])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a.exp().sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+    # [fixme] the following line is not working in the approx branch?
     #b = a < -1
     # lt is not safe to pad
     #with self.assertRaises(KernelOptError):
     #  helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
     #with self.assertRaises(KernelOptError):
     #  helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
-    pass
 
   def test_padto_max(self):
     N = 18 * 18
