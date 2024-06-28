@@ -196,3 +196,7 @@ install_hook(libc.stat64, _stat64)
 install_hook(libc.fstat64, _fstat64)
 install_hook(libc.getdents64, _getdents64)
 builtins.memoryview = _memoryview # type: ignore
+
+import tinygrad
+tinygrad.runtime.autogen.libc.mmap = _mmap
+tinygrad.runtime.autogen.libc.munmap = _munmap
