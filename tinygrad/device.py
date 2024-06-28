@@ -180,8 +180,8 @@ class Compiler:
 
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
-    self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler if compiler else Compiler(), runtime, graph
-    self.renderer = renderer if renderer else Renderer()
+    self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
+    self.renderer = renderer or Renderer()
   def synchronize(self): pass  # override this in your device
 
 # **************** for HCQ Compatible Devices ****************
@@ -309,7 +309,12 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
                                .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
                                .copy(dest.va_addr, src.va_addr, sz) \
                                .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
-      dest_dev.hw_compute_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
       src_dev.timeline_value += 1
+
+    if src_dev != dest_dev:
+      dest_dev.hw_compute_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
+                                   .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
+                                   .signal(dest_dev.timeline_signal, dest_dev.timeline_value).submit(dest_dev)
+      dest_dev.timeline_value += 1
 
   def offset(self, buf, size:int, offset:int): return type(buf)(base=buf.base + offset, va_addr=buf.va_addr + offset, length=size, size=size)
