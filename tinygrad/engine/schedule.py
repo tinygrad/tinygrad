@@ -35,6 +35,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   if buf != buf.base:
     st = buf.st + st
     buf = buf.base
+  print(buf.op, st)
   # all buffers here are base now
   assert buf.op is not None
 
@@ -293,7 +294,6 @@ def _create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuff
   kernel_number = GlobalCounters.kernel_count
   while queue:
     ps = queue.popleft()
-    print(ps.outputs[0])
     for buf in ps.outputs: seen.add(buf)
     if GRAPH:
       kernel_number += 1
