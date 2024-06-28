@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
 import functools, itertools, heapq, math
-from collections import defaultdict, deque
+from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType
@@ -33,7 +33,6 @@ class UOp:
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
-  def tuple(self): return (self.op, self.dtype, self.src, self.arg)
   def commutative(self) -> bool:
     return self.op is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
@@ -289,34 +288,15 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
   in_degree[u] = len(u.src)
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  @functools.lru_cache(None)
-  def __inner_rewrite(n:UOp) -> UOp:
-    replace_src = tuple(__inner_rewrite(x) for x in n.src)
-    if replace_src != n.src: n = UOp(n.op, n.dtype, replace_src, n.arg)
-    return __inner_rewrite(new_n) if (new_n := pm.rewrite(n)) else n
-  return __inner_rewrite(sink)
-
-def graph_dedup(sink:UOp):
-  # add nodes to graph in reverse BFS order
-  # dedup all nodes
-  in_degree: Dict[UOp, int] = {}
-  children: Dict[UOp, List[UOp]] = {}
-  get_children_dfs(sink, children, in_degree)
-
   nodes: Dict[Tuple, UOp] = {}
-  queue = deque([k for k, v in in_degree.items() if v == 0])
-  replace_nodes: Dict[UOp, UOp] = {}
-  while queue:
-    n = queue.popleft()
-    if n in replace_nodes: continue
-    key = (n.op, n.dtype, tuple(replace_nodes.get(x, x) for x in n.src), n.arg)
-    if found:=nodes.get(key): replace_nodes[n] = found
-    else: replace_nodes[n] = nodes[key] = UOp(*key)
-    for x in children[n]:
-      in_degree[x] -= 1
-      if in_degree[x] == 0:
-        queue.append(x)
-  return replace_nodes.get(sink, sink)
+  replace: Dict[UOp, UOp] = {}
+  def __inner_rewrite(n:UOp) -> UOp:
+    if n in replace: return replace[n]
+    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
+    if found := nodes.get(replace_source): replace[n] = found
+    else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
+    return replace[n]
+  return __inner_rewrite(sink)
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
@@ -348,10 +328,7 @@ class UOpGraph:
     #assert self._uops is None, "already linearized"
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
-    # dedup all nodes in graph
-    sink = graph_dedup(sink)
-
-    # do graph rewrite
+    # dedup all nodes and do graph rewrite
     sink = graph_rewrite(sink, constant_folder)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
