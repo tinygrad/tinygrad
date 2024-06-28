@@ -80,7 +80,9 @@ class CStyleLanguage(Renderer):
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.count == 1 else str(var_dtype.count)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.count > 1:
-      if(var_name.startswith('zreg')): return f"__stz(&{buf_name}[{idx}], {int(var_name[4:var_name.index('.')])*buf_dtype.itemsize%64}); //{var_name[:var_name.index('.')]}"
+      if(var_name.startswith('zreg')):
+        name = int(var_name[4:var_name.index('.')]) if '.' in var_name else int(var_name[4:])
+        return f"__stz(&{buf_name}[{idx}], {name*buf_dtype.itemsize%64});"
       prefix = self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix
       return f"*(({prefix}{self.render_dtype(buf_dtype)}{var_dtype.count}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
@@ -145,7 +147,7 @@ class CStyleLanguage(Renderer):
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
           if not r[src[0]].startswith('zreg'): kk(f"{r[src[0]]} = {r[src[1]]};")
-          else: kk(f"// phi {r[src[0]][:r[src[0]].index('.')]}")
+          # else: kk(f"// phi {r[src[0]][:r[src[0]].index('.')]}")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           if uop is UOps.BITCAST:

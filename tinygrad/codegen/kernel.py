@@ -413,7 +413,11 @@ class Kernel:
     for src in mul_op.src:
       if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
 
-    if not all(x % (amx_size:=64//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
+    if not all(x % (amx_size:=64//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape):
+      axis_pads = tuple((i, amx_size) for i, x in enumerate(self.full_shape[:-1]) if x%amx_size != 0)
+      try:
+        for axis, dim in axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
+      except KernelOptError: return False
 
     self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
     self.apply_opt(Opt(OptOps.UNROLL, -1, amx_size)) # unroll to support matvec, otherwise cannot upcast reduce dim
