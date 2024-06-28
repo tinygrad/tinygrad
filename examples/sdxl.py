@@ -479,7 +479,7 @@ class Open:
       ]
 
     def __call__(self, x:Tensor, attn_mask:Optional[Tensor]=None) -> Tensor:
-      x = x.transpose(0, 1).contiguous()
+      x = x.transpose(0, 1)
       for r in self.resblocks:
         x = r(x, attn_mask=attn_mask)
       x = x.transpose(0, 1)
@@ -867,7 +867,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   Tensor.no_grad = True
-  if args.seed:
+  if args.seed is not None:
     Tensor.manual_seed(args.seed)
 
   model = SDXL(configs["SDXL_Base"])
@@ -901,11 +901,10 @@ if __name__ == "__main__":
 
   # make image correct size and scale
   x = (x + 1.0) / 2.0
-  x = x.reshape(3,args.height,args.width).permute(1,2,0).clip(0,1)*255
-  x = x.cast(dtypes.float32).realize().cast(dtypes.uint8)
+  x = x.reshape(3,args.height,args.width).permute(1,2,0).clip(0,1).mul(255).cast(dtypes.uint8)
   print(x.shape)
 
-  im = Image.fromarray(x.numpy().astype(np.uint8, copy=False))
+  im = Image.fromarray(x.numpy())
   print(f"saving {args.out}")
   im.save(args.out)
 
