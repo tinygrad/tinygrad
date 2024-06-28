@@ -1,8 +1,9 @@
 from __future__ import annotations
 from typing import Tuple, List, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
+from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE
+from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -212,11 +213,11 @@ class HWPM4Queue(HWQueue):
   def submit(self, device: AMDDevice):
     cmds = self.indirect_cmd if device == self.binded_device else self.q
 
-    wptr = device.pm4_write_pointer[0]
-    pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
-    for i, value in enumerate(cmds): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
-    device.pm4_write_pointer[0] = wptr + len(cmds)
-    device.pm4_doorbell[0] = wptr + len(cmds)
+    for i, value in enumerate(cmds): device.compute_queue.ring[(device.compute_queue.put_value + i) % len(device.compute_queue.ring)] = value
+
+    device.compute_queue.put_value += len(cmds)
+    device.compute_queue.write_ptr[0] = device.compute_queue.put_value
+    device.compute_queue.doorbell[0] = device.compute_queue.put_value
     return self
 
 SDMA_MAX_COPY_SIZE = 0x400000
@@ -276,31 +277,28 @@ class HWCopyQueue(HWQueue):
              *data64_le(ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'start_ts').offset)])
     return self._mark_command_end()
 
-  def submit(self, device:AMDDevice):
-    read_ptr = device.sdma_read_pointer[0]
-    if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
-
-    sdma_buffer_view = to_mv(device.sdma_ring.va_addr, device.sdma_ring.size).cast("I")
+  def submit(self, device: AMDDevice):
+    if device.sdma_queue.put_value - device.sdma_queue.read_ptr[0] > device.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
 
     tail_blit_dword = 0
     for cmdsz in self.internal_cmd_sizes:
-      if (tail_blit_dword + cmdsz) * 4 >= device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size: break
+      if (tail_blit_dword + cmdsz) * 4 >= device.sdma_queue.ring.nbytes - device.sdma_queue.put_value % device.sdma_queue.ring.nbytes: break
       tail_blit_dword += cmdsz
 
-    start_idx = (device.sdma_doorbell_value % device.sdma_ring.size) // 4
-    sdma_buffer_view[start_idx : start_idx + tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
-    device.sdma_doorbell_value += tail_blit_dword * 4
+    start_idx = (device.sdma_queue.put_value % device.sdma_queue.ring.nbytes) // 4
+    device.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
+    device.sdma_queue.put_value += tail_blit_dword * 4
 
     if (rem_packet_cnt := len(self.q) - tail_blit_dword) > 0:
-      zero_fill = device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size
-      ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, zero_fill)
-      device.sdma_doorbell_value += zero_fill
+      zero_fill = device.sdma_queue.ring.nbytes - device.sdma_queue.put_value % device.sdma_queue.ring.nbytes
+      ctypes.memset(mv_address(device.sdma_queue.ring) + (device.sdma_queue.put_value % device.sdma_queue.ring.nbytes), 0, zero_fill)
+      device.sdma_queue.put_value += zero_fill
 
-      sdma_buffer_view[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
-      device.sdma_doorbell_value += rem_packet_cnt * 4
+      device.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
+      device.sdma_queue.put_value += rem_packet_cnt * 4
 
-    device.sdma_write_pointer[0] = device.sdma_doorbell_value
-    device.sdma_doorbell[0] = device.sdma_doorbell_value
+    device.sdma_queue.write_ptr[0] = device.sdma_queue.put_value
+    device.sdma_queue.doorbell[0] = device.sdma_queue.put_value
     return self
 
 SHT_PROGBITS, SHF_ALLOC = 0x1, 0x2
@@ -400,6 +398,15 @@ class AMDAllocator(HCQCompatAllocator):
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
+
+@dataclass
+class AMDQueueDesc:
+  ring: memoryview
+  read_ptr: memoryview
+  write_ptr: memoryview
+  doorbell: memoryview
+  put_value: int = 0
+
 class AMDDevice(HCQCompatCompiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
@@ -496,7 +503,7 @@ class AMDDevice(HCQCompatCompiled):
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
 
-    # scratch setup
+    # Scratch setup
     max_cu_id = self.properties['simd_count'] // self.properties['simd_per_cu'] - 1
     max_wave_id = self.properties['max_waves_per_simd'] * self.properties['simd_per_cu'] - 1
     self.max_private_segment_size = 4096
@@ -506,36 +513,8 @@ class AMDDevice(HCQCompatCompiled):
     engines = self.properties['array_count'] // self.properties['simd_arrays_per_engine']
     self.tmpring_size = (wave_scratch_len // 256) << 12 | (self.scratch_len // (wave_scratch_len * engines))
 
-    # SDMA Queue
-    self.sdma_gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.sdma_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.sdma_queue = kio.create_queue(AMDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
-      queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
-      write_pointer_address=self.sdma_gart.va_addr, read_pointer_address=self.sdma_gart.va_addr+8)
-
-    # doorbell page
-    self.doorbells_base = self.sdma_queue.doorbell_offset & (~0x1fff)  # doorbell is two pages
-    self.doorbells = libc.mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, AMDDevice.kfd, self.doorbells_base)
-
-    self.sdma_read_pointer = to_mv(self.sdma_queue.read_pointer_address, 8).cast("Q")
-    self.sdma_write_pointer = to_mv(self.sdma_queue.write_pointer_address, 8).cast("Q")
-    self.sdma_doorbell = to_mv(self.doorbells + self.sdma_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
-    self.sdma_doorbell_value = 0
-
-    # PM4 Queue
-    self.pm4_ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-    self.pm4_eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-    self.pm4_gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.pm4_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.pm4_queue = kio.create_queue(AMDDevice.kfd, ring_base_address=self.pm4_ring.va_addr, ring_size=self.pm4_ring.size, gpu_id=self.gpu_id,
-      queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
-      eop_buffer_address=self.pm4_eop_buffer.va_addr, eop_buffer_size=self.pm4_eop_buffer.size,
-      ctx_save_restore_address=self.pm4_ctx_save_restore_address.va_addr, ctx_save_restore_size=self.pm4_ctx_save_restore_address.size,
-      ctl_stack_size = 0xa000, write_pointer_address=self.pm4_gart.va_addr, read_pointer_address=self.pm4_gart.va_addr+8)
-
-    self.pm4_read_pointer = to_mv(self.pm4_queue.read_pointer_address, 8).cast("Q")
-    self.pm4_write_pointer = to_mv(self.pm4_queue.write_pointer_address, 8).cast("Q")
-    self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
+    self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000, ctx_save_restore_size=0x2C02000, eop_buffer_size=0x1000)
+    self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HWPM4Queue, HWCopyQueue,
       timeline_signals=[self._get_signal(sync_event=sync_event), self._get_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))])
@@ -543,6 +522,24 @@ class AMDDevice(HCQCompatCompiled):
   def _gpu2cpu_time(self, gpu_time, is_copy):
     if is_copy: return self.copy_cpu_start_time + (gpu_time - self.copy_gpu_start_time) / 1e2
     return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e2
+
+  def _alloc_queue(self, type, ring_size, ctx_save_restore_size=None, eop_buffer_size=None) -> AMDQueueDesc:
+    gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    ring = self._gpu_alloc(ring_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    ctx_save_restore = self._gpu_alloc(ctx_save_restore_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if ctx_save_restore_size else ctx_save_restore_size
+    eop_buffer = self._gpu_alloc(eop_buffer_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if eop_buffer_size else eop_buffer_size
+    queue = kio.create_queue(AMDDevice.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
+      queue_type=type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
+      eop_buffer_address=eop_buffer.va_addr, eop_buffer_size=eop_buffer.size, ctx_save_restore_address=ctx_save_restore.va_addr,
+      ctx_save_restore_size=ctx_save_restore.size, write_pointer_address=gart.va_addr, read_pointer_address=gart.va_addr + 8)
+
+    if not hasattr(self, 'doorbells'):
+      self.doorbells_base = queue.doorbell_offset & (~0x1fff) # doorbell is two pages
+      self.doorbells = libc.mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, AMDDevice.kfd, self.doorbells_base)
+
+    return AMDQueueDesc(ring=to_mv(ring.va_addr, ring_size).cast("I"),
+                        read_ptr=to_mv(queue.read_pointer_address, 8).cast("Q"), write_ptr=to_mv(queue.write_pointer_address, 8).cast("Q"),
+                        doorbell=to_mv(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8).cast("Q"))
 
   def synchronize(self):
     AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
