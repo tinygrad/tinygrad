@@ -3,6 +3,7 @@ import subprocess, hashlib, tempfile, ctypes, ctypes.util, functools, re
 from pathlib import Path
 from typing import Tuple, Optional, List
 import tinygrad.runtime.autogen.cuda as cuda
+import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, init_c_struct_t, colored, cpu_time_execution
 from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator, MallocAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -19,6 +20,7 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
 
+PTX = getenv("PTX")
 CUDACPU = getenv("CUDACPU") == 1
 if CUDACPU:
   gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
@@ -61,16 +63,16 @@ class PTXCompiler(Compiler):
 class CUDACompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
-    check(cuda.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
+    check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_cuda_{self.arch}")
   def compile(self, src:str) -> bytes:
-    check(cuda.nvrtcCreateProgram(ctypes.byref(prog := cuda.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
-    status = cuda.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
+    check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
+    status = nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
 
-    if status != 0: raise CompileError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check).decode()}")
-    return _get_bytes(prog, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, check)
+    if status != 0: raise CompileError(f"compile failed: {_get_bytes(prog, nvrtc.nvrtcGetProgramLog, nvrtc.nvrtcGetProgramLogSize, check).decode()}")
+    return _get_bytes(prog, nvrtc.nvrtcGetPTX, nvrtc.nvrtcGetPTXSize, check)
 
 def cuda_disassemble(lib, arch):
   try:
@@ -168,9 +170,8 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator,
-                     PTXRenderer(self.arch) if getenv("PTX") else CUDARenderer(self.arch),
-                     PTXCompiler(self.arch) if getenv("PTX") else CUDACompiler(self.arch),
+    super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator, PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
+                     PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch),
                      functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
 
   def synchronize(self):
