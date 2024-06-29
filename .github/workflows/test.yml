@@ -466,7 +466,7 @@ jobs:
           EOF
           echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
           sudo apt update || true
-          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev
+          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
           curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
           jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
           sudo xargs curl -L -o /usr/local/lib/libremu.so

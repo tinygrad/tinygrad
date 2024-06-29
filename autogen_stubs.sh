@@ -208,8 +208,8 @@ generate_io_uring() {
 
 generate_libc() {
   clang2py \
-    /usr/include/x86_64-linux-gnu/sys/mman.h \
-    /usr/include/x86_64-linux-gnu/sys/syscall.h \
+    $(dpkg -L libc6-dev | grep sys/mman.h) \
+    $(dpkg -L libc6-dev | grep sys/syscall.h) \
     /usr/include/unistd.h \
     -o $BASE/libc.py
 
