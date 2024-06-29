@@ -2628,6 +2628,8 @@ class Tensor:
   def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rtruediv__(self, x) -> Tensor: return self.div(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
+  def __rand__(self, x) -> Tensor: return self.bitwise_and(x, True)
+  def __ror__(self, x) -> Tensor: return self.bitwise_or(x, True)
   def __rxor__(self, x) -> Tensor: return self.xor(x, True)
 
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
