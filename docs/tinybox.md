@@ -16,6 +16,8 @@ tinybox has two 1600W PSUs, which together exceed the capacity of most 120V hous
 
 You'll also want to connect the Ethernet port without a rubber stopper to your home network.
 
+While it's designed primarily for the home or office, the tinybox is 12U rack mountable using [these rails](https://rackmountmart.store.turbify.net/26slidrailfo.html).
+
 ## Connecting to the box
 
 tinybox ships with a relatively basic install of Ubuntu 22.04. To do initial setup, you can either plug in a VGA monitor and keyboard, or you can connect remotely to the machine using the BMC. The BMC IP and password are displayed on the screen.
