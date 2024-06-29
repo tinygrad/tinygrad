@@ -267,5 +267,3 @@ ptx_matcher = PatternMatcher([
       (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
         UOp.const(dtypes.int64, 0))+root.src[2:])),
 ])
-
-class NVPTXRenderer(PTXRenderer): device = "NV"
