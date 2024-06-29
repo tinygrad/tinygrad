@@ -215,7 +215,7 @@ class Linearizer(Kernel):
       if self.late_gate is not None: valid *= self.late_gate
       # TODO: let UPat check this once it's fast
       if valid.min == 1: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var)))
-      else: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(render_ops, self.loop_uops).cast(dtypes.bool))))
+      else: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(render_ops, self.loop_uops))))
     return stores
 
   # render loop
