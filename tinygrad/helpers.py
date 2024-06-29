@@ -299,6 +299,7 @@ class tqdm:
     def fn(x): return (f"{scl(x):.{3-math.ceil(math.log10(scl(x)))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(math.log(x,1000))].strip(' ')) if x else '0.00'
     if self.t: unit_text = f"{fn(self.n)}/{fn(self.t)}" if self.unit_scale else f"{self.n}/{self.t}"
     else: unit_text = f"{fn(self.n)}{self.unit}" if self.unit_scale else f"{self.n}{self.unit}"
+    print(f"{dur=}, {self.n=}, {self.n/dur=}, {fn(self.n/dur)=}")
     it_text = (f"{fn(self.n/dur)}" if self.unit_scale else f"{self.n/dur:5.2f}") if self.n else "?"
     if self.t: suf = f'| {unit_text} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {it_text}{self.unit}/s]'
     else: suf = f'{unit_text} [{fmt(dur)}, {it_text}{self.unit}/s]'
