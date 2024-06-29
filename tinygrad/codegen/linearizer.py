@@ -142,9 +142,7 @@ class Linearizer(Kernel):
     acc_count = 0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx = (invalid_value, NumNode(0)) if valid.max == 0 else (const, idx)
-      valid_uop = valid.render(render_ops, self.loop_uops) if valid.min == 0 and valid.max == 1 else UOp.const(dtypes.bool, valid.b)
-      # TODO: temp assert, this is done in type_verify already
-      assert valid_uop.dtype is dtypes.bool, f"unexpected dtype {valid_uop.dtype} {valid} {valid.render()} {valid_uop}"
+      valid_uop = UOp.const(dtypes.bool, valid.b) if valid.min == valid.max else valid.render(render_ops, self.loop_uops)
       key = f"{'' if acc is None else self.reduceops.index(acc)}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
