@@ -326,13 +326,8 @@ class UOpGraph:
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
-    sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
-    # dedup all nodes and do graph rewrite
-    sink = graph_rewrite(sink, constant_folder)
-    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
-
-    # rewrite gated stores with as an IF block
+    # fixup gated stores with an IF block to save extra LOADs
     @functools.lru_cache(None)
     def _dfs(u:UOp, gate:UOp) -> UOp:
       if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
@@ -340,13 +335,13 @@ class UOpGraph:
         return UOp(u.op, u.dtype, u.src[:2]+(if_uop, ), u.arg)
       if (new_src:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, new_src, u.arg)
       return u
-    for i, s in enumerate(sink.src):
+    for i, s in enumerate(self.sinks[:]):
       if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
-    if tuple(self.sinks) != sink.src:
-      sink = UOp(UOps.SINK, None, tuple(self.sinks))
-      # dedup all nodes and do graph rewrite
-      sink = graph_rewrite(sink, constant_folder)
-      if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+    sink = UOp(UOps.SINK, None, tuple(self.sinks))
+
+    # dedup all nodes and do graph rewrite
+    sink = graph_rewrite(sink, constant_folder)
+    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
     # BFS toposort
