@@ -9,6 +9,7 @@ from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
+import tinygrad.runtime.autogen.libc as libc
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401
 
