@@ -335,17 +335,18 @@ class UOpGraph:
     # custom fixup of gated stores to UOps.IF blocks. TODO: can do more
     changed = False
     for i, s in enumerate(new_sinks:=self.sinks.copy()):
-      assert s.op is UOps.STORE, f"sinking {s}?"
-      if len(s.src) != 4: continue
-      changed = True
+      #assert s.op is UOps.STORE, f"sinking {s}?"
+      if s.op is not UOps.STORE or len(s.src) != 4: continue
       @functools.lru_cache(None)
       def _dfs(u:UOp) -> UOp:
-        if u.op is UOps.LOAD:
-          assert u.src[-1].op is UOps.BARRIER
+        nonlocal changed
+        if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
+          changed = True
           if_uop = UOp(UOps.IF, None, (s.src[3], u.src[-1]))
           return UOp(u.op, u.dtype, u.src[:2]+(if_uop, ), u.arg)
-        if u is s: u =  UOp(u.op, u.dtype, u.src[:3], u.arg)
-        u = UOp(u.op, u.dtype, tuple(_dfs(x) for x in u.src), u.arg)
+        src = tuple(_dfs(x) for x in u.src)
+        if u is s and changed: src = src[:3]
+        u = UOp(u.op, u.dtype, src, u.arg)
         return u
       new_sinks[i] = _dfs(s)
     if changed:
