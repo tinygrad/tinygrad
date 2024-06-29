@@ -333,9 +333,11 @@ class UOpGraph:
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # custom fixup of gated stores to UOps.IF blocks. TODO: can do more
-    for i, s in enumerate(self.sinks.copy()):
+    changed = False
+    for i, s in enumerate(new_sinks:=self.sinks.copy()):
       assert s.op is UOps.STORE, f"sinking {s}?"
       if len(s.src) != 4: continue
+      changed = True
       @functools.lru_cache(None)
       def _dfs(u:UOp) -> UOp:
         if u.op is UOps.LOAD:
@@ -345,8 +347,12 @@ class UOpGraph:
         if u is s: u =  UOp(u.op, u.dtype, u.src[:3], u.arg)
         u = UOp(u.op, u.dtype, tuple(_dfs(x) for x in u.src), u.arg)
         return u
-      self.sinks[i] = _dfs(s)
-    sink = UOp(UOps.SINK, None, tuple(self.sinks))
+      new_sinks[i] = _dfs(s)
+    if changed:
+      sink = UOp(UOps.SINK, None, tuple(new_sinks))
+      # dedup all nodes and do graph rewrite
+      sink = graph_rewrite(sink, constant_folder)
+      if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
     # BFS toposort
