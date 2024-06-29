@@ -213,11 +213,12 @@ class TestProgressBar(unittest.TestCase):
         i += 1
         incr = max(1, (total // 10) + random.randint(0, 100))
         if n + incr > total: incr = total - n
-        bar.update(incr, close=n+incr==total)
         n += incr
+        bar.update(incr, close=n==total)
         if bar.i % bar.skip != 0: continue
 
         tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+        print(f"{n=}, {i=}, {i*dt=}")
         tqdm_output = tqdm.format_meter(n=n, total=total, unit="B", unit_scale=True, elapsed=i*dt, ncols=ncols, prefix="Test")
         print(f"{tinytqdm_output}\n{tqdm_output}\n")
         self._compare_bars(tinytqdm_output, tqdm_output)
