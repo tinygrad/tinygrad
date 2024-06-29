@@ -1079,6 +1079,19 @@ class Tensor:
     # checks for shapes and number of dimensions delegated to cat
     return self.unsqueeze(dim).cat(*[t.unsqueeze(dim) for t in args], dim=dim)
 
+  def repeat_interleave(self, repeats:int, dim:Optional[int]=None) -> Tensor:
+    """
+    Repeat elements of a tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.repeat_interleave(2).numpy())
+    ```
+    """
+    x, dim = (self.flatten(), 0) if dim is None else (self, dim)
+    shp = x.shape
+    return x.reshape(*shp[:dim+1], 1, *shp[dim+1:]).expand(*shp[:dim+1], repeats, *shp[dim+1:]).reshape(*shp[:dim], shp[dim]*repeats, *shp[dim+1:])
+
   def repeat(self, repeats, *args) -> Tensor:
     """
     Repeats tensor number of times along each dimension specified by `repeats`.
