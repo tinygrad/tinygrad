@@ -211,8 +211,7 @@ class Linearizer(Kernel):
       else:
         rendered_idx = idx.render(render_ops, self.loop_uops)
       if hasattr(self, "if_cond"):
-        assert valid.min == 1, "todo!"
-        valid = self.if_cond
+        valid *= self.if_cond
       # TODO: let UPat check this once it's fast
       if valid.min == 1: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var)))
       else: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(render_ops, self.loop_uops))))
