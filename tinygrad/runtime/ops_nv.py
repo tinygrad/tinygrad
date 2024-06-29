@@ -10,8 +10,8 @@ import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.renderer.assembly import PTXRenderer
 import tinygrad.runtime.autogen.libc as libc
-if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401
-if MOCKGPU:=getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401
+if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
+if MOCKGPU:=getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
 def nv_iowr(fd, nr, args):
   ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
