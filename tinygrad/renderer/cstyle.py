@@ -80,7 +80,7 @@ class CStyleLanguage(Renderer):
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.count == 1 else str(var_dtype.count)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.count > 1:
-      if(var_name.startswith('zreg')): return f"__stz(&{buf_name}[{idx}], {int(var_name[4:var_name.index('.')])*buf_dtype.itemsize%64});"
+      if(var_name.startswith('zreg')): return f"__stz(&{buf_name}[{idx}], {int(var_name[4:var_name.index('[')])*buf_dtype.itemsize%64});"
       prefix = self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix
       return f"*(({prefix}{self.render_dtype(buf_dtype)}{var_dtype.count}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
@@ -178,7 +178,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
-          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 16 else f".{'abcdefghijklmnop'[args]}")
+          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
         else: raise RuntimeError(f"failed to render {uop}")
 
     return self.render_kernel(name, kernel, bufs, uops)
@@ -196,19 +196,19 @@ class ClangRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    dto_name, dto_count, dto_cast = 'float', 16, 'float16'
     kernel.insert(0, '  AMX_SET(0);')
     kernel.insert(len(kernel), '  AMX_SET(1);')
     prefix = [
-'#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
-'#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
-"""typedef struct { float a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p; } float16;
-float16 make_float16(float a, float b, float c, float d, float e, float f, float g, float h, float i, float j, float k, float l, float m, float n, float o, float p) {
-    float16 result = {a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p};
-    return result;
-}""",
-"void __stz(float* restrict data0, int zreg){ AMX(5, data0, 0ull<<62 | (zreg*1ull)<<56); }",
-"void __MMA_16_16_float16(float16 data1, float16 data2){ AMX(0, (int *) (&data2), 0ull<<62); AMX(1, (int *) (&data1), 0ull<<62); AMX(12, 0, 0ull); }"
-]
+      f"""typedef struct {{ {dto_name + " x" + ", x".join([str(x) for x in range(dto_count)])}; }} {dto_cast};
+{dto_cast} make_{dto_cast}({dto_name + " x" + f", {dto_name} x".join([str(x) for x in range(dto_count)])}) {{
+    return ({dto_cast}) {{x{", x".join([str(x) for x in range(dto_count)])}}};
+}}""",
+      '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
+      '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
+      f"void __stz({dto_name}* restrict data0, int zreg){{ AMX(5, data0, 0ull<<62 | (zreg*1ull)<<56); }}",
+      f"void __MMA_{dto_count}_{dto_count}_{dto_cast}({dto_cast} data1, {dto_cast} data2){{ AMX(0, (int *) (&data2), 0ull<<62); AMX(1, (int *) (&data1), 0ull<<62); AMX(12, 0, 0ull); }}",
+    ]
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
