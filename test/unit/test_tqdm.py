@@ -211,7 +211,7 @@ class TestProgressBar(unittest.TestCase):
 
       while n < total:
         i += 1
-        incr = (total // 10) + random.randint(0, 100)
+        incr = max(1, (total // 10) + random.randint(0, 100))
         if n + incr > total: incr = total - n
         bar.update(incr, close=n+incr==total)
         n += incr
