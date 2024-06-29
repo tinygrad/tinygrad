@@ -1,6 +1,8 @@
 import json, pprint
+from typing import Optional
 from tinygrad import fetch, nn, Tensor
 from extra.models.llama import RMSNorm    # TODO: move to nn
+from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 
 class FeedForward:
   def __init__(self, model_dim, intermediate_dim):
@@ -12,12 +14,33 @@ class FeedForward:
     y_1, y_2 = y_12.chunk(2, dim=-1)
     return self.proj_2(y_1.silu() * y_2)
 
+MAX_CONTEXT = 1024
 class Attention:
   def __init__(self, model_dim, num_query_heads, num_kv_heads, head_dim):
     self.qkv_proj = nn.Linear(model_dim, (num_query_heads + num_kv_heads*2) * head_dim, bias=False)
+    self.num_query_heads, self.num_kv_heads = num_query_heads, num_kv_heads
+    self.head_dim = head_dim
+    self.q_norm = RMSNorm(head_dim)
+    self.k_norm = RMSNorm(head_dim)
+    self.out_proj = nn.Linear(num_query_heads * head_dim, model_dim, bias=False)
+    #self.freqs_cis = None
 
-  def __call__(self, x):
-    pass
+  def __call__(self, x:Tensor):
+    batch_size, seq_len, embed_dim = x.shape
+    qkv = self.qkv_proj(x)
+    qkv = qkv.reshape(batch_size, seq_len, self.num_query_heads+self.num_kv_heads*2, self.head_dim).transpose(1, 2)
+    xq,xk,xv = qkv.split([self.num_query_heads, self.num_kv_heads, self.num_kv_heads], 1)
+    xq = self.q_norm(xq)
+    xk = self.k_norm(xk)
+
+    # Add positional embedding (NOTE: jit avoid independent would avoid this None hack)
+    #if self.freqs_cis is None:
+    #  self.freqs_cis = precompute_freqs_cis(embed_dim // self.num_kv_heads, MAX_CONTEXT*1)
+    #xq, xk = apply_rotary_emb(xq, xk, self.freqs_cis)  # TODO: why aren't types going through here?
+
+    attn_output = xq.scaled_dot_product_attention(xk, xv)
+    attn_output = attn_output.transpose(1, 2).reshape(batch_size, seq_len, self.num_query_heads * self.head_dim)
+    return self.out_proj(attn_output)
 
 class Layer:
   def __init__(self, model_dim, intermediate_dim, num_query_heads, num_kv_heads, head_dim):
@@ -49,12 +72,18 @@ class Transformer:
     self.norm = RMSNorm(cfg['model_dim'])
     self.token_embeddings = nn.Embedding(cfg['vocab_size'], cfg['model_dim'])
 
-  def __call__(self, x:Tensor):
-    return self.token_embeddings(self.norm(x))
+  def __call__(self, tokens:Tensor):
+    # _bsz, seqlen = tokens.shape
+    x = self.token_embeddings(tokens)
+    for l in self.layers: x = l(x)
+    return self.norm(x) @ self.token_embeddings.weight.T
 
 if __name__ == "__main__":
   model = Transformer(json.loads(fetch("https://huggingface.co/apple/OpenELM-270M-Instruct/resolve/main/config.json?download=true").read_bytes()))
   weights = nn.state.safe_load(fetch("https://huggingface.co/apple/OpenELM-270M-Instruct/resolve/main/model.safetensors?download=true"))
-  #for k, v in weights.items(): print(k, v.shape)
+  for k, v in weights.items(): print(k, v.shape)
   nn.state.load_state_dict(model, {k.removeprefix("transformer."):v for k,v in weights.items()})
+
+  toks = Tensor([[0]])
+  model(toks)
 

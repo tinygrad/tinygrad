@@ -15,7 +15,7 @@ def complex_mult(A, c, d):
   co = a*d + b*c
   return ro.cat(co, dim=-1)
 
-def apply_rotary_emb(xq, xk, freqs_cis) -> Tuple[Tensor, Tensor]:
+def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis) -> Tuple[Tensor, Tensor]:
   assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
   xq = xq.reshape(*xq.shape[0:-1], -1, 2)
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
@@ -39,7 +39,7 @@ class RMSNorm:
   def _norm(self, x:Tensor):
     return x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     return self._norm(x.float()).cast(x.dtype) * self.weight
 
 class Attention:
