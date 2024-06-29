@@ -309,7 +309,13 @@ def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, idx, new_var))
 
+tc_args = ('WMMA_8_8_8_float_float', (8, 8, 8), dtypes.float, dtypes.float, (2, 2, 2), 'METAL')
+ex_8 = UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(8))).name("ex")
+
 float4_folding = PatternMatcher([
+  # tensor core!
+  #(UOp(UOps.REDUCE, dtype=dtypes.float, src=(UOp(UOps.LOAD).name("x") * UOp(UOps.LOAD, src=(UOp.var("w_src"), UOp.var("w_idx")+ex_8)), ex_8)),
+  #  lambda ex,x,w_src,w_idx: UOp(UOps.WMMA, dtypes.float, (x, UOp(UOps.LOAD, dtypes.float, src=(w_src, w_idx))), tc_args)),
   # float4 add reorder. NOTE: n-ary ADD will fix this.
   #(UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
   #  UOp.var("idx")+(UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")))).name("load"),
