@@ -214,7 +214,9 @@ class TestProgressBar(unittest.TestCase):
         if n + incr > total: incr = total - n
         n += incr
         bar.update(incr, close=n==total)
-        if bar.i % bar.skip != 0: continue
+        if bar.i % bar.skip != 0:
+          print(f"skip {bar.i=}, {bar.skip=}")
+          continue
 
         tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
         print(f"{n=}, {cnt=}, {cnt*dt=}")

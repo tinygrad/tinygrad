@@ -291,7 +291,9 @@ class tqdm:
   def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
-    if (self.i % self.skip != 0 and not close) or self.dis: return
+    if (self.i % self.skip != 0 and not close) or self.dis:
+      print("skip!!")
+      return
     prog, dur, term = self.n/self.t if self.t else -1, time.perf_counter()-self.st, shutil.get_terminal_size().columns
     if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
     def fmt(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([t//3600,t%3600//60,t%60]) if i or x) if (t:=int(t)) != -1 else '?'
@@ -299,7 +301,7 @@ class tqdm:
     def fn(x): return (f"{scl(x):.{3-math.ceil(math.log10(scl(x)))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(math.log(x,1000))].strip(' ')) if x else '0.00'
     if self.t: unit_text = f"{fn(self.n)}/{fn(self.t)}" if self.unit_scale else f"{self.n}/{self.t}"
     else: unit_text = f"{fn(self.n)}{self.unit}" if self.unit_scale else f"{self.n}{self.unit}"
-    print(f"{dur=}, {self.n=}, {self.n/dur=}, {fn(self.n/dur)=}")
+    print(f"{self.st=}, {dur=}, {self.n=}, {self.n/dur=}, {fn(self.n/dur)=}")
     it_text = (f"{fn(self.n/dur)}" if self.unit_scale else f"{self.n/dur:5.2f}") if self.n else "?"
     if self.t: suf = f'| {unit_text} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {it_text}{self.unit}/s]'
     else: suf = f'{unit_text} [{fmt(dur)}, {it_text}{self.unit}/s]'
