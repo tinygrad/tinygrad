@@ -163,7 +163,6 @@ class TestProgressBar(unittest.TestCase):
   def test_tqdm_perf(self):
     st = time.perf_counter()
     for _ in tqdm(range(100)): time.sleep(0.01)
-
     tqdm_time = time.perf_counter() - st
 
     st = time.perf_counter()

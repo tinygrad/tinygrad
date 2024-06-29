@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
 import functools, itertools, heapq, math
-from collections import defaultdict, deque
+from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType
@@ -33,7 +33,6 @@ class UOp:
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
-  def tuple(self): return (self.op, self.dtype, self.src, self.arg)
   def commutative(self) -> bool:
     return self.op is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
@@ -289,34 +288,15 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
   in_degree[u] = len(u.src)
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  @functools.lru_cache(None)
-  def __inner_rewrite(n:UOp) -> UOp:
-    replace_src = tuple(__inner_rewrite(x) for x in n.src)
-    if replace_src != n.src: n = UOp(n.op, n.dtype, replace_src, n.arg)
-    return __inner_rewrite(new_n) if (new_n := pm.rewrite(n)) else n
-  return __inner_rewrite(sink)
-
-def graph_dedup(sink:UOp):
-  # add nodes to graph in reverse BFS order
-  # dedup all nodes
-  in_degree: Dict[UOp, int] = {}
-  children: Dict[UOp, List[UOp]] = {}
-  get_children_dfs(sink, children, in_degree)
-
   nodes: Dict[Tuple, UOp] = {}
-  queue = deque([k for k, v in in_degree.items() if v == 0])
-  replace_nodes: Dict[UOp, UOp] = {}
-  while queue:
-    n = queue.popleft()
-    if n in replace_nodes: continue
-    key = (n.op, n.dtype, tuple(replace_nodes.get(x, x) for x in n.src), n.arg)
-    if found:=nodes.get(key): replace_nodes[n] = found
-    else: replace_nodes[n] = nodes[key] = UOp(*key)
-    for x in children[n]:
-      in_degree[x] -= 1
-      if in_degree[x] == 0:
-        queue.append(x)
-  return replace_nodes.get(sink, sink)
+  replace: Dict[UOp, UOp] = {}
+  def __inner_rewrite(n:UOp) -> UOp:
+    if n in replace: return replace[n]
+    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
+    if found := nodes.get(replace_source): replace[n] = found
+    else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
+    return replace[n]
+  return __inner_rewrite(sink)
 
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
@@ -346,25 +326,34 @@ class UOpGraph:
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
+
+    # fixup gated stores with an IF block to save extra local loads
+    @functools.lru_cache(None)
+    def _dfs(u:UOp, gate:UOp) -> UOp:
+      if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
+        if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
+        return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
+      if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
+      return u
+    for i, s in enumerate(self.sinks[:]):
+      if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
-    # dedup all nodes in graph
-    sink = graph_dedup(sink)
-
-    # do graph rewrite
+    # dedup all nodes and do graph rewrite
     sink = graph_rewrite(sink, constant_folder)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
     # BFS toposort
-    graph: Dict[UOp, List[UOp]] = {}
+    children: Dict[UOp, List[UOp]] = {}
     in_degree: Dict[UOp, int] = {}
-    get_children_dfs(sink, graph, in_degree)
+    get_children_dfs(sink, children, in_degree)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
       if x.op is UOps.SINK: return set()
-      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in graph[x] if x.op is not end]))
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
+
     # scope children impact the toposort and END* insertion
     end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
     loops, ifs = [x for x in in_degree if x.op is UOps.RANGE], [x for x in in_degree if x.op is UOps.IF]
@@ -378,12 +367,12 @@ class UOpGraph:
         if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
-    for u in graph:
+    for u in children:
       if in_degree[u] == 0: push(u)
 
     if getenv("FUZZ_UOPS", 0):
       from test.external.fuzz_uops import fuzz_uops
-      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), scope_children)
+      self.fuzz_paths = fuzz_uops(children, in_degree.copy(), scope_children)
 
     self._uops = []
     while queue:
@@ -398,7 +387,7 @@ class UOpGraph:
         if x in ss:
           ss.remove(x)
           if len(ss) == 0: self._uops.append(UOp(end_for_uop[u.op][1], None, (u,)))
-      for u in graph[x]:
+      for u in children[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
 
