@@ -327,12 +327,12 @@ class UOpGraph:
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
-    # fixup gated stores with an IF block to save extra LOADs
+    # fixup gated stores with an IF block to save extra local loads
     @functools.lru_cache(None)
     def _dfs(u:UOp, gate:UOp) -> UOp:
       if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
         if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
-        return UOp(u.op, u.dtype, u.src[:-1]+(if_uop, ), u.arg)
+        return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
       if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
     for i, s in enumerate(self.sinks[:]):
