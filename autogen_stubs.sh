@@ -217,7 +217,6 @@ generate_libc() {
   sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
   sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('c'))\g" $BASE/libc.py
 
-  # clang2py can't parse defines
   fixup $BASE/libc.py
 }
 

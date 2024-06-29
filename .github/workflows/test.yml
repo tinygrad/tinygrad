@@ -511,8 +511,11 @@ jobs:
       - name: Verify Linux autogen
         if: matrix.backend == 'amd'
         run: |
+          cp tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
           cp tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
+          ./autogen_stubs.sh libc
           ./autogen_stubs.sh io_uring
+          diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
           diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
