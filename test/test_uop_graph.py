@@ -186,5 +186,12 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(len(uops.uops), 4)
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
 
+  def test_asserts_bad_gate(self):
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    idx = UOp.const(dtypes.int, 0)
+    bad_gate = UOp.const(dtypes.int, 1)
+    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
+    with self.assertRaises(AssertionError): uops.linearize()
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
