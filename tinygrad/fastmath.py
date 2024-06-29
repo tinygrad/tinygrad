@@ -53,6 +53,9 @@ def bits_to_float(d: LazyBuffer, float_dtype: DType) -> LazyBuffer:
   return d.cast(cast_to, True, True)
 
 # **** utils ****
+def shr(x: LazyBuffer, y:int) -> LazyBuffer: return x.e(BinaryOps.IDIV, x.const(2**y))
+def shl(x: LazyBuffer, y:int) -> LazyBuffer: return x.e(BinaryOps.MUL, x.const(2**y))
+
 def rintk(d: LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   return_t = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype]
@@ -70,7 +73,7 @@ def ilogb2k(d:LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   dint = d.cast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype], True, True)
   # ((float_to_bits(d) >> significand_bits(dtype)) & exponent_mask(dtype)) - exponent_bias(dtype)
-  return dint.e(BinaryOps.SHR, dint.const(significand_bits(d.dtype))).e(BinaryOps.AND, dint.const(exponent_mask(d.dtype))).e(BinaryOps.ADD, dint.const(-(exponent_bias(d.dtype)+1))) # noqa: E501
+  return shr(dint, significand_bits(d.dtype)).e(BinaryOps.AND, dint.const(exponent_mask(d.dtype))).e(BinaryOps.ADD, dint.const(-(exponent_bias(d.dtype)+1))) # noqa: E501
 
 def ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype) and is_dtype_fastmath_supported(e.dtype)
@@ -79,22 +82,23 @@ def ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   cast_map = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
   e = e.cast(cast_map[d.dtype])
   m1 = d.cast(cast_map[d.dtype], True, True)
-  m2 = e.e(BinaryOps.SHL, e.const(significand_bits(d.dtype)))
+  m2 = shl(e, significand_bits(d.dtype))
   return m1.e(BinaryOps.ADD, m2).cast(d.dtype, True, True).cast(dtype)
 
 def pow2if(q: LazyBuffer, float_dtype: DType):
-  final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype}[q.dtype]
-  return q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)).e(BinaryOps.SHL, q.const(significand_bits(final_dtype))).cast(final_dtype, True, True) # noqa: E501
+  assert q.dtype in (dtypes.int64, dtypes.int32, dtypes.int16, dtypes.uint32)
+  final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype, dtypes.uint32: dtypes.float32}[q.dtype]
+  return shl(q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)), significand_bits(final_dtype)).cast(final_dtype, True, True) # noqa: E501
 
 def ldexp2kf(d: LazyBuffer, e: LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype) and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
-  return d.e(BinaryOps.MUL, pow2if(e.e(BinaryOps.SHR, e.const(1)), d.dtype)).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.ADD, e.e(BinaryOps.SHR, e.const(1)).e(UnaryOps.NEG)), d.dtype)) # noqa: E501
+  return d.e(BinaryOps.MUL, pow2if(shr(e, 1), d.dtype)).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.ADD, shr(e, 1).e(UnaryOps.NEG)), d.dtype)) # noqa: E501
 
 def frexp(v: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   m1 = {dtypes.float64: 0x800FFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype] # noqa: E501
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3C00}[v.dtype] # noqa: E501
   bits = float_to_bits(v)
-  exponent = bits.e(BinaryOps.SHR, bits.const(significand_bits(v.dtype))).e(BinaryOps.AND, bits.const(exponent_mask(v.dtype)))
+  exponent = shr(bits, significand_bits(v.dtype)).e(BinaryOps.AND, bits.const(exponent_mask(v.dtype)))
   exponent_zero = exponent.e(BinaryOps.CMPNE, exponent.const(0.0))
   result_f = bits_to_float(bits.e(BinaryOps.AND, bits.const(m1)).e(BinaryOps.OR, bits.const(m2)), v.dtype)
   value = exponent_zero.e(TernaryOps.WHERE, result_f, v)
@@ -113,7 +117,7 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
 
   f, e = frexp(d)
   ia = (k := f.cast(dtype_via)).e(BinaryOps.MUL, k.const(4.294967296e9)).cast(dtypes.uint64)
-  i = (k := e.cast(dtypes.uint64)).e(BinaryOps.SHR, k.const(5))
+  i = shr(e.cast(dtypes.uint64), 5)
   e = (k := e.cast(dtypes.uint64)).e(BinaryOps.AND, k.const(31))
 
   def _eq(arr: LazyBuffer, eq_to: int) -> LazyBuffer: return arr.e(BinaryOps.CMPNE, arr.const(eq_to))
@@ -137,16 +141,21 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
   e = e.cast(dtypes.uint32)
   offset = e.const(32).e(BinaryOps.ADD, e.e(UnaryOps.NEG))
 
-  hi = _eq(e, 0).e(TernaryOps.WHERE, a1.e(BinaryOps.SHL, e).e(BinaryOps.OR, a1p1.e(BinaryOps.SHR, offset)), a1)
-  mi = _eq(e, 0).e(TernaryOps.WHERE, a2.e(BinaryOps.SHL, e).e(BinaryOps.OR, a2p1.e(BinaryOps.SHR, offset)), a2)
-  lo = _eq(e, 0).e(TernaryOps.WHERE, a3.e(BinaryOps.SHL, e).e(BinaryOps.OR, a3p1.e(BinaryOps.SHR, offset)), a3)
+  acc_dtype = dtypes.uint32 if input_dtype == dtypes.float16 else dtypes.uint64
+  def _exact_pow2if(x): return _xexp2_base(x.cast(dtypes.float32)).cast(acc_dtype)
+  def _shl(x, y): return x.cast(acc_dtype).e(BinaryOps.MUL, _exact_pow2if(y)).cast(dtypes.uint32)
+  def _shr(x, y): return x.cast(acc_dtype).e(BinaryOps.IDIV, _exact_pow2if(y)).cast(dtypes.uint32)
+
+  hi = _eq(e, 0).e(TernaryOps.WHERE, _shl(a1, e).e(BinaryOps.OR, _shr(a1p1, offset)), a1)
+  mi = _eq(e, 0).e(TernaryOps.WHERE, _shl(a2, e).e(BinaryOps.OR, _shr(a2p1, offset)), a2)
+  lo = _eq(e, 0).e(TernaryOps.WHERE, _shl(a3, e).e(BinaryOps.OR, _shr(a3p1, offset)), a3)
 
   def _hp_mul(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer: return x.cast(dtypes.uint64).e(BinaryOps.MUL, y.cast(dtypes.uint64))
   p = _hp_mul(ia, lo)
-  p = _hp_mul(ia, mi).e(BinaryOps.ADD, p.e(BinaryOps.SHR, p.const(32)))
-  p = _hp_mul(ia, hi).e(BinaryOps.SHL, p.const(32)).e(BinaryOps.ADD, p)
+  p = _hp_mul(ia, mi).e(BinaryOps.ADD, shr(p, 32))
+  p = shl(_hp_mul(ia, hi), 32).e(BinaryOps.ADD, p)
 
-  q = p.e(BinaryOps.SHR, p.const(62)).cast(dtypes.int32)
+  q = shr(p, 62).cast(dtypes.int32)
   p = p.e(BinaryOps.AND, p.const(0x3fffffffffffffff))
 
   fr_map = p.e(BinaryOps.AND, p.const(0x2000000000000000)).e(BinaryOps.CMPNE, p.const(0))
@@ -179,7 +188,7 @@ def _xsin_base(d: LazyBuffer, fast:bool=False) -> LazyBuffer:
   d = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
   fp64_p = d.dtype == dtypes.float64
   trig_range_lv1 = d.const(15.0 if fp64_p else 125.0)
-  trig_range_lv2 = d.const(1e+14 if fp64_p else 39000)
+  trig_range_lv2 = d.const(1e+14 if fp64_p else 38900)
   m_1_pi = 0.318309886183790671537767526745028724
 
   # di = abs(d)
@@ -198,7 +207,8 @@ def _xsin_base(d: LazyBuffer, fast:bool=False) -> LazyBuffer:
       return rintk(mla(d, d.const(m_1_pi), qdh.e(UnaryOps.NEG))).cast(d.dtype)
     return __lv1q(x)
 
-  lv3_reduced_d = payne_hanek_reduction(di, d)
+  di_no_inf = di.e(BinaryOps.CMPLT, trig_range_lv2).e(TernaryOps.WHERE, trig_range_lv2, di)
+  lv3_reduced_d = payne_hanek_reduction(di_no_inf, d)
   lv3_q = __lv2q(d) if fast else __lv2q(lv3_reduced_d) # skip the payne_hanek_reduction
   q: LazyBuffer = di.e(BinaryOps.CMPLT, trig_range_lv1).e(TernaryOps.WHERE, __lv1q(d), di.e(BinaryOps.CMPLT, trig_range_lv2).e(TernaryOps.WHERE, __lv2q(d), lv3_q)) # noqa: E501
   def __lv1(x: LazyBuffer) -> LazyBuffer:
@@ -303,7 +313,7 @@ def _xlog2_base(d: LazyBuffer, denormal: bool) -> LazyBuffer:
   r = zero_map.e(TernaryOps.WHERE, r, r.const(-math.inf))
   return r
 
-# ****** toplevels for fastmath *****
+# ****** toplevel functions for fastmath *****
 def xsin(x: LazyBuffer, fast: bool=False) -> LazyBuffer:
   assert is_dtype_fastmath_supported(x.dtype)
   if 0 in x.shape: return x
@@ -312,7 +322,9 @@ def xsin(x: LazyBuffer, fast: bool=False) -> LazyBuffer:
 def xlog2(d: LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   FLT_MIN = d.const(1e-6 if d.dtype == dtypes.float16 else 1e-4)
+  Y_FLT_MIN = d.const(math.log2({dtypes.float64: 1e-228, dtypes.float32: 1e-38, dtypes.float16: 1e-6}[d.dtype]))
   out = d.e(BinaryOps.CMPLT, FLT_MIN).e(TernaryOps.WHERE, _xlog2_base(d, True), _xlog2_base(d, False))
+  out = out.e(BinaryOps.CMPLT, Y_FLT_MIN).e(TernaryOps.WHERE, out.const(math.nan), out)
   return d.e(BinaryOps.CMPNE, d.const(0.0)).e(TernaryOps.WHERE, out, d.const(-math.inf))
 
 def xexp2(d: LazyBuffer) -> LazyBuffer:
