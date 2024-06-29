@@ -206,6 +206,20 @@ generate_io_uring() {
   fixup $BASE/io_uring.py
 }
 
+generate_libc() {
+  clang2py \
+    $(dpkg -L libc6-dev | grep sys/mman.h) \
+    $(dpkg -L libc6-dev | grep sys/syscall.h) \
+    /usr/include/unistd.h \
+    -o $BASE/libc.py
+
+  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
+  sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('c'))\g" $BASE/libc.py
+
+  fixup $BASE/libc.py
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -216,6 +230,7 @@ elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "io_uring" ]; then generate_io_uring
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd
+elif [ "$1" == "libc" ]; then generate_libc
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
 else echo "usage: $0 <type>"
 fi

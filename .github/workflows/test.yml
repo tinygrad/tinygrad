@@ -466,7 +466,7 @@ jobs:
           EOF
           echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
           sudo apt update || true
-          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev
+          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
           curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
           jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
           sudo xargs curl -L -o /usr/local/lib/libremu.so
@@ -511,8 +511,11 @@ jobs:
       - name: Verify Linux autogen
         if: matrix.backend == 'amd'
         run: |
+          cp tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
           cp tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
+          ./autogen_stubs.sh libc
           ./autogen_stubs.sh io_uring
+          diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
           diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'

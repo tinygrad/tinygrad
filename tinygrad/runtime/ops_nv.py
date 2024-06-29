@@ -9,18 +9,9 @@ from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompi
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.renderer.assembly import PTXRenderer
-if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401
-
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype = ctypes.c_void_p
-libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-libc.munmap.restype = ctypes.c_int
-
-if MOCKGPU:=getenv("MOCKGPU"):
-  import extra.mockgpu.mockgpu  # noqa: F401
-  libc.mmap = extra.mockgpu.mockgpu._mmap # type: ignore
-  libc.munmap = extra.mockgpu.mockgpu._munmap # type: ignore
+import tinygrad.runtime.autogen.libc as libc
+if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
+if MOCKGPU:=getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
 def nv_iowr(fd, nr, args):
   ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
