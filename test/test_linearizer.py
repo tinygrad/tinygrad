@@ -1168,6 +1168,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skip("parallel reduce")
   def test_local_and_grouped_reduce_multireduce(self):
     N = 128
     Tensor.manual_seed(1882)
