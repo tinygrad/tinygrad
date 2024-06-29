@@ -332,25 +332,18 @@ class UOpGraph:
     sink = graph_rewrite(sink, constant_folder)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
-    # custom fixup of gated stores to UOps.IF blocks. TODO: can do more
-    changed = False
-    for i, s in enumerate(new_sinks:=self.sinks.copy()):
-      #assert s.op is UOps.STORE, f"sinking {s}?"
-      if s.op is not UOps.STORE or len(s.src) != 4: continue
-      @functools.lru_cache(None)
-      def _dfs(u:UOp) -> UOp:
-        nonlocal changed
-        if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
-          changed = True
-          if_uop = UOp(UOps.IF, None, (s.src[3], u.src[-1]))
-          return UOp(u.op, u.dtype, u.src[:2]+(if_uop, ), u.arg)
-        src = tuple(_dfs(x) for x in u.src)
-        if u is s and changed: src = src[:3]
-        u = UOp(u.op, u.dtype, src, u.arg)
-        return u
-      new_sinks[i] = _dfs(s)
-    if changed:
-      sink = UOp(UOps.SINK, None, tuple(new_sinks))
+    # rewrite gated stores with as an IF block
+    @functools.lru_cache(None)
+    def _dfs(u:UOp, gate:UOp) -> UOp:
+      if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
+        if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
+        return UOp(u.op, u.dtype, u.src[:2]+(if_uop, ), u.arg)
+      src = tuple(_dfs(x, gate) for x in u.src)
+      return UOp(u.op, u.dtype, src, u.arg)
+    for i, s in enumerate(sink.src):
+      if s.op is UOps.STORE and len(s.src) == 4 and (rewritten:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rewritten.op, rewritten.dtype, rewritten.src[:3], rewritten.arg)
+    if tuple(self.sinks) != sink.src:
+      sink = UOp(UOps.SINK, None, tuple(self.sinks))
       # dedup all nodes and do graph rewrite
       sink = graph_rewrite(sink, constant_folder)
       if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
