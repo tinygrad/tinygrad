@@ -289,17 +289,23 @@ reducer = PatternMatcher([
 ])
 
 def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), const=None):
+  if len(ex.src) != 4: return None
+  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
   if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
-  if load.dtype.scalar() != load.dtype: return None  # how does this happen?
   if const is not None: idx = idx + const
   if not idx.divides(len(ex.src)): return None
+
+  if load.dtype.scalar() != load.dtype: return None  # how does this happen?
   vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
   return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
 
 def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None):
+  if len(ex.src) != 4: return None
+  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
   if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
   if const is not None: idx = idx + const
   if not idx.divides(len(ex.src)): return None
+
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, idx, new_var))
 
@@ -308,25 +314,28 @@ float4_folding = PatternMatcher([
   #(UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
   #  UOp.var("idx")+(UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")))).name("load"),
   #  lambda buf, load, idx, idx2, ex: UOp(UOps.LOAD, load.dtype, (buf, idx+idx2+ex), load.arg)),
+  (UOp(UOps.STORE, dtype=dtypes.float, src=(UOp.var("buf"), UOp.var("idx")+
+    (UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")), UOp.var("var"))).name("store"),
+    lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float4 load/store
   #(UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
   #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"))).name("load"), float4_expand_load),
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int))).name("load"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int))).name("load"),
     float4_expand_load),
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))).name("load"), float4_expand_load),
+    UOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
   #(UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
   #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"), UOp.var("var"))), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int), UOp.var("var"))),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int), UOp.var("var"))),
     float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx"), UOp.var("var"))), float4_contract_store),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx"), UOp.var("var"))), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
+    UOp(UOps.EXPAND).name("ex"), UOp.var("var"))), float4_contract_store),
 ])
 
 """
@@ -508,6 +517,7 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
+  cnt = 0
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
     global acc_number
     acc_number = 0
@@ -520,7 +530,8 @@ class UOpGraph:
     sink = graph_rewrite(sink, self.folder)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
-    if not getenv("DEBUG_EXPAND", 0):
+    UOpGraph.cnt += 1
+    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
       # do contracts/reduces
       sink = graph_rewrite(sink, contractor)
       sink = graph_rewrite(sink, reducer)
