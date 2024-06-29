@@ -296,14 +296,14 @@ class tqdm:
     if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
     def fmt(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t!=-1 else '?'
     def scl(x): return x/1000**int(math.log(x,1000))
-    def fn(x): return (f"{scl(x):.{3-math.ceil(math.log10(scl(x)))}f}"[:4]+(f"{[' ','k','M','G','T','P'][int(math.log(x,1000))]}") if x else '0.00')
+    def fn(x): return (f"{scl(x):.{3-math.ceil(math.log10(scl(x)))}f}"[:4]+(' kMGTP'[int(math.log(x,1000))]) if x else '0.00')
     if self.t: unit_text = f"{fn(self.n)}/{fn(self.t)}" if self.unit_scale else f"{self.n}/{self.t}"
     else: unit_text = f"{fn(self.n)}{self.unit}" if self.unit_scale else f"{self.n}{self.unit}"
-    it_text = f"{fn(self.n/dur)}" if self.n and self.unit_scale else f"{self.n/dur:5.2f}" if self.n else "?"
+    it_text = (f"{fn(self.n/dur)}" if self.unit_scale else f"{self.n/dur:5.2f}") if self.n else "?"
     if self.t: suf = f'| {unit_text} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {it_text}{self.unit}/s]'
     else: suf = f'{unit_text} [{fmt(dur)}, {it_text}{self.unit}/s]'
     sz = max(term-5-len(suf)-len(self.desc), 1)
-    bar = f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}' if self.t else f'\r{self.desc}{suf}{" "*term}'
+    bar = f'\r{self.desc}{round(100*prog):3}%|{("█"*round(sz*prog)).ljust(sz," ")}{suf}' if self.t else f'\r{self.desc}{suf}{" "*term}'
     print(bar[:term+1],flush=True,end='\n'*close,file=sys.stderr)
 
 class trange(tqdm):
