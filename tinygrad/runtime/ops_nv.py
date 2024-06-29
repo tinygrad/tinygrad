@@ -5,9 +5,10 @@ from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, Compiler, CompileError, BufferOptions
 from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod, PROFILE
 from tinygrad.renderer.cstyle import NVRenderer
-from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler
+from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler, PTXCompiler, PTX
 import tinygrad.runtime.autogen.cuda as cuda
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
+from tinygrad.renderer.assembly import PTXRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -70,10 +71,8 @@ def nvdata64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
 class NVCompiler(Compiler):
   def __init__(self, arch:str):
-    self.arch = arch
-    #NVCompiler.compiler_opts = replace(NVCompiler.compiler_opts, has_tensor_cores=int(arch[3:]) >= 80)
+    self.arch, self.compile_options = arch, [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     cuda_check(cuda.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
-    self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_nv_{self.arch}")
   def compile(self, src:str) -> bytes:
@@ -83,6 +82,15 @@ class NVCompiler(Compiler):
     if status != 0:
       raise CompileError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, cuda_check).decode()}")
     return _get_bytes(prog, cuda.nvrtcGetCUBIN, cuda.nvrtcGetCUBINSize, cuda_check)
+
+class NVPTXCompiler(NVCompiler):
+  def compile(self, src:str) -> bytes:
+    ptxsrc = src.replace("TARGET", self.arch).replace("VERSION", "7.8" if self.arch >= "sm_89" else "7.5")
+    cuda_check(cuda.nvJitLinkCreate(handle := cuda.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])))
+    cuda_check(cuda.nvJitLinkAddData(handle, cuda.NVJITLINK_INPUT_PTX, ptxsrc.encode(), len(ptxsrc), "<null>".encode()))
+    if cuda.nvJitLinkComplete(handle) != 0:
+      raise CompileError(f"compile failed: {_get_bytes(handle, cuda.nvJitLinkGetErrorLog, cuda.nvJitLinkGetErrorLogSize, cuda_check).decode()}")
+    return _get_bytes(handle, cuda.nvJitLinkGetLinkedCubin, cuda.nvJitLinkGetLinkedCubinSize, cuda_check)
 
 class HWQueue:
   def __init__(self): self.q, self.binded_device, self.cmd_offsets = [], None, [0]
@@ -540,7 +548,8 @@ class NVDevice(HCQCompatCompiled):
 
     self.arch: str = "sm_89" if not MOCKGPU else "sm_35" # TODO: fix
 
-    super().__init__(device, NVAllocator(self), NVRenderer(self.arch), CUDACompiler(self.arch) if MOCKGPU else NVCompiler(self.arch),
+    compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
+    super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
                      functools.partial(NVProgram, self), HWComputeQueue, HWCopyQueue, timeline_signals=[self._get_signal(), self._get_signal()])
 
     self._cmdq_setup_compute_gpfifo()

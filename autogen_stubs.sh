@@ -82,10 +82,11 @@ generate_kfd() {
 }
 
 generate_cuda() {
-  clang2py /usr/include/cuda.h /usr/include/nvrtc.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so -l /usr/lib/x86_64-linux-gnu/libnvrtc.so
+  clang2py /usr/include/cuda.h /usr/include/nvrtc.h /usr/include/nvJitLink.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so -l /usr/lib/x86_64-linux-gnu/libnvrtc.so -l /usr/lib/x86_64-linux-gnu/libnvJitLink.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
   sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\ctypes.CDLL(ctypes.util.find_library('cuda'))\g" $BASE/cuda.py
   sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libnvrtc.so')\ctypes.CDLL(ctypes.util.find_library('nvrtc'))\g" $BASE/cuda.py
+  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libnvJitLink.so')\ctypes.CDLL(ctypes.util.find_library('nvJitLink'))\g" $BASE/cuda.py
   fixup $BASE/cuda.py
   python3 -c "import tinygrad.runtime.autogen.cuda"
 }

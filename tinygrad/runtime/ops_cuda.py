@@ -19,6 +19,7 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
 
+PTX = getenv("PTX")
 CUDACPU = getenv("CUDACPU") == 1
 if CUDACPU:
   gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
@@ -168,9 +169,8 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator,
-                     PTXRenderer(self.arch) if getenv("PTX") else CUDARenderer(self.arch),
-                     PTXCompiler(self.arch) if getenv("PTX") else CUDACompiler(self.arch),
+    super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator, PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
+                     PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch),
                      functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
 
   def synchronize(self):
