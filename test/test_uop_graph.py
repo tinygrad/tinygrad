@@ -145,7 +145,6 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.src[1].op, UOps.CONST)
     self.assertEqual(out.src[1].arg, 6)
 
-  @unittest.skip("temp")
   def test_fold_gated_load(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
     glbl1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (1, False))
@@ -160,7 +159,6 @@ class TestUOpGraph(TestUOps):
     # the gate and invalid value are deleted from ld1
     self.assert_equiv_uops(ld1, UOp.load(glbl2, idx, dtype=dtypes.int))
 
-  @unittest.skip("temp")
   def test_fold_gated_load_local(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
     smem = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.int), (), ("temp", 1))
@@ -176,7 +174,6 @@ class TestUOpGraph(TestUOps):
     # the gate and invalid value are deleted from ld1
     self.assert_equiv_uops(ld1, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
 
-  @unittest.skip("temp")
   def test_fold_gated_store(self):
     glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
     idx0 = UOp.const(dtypes.int, 0)
@@ -188,6 +185,13 @@ class TestUOpGraph(TestUOps):
     # only the second store happens
     self.assertEqual(len(uops.uops), 4)
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
+
+  def test_asserts_bad_gate(self):
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    idx = UOp.const(dtypes.int, 0)
+    bad_gate = UOp.const(dtypes.int, 1)
+    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
+    with self.assertRaises(AssertionError): uops.linearize()
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
