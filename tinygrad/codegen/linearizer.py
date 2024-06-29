@@ -141,7 +141,9 @@ class Linearizer(Kernel):
     invalid_value = 0
     acc_count = 0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
-      this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
+      this_const, idx = (invalid_value, NumNode(0)) if valid.max == 0 else (const, idx)
+      valid_uop = UOp.const(dtypes.bool, True) if valid.max == 0 else valid.render(render_ops, self.loop_uops)
+      assert valid_uop.dtype is dtypes.bool, f"unexpected dtype {valid_uop.dtype} {valid} {valid.render()} {valid_uop}"
       key = f"{'' if acc is None else self.reduceops.index(acc)}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
@@ -157,7 +159,7 @@ class Linearizer(Kernel):
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
           rendered_idx = UOp(UOps.CAST, dtypes.int.vec(2), tuple(x.render(render_ops, self.loop_uops) for x in image_idx))
-          valid_tuple = (valid.render(render_ops, self.loop_uops).cast(dtypes.bool), UOp.const(buf.dtype.base.vec(4), invalid_value)) if valid.min == 0 else tuple()
+          valid_tuple = (valid_uop, UOp.const(buf.dtype.base.vec(4), invalid_value)) if valid.min == 0 else tuple()
           self.load_cache[key] = UOp(UOps.LOAD, buf.dtype.base.vec(4),
                                                (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
           if localtype == localtype.scalar():
@@ -173,7 +175,7 @@ class Linearizer(Kernel):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           rendered_idx = idx.render(render_ops, self.loop_uops)
-          valid_tuple = (valid.render(render_ops, self.loop_uops).cast(dtypes.bool), UOp.const(localtype, invalid_value)) if valid.min == 0 else tuple()
+          valid_tuple = (valid_uop, UOp.const(localtype, invalid_value)) if valid.min == 0 else tuple()
           self.load_cache[key] = UOp(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
       ret.append(UOp(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
