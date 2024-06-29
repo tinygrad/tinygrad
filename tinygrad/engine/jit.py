@@ -156,9 +156,13 @@ class TinyJit(Generic[ReturnType]):
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
-        self.ret = self.fxn(*args, **kwargs)
-        if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
-        capturing.clear()
+        try:
+          self.ret = self.fxn(*args, **kwargs)
+          if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
+          capturing.clear()
+        except Exception as e:
+          capturing.clear()
+          raise e
       del self.buffer_replace
       assert len(self.jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_buffers)} inputs")
