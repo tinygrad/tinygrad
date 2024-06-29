@@ -336,10 +336,12 @@ class UOpGraph:
     for i, s in enumerate(self.sinks.copy()):
       assert s.op is UOps.STORE, f"sinking {s}?"
       if len(s.src) != 4: continue
-      if_uop = UOp(UOps.IF, None, (s.src[3], ))
       @functools.lru_cache(None)
       def _dfs(u:UOp) -> UOp:
-        if u.op is UOps.LOAD: return UOp(u.op, u.dtype, u.src+(if_uop, ), u.arg)
+        if u.op is UOps.LOAD:
+          assert u.src[-1].op is UOps.BARRIER
+          if_uop = UOp(UOps.IF, None, (s.src[3], u.src[-1]))
+          return UOp(u.op, u.dtype, u.src+(if_uop, ), u.arg)
         if u is s: u =  UOp(u.op, u.dtype, u.src[:3], u.arg)
         u = UOp(u.op, u.dtype, tuple(_dfs(x) for x in u.src), u.arg)
         return u
@@ -398,6 +400,7 @@ class UOpGraph:
     self._uops = self._uops[:-1]
 
     if type_verify: self.type_verify()
+    self.print()
 
   # *** checker functions ***
 
