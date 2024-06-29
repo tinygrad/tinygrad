@@ -294,8 +294,7 @@ class tqdm:
     if (self.i % self.skip != 0 and not close) or self.dis: return
     prog, dur, term = self.n/self.t if self.t else -1, time.perf_counter()-self.st, shutil.get_terminal_size().columns
     if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
-    def fmt(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([t//3600,t%3600//60,t%60]) if t>=60 or x) if \
-      (t:=int(t)) > 0 else '00:00' if t == 0 else '?'
+    def fmt(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([t//3600,t%3600//60,t%60]) if i or x) if (t:=int(t)) != -1 else '?'
     def scl(x): return x/1000**int(math.log(x,1000))
     def fn(x): return (f"{scl(x):.{3-math.ceil(math.log10(scl(x)))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(math.log(x,1000))].strip(' ')) if x else '0.00'
     if self.t: unit_text = f"{fn(self.n)}/{fn(self.t)}" if self.unit_scale else f"{self.n}/{self.t}"

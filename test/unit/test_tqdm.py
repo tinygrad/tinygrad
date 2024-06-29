@@ -62,7 +62,7 @@ class TestProgressBar(unittest.TestCase):
   @patch('shutil.get_terminal_size')
   def test_unit_scale(self, mock_terminal_size, mock_stderr):
     for unit_scale in [True, False]:
-      # NOTE: numpy compariso raises TypeError if exponent > 22
+      # NOTE: numpy comparison raises TypeError if exponent > 22
       for exponent in range(1, 22, 3):
         low, high = 10 ** exponent, 10 ** (exponent+1)
         for _ in range(3):
