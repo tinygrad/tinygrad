@@ -192,34 +192,33 @@ class TestProgressBar(unittest.TestCase):
     for _ in range(30):
       total, ncols, dt = random.randint(10, 100000), random.randint(80, 120), 0.1
 
+      cnt = 0
       def time_gen():
-        cnt = 0
+        nonlocal cnt
         while True:
-          yield dt * cnt
+          yield cnt*dt
           cnt += 1
 
       mock_perf_counter.side_effect = time_gen()
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
       n = 0
-      i = 1
 
       bar = tinytqdm(total=total, desc="Test", unit="B", unit_scale=True)
       tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
-      tqdm_output = tqdm.format_meter(n=n, total=total, unit="B", unit_scale=True, elapsed=i*dt, ncols=ncols, prefix="Test")
+      tqdm_output = tqdm.format_meter(n=n, total=total, unit="B", unit_scale=True, elapsed=cnt*dt, ncols=ncols, prefix="Test")
       self._compare_bars(tinytqdm_output, tqdm_output)
 
       while n < total:
-        i += 1
-        incr = max(1, (total // 10) + random.randint(0, 100))
+        incr = (total // 10) + random.randint(0, 100)
         if n + incr > total: incr = total - n
         n += incr
         bar.update(incr, close=n==total)
         if bar.i % bar.skip != 0: continue
 
         tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
-        print(f"{n=}, {i=}, {i*dt=}")
-        tqdm_output = tqdm.format_meter(n=n, total=total, unit="B", unit_scale=True, elapsed=i*dt, ncols=ncols, prefix="Test")
+        print(f"{n=}, {cnt=}, {cnt*dt=}")
+        tqdm_output = tqdm.format_meter(n=n, total=total, unit="B", unit_scale=True, elapsed=cnt*dt, ncols=ncols, prefix="Test")
         print(f"{tinytqdm_output}\n{tqdm_output}\n")
         self._compare_bars(tinytqdm_output, tqdm_output)
 
