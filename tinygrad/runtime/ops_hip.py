@@ -28,8 +28,8 @@ class HIPProgram:
     if not hasattr(self, "vargs"):
       self.c_args = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
                                           [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
-      self.vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), ctypes.c_void_p(2),
-                                         ctypes.cast(ctypes.byref(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), ctypes.c_void_p(3))
+      self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
+                                         ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
 
     for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
     for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
