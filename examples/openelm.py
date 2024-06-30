@@ -33,6 +33,11 @@ class Attention:
     xq = self.q_norm(xq)
     xk = self.k_norm(xk)
 
+    # grouped-query attention
+    num_groups = self.num_query_heads // self.num_kv_heads
+    xk = xk.repeat_interleave(num_groups, dim=1)
+    xv = xv.repeat_interleave(num_groups, dim=1)
+
     # Add positional embedding (NOTE: jit avoid independent would avoid this None hack)
     #if self.freqs_cis is None:
     #  self.freqs_cis = precompute_freqs_cis(embed_dim // self.num_kv_heads, MAX_CONTEXT*1)
@@ -85,5 +90,6 @@ if __name__ == "__main__":
   nn.state.load_state_dict(model, {k.removeprefix("transformer."):v for k,v in weights.items()})
 
   toks = Tensor([[0]])
-  model(toks)
+  out = model(toks).realize()
+  print(out.shape)
 
