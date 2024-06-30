@@ -299,8 +299,8 @@ class tqdm:
     it_text = (fn(self.n/dur) if self.unit_scale else f"{self.n/dur:5.2f}") if self.n else "?"
     tm = f'{fmt(dur)}<{fmt(dur/prog-dur) if self.n else "?"}' if self.t else fmt(dur)
     suf = f'{unit_text} [{tm}, {it_text}{self.unit}/s]'
-    barsz = max(ncols-len(self.desc)-5-2-len(suf), 1)
-    bar = '\r' + self.desc + (f'{round(100*prog):3}%|{("█"*round(barsz*prog)).ljust(barsz," ")}| ' if self.t else '') + suf
+    sz = max(ncols-len(self.desc)-5-2-len(suf), 1)
+    bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
     print(bar[:ncols+1],flush=True,end='\n'*close,file=sys.stderr)
 
 class trange(tqdm):
