@@ -14,7 +14,6 @@ class FeedForward:
     y_1, y_2 = y_12.chunk(2, dim=-1)
     return self.proj_2(y_1.silu() * y_2)
 
-MAX_CONTEXT = 1024
 class Attention:
   def __init__(self, model_dim, num_query_heads, num_kv_heads, head_dim):
     self.qkv_proj = nn.Linear(model_dim, (num_query_heads + num_kv_heads*2) * head_dim, bias=False)
@@ -25,27 +24,27 @@ class Attention:
     self.out_proj = nn.Linear(num_query_heads * head_dim, model_dim, bias=False)
     self.freqs_cis: Optional[Tensor] = None
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     start_pos = 0
     batch_size, seq_len, embed_dim = x.shape
     qkv = self.qkv_proj(x)
     qkv = qkv.reshape(batch_size, seq_len, self.num_query_heads+self.num_kv_heads*2, self.head_dim) #.transpose(1, 2)
-    xq,xk,xv = qkv.split([self.num_query_heads, self.num_kv_heads, self.num_kv_heads], 2)
+    xq,xk,xv = qkv.split([self.num_query_heads, self.num_kv_heads, self.num_kv_heads], dim=2)
     xq = self.q_norm(xq)
     xk = self.k_norm(xk)
+
+    # Add positional embedding (NOTE: jit avoid independent would avoid this None hack)
+    if self.freqs_cis is None: self.freqs_cis = precompute_freqs_cis(self.head_dim, 4096, 10000) # rope_max_length, rope_freq_constant
+    xq, xk = apply_rotary_emb(xq, xk, self.freqs_cis.shrink((None, (start_pos, start_pos+seq_len), None, None, None)))
 
     # grouped-query attention
     num_groups = self.num_query_heads // self.num_kv_heads
     xk = xk.repeat_interleave(num_groups, dim=2)
     xv = xv.repeat_interleave(num_groups, dim=2)
 
-    # Add positional embedding (NOTE: jit avoid independent would avoid this None hack)
-    if self.freqs_cis is None:
-      self.freqs_cis = precompute_freqs_cis(self.head_dim, MAX_CONTEXT*1)
-    xq, xk = apply_rotary_emb(xq, xk, self.freqs_cis.shrink((None, (start_pos, start_pos+seq_len),None,None,None)))
-
-    attn_output = xq.scaled_dot_product_attention(xk,xv)
-    attn_output = attn_output.transpose(1, 2).reshape(batch_size, seq_len, self.num_query_heads * self.head_dim)
+    mask = Tensor.full((1, 1, seq_len, start_pos+seq_len), float("-inf"), dtype=xq.dtype, device=xq.device).triu(start_pos+1)
+    attn_output = xq.transpose(1, 2).scaled_dot_product_attention(xk.transpose(1, 2), xv.transpose(1, 2), mask).transpose(1, 2)
+    attn_output = attn_output.reshape(batch_size, seq_len, self.num_query_heads * self.head_dim)
     return self.out_proj(attn_output)
 
 class Layer:
@@ -55,14 +54,10 @@ class Layer:
     self.ffn_norm = RMSNorm(model_dim)
     self.attn_norm = RMSNorm(model_dim)
 
-  def __call__(self, x):
-    # (batch, seq_len, embed_dim)
-    x = self.attn_norm(x)
-    x = self.attn(x)
-    res = x
-    x = self.ffn_norm(x)
-    x = self.ffn(x)
-    return res + x
+  def __call__(self, x:Tensor) -> Tensor: # (batch, seq_len, embed_dim)
+    x = x + self.attn(self.attn_norm(x))
+    x = x + self.ffn(self.ffn_norm(x))
+    return x
 
 # stupidly complex
 def make_divisible(v, divisor):
@@ -85,18 +80,24 @@ class Transformer:
     return self.norm(x) @ self.token_embeddings.weight.T
 
 if __name__ == "__main__":
-  model = Transformer(json.loads(fetch("https://huggingface.co/apple/OpenELM-270M-Instruct/resolve/main/config.json?download=true").read_bytes()))
-  weights = nn.state.safe_load(fetch("https://huggingface.co/apple/OpenELM-270M-Instruct/resolve/main/model.safetensors?download=true"))
+  #model_name = "OpenELM-270M-Instruct"
+  model_name = "OpenELM-270M"  # fp32?
+  model = Transformer(json.loads(fetch(f"https://huggingface.co/apple/{model_name}/resolve/main/config.json?download=true").read_bytes()))
+  weights = nn.state.safe_load(fetch(f"https://huggingface.co/apple/{model_name}/resolve/main/model.safetensors?download=true"))
   for k, v in weights.items(): print(k, v.shape)
   nn.state.load_state_dict(model, {k.removeprefix("transformer."):v for k,v in weights.items()})
 
   from sentencepiece import SentencePieceProcessor
-  tokenizer = SentencePieceProcessor(fetch("https://huggingface.co/togethercomputer/LLaMA-2-7B-32K/resolve/main/tokenizer.model").as_posix())
-  toks = [tokenizer.bos_id()]
-  for i in range(10):
+  tokenizer = SentencePieceProcessor(fetch("https://github.com/karpathy/llama2.c/raw/master/tokenizer.model").as_posix())
+  toks = [tokenizer.bos_id()] + tokenizer.encode("Hello.")
+  for i in range(20):
     ttoks = Tensor([toks])
     out = model(ttoks).realize()
-    toks.append(out[0, 0].argmax().item())
-    print(toks, tokenizer.decode(toks))
+    t0 = out[0].argmax(axis=-1).tolist()
+    toks.append(t0[-1])
+    print(t0, tokenizer.decode(toks))
+    #print(t0, toks, tokenizer.decode(toks))
+
+    #print(toks, tokenizer.decode(toks))
 
 
