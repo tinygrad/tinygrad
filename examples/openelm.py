@@ -34,7 +34,7 @@ class Attention:
     xk = self.k_norm(xk)
 
     # Add positional embedding (NOTE: jit avoid independent would avoid this None hack)
-    if self.freqs_cis is None: self.freqs_cis = precompute_freqs_cis(self.head_dim, 4096, 10000) # rope_max_length, rope_freq_constant
+    if self.freqs_cis is None: self.freqs_cis = precompute_freqs_cis(self.head_dim, 4096, 10000, dtype=xq.dtype) # rope_max_length, rope_freq_constant
     xq, xk = apply_rotary_emb(xq, xk, self.freqs_cis.shrink((None, (start_pos, start_pos+seq_len), None, None, None)))
 
     # grouped-query attention
@@ -84,18 +84,21 @@ if __name__ == "__main__":
   model_name = "OpenELM-270M"  # fp32?
   model = Transformer(json.loads(fetch(f"https://huggingface.co/apple/{model_name}/resolve/main/config.json?download=true").read_bytes()))
   weights = nn.state.safe_load(fetch(f"https://huggingface.co/apple/{model_name}/resolve/main/model.safetensors?download=true"))
-  for k, v in weights.items(): print(k, v.shape)
+  #for k, v in weights.items(): print(k, v.shape)
   nn.state.load_state_dict(model, {k.removeprefix("transformer."):v for k,v in weights.items()})
 
   from sentencepiece import SentencePieceProcessor
   tokenizer = SentencePieceProcessor(fetch("https://github.com/karpathy/llama2.c/raw/master/tokenizer.model").as_posix())
   toks = [tokenizer.bos_id()] + tokenizer.encode("Hello.")
-  for i in range(20):
+  for i in range(100):
     ttoks = Tensor([toks])
     out = model(ttoks).realize()
     t0 = out[0].argmax(axis=-1).tolist()
     toks.append(t0[-1])
-    print(t0, tokenizer.decode(toks))
+    print(tokenizer.decode(t0))
+    print(tokenizer.decode(toks))
+    print(t0)
+    print(toks)
     #print(t0, toks, tokenizer.decode(toks))
 
     #print(toks, tokenizer.decode(toks))
