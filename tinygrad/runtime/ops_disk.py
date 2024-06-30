@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, mmap, _posixshmem, io, ctypes, ctypes.util, platform, contextlib
+import os, sys, mmap, _posixshmem, io, ctypes, ctypes.util, platform, contextlib
 from typing import Optional, Generator, Tuple, Callable, List
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
@@ -101,7 +101,7 @@ class DiskDevice(Compiled):
   def _iouring_setup(self):
     DiskDevice._tried_io_uring_init = True
 
-    if platform.system() != 'Linux': return
+    if platform.system() != 'Linux' or hasattr(sys, "getandroidapilevel"): return
 
     fd = libc.syscall(io_uring.NR_io_uring_setup, 4096, ctypes.byref(p:=io_uring.struct_io_uring_params()))
     if fd < 0: return
