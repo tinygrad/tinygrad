@@ -1,4 +1,4 @@
-import time, random, unittest
+import time, random, unittest, itertools
 from unittest.mock import patch
 from io import StringIO
 from collections import namedtuple
@@ -7,7 +7,7 @@ from tinygrad.helpers import tqdm as tinytqdm, trange as tinytrange
 import numpy as np
 
 class TestProgressBar(unittest.TestCase):
-  def _compare_bars(self, bar1, bar2, cmp_prog=False):
+  def _compare_bars(self, bar1, bar2):
     prefix1, prog1, suffix1 = bar1.split("|")
     prefix2, prog2, suffix2 = bar2.split("|")
 
@@ -30,8 +30,8 @@ class TestProgressBar(unittest.TestCase):
     else:
       self.assertEqual(suffix1, suffix2)
 
-    diff = sum([1 for c1, c2 in zip(prog1, prog2) if c1 == c2]) # allow 1 char diff (due to tqdm special chars)
-    self.assertTrue(not cmp_prog or diff <= 1)
+    diff = sum([c1 != c2 for c1, c2 in zip(prog1, prog2)])  # allow 1 char diff to be less flaky, but it should match
+    assert diff <= 1, f"{diff=}\n{prog1=}\n{prog2=}"
 
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
@@ -185,6 +185,30 @@ class TestProgressBar(unittest.TestCase):
         tqdm_output = tqdm.format_meter(n=n, total=0, elapsed=elapsed, ncols=ncols, prefix="Test")
         self.assertEqual(tinytqdm_output, tqdm_output)
 
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('shutil.get_terminal_size')
+  def test_tqdm_output_custom_nolen_total(self, mock_terminal_size, mock_stderr):
+    for unit_scale in [True, False]:
+      for _ in range(3):
+        gen = itertools.count(0)
+        ncols = random.randint(80, 120)
+        mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+        mock_stderr.truncate(0)
+
+        # compare bars at each iteration (only when tinytqdm bar has been updated)
+        for n,g in enumerate(tinytqdm(gen, desc="Test", unit_scale=unit_scale)):
+          assert g == n
+          time.sleep(0.01)
+          tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+          if n:
+            iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1])
+            elapsed = n/iters_per_sec
+          else:
+            elapsed = 0
+          tqdm_output = tqdm.format_meter(n=n, total=0, elapsed=elapsed, ncols=ncols, prefix="Test", unit_scale=unit_scale)
+          self.assertEqual(tinytqdm_output, tqdm_output)
+          if n > 5: break
+
   def test_tqdm_perf(self):
     st = time.perf_counter()
     for _ in tqdm(range(100)): time.sleep(0.01)
@@ -194,7 +218,7 @@ class TestProgressBar(unittest.TestCase):
     for _ in tinytqdm(range(100)): time.sleep(0.01)
     tinytqdm_time = time.perf_counter() - st
 
-    assert tinytqdm_time < 2.0 * tqdm_time
+    assert tinytqdm_time < 2 * tqdm_time
 
   def test_tqdm_perf_high_iter(self):
     st = time.perf_counter()
