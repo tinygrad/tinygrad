@@ -63,8 +63,8 @@ class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    try: return compile_hip(src, self.arch)
+  def compile(self, src:str, asm:bool = False) -> bytes:
+    try: return compile_hip(src, self.arch, asm)
     except RuntimeError as e: raise CompileError(e) from e
 
 class HWQueue:
