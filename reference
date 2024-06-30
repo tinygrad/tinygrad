@@ -1,0 +1,108 @@
+# Example: Simple addition operation in TinyGrad
+
+# 1. TinyGrad Operation
+from tinygrad.tensor import Tensor
+
+a = Tensor([1, 2, 3])
+b = Tensor([4, 5, 6])
+c = a + b
+
+# 2. UOps 
+# (This is a simplified representation of UOps)
+uops = [
+    ('load', 'a'),
+    ('load', 'b'),
+    ('add', 'a', 'b', 'c'),
+    ('store', 'c')
+]
+
+# 3. CUDA 
+cuda_code = """
+__global__ void add_kernel(float *a, float *b, float *c, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        c[idx] = a[idx] + b[idx];
+    }
+}
+"""
+
+# 4. PTX 
+ptx_code = """
+.visible .entry add_kernel(
+    .param .u64 add_kernel_param_0,
+    .param .u64 add_kernel_param_1,
+    .param .u64 add_kernel_param_2,
+    .param .u32 add_kernel_param_3
+)
+{
+    .reg .f32 	%f<4>;
+    .reg .pred 	%p<2>;
+    // ... (more PTX code)
+    ld.global.f32 	%f1, [%rd4];
+    ld.global.f32 	%f2, [%rd5];
+    add.f32 	%f3, %f1, %f2;
+    st.global.f32 	[%rd6], %f3;
+    // ... (more PTX code)
+}
+"""
+
+# sASS
+sass_code = """
+/*0008*/    ISCADD R1, R0, c[0x0][0x140], 0x2;
+/*0010*/    ISCADD R2, R0, c[0x0][0x144], 0x2;
+/*0018*/    ISCADD R3, R0, c[0x0][0x148], 0x2;
+/*0020*/    LDG.E R0, [R1];
+/*0028*/    LDG.E R1, [R2];
+/*0030*/    FADD R0, R0, R1;
+/*0038*/    STG.E [R3], R0;
+/*0040*/    EXIT;
+
+
+# AMD Equiv
+# 1. TinyGrad 
+from tinygrad.tensor import Tensor
+
+a = Tensor([1, 2, 3])
+b = Tensor([4, 5, 6])
+c = a + b
+
+# 2. UOps 
+# (This is a simplified representation of UOps - same as CUDA example)
+uops = [
+    ('load', 'a'),
+    ('load', 'b'),
+    ('add', 'a', 'b', 'c'),
+    ('store', 'c')
+]
+
+# 3. HIP 
+hip_code = """
+__global__ void add_kernel(float *a, float *b, float *c, int n) {
+    int idx = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    if (idx < n) {
+        c[idx] = a[idx] + b[idx];
+    }
+}
+"""
+
+# 4. RDNA3
+rdna3_isa = """
+s_load_dwordx2  s[0:1], s[4:5], 0x0
+s_load_dwordx2  s[2:3], s[4:5], 0x8
+s_load_dwordx2  s[4:5], s[4:5], 0x10
+v_mov_b32       v0, 0
+v_add_u32       v1, vcc, s0, v0
+v_mov_b32       v2, s1
+v_addc_u32      v2, vcc, v2, 0, vcc
+flat_load_dword v3, v[1:2]
+v_add_u32       v1, vcc, s2, v0
+v_mov_b32       v2, s3
+v_addc_u32      v2, vcc, v2, 0, vcc
+flat_load_dword v4, v[1:2]
+v_add_f32       v3, v3, v4
+v_add_u32       v1, vcc, s4, v0
+v_mov_b32       v2, s5
+v_addc_u32      v2, vcc, v2, 0, vcc
+flat_store_dword v[1:2], v3
+s_endpgm
+"""

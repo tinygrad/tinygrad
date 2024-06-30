@@ -353,7 +353,7 @@ KERNEL_NAME:"""
 
 def render(self, name:str, uops:UOpGraph) -> str:
         kernel: List[str] = []
-        bufs: List[Tuple[str, DType]] = []
+        bufs: []
 
         uops.linearize()
         if DEBUG >= 4: uops.print()
