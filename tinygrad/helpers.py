@@ -283,11 +283,10 @@ class tqdm:
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, len(iterable) if total==-1 else total
     self.update(0)
   def __iter__(self):
-    try:
-      for item in self.iter:
-        yield item
-        self.update(1)
-    finally: self.update(close=True)
+    for item in self.iter:
+      yield item
+      self.update(1)
+    self.update(close=True)
   def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
@@ -295,12 +294,10 @@ class tqdm:
     prog, dur, ncols = self.n/self.t if self.t else 0, time.perf_counter()-self.st, shutil.get_terminal_size().columns
     if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1)
     def fmt(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([int(t)//3600,int(t)%3600//60,int(t)%60]) if i or x)
-    def scl(x): return x/1000**int(math.log(x,1000))
-    def fn(x): return (f"{scl(x):.{3-math.ceil(math.log10(scl(x)))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(math.log(x,1000))].strip(' ')) if x else '0.00'
-    if self.unit_scale: unit_text = fn(self.n) + (f"/{fn(self.t)}" if self.t else '')
-    else: unit_text = str(self.n) + (f"/{self.t}" if self.t else self.unit)
+    def fn(x): return (f"{x/1000**int(g:=math.log(x,1000)):.{int(3-3*math.fmod(g,1))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(g)].strip()) if x else '0.00'
+    unit_text = f'{fn(self.n)}{f"/{fn(self.t)}" if self.t else ""}' if self.unit_scale else f'{self.n}{f"/{self.t}" if self.t else self.unit}'
     it_text = (fn(self.n/dur) if self.unit_scale else f"{self.n/dur:5.2f}") if self.n else "?"
-    tm = f'{fmt(dur)}<{fmt(dur/self.n*self.t-dur) if self.n else "?"}' if self.t else fmt(dur)
+    tm = f'{fmt(dur)}<{fmt(dur/prog-dur) if self.n else "?"}' if self.t else fmt(dur)
     suf = f'{unit_text} [{tm}, {it_text}{self.unit}/s]'
     barsz = max(ncols-len(self.desc)-5-2-len(suf), 1)
     bar = '\r' + self.desc + (f'{round(100*prog):3}%|{("█"*round(barsz*prog)).ljust(barsz," ")}| ' if self.t else '') + suf
