@@ -1,6 +1,6 @@
 import os
 from extra.export_model import compile_net, jit_model
-from examples.stable_diffusion import StableDiffusion
+from examples.stable_diffusion import StableDiffusionV1, configs
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
 from tinygrad import Device
@@ -76,7 +76,7 @@ if __name__ == "__main__":
   Device.DEFAULT = "WEBGPU"
 
   Tensor.no_grad = True
-  model = StableDiffusion()
+  model = StableDiffusionV1(**configs["SDv1"]["args"])
 
   # load in weights
   load_state_dict(model, torch_load(fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt'))['state_dict'], strict=False)

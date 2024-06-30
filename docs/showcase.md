@@ -43,6 +43,14 @@ python3 examples/stable_diffusion.py
 
 *"a horse sized cat eating a bagel"*
 
+This will use Stable Diffusion 1.4 by default, but we also support other architectures like SDXL:
+
+```sh
+python3 examples/stable_diffusion.py --arch SDXL
+```
+
+![a horse sized cat eating a bagel](https://github.com/tinygrad/tinygrad/blob/master/docs/showcase/sdxl_by_tinygrad.jpg?raw=true)
+
 ### LLaMA
 
 You will need to download and put the weights into the `weights/LLaMA` directory, which may need to be created.

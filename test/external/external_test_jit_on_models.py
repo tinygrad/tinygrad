@@ -30,8 +30,9 @@ class TestJittedModels(unittest.TestCase):
 
   @unittest.skipUnless(not CI, "huge for CI")
   def test_jitted_stable_diffusion(self):
-    from examples.stable_diffusion import UNetModel
-    model = UNetModel()
+    from extra.models.unet import UNetModel
+    from examples.stable_diffusion import configs
+    model = UNetModel(**configs["SDv1"]["args"]["model"])
     derandomize_model(model)
     def test(t, t2): return model(t, 801, t2).realize()
 
