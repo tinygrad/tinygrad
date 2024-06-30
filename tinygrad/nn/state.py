@@ -129,6 +129,15 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
+def compare_state_dicts(left_state_dict:Dict, right_state_dict:Dict, left_name:str="Model", right_name:str="Weights") -> None:
+  """
+  Compares 2 state dicts, printing which keys are missing from another for debugging purposes.
+  """
+  left_keys, right_keys = set(left_state_dict.keys()), set(right_state_dict.keys())
+  left_only, right_only = left_keys.difference(right_keys), right_keys.difference(left_keys)
+  blocks = ["\n".join([f"\n{n} Only:"]+sorted(list(s))) for s,n in ((left_only,left_name), (right_only,right_name)) if len(s) > 0]
+  print("Both state dicts contain the same keys" if len(blocks) == 0 else "\n".join(blocks)+"\n")
+
 # torch support!
 
 def torch_load(fn:str) -> Dict[str, Tensor]:
