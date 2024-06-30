@@ -1,4 +1,4 @@
-import time, random, unittest
+import time, random, unittest, itertools
 from unittest.mock import patch
 from io import StringIO
 from collections import namedtuple
@@ -184,6 +184,30 @@ class TestProgressBar(unittest.TestCase):
         elapsed = n/iters_per_sec if n>0 else 0
         tqdm_output = tqdm.format_meter(n=n, total=0, elapsed=elapsed, ncols=ncols, prefix="Test")
         self.assertEqual(tinytqdm_output, tqdm_output)
+
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('shutil.get_terminal_size')
+  def test_tqdm_output_custom_nolen_total(self, mock_terminal_size, mock_stderr):
+    for unit_scale in [True, False]:
+      for _ in range(3):
+        gen = itertools.count(0)
+        ncols = random.randint(80, 120)
+        mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+        mock_stderr.truncate(0)
+
+        # compare bars at each iteration (only when tinytqdm bar has been updated)
+        for n,g in enumerate(tinytqdm(gen, desc="Test", unit_scale=unit_scale)):
+          assert g == n
+          time.sleep(0.01)
+          tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+          if n:
+            iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1])
+            elapsed = n/iters_per_sec
+          else:
+            elapsed = 0
+          tqdm_output = tqdm.format_meter(n=n, total=0, elapsed=elapsed, ncols=ncols, prefix="Test", unit_scale=unit_scale)
+          self.assertEqual(tinytqdm_output, tqdm_output)
+          if n > 5: break
 
   def test_tqdm_perf(self):
     st = time.perf_counter()
