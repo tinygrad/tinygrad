@@ -592,8 +592,9 @@ if __name__ == "__main__":
   load_state_dict(model, torch_load(fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt'))['state_dict'], strict=False)
 
   if args.fp16:
-    for l in get_state_dict(model).values():
-      l.replace(l.cast(dtypes.float16).realize())
+    for k,v in get_state_dict(model).items():
+      if k.startswith("model"):
+        v.replace(v.cast(dtypes.float16).realize())
 
   # run through CLIP to get context
   tokenizer = ClipTokenizer()
