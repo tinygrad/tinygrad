@@ -30,6 +30,7 @@ class CStyleLanguage(Renderer):
     BinaryOps.MUL: lambda *args: f"({'*'.join(args[:-1])})",
     BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
+    BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
   # returns a str expression of the casted xs with the given type
