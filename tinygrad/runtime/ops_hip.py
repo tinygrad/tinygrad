@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, functools, subprocess
+import ctypes, functools
 from typing import Tuple
 import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, init_c_struct_t
@@ -27,8 +27,8 @@ class HIPProgram:
     check(hip.hipSetDevice(self.device.device_id))
     if not hasattr(self, "vargs"):
       self.c_args = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
-                                          [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
-      self.vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.byref(self.c_args), ctypes.c_void_p(2),
+                                          [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
+      self.vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                          ctypes.cast(ctypes.byref(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), ctypes.c_void_p(3))
 
     for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
@@ -40,7 +40,7 @@ class HIPProgram:
 
     if wait:
       check(hip.hipEventRecord(self.device.time_event_en, None))
-      check(hip.hipEventSynchronize(evs[1]))
+      check(hip.hipEventSynchronize(self.device.time_event_en))
       check(hip.hipEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), self.device.time_event_st, self.device.time_event_en))
       return ret.value * 1e-3
 
@@ -57,7 +57,6 @@ class HIPAllocator(LRUAllocator):
     check(hip.hipMemcpy(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice))
   def copyout(self, dest:memoryview, src):
     self.device.synchronize()
-    check(hip.hipSetDevice(self.device.device_id))
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
 
 class HIPDevice(Compiled):
