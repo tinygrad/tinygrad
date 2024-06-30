@@ -7,7 +7,7 @@ from tinygrad.helpers import tqdm as tinytqdm, trange as tinytrange
 import numpy as np
 
 class TestProgressBar(unittest.TestCase):
-  def _compare_bars(self, bar1, bar2, cmp_prog=False):
+  def _compare_bars(self, bar1, bar2):
     prefix1, prog1, suffix1 = bar1.split("|")
     prefix2, prog2, suffix2 = bar2.split("|")
 
@@ -30,8 +30,8 @@ class TestProgressBar(unittest.TestCase):
     else:
       self.assertEqual(suffix1, suffix2)
 
-    diff = sum([1 for c1, c2 in zip(prog1, prog2) if c1 == c2]) # allow 1 char diff (due to tqdm special chars)
-    self.assertTrue(not cmp_prog or diff <= 1)
+    diff = sum([c1 != c2 for c1, c2 in zip(prog1, prog2)])  # allow 1 char diff to be less flaky, but it should match
+    assert diff <= 1, f"{diff=}\n{prog1=}\n{prog2=}"
 
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
