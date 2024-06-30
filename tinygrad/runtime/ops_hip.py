@@ -4,8 +4,8 @@ from typing import Tuple
 import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator, BufferOptions
-from tinygrad.runtime.ops_amd import AMDCompiler
-from tinygrad.renderer.cstyle import AMDRenderer
+from tinygrad.runtime.ops_amd import AMDCompiler, disasm
+from tinygrad.renderer.cstyle import HIPRenderer
 
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
@@ -14,9 +14,7 @@ class HIPProgram:
   def __init__(self, device:HIPDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
 
-    if DEBUG >= 6:
-      asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+    if DEBUG >= 6: print(disasm(lib))
 
     check(hip.hipSetDevice(self.device.device_id))
     self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
@@ -29,24 +27,21 @@ class HIPProgram:
     check(hip.hipSetDevice(self.device.device_id))
     if not hasattr(self, "vargs"):
       self.c_args = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
-                                          [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
-      self.vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), ctypes.c_void_p(2),
+                                          [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
+      self.vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.byref(self.c_args), ctypes.c_void_p(2),
                                          ctypes.cast(ctypes.byref(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), ctypes.c_void_p(3))
 
     for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
     for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
 
-    if wait:
-      evs = [init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
-      check(hip.hipEventRecord(evs[0], None))
+    if wait: check(hip.hipEventRecord(self.device.time_event_st, None))
 
     check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, self.vargs))
 
     if wait:
-      check(hip.hipEventRecord(evs[1], None))
+      check(hip.hipEventRecord(self.device.time_event_en, None))
       check(hip.hipEventSynchronize(evs[1]))
-      check(hip.hipEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1]))
-      for ev in evs: check(hip.hipEventDestroy(ev))
+      check(hip.hipEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), self.device.time_event_st, self.device.time_event_en))
       return ret.value * 1e-3
 
 class HIPAllocator(LRUAllocator):
@@ -69,7 +64,8 @@ class HIPDevice(Compiled):
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode()
-    super().__init__(device, HIPAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(HIPProgram, self))
+    self.time_event_st, self.time_event_en = [init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
+    super().__init__(device, HIPAllocator(self), HIPRenderer(), AMDCompiler(self.arch), functools.partial(HIPProgram, self))
   def synchronize(self):
     check(hip.hipSetDevice(self.device_id))
     check(hip.hipDeviceSynchronize())
