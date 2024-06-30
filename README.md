@@ -109,7 +109,7 @@ python3 -m pip install git+https://github.com/tinygrad/tinygrad.git
 
 ## Documentation
 
-Documentation along with a quick start guide can be found in the [docs/](/docs) directory.
+Documentation along with a quick start guide can be found on the [docs website](https://docs.tinygrad.org/) built from the [docs/](/docs) directory.
 
 ### Quick example comparing to PyTorch
 

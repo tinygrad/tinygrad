@@ -493,7 +493,7 @@ class ClipTokenizer:
     self.cache[token] = word
     return word
 
-  def encode(self, text):
+  def encode(self, text, pad_with_zeros=False):
     bpe_tokens = []
     text = whitespace_clean(text.strip()).lower()
     for token in re.findall(self.pat, text):
@@ -502,7 +502,7 @@ class ClipTokenizer:
     # Truncation, keeping two slots for start and end tokens.
     if len(bpe_tokens) > 75:
       bpe_tokens = bpe_tokens[:75]
-    return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
+    return [49406] + bpe_tokens + [49407] + ([0] if pad_with_zeros else [49407]) * (77 - len(bpe_tokens) - 2)
 
 def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=1000):
   betas = np.linspace(beta_start ** 0.5, beta_end ** 0.5, n_training_steps, dtype=np.float32) ** 2
