@@ -39,6 +39,8 @@ jobs:
     # run: echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
     - name: Run Stable Diffusion 1.4
       run: JIT=2 THREEFRY=1 python3 examples/stable_diffusion.py --arch SDv1 --seed 0 --noshow --timing | tee sd.txt
+    - name: Run Stable Diffusion 1.4 with fp16
+      run: JIT=2 THREEFRY=1 python3 examples/stable_diffusion.py --fp16 --arch SDv1 --seed 0 --noshow --timing | tee sd_fp16.txt
     - name: Run SDXL
       run: JIT=2 THREEFRY=1 python3 examples/stable_diffusion.py --arch SDXL --seed 0 --noshow --timing | tee sdxl.txt
     - name: Run model inference benchmark
@@ -105,6 +107,7 @@ jobs:
           matmul.txt
           matmul_half.txt
           sd.txt
+          sd_fp16.txt
           sdxl.txt
           beautiful_mnist.txt
           train_cifar.txt
