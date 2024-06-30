@@ -23,25 +23,26 @@ class Attention:
     self.q_norm = RMSNorm(head_dim)
     self.k_norm = RMSNorm(head_dim)
     self.out_proj = nn.Linear(num_query_heads * head_dim, model_dim, bias=False)
-    #self.freqs_cis = None
+    self.freqs_cis: Optional[Tensor] = None
 
   def __call__(self, x:Tensor):
+    start_pos = 0
     batch_size, seq_len, embed_dim = x.shape
     qkv = self.qkv_proj(x)
-    qkv = qkv.reshape(batch_size, seq_len, self.num_query_heads+self.num_kv_heads*2, self.head_dim).transpose(1, 2)
-    xq,xk,xv = qkv.split([self.num_query_heads, self.num_kv_heads, self.num_kv_heads], 1)
+    qkv = qkv.reshape(batch_size, seq_len, self.num_query_heads+self.num_kv_heads*2, self.head_dim) #.transpose(1, 2)
+    xq,xk,xv = qkv.split([self.num_query_heads, self.num_kv_heads, self.num_kv_heads], 2)
     xq = self.q_norm(xq)
     xk = self.k_norm(xk)
 
     # grouped-query attention
     num_groups = self.num_query_heads // self.num_kv_heads
-    xk = xk.repeat_interleave(num_groups, dim=1)
-    xv = xv.repeat_interleave(num_groups, dim=1)
+    xk = xk.repeat_interleave(num_groups, dim=2)
+    xv = xv.repeat_interleave(num_groups, dim=2)
 
     # Add positional embedding (NOTE: jit avoid independent would avoid this None hack)
-    #if self.freqs_cis is None:
-    #  self.freqs_cis = precompute_freqs_cis(embed_dim // self.num_kv_heads, MAX_CONTEXT*1)
-    #xq, xk = apply_rotary_emb(xq, xk, self.freqs_cis)  # TODO: why aren't types going through here?
+    if self.freqs_cis is None:
+      self.freqs_cis = precompute_freqs_cis(self.head_dim, MAX_CONTEXT*1)
+    xq, xk = apply_rotary_emb(xq, xk, self.freqs_cis.shrink((None, (start_pos, start_pos+seq_len),None,None,None)))
 
     attn_output = xq.scaled_dot_product_attention(xk, xv)
     attn_output = attn_output.transpose(1, 2).reshape(batch_size, seq_len, self.num_query_heads * self.head_dim)
