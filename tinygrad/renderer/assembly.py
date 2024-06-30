@@ -1,6 +1,7 @@
-from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
+from typing import DefaultDict, Dict, List, Tuple, Union, Optional, cast, Callable
 import struct, math
 from collections import defaultdict
+from extra.assembly.assembly_ptx import uops_to_ptx_asm
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
@@ -268,7 +269,6 @@ ptx_matcher = PatternMatcher([
         UOp.const(dtypes.int64, 0))+root.src[2:])),
 ])
 
-# Begin RDNA Renderer
 class RDNARenderer(Renderer):
   device = "AMD"
   suffix = "RDNA"
@@ -300,9 +300,7 @@ KERNEL_NAME:"""
     UnaryOps.SIN: lambda d,a,dt,name: f"v_sin_f32 {d}, {a}",
     UnaryOps.SQRT: lambda d,a,dt,name: f"v_sqrt_f32 {d}, {a}",
     BinaryOps.ADD: lambda d,a,b,dt,name: f"v_add_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
-    BinaryOps.SUB: lambda d,a,b,dt,name: f"v_sub_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
     BinaryOps.MUL: lambda d,a,b,dt,name: f"v_mul_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
-    BinaryOps.DIV: lambda d,a,b,dt,name: f"v_div_scale_f32 {d}, vcc, {b}, {b}, {a}\n\tv_div_fmas_f32 {d}, {d}, {b}, {a}\n\tv_div_fixup_f32 {d}, {d}, {b}, {a}",
     BinaryOps.MAX: lambda d,a,b,dt,name: f"v_max_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
     BinaryOps.CMPLT: lambda d,a,b,dt,name: f"v_cmp_lt_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
     TernaryOps.MULACC: lambda d,a,b,c,dt,name: f"v_fma_f32 {d}, {a}, {b}, {c}" if dtypes.is_float(dt) else f"v_mad_i32_i24 {d}, {a}, {b}, {c}",
@@ -397,32 +395,19 @@ def render(self, name:str, uops:UOpGraph) -> str:
                 kk(*self.render_cast(r[src[0]], r[u], dtype, src[0].dtype))
             elif uop == UOps.PHI:
                 r[u] = r[src[0]]
-            elif uop == UOps.LABEL:
-                kk(f"{args}:")
             elif uop == UOps.BARRIER:
                 kk(self.barrier)
             elif uop == UOps.DEFINE_ACC:
                 r[u] = ssa('acc')
                 kk(f"v_mov_b32 {r[u]}, 0")
-            elif uop == UOps.LOOP:
-                idx = ssa('loop_idx')
-                kk(*self.render_loop(idx, r[src[0]], f"LOOP_{idx[1:]}"))
-                r[u] = idx
-            elif uop == UOps.END:
-                kk(f"s_branch LOOP_{r[src[0]][1:]}")
-                kk(f"ENDLOOP_{r[src[0]][1:]}:")
-            elif uop == UOps.COND_BRANCH:
-                kk(*self.render_bra(args[0], r[src[0]]))
             else:
                 raise NotImplementedError(f"unhandled op {uop}")
 
-        # Generate kernel prologue
         prologue = [
             self.kernel_prefix.replace("KERNEL_NAME", name),
             *(f".reg .{self.types[dtype]} %{reg};" for reg,dtype in bufs)
         ]
 
-        # Combine prologue, kernel body, and epilogue
         full_kernel = prologue + kernel + ["s_endpgm"]
         
         return '\n'.join(full_kernel)
@@ -485,7 +470,7 @@ def uops_to_rdna_asm(function_name:str, uops:UOpGraph) -> str:
   return renderer.render_kernel(function_name, kernel, bufs)
 
 rdna_matcher = PatternMatcher([
-  # todo we'll put specific RDNA matching here
+  # TODO: we'll put specific RDNA matching here
 ])
 
 def uops_to_asm(function_name:str, uops:UOpGraph, architecture:str) -> str:
