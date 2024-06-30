@@ -44,7 +44,7 @@ class Attention:
       self.freqs_cis = precompute_freqs_cis(self.head_dim, MAX_CONTEXT*1)
     xq, xk = apply_rotary_emb(xq, xk, self.freqs_cis.shrink((None, (start_pos, start_pos+seq_len),None,None,None)))
 
-    attn_output = xq.scaled_dot_product_attention(xk, xv)
+    attn_output = xq.scaled_dot_product_attention(xk,xv)
     attn_output = attn_output.transpose(1, 2).reshape(batch_size, seq_len, self.num_query_heads * self.head_dim)
     return self.out_proj(attn_output)
 
@@ -90,7 +90,13 @@ if __name__ == "__main__":
   for k, v in weights.items(): print(k, v.shape)
   nn.state.load_state_dict(model, {k.removeprefix("transformer."):v for k,v in weights.items()})
 
-  toks = Tensor([[0]])
-  out = model(toks).realize()
-  print(out.shape)
+  from sentencepiece import SentencePieceProcessor
+  tokenizer = SentencePieceProcessor(fetch("https://huggingface.co/togethercomputer/LLaMA-2-7B-32K/resolve/main/tokenizer.model").as_posix())
+  toks = [tokenizer.bos_id()]
+  for i in range(10):
+    ttoks = Tensor([toks])
+    out = model(ttoks).realize()
+    toks.append(out[0, 0].argmax().item())
+    print(toks, tokenizer.decode(toks))
+
 
