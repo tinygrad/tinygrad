@@ -1,650 +1,683 @@
-# https://arxiv.org/pdf/2112.10752.pdf
-# https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
-import tempfile
-from pathlib import Path
-import gzip, argparse, math, re
-from functools import lru_cache
-from collections import namedtuple
+# This file (and it's imports) incorporates code from the following:
+# Github Name                    | License | Link
+# Stability-AI/generative-models | MIT     | https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/LICENSE-CODE
+# mlfoundations/open_clip        | MIT     | https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/LICENSE
 
+from tinygrad import Tensor, TinyJit, dtypes, GlobalCounters, Device
+from tinygrad.helpers import tqdm, Timing, fetch, Context, getenv, colored, THREEFRY
+from tinygrad.nn.state import safe_load, load_state_dict, torch_load, get_state_dict
+from tinygrad.nn import Conv2d, GroupNorm
+
+from extra.models.clip import Embedder, FrozenClosedClipEmbedder, FrozenOpenClipEmbedder
+from extra.models.unet import UNetModel, timestep_embedding
+
+from typing import Dict, Tuple, List, Set, Optional, Type, Union
+import os, argparse, tempfile, re
+from abc import ABC, abstractmethod
+from pathlib import Path
 from PIL import Image
 import numpy as np
-from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
-from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm, THREEFRY
-from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
-from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 
-class AttnBlock:
-  def __init__(self, in_channels):
-    self.norm = GroupNorm(32, in_channels)
-    self.q = Conv2d(in_channels, in_channels, 1)
-    self.k = Conv2d(in_channels, in_channels, 1)
-    self.v = Conv2d(in_channels, in_channels, 1)
-    self.proj_out = Conv2d(in_channels, in_channels, 1)
 
-  # copied from AttnBlock in ldm repo
-  def __call__(self, x):
-    h_ = self.norm(x)
-    q,k,v = self.q(h_), self.k(h_), self.v(h_)
+def tensor_identity(x:Tensor) -> Tensor:
+  return x
 
-    # compute attention
-    b,c,h,w = q.shape
-    q,k,v = [x.reshape(b,c,h*w).transpose(1,2) for x in (q,k,v)]
-    h_ = Tensor.scaled_dot_product_attention(q,k,v).transpose(1,2).reshape(b,c,h,w)
-    return x + self.proj_out(h_)
-
-class ResnetBlock:
-  def __init__(self, in_channels, out_channels=None):
-    self.norm1 = GroupNorm(32, in_channels)
-    self.conv1 = Conv2d(in_channels, out_channels, 3, padding=1)
-    self.norm2 = GroupNorm(32, out_channels)
-    self.conv2 = Conv2d(out_channels, out_channels, 3, padding=1)
-    self.nin_shortcut = Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else lambda x: x
-
-  def __call__(self, x):
-    h = self.conv1(self.norm1(x).swish())
-    h = self.conv2(self.norm2(h).swish())
-    return self.nin_shortcut(x) + h
-
-class Mid:
-  def __init__(self, block_in):
-    self.block_1 = ResnetBlock(block_in, block_in)
-    self.attn_1 = AttnBlock(block_in)
-    self.block_2 = ResnetBlock(block_in, block_in)
-
-  def __call__(self, x):
-    return x.sequential([self.block_1, self.attn_1, self.block_2])
-
-class Decoder:
-  def __init__(self):
-    sz = [(128, 256), (256, 512), (512, 512), (512, 512)]
-    self.conv_in = Conv2d(4,512,3, padding=1)
-    self.mid = Mid(512)
-
-    arr = []
-    for i,s in enumerate(sz):
-      arr.append({"block":
-        [ResnetBlock(s[1], s[0]),
-         ResnetBlock(s[0], s[0]),
-         ResnetBlock(s[0], s[0])]})
-      if i != 0: arr[-1]['upsample'] = {"conv": Conv2d(s[0], s[0], 3, padding=1)}
-    self.up = arr
-
-    self.norm_out = GroupNorm(32, 128)
-    self.conv_out = Conv2d(128, 3, 3, padding=1)
-
-  def __call__(self, x):
-    x = self.conv_in(x)
-    x = self.mid(x)
-
-    for l in self.up[::-1]:
-      print("decode", x.shape)
-      for b in l['block']: x = b(x)
-      if 'upsample' in l:
-        # https://pytorch.org/docs/stable/generated/torch.nn.functional.interpolate.html ?
-        bs,c,py,px = x.shape
-        x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
-        x = l['upsample']['conv'](x)
-      x.realize()
-
-    return self.conv_out(self.norm_out(x).swish())
-
-class Encoder:
-  def __init__(self):
-    sz = [(128, 128), (128, 256), (256, 512), (512, 512)]
-    self.conv_in = Conv2d(3,128,3, padding=1)
-
-    arr = []
-    for i,s in enumerate(sz):
-      arr.append({"block":
-        [ResnetBlock(s[0], s[1]),
-         ResnetBlock(s[1], s[1])]})
-      if i != 3: arr[-1]['downsample'] = {"conv": Conv2d(s[1], s[1], 3, stride=2, padding=(0,1,0,1))}
-    self.down = arr
-
-    self.mid = Mid(512)
-    self.norm_out = GroupNorm(32, 512)
-    self.conv_out = Conv2d(512, 8, 3, padding=1)
-
-  def __call__(self, x):
-    x = self.conv_in(x)
-
-    for l in self.down:
-      print("encode", x.shape)
-      for b in l['block']: x = b(x)
-      if 'downsample' in l: x = l['downsample']['conv'](x)
-
-    x = self.mid(x)
-    return self.conv_out(self.norm_out(x).swish())
-
-class AutoencoderKL:
-  def __init__(self):
-    self.encoder = Encoder()
-    self.decoder = Decoder()
-    self.quant_conv = Conv2d(8, 8, 1)
-    self.post_quant_conv = Conv2d(4, 4, 1)
-
-  def __call__(self, x):
-    latent = self.encoder(x)
-    latent = self.quant_conv(latent)
-    latent = latent[:, 0:4]  # only the means
-    print("latent", latent.shape)
-    latent = self.post_quant_conv(latent)
-    return self.decoder(latent)
-
-# not to be confused with ResnetBlock
-class ResBlock:
-  def __init__(self, channels, emb_channels, out_channels):
-    self.in_layers = [
-      GroupNorm(32, channels),
-      Tensor.silu,
-      Conv2d(channels, out_channels, 3, padding=1)
-    ]
-    self.emb_layers = [
-      Tensor.silu,
-      Linear(emb_channels, out_channels)
-    ]
-    self.out_layers = [
-      GroupNorm(32, out_channels),
-      Tensor.silu,
-      lambda x: x,  # needed for weights loading code to work
-      Conv2d(out_channels, out_channels, 3, padding=1)
-    ]
-    self.skip_connection = Conv2d(channels, out_channels, 1) if channels != out_channels else lambda x: x
-
-  def __call__(self, x, emb):
-    h = x.sequential(self.in_layers)
-    emb_out = emb.sequential(self.emb_layers)
-    h = h + emb_out.reshape(*emb_out.shape, 1, 1)
-    h = h.sequential(self.out_layers)
-    ret = self.skip_connection(x) + h
-    return ret
-
-class CrossAttention:
-  def __init__(self, query_dim, context_dim, n_heads, d_head):
-    self.to_q = Linear(query_dim, n_heads*d_head, bias=False)
-    self.to_k = Linear(context_dim, n_heads*d_head, bias=False)
-    self.to_v = Linear(context_dim, n_heads*d_head, bias=False)
-    self.num_heads = n_heads
-    self.head_size = d_head
-    self.to_out = [Linear(n_heads*d_head, query_dim)]
-
-  def __call__(self, x, context=None):
-    context = x if context is None else context
-    q,k,v = self.to_q(x), self.to_k(context), self.to_v(context)
-    q,k,v = [y.reshape(x.shape[0], -1, self.num_heads, self.head_size).transpose(1,2) for y in (q,k,v)]
-    attention = Tensor.scaled_dot_product_attention(q, k, v).transpose(1,2)
-    h_ = attention.reshape(x.shape[0], -1, self.num_heads * self.head_size)
-    return h_.sequential(self.to_out)
-
-class GEGLU:
-  def __init__(self, dim_in, dim_out):
-    self.proj = Linear(dim_in, dim_out * 2)
-    self.dim_out = dim_out
-
-  def __call__(self, x):
-    x, gate = self.proj(x).chunk(2, dim=-1)
-    return x * gate.gelu()
-
-class FeedForward:
-  def __init__(self, dim, mult=4):
-    self.net = [
-      GEGLU(dim, dim*mult),
-      lambda x: x,  # needed for weights loading code to work
-      Linear(dim*mult, dim)
-    ]
-
-  def __call__(self, x):
-    return x.sequential(self.net)
-
-class BasicTransformerBlock:
-  def __init__(self, dim, context_dim, n_heads, d_head):
-    self.attn1 = CrossAttention(dim, dim, n_heads, d_head)
-    self.ff = FeedForward(dim)
-    self.attn2 = CrossAttention(dim, context_dim, n_heads, d_head)
-    self.norm1 = LayerNorm(dim)
-    self.norm2 = LayerNorm(dim)
-    self.norm3 = LayerNorm(dim)
-
-  def __call__(self, x, context=None):
-    x = self.attn1(self.norm1(x)) + x
-    x = self.attn2(self.norm2(x), context=context) + x
-    x = self.ff(self.norm3(x)) + x
-    return x
-
-class SpatialTransformer:
-  def __init__(self, channels, context_dim, n_heads, d_head):
-    self.norm = GroupNorm(32, channels)
-    assert channels == n_heads * d_head
-    self.proj_in = Conv2d(channels, n_heads * d_head, 1)
-    self.transformer_blocks = [BasicTransformerBlock(channels, context_dim, n_heads, d_head)]
-    self.proj_out = Conv2d(n_heads * d_head, channels, 1)
-
-  def __call__(self, x, context=None):
-    b, c, h, w = x.shape
-    x_in = x
-    x = self.norm(x)
-    x = self.proj_in(x)
-    x = x.reshape(b, c, h*w).permute(0,2,1)
-    for block in self.transformer_blocks:
-      x = block(x, context=context)
-    x = x.permute(0,2,1).reshape(b, c, h, w)
-    ret = self.proj_out(x) + x_in
-    return ret
-
-class Downsample:
-  def __init__(self, channels):
-    self.op = Conv2d(channels, channels, 3, stride=2, padding=1)
-
-  def __call__(self, x):
-    return self.op(x)
-
-class Upsample:
-  def __init__(self, channels):
-    self.conv = Conv2d(channels, channels, 3, padding=1)
-
-  def __call__(self, x):
-    bs,c,py,px = x.shape
-    x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
-    return self.conv(x)
-
-def timestep_embedding(timesteps, dim, max_period=10000):
-  half = dim // 2
-  freqs = (-math.log(max_period) * Tensor.arange(half) / half).exp()
-  args = timesteps * freqs
-  return Tensor.cat(args.cos(), args.sin()).reshape(1, -1)
-
-class UNetModel:
-  def __init__(self):
-    self.time_embed = [
-      Linear(320, 1280),
-      Tensor.silu,
-      Linear(1280, 1280),
-    ]
-    self.input_blocks = [
-      [Conv2d(4, 320, kernel_size=3, padding=1)],
-      [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
-      [ResBlock(320, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
-      [Downsample(320)],
-      [ResBlock(320, 1280, 640), SpatialTransformer(640, 768, 8, 80)],
-      [ResBlock(640, 1280, 640), SpatialTransformer(640, 768, 8, 80)],
-      [Downsample(640)],
-      [ResBlock(640, 1280, 1280), SpatialTransformer(1280, 768, 8, 160)],
-      [ResBlock(1280, 1280, 1280), SpatialTransformer(1280, 768, 8, 160)],
-      [Downsample(1280)],
-      [ResBlock(1280, 1280, 1280)],
-      [ResBlock(1280, 1280, 1280)]
-    ]
-    self.middle_block = [
-      ResBlock(1280, 1280, 1280),
-      SpatialTransformer(1280, 768, 8, 160),
-      ResBlock(1280, 1280, 1280)
-    ]
-    self.output_blocks = [
-      [ResBlock(2560, 1280, 1280)],
-      [ResBlock(2560, 1280, 1280)],
-      [ResBlock(2560, 1280, 1280), Upsample(1280)],
-      [ResBlock(2560, 1280, 1280), SpatialTransformer(1280, 768, 8, 160)],
-      [ResBlock(2560, 1280, 1280), SpatialTransformer(1280, 768, 8, 160)],
-      [ResBlock(1920, 1280, 1280), SpatialTransformer(1280, 768, 8, 160), Upsample(1280)],
-      [ResBlock(1920, 1280, 640), SpatialTransformer(640, 768, 8, 80)],  # 6
-      [ResBlock(1280, 1280, 640), SpatialTransformer(640, 768, 8, 80)],
-      [ResBlock(960, 1280, 640), SpatialTransformer(640, 768, 8, 80), Upsample(640)],
-      [ResBlock(960, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
-      [ResBlock(640, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
-      [ResBlock(640, 1280, 320), SpatialTransformer(320, 768, 8, 40)],
-    ]
-    self.out = [
-      GroupNorm(32, 320),
-      Tensor.silu,
-      Conv2d(320, 4, kernel_size=3, padding=1)
-    ]
-
-  def __call__(self, x, timesteps=None, context=None):
-    # TODO: real time embedding
-    t_emb = timestep_embedding(timesteps, 320)
-    emb = t_emb.sequential(self.time_embed)
-
-    def run(x, bb):
-      if isinstance(bb, ResBlock): x = bb(x, emb)
-      elif isinstance(bb, SpatialTransformer): x = bb(x, context)
-      else: x = bb(x)
-      return x
-
-    saved_inputs = []
-    for i,b in enumerate(self.input_blocks):
-      #print("input block", i)
-      for bb in b:
-        x = run(x, bb)
-      saved_inputs.append(x)
-    for bb in self.middle_block:
-      x = run(x, bb)
-    for i,b in enumerate(self.output_blocks):
-      #print("output block", i)
-      x = x.cat(saved_inputs.pop(), dim=1)
-      for bb in b:
-        x = run(x, bb)
-    return x.sequential(self.out)
-
-class CLIPMLP:
-  def __init__(self):
-    self.fc1 = Linear(768, 3072)
-    self.fc2 = Linear(3072, 768)
-
-  def __call__(self, hidden_states):
-    hidden_states = self.fc1(hidden_states)
-    hidden_states = hidden_states.quick_gelu()
-    hidden_states = self.fc2(hidden_states)
-    return hidden_states
-
-class CLIPAttention:
-  def __init__(self):
-    self.embed_dim = 768
-    self.num_heads = 12
-    self.head_dim = self.embed_dim // self.num_heads
-    self.k_proj = Linear(self.embed_dim, self.embed_dim)
-    self.v_proj = Linear(self.embed_dim, self.embed_dim)
-    self.q_proj = Linear(self.embed_dim, self.embed_dim)
-    self.out_proj = Linear(self.embed_dim, self.embed_dim)
-
-  def __call__(self, hidden_states, causal_attention_mask):
-    bsz, tgt_len, embed_dim = hidden_states.shape
-    q,k,v = self.q_proj(hidden_states), self.k_proj(hidden_states), self.v_proj(hidden_states)
-    q,k,v = [x.reshape(bsz, tgt_len, self.num_heads, self.head_dim).transpose(1, 2) for x in (q,k,v)]
-    attn_output = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=causal_attention_mask)
-    return self.out_proj(attn_output.transpose(1, 2).reshape(bsz, tgt_len, embed_dim))
-
-class CLIPEncoderLayer:
-  def __init__(self):
-    self.self_attn = CLIPAttention()
-    self.layer_norm1 = LayerNorm(768)
-    self.mlp = CLIPMLP()
-    self.layer_norm2 = LayerNorm(768)
-
-  def __call__(self, hidden_states, causal_attention_mask):
-    residual = hidden_states
-    hidden_states = self.layer_norm1(hidden_states)
-    hidden_states = self.self_attn(hidden_states, causal_attention_mask)
-    hidden_states = residual + hidden_states
-
-    residual = hidden_states
-    hidden_states = self.layer_norm2(hidden_states)
-    hidden_states = self.mlp(hidden_states)
-    hidden_states = residual + hidden_states
-
-    return hidden_states
-
-class CLIPEncoder:
-  def __init__(self):
-    self.layers = [CLIPEncoderLayer() for i in range(12)]
-
-  def __call__(self, hidden_states, causal_attention_mask):
-    for l in self.layers:
-      hidden_states = l(hidden_states, causal_attention_mask)
-    return hidden_states
-
-class CLIPTextEmbeddings:
-  def __init__(self):
-    self.token_embedding = Embedding(49408, 768)
-    self.position_embedding = Embedding(77, 768)
-
-  def __call__(self, input_ids, position_ids):
-    return self.token_embedding(input_ids) + self.position_embedding(position_ids)
-
-class CLIPTextTransformer:
-  def __init__(self):
-    self.embeddings = CLIPTextEmbeddings()
-    self.encoder = CLIPEncoder()
-    self.final_layer_norm = LayerNorm(768)
-
-  def __call__(self, input_ids):
-    x = self.embeddings(input_ids, Tensor.arange(input_ids.shape[1]).reshape(1, -1))
-    x = self.encoder(x, Tensor.full((1, 1, 77, 77), float("-inf")).triu(1))
-    return self.final_layer_norm(x)
-
-# Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
-@lru_cache()
-def default_bpe(): return fetch("https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz", "bpe_simple_vocab_16e6.txt.gz")
-
-def get_pairs(word):
-  """Return set of symbol pairs in a word.
-  Word is represented as tuple of symbols (symbols being variable-length strings).
-  """
-  return set(zip(word, word[1:]))
-
-def whitespace_clean(text):
-  text = re.sub(r'\s+', ' ', text)
-  text = text.strip()
-  return text
-
-def bytes_to_unicode():
-  """
-  Returns list of utf-8 byte and a corresponding list of unicode strings.
-  The reversible bpe codes work on unicode strings.
-  This means you need a large # of unicode characters in your vocab if you want to avoid UNKs.
-  When you're at something like a 10B token dataset you end up needing around 5K for decent coverage.
-  This is a significant percentage of your normal, say, 32K bpe vocab.
-  To avoid that, we want lookup tables between utf-8 bytes and unicode strings.
-  And avoids mapping to whitespace/control characters the bpe code barfs on.
-  """
-  bs = list(range(ord("!"), ord("~")+1))+list(range(ord("¡"), ord("¬")+1))+list(range(ord("®"), ord("ÿ")+1))
-  cs = bs[:]
-  n = 0
-  for b in range(2**8):
-    if b not in bs:
-      bs.append(b)
-      cs.append(2**8+n)
-      n += 1
-  cs = [chr(n) for n in cs]
-  return dict(zip(bs, cs))
-
-class ClipTokenizer:
-  def __init__(self, bpe_path: str = default_bpe()):
-    self.byte_encoder = bytes_to_unicode()
-    merges = gzip.open(bpe_path).read().decode("utf-8").split('\n')
-    merges = merges[1:49152-256-2+1]
-    merges = [tuple(merge.split()) for merge in merges]
-    vocab = list(bytes_to_unicode().values())
-    vocab = vocab + [v+'</w>' for v in vocab]
-    for merge in merges:
-      vocab.append(''.join(merge))
-    vocab.extend(['<|startoftext|>', '<|endoftext|>'])
-    self.encoder = dict(zip(vocab, range(len(vocab))))
-    self.bpe_ranks = dict(zip(merges, range(len(merges))))
-    self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
-    self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
-
-  def bpe(self, token):
-    if token in self.cache:
-      return self.cache[token]
-    word = tuple(token[:-1]) + ( token[-1] + '</w>',)
-    pairs = get_pairs(word)
-
-    if not pairs:
-      return token+'</w>'
-
-    while True:
-      bigram = min(pairs, key = lambda pair: self.bpe_ranks.get(pair, float('inf')))
-      if bigram not in self.bpe_ranks:
-        break
-      first, second = bigram
-      new_word = []
-      i = 0
-      while i < len(word):
-        try:
-          j = word.index(first, i)
-          new_word.extend(word[i:j])
-          i = j
-        except Exception:
-          new_word.extend(word[i:])
-          break
-
-        if word[i] == first and i < len(word)-1 and word[i+1] == second:
-          new_word.append(first+second)
-          i += 2
-        else:
-          new_word.append(word[i])
-          i += 1
-      new_word = tuple(new_word)
-      word = new_word
-      if len(word) == 1:
-        break
-      pairs = get_pairs(word)
-    word = ' '.join(word)
-    self.cache[token] = word
-    return word
-
-  def encode(self, text, pad_with_zeros=False):
-    bpe_tokens = []
-    text = whitespace_clean(text.strip()).lower()
-    for token in re.findall(self.pat, text):
-      token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
-      bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
-    # Truncation, keeping two slots for start and end tokens.
-    if len(bpe_tokens) > 75:
-      bpe_tokens = bpe_tokens[:75]
-    return [49406] + bpe_tokens + [49407] + ([0] if pad_with_zeros else [49407]) * (77 - len(bpe_tokens) - 2)
+def append_dims(x:Tensor, t:Tensor) -> Tensor:
+  dims_to_append = len(t.shape) - len(x.shape)
+  assert dims_to_append >= 0
+  return x.reshape(x.shape + (1,)*dims_to_append)
 
 def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=1000):
   betas = np.linspace(beta_start ** 0.5, beta_end ** 0.5, n_training_steps, dtype=np.float32) ** 2
   alphas = 1.0 - betas
   alphas_cumprod = np.cumprod(alphas, axis=0)
-  return Tensor(alphas_cumprod)
+  return alphas_cumprod
 
-class StableDiffusion:
-  def __init__(self):
-    self.alphas_cumprod = get_alphas_cumprod()
-    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel())
-    self.first_stage_model = AutoencoderKL()
-    self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
 
-  def get_x_prev_and_pred_x0(self, x, e_t, a_t, a_prev):
-    temperature = 1
-    sigma_t = 0
-    sqrt_one_minus_at = (1-a_t).sqrt()
-    #print(a_t, a_prev, sigma_t, sqrt_one_minus_at)
+# https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/discretizer.py#L42
+class LegacyDDPMDiscretization:
+  def __init__(self, linear_start:float=0.00085, linear_end:float=0.0120, num_timesteps:int=1000):
+    self.num_timesteps = num_timesteps
+    self.alphas_cumprod = get_alphas_cumprod(linear_start, linear_end, num_timesteps)
 
-    pred_x0 = (x - sqrt_one_minus_at * e_t) / a_t.sqrt()
+  def __call__(self, n:int, flip:bool=False) -> Tensor:
+    if n < self.num_timesteps:
+      timesteps = np.linspace(self.num_timesteps - 1, 0, n, endpoint=False).astype(int)[::-1]
+      alphas_cumprod = self.alphas_cumprod[timesteps]
+    elif n == self.num_timesteps:
+      alphas_cumprod = self.alphas_cumprod
+    sigmas = Tensor((1 - alphas_cumprod) / alphas_cumprod) ** 0.5
+    sigmas = Tensor.cat(Tensor.zeros((1,)), sigmas)
+    return sigmas if flip else sigmas.flip(axis=0) # sigmas is "pre-flipped", need to do oposite of flag
 
-    # direction pointing to x_t
-    dir_xt = (1. - a_prev - sigma_t**2).sqrt() * e_t
 
-    x_prev = a_prev.sqrt() * pred_x0 + dir_xt
-    return x_prev, pred_x0
+class DiffusionModel:
+  def __init__(self, *args, **kwargs):
+    self.diffusion_model = UNetModel(*args, **kwargs)
 
-  def get_model_output(self, unconditional_context, context, latent, timestep, unconditional_guidance_scale):
-    # put into diffuser
-    latents = self.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep, unconditional_context.cat(context, dim=0))
-    unconditional_latent, latent = latents[0:1], latents[1:2]
 
-    e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
-    return e_t
+# https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L913
+class ConcatTimestepEmbedderND(Embedder):
+  def __init__(self, input_key:str, outdim:int=256):
+    self.outdim = outdim
+    self.input_key = input_key
 
-  def decode(self, x):
-    x = self.first_stage_model.post_quant_conv(1/0.18215 * x)
-    x = self.first_stage_model.decoder(x)
+  def __call__(self, x:Union[str,Tensor]):
+    assert isinstance(x, Tensor)
+    assert len(x.shape) == 2
+    emb = timestep_embedding(x.flatten(), self.outdim)
+    emb = emb.reshape((x.shape[0],-1))
+    return emb
 
-    # make image correct size and scale
-    x = (x + 1.0) / 2.0
-    x = x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255
-    return x.cast(dtypes.uint8) if Device.DEFAULT != "WEBGPU" else x
+# https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L71
+class GeneralConditioner:
+  OUTPUT_DIM2KEYS = {2: "vector", 3: "crossattn", 4: "concat", 5: "concat"}
+  KEY2CATDIM      = {"vector": 1, "crossattn": 2, "concat": 1}
+  embedders: List[Embedder]
 
-  def __call__(self, unconditional_context, context, latent, timestep, alphas, alphas_prev, guidance):
-    e_t = self.get_model_output(unconditional_context, context, latent, timestep, guidance)
-    x_prev, _ = self.get_x_prev_and_pred_x0(latent, e_t, alphas, alphas_prev)
-    #e_t_next = get_model_output(x_prev)
-    #e_t_prime = (e_t + e_t_next) / 2
-    #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
-    return x_prev.realize()
+  def __init__(self, embedders:List[Dict]):
+    self.embedders = []
+    for emb in embedders:
+      self.embedders.append(emb["class"](**emb["args"]))
 
-# ** ldm.models.autoencoder.AutoencoderKL (done!)
-# 3x512x512 <--> 4x64x64 (16384)
-# decode torch.Size([1, 4, 64, 64]) torch.Size([1, 3, 512, 512])
-# section 4.3 of paper
-# first_stage_model.encoder, first_stage_model.decoder
+  def get_keys(self) -> Set[str]:
+    return set(e.input_key for e in self.embedders)
 
-# ** ldm.modules.diffusionmodules.openaimodel.UNetModel
-# this is what runs each time to sample. is this the LDM?
-# input:  4x64x64
-# output: 4x64x64
-# model.diffusion_model
-# it has attention?
+  def __call__(self, batch:Dict, force_zero_embeddings:List=[]) -> Dict[str,Tensor]:
+    output: Dict[str,Tensor] = {}
 
-# ** ldm.modules.encoders.modules.FrozenCLIPEmbedder
-# cond_stage_model.transformer.text_model
+    for embedder in self.embedders:
+      emb_out = embedder(batch[embedder.input_key])
+
+      if isinstance(emb_out, Tensor):
+        emb_out = [emb_out]
+      else:
+        assert isinstance(emb_out, (list, tuple))
+
+      for emb in emb_out:
+        if embedder.input_key in force_zero_embeddings:
+          emb = Tensor.zeros_like(emb)
+
+        out_key = self.OUTPUT_DIM2KEYS[len(emb.shape)]
+        if out_key in output:
+          output[out_key] = Tensor.cat(output[out_key], emb, dim=self.KEY2CATDIM[out_key])
+        else:
+          output[out_key] = emb
+
+    return output
+
+
+class FirstStage:
+  """
+  Namespace for FirstStageModel components.
+  """
+
+  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L136
+  class ResnetBlock:
+    def __init__(self, in_channels, out_channels=None):
+      self.norm1 = GroupNorm(32, in_channels)
+      self.conv1 = Conv2d(in_channels, out_channels, 3, padding=1)
+      self.norm2 = GroupNorm(32, out_channels)
+      self.conv2 = Conv2d(out_channels, out_channels, 3, padding=1)
+      self.nin_shortcut = Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else lambda x: x
+
+    def __call__(self, x):
+      h = self.conv1(self.norm1(x).swish())
+      h = self.conv2(self.norm2(h).swish())
+      return self.nin_shortcut(x) + h
+
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/model.py#L74
+  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L102
+  class Downsample:
+    def __init__(self, dims:int):
+      self.conv = Conv2d(dims, dims, kernel_size=3, stride=2, padding=(0,1,0,1))
+
+    def __call__(self, x:Tensor) -> Tensor:
+      return self.conv(x)
+
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/model.py#L58
+  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L83
+  class Upsample:
+    def __init__(self, dims:int):
+      self.conv = Conv2d(dims, dims, kernel_size=3, stride=1, padding=1)
+
+    def __call__(self, x:Tensor) -> Tensor:
+      B,C,Y,X = x.shape
+      x = x.reshape(B, C, Y, 1, X, 1).expand(B, C, Y, 2, X, 2).reshape(B, C, Y*2, X*2)
+      return self.conv(x)
+
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/model.py#L204
+  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L17
+  class AttnBlock:
+    def __init__(self, dim:int):
+      self.norm = GroupNorm(32, dim)
+      self.q = Conv2d(dim, dim, 1)
+      self.k = Conv2d(dim, dim, 1)
+      self.v = Conv2d(dim, dim, 1)
+      self.proj_out = Conv2d(dim, dim, 1)
+
+    # copied from AttnBlock in ldm repo
+    def __call__(self, x:Tensor) -> Tensor:
+      h_ = self.norm(x)
+      q,k,v = self.q(h_), self.k(h_), self.v(h_)
+
+      # compute attention
+      b,c,h,w = q.shape
+      q,k,v = [x.reshape(b,c,h*w).transpose(1,2) for x in (q,k,v)]
+      h_ = Tensor.scaled_dot_product_attention(q,k,v).transpose(1,2).reshape(b,c,h,w)
+      return x + self.proj_out(h_)
+
+  class MidEntry:
+    def __init__(self, block_in:int):
+      self.block_1 = FirstStage.ResnetBlock(block_in, block_in)
+      self.attn_1  = FirstStage.AttnBlock  (block_in)
+      self.block_2 = FirstStage.ResnetBlock(block_in, block_in)
+
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/model.py#L487
+  class Encoder:
+    def __init__(self, ch:int, in_ch:int, out_ch:int, z_ch:int, ch_mult:List[int], num_res_blocks:int, resolution:int):
+      self.conv_in = Conv2d(in_ch, ch, kernel_size=3, stride=1, padding=1)
+      in_ch_mult = (1,) + tuple(ch_mult)
+
+      class BlockEntry:
+        def __init__(self, block:List[FirstStage.ResnetBlock], downsample):
+          self.block = block
+          self.downsample = downsample
+      self.down: List[BlockEntry] = []
+      for i_level in range(len(ch_mult)):
+        block = []
+        block_in  = ch * in_ch_mult[i_level]
+        block_out = ch * ch_mult   [i_level]
+        for _ in range(num_res_blocks):
+          block.append(FirstStage.ResnetBlock(block_in, block_out))
+          block_in = block_out
+
+        downsample = tensor_identity if (i_level == len(ch_mult)-1) else FirstStage.Downsample(block_in)
+        self.down.append(BlockEntry(block, downsample))
+
+      self.mid = FirstStage.MidEntry(block_in)
+
+      self.norm_out = GroupNorm(32, block_in)
+      self.conv_out = Conv2d(block_in, 2*z_ch, kernel_size=3, stride=1, padding=1)
+
+    def __call__(self, x:Tensor) -> Tensor:
+      h = self.conv_in(x)
+      for down in self.down:
+        for block in down.block:
+          h = block(h)
+        h = down.downsample(h)
+
+      h = h.sequential([self.mid.block_1, self.mid.attn_1, self.mid.block_2])
+      h = h.sequential([self.norm_out,    Tensor.swish,    self.conv_out   ])
+      return h
+
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/model.py#L604
+  class Decoder:
+    def __init__(self, ch:int, in_ch:int, out_ch:int, z_ch:int, ch_mult:List[int], num_res_blocks:int, resolution:int):
+      block_in = ch * ch_mult[-1]
+      curr_res = resolution // 2 ** (len(ch_mult) - 1)
+      self.z_shape = (1, z_ch, curr_res, curr_res)
+
+      self.conv_in = Conv2d(z_ch, block_in, kernel_size=3, stride=1, padding=1)
+
+      self.mid = FirstStage.MidEntry(block_in)
+
+      class BlockEntry:
+        def __init__(self, block:List[FirstStage.ResnetBlock], upsample):
+          self.block = block
+          self.upsample = upsample
+      self.up: List[BlockEntry] = []
+      for i_level in reversed(range(len(ch_mult))):
+        block = []
+        block_out = ch * ch_mult[i_level]
+        for _ in range(num_res_blocks + 1):
+          block.append(FirstStage.ResnetBlock(block_in, block_out))
+          block_in = block_out
+
+        upsample = tensor_identity if i_level == 0 else FirstStage.Upsample(block_in)
+        self.up.insert(0, BlockEntry(block, upsample))
+
+      self.norm_out = GroupNorm(32, block_in)
+      self.conv_out = Conv2d(block_in, out_ch, kernel_size=3, stride=1, padding=1)
+
+    def __call__(self, z:Tensor) -> Tensor:
+      h = z.sequential([self.conv_in, self.mid.block_1, self.mid.attn_1, self.mid.block_2])
+
+      for up in self.up[::-1]:
+        for block in up.block:
+          h = block(h)
+        h = up.upsample(h)
+
+      h = h.sequential([self.norm_out, Tensor.swish, self.conv_out])
+      return h
+
+# https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/models/autoencoder.py#L102
+# https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/models/autoencoder.py#L437
+# https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/models/autoencoder.py#L508
+class FirstStageModel:
+  def __init__(self, embed_dim:int=4, **kwargs):
+    self.encoder = FirstStage.Encoder(**kwargs)
+    self.decoder = FirstStage.Decoder(**kwargs)
+    self.quant_conv = Conv2d(2*kwargs["z_ch"], 2*embed_dim, 1)
+    self.post_quant_conv = Conv2d(embed_dim, kwargs["z_ch"], 1)
+
+  def decode(self, z:Tensor) -> Tensor:
+    return z.sequential([self.post_quant_conv, self.decoder])
+
+
+class VanillaCFG:
+  def __init__(self, scale:float):
+    self.scale = scale
+
+  def prepare_inputs(self, x:Tensor, s:Optional[Tensor], c:Dict, uc:Dict) -> Tuple[Tensor,Tensor,Tensor]:
+    c_out = {}
+    for k in c:
+      assert k in ["vector", "crossattn", "concat"]
+      c_out[k] = Tensor.cat(uc[k], c[k], dim=0)
+    return Tensor.cat(x, x), (None if s is None else Tensor.cat(s, s)), c_out
+
+  def __call__(self, x:Tensor, sigma:float) -> Tensor:
+    x_u, x_c = x.chunk(2)
+    x_pred = x_u + self.scale*(x_c - x_u)
+    return x_pred
+
+class Sampler(ABC):
+  @abstractmethod
+  def __init__(self, cfg_scale:float, timing:bool):
+    pass
+  @abstractmethod
+  def __call__(self, denoiser, x:Tensor, c:Dict, uc:Dict, num_steps:int) -> Tensor:
+    pass
+
+class Samplers:
+  """
+  Namespace for Stable Diffusion samplers.
+  """
+
+  class SDv1Sampler(Sampler):
+    def __init__(self, cfg_scale:float, timing:bool):
+      self.cfg_scale = cfg_scale
+      self.timing = timing
+
+      self.discretization = LegacyDDPMDiscretization()
+      self.guider = VanillaCFG(cfg_scale)
+      self.alphas_cumprod = get_alphas_cumprod()
+
+    def __call__(self, denoiser, x:Tensor, c:Dict, uc:Dict, num_steps:int) -> Tensor:
+      timesteps   = list(range(1, 1000, 1000//num_steps))
+      alphas      = Tensor(self.alphas_cumprod[timesteps])
+      alphas_prev = Tensor([1.0]).cat(alphas[:-1])
+
+      for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
+        GlobalCounters.reset()
+        t.set_description(f"{index:3d} {timestep:3d}")
+        with Timing("step in ", enabled=self.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
+          tid        = Tensor([index])
+          alpha      = alphas     [tid]
+          alpha_prev = alphas_prev[tid]
+
+          latents, _, cond = self.guider.prepare_inputs(x, None, c, uc)
+          latents = denoiser(latents, Tensor([timestep]), cond)
+          uc_latent, c_latent = latents[0:1], latents[1:2]
+          e_t = uc_latent + self.cfg_scale * (c_latent - uc_latent)
+
+          sqrt_one_minus_at = (1 - alpha).sqrt()
+          pred_x0 = (x - sqrt_one_minus_at * e_t) / alpha.sqrt()
+          dir_xt = (1. - alpha_prev).sqrt() * e_t
+          x = alpha_prev.sqrt() * pred_x0 + dir_xt
+
+          if self.timing: Device[Device.DEFAULT].synchronize()
+
+      return x
+
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/sampling.py#L21
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/sampling.py#L287
+  class DPMPP2MSampler(Sampler):
+    def __init__(self, cfg_scale:float, timing:bool):
+      self.timing = timing
+      self.discretization = LegacyDDPMDiscretization()
+      self.guider = VanillaCFG(cfg_scale)
+
+    def sampler_step(self, old_denoised:Optional[Tensor], prev_sigma:Optional[Tensor], sigma:Tensor, next_sigma:Tensor, denoiser, x:Tensor, c:Dict, uc:Dict) -> Tuple[Tensor,Tensor]:
+      denoised = denoiser(*self.guider.prepare_inputs(x, sigma, c, uc))
+      denoised = self.guider(denoised, sigma)
+
+      t, t_next = sigma.log().neg(), next_sigma.log().neg()
+      h = t_next - t
+      r = None if prev_sigma is None else (t - prev_sigma.log().neg()) / h
+
+      mults = [t_next.neg().exp()/t.neg().exp(), (-h).exp().sub(1)]
+      if r is not None:
+        mults.extend([1 + 1/(2*r), 1/(2*r)])
+      mults = [append_dims(m, x) for m in mults]
+
+      x_standard = mults[0]*x - mults[1]*denoised
+      if (old_denoised is None) or (next_sigma.sum().numpy().item() < 1e-14):
+        return x_standard, denoised
+
+      denoised_d = mults[2]*denoised - mults[3]*old_denoised
+      x_advanced = mults[0]*x        - mults[1]*denoised_d
+      x = Tensor.where(append_dims(next_sigma, x) > 0.0, x_advanced, x_standard)
+      return x, denoised
+
+    def __call__(self, denoiser, x:Tensor, c:Dict, uc:Dict, num_steps:int) -> Tensor:
+      sigmas = self.discretization(num_steps)
+      x *= Tensor.sqrt(1.0 + sigmas[0] ** 2.0)
+
+      old_denoised = None
+      for i in (t:=tqdm(range(len(sigmas) - 1))):
+        GlobalCounters.reset()
+        t.set_description(f"{i:3d}")
+        with Timing("step in ", enabled=self.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
+          x, old_denoised = self.sampler_step(
+            old_denoised=old_denoised,
+            prev_sigma=(None if i==0 else sigmas[i-1].reshape(x.shape[0])),
+            sigma=sigmas[i].reshape(x.shape[0]),
+            next_sigma=sigmas[i+1].reshape(x.shape[0]),
+            denoiser=denoiser,
+            x=x,
+            c=c,
+            uc=uc,
+          )
+          x.realize()
+          old_denoised.realize()
+
+          if self.timing: Device[Device.DEFAULT].synchronize()
+
+      return x
+
+
+def prep_for_jit(*tensors:Tensor) -> Tuple[Tensor,...]:
+  return tuple(t.cast(dtypes.float16).realize() for t in tensors)
+
+class StableDiffusion(ABC):
+  samplers: Dict[str,Type[Sampler]] # the first entry in the dict is considered default
+  @abstractmethod
+  def create_conditioning(self, pos_prompt:str, img_width:int, img_height:int, aesthetic_score:float) -> Tuple[Dict,Dict]:
+    pass
+  @abstractmethod
+  def denoise(self, x:Tensor, sigmas_or_tms:Tensor, cond:Dict) -> Tensor:
+    pass
+  @abstractmethod
+  def decode(self, x:Tensor) -> Tensor:
+    pass
+  @abstractmethod
+  def delete_conditioner(self) -> None:
+    pass
+
+class StableDiffusionV1(StableDiffusion):
+  samplers = {
+    "basic": Samplers.SDv1Sampler,
+  }
+
+  def __init__(self, first_stage:Dict, model:Dict, num_timesteps:int):
+    self.cond_stage_model = FrozenClosedClipEmbedder()
+    self.first_stage_model = FirstStageModel(**first_stage)
+    self.model = DiffusionModel(**model)
+
+    disc = LegacyDDPMDiscretization()
+    self.sigmas = disc(num_timesteps, flip=True)
+    self.alphas_cumprod = disc.alphas_cumprod
+
+  def create_conditioning(self, pos_prompt:str, img_width:int, img_height:int, aesthetic_score:float) -> Tuple[Dict,Dict]:
+    return {"crossattn": self.cond_stage_model(pos_prompt)}, {"crossattn": self.cond_stage_model("")}
+
+  def denoise(self, x:Tensor, tms:Tensor, cond:Dict) -> Tensor:
+    @TinyJit
+    def run(x, tms, ctx):
+      return self.model.diffusion_model(x, tms, ctx, None).realize()
+
+    return run(*prep_for_jit(x, tms, cond["crossattn"]))
+
+  def decode(self, x:Tensor) -> Tensor:
+    return self.first_stage_model.decode(1 / 0.18215 * x)
+
+  def delete_conditioner(self) -> None:
+    del self.cond_stage_model
+
+# https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/models/diffusion.py#L19
+class SDXL(StableDiffusion):
+  samplers = {
+    "dpmpp2m": Samplers.DPMPP2MSampler,
+  }
+
+  def __init__(self, conditioner:Dict, first_stage:Dict, model:Dict, num_timesteps:int):
+    self.conditioner = GeneralConditioner(**conditioner)
+    self.first_stage_model = FirstStageModel(**first_stage)
+    self.model = DiffusionModel(**model)
+
+    self.sigmas = LegacyDDPMDiscretization()(num_timesteps, flip=True)
+
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/inference/helpers.py#L173
+  def create_conditioning(self, pos_prompt:str, img_width:int, img_height:int, aesthetic_score:float) -> Tuple[Dict,Dict]:
+    N = 1
+    batch_c : Dict = {
+      "txt": pos_prompt,
+      "original_size_as_tuple": Tensor([img_height,img_width]).repeat(N,1),
+      "crop_coords_top_left": Tensor([0,0]).repeat(N,1),
+      "target_size_as_tuple": Tensor([img_height,img_width]).repeat(N,1),
+      "aesthetic_score": Tensor([aesthetic_score]).repeat(N,1),
+    }
+    batch_uc: Dict = {
+      "txt": "",
+      "original_size_as_tuple": Tensor([img_height,img_width]).repeat(N,1),
+      "crop_coords_top_left": Tensor([0,0]).repeat(N,1),
+      "target_size_as_tuple": Tensor([img_height,img_width]).repeat(N,1),
+      "aesthetic_score": Tensor([aesthetic_score]).repeat(N,1),
+    }
+    return self.conditioner(batch_c), self.conditioner(batch_uc, force_zero_embeddings=["txt"])
+
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/denoiser.py#L42
+  def denoise(self, x:Tensor, sigma:Tensor, cond:Dict) -> Tensor:
+
+    def sigma_to_idx(s:Tensor) -> Tensor:
+      dists = s - self.sigmas.unsqueeze(1)
+      return dists.abs().argmin(axis=0).view(*s.shape)
+
+    sigma = self.sigmas[sigma_to_idx(sigma)]
+    sigma_shape = sigma.shape
+    sigma = append_dims(sigma, x)
+
+    c_out   = -sigma
+    c_in    = 1 / (sigma**2 + 1.0) ** 0.5
+    c_noise = sigma_to_idx(sigma.reshape(sigma_shape))
+
+    @TinyJit
+    def run(x, tms, ctx, y, c_out, add):
+      return (self.model.diffusion_model(x, tms, ctx, y)*c_out + add).realize()
+
+    return run(*prep_for_jit(x*c_in, c_noise, cond["crossattn"], cond["vector"], c_out, x))
+
+  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L543
+  def decode(self, x:Tensor) -> Tensor:
+    return self.first_stage_model.decode(1.0 / 0.13025 * x)
+
+  def delete_conditioner(self) -> None:
+    del self.conditioner
+
+configs: Dict = {
+  # https://github.com/CompVis/stable-diffusion/blob/21f890f9da3cfbeaba8e2ac3c425ee9e998d5229/configs/stable-diffusion/v1-inference.yaml
+  "SDv1": {
+    "default_weights_url": "https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt",
+    "class": StableDiffusionV1,
+    "args": {
+      "model": {
+        "adm_in_ch": None,
+        "in_ch": 4,
+        "out_ch": 4,
+        "model_ch": 320,
+        "attention_resolutions": [4, 2, 1],
+        "num_res_blocks": 2,
+        "channel_mult": [1, 2, 4, 4],
+        "n_heads": 8,
+        "transformer_depth": [1, 1, 1, 1],
+        "ctx_dim": 768,
+      },
+      "first_stage": {
+        "ch": 128,
+        "in_ch": 3,
+        "out_ch": 3,
+        "z_ch": 4,
+        "ch_mult": [1, 2, 4, 4],
+        "num_res_blocks": 2,
+        "resolution": 256,
+      },
+      "num_timesteps": 1000,
+    },
+  },
+
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/configs/inference/sd_xl_base.yaml
+  "SDXL": {
+    "default_weights_url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+    "class": SDXL,
+    "args": {
+      "model": {
+        "adm_in_ch": 2816,
+        "in_ch": 4,
+        "out_ch": 4,
+        "model_ch": 320,
+        "attention_resolutions": [4, 2],
+        "num_res_blocks": 2,
+        "channel_mult": [1, 2, 4],
+        "d_head": 64,
+        "transformer_depth": [1, 2, 10],
+        "ctx_dim": 2048,
+      },
+      "first_stage": {
+        "ch": 128,
+        "in_ch": 3,
+        "out_ch": 3,
+        "z_ch": 4,
+        "ch_mult": [1, 2, 4, 4],
+        "num_res_blocks": 2,
+        "resolution": 256,
+      },
+      "conditioner": {
+        "embedders": [
+          { "class": FrozenClosedClipEmbedder, "args": { "ret_layer_idx": 11 } },
+          { "class": FrozenOpenClipEmbedder,   "args": { "dims": 1280, "n_heads": 20, "layers": 32, "return_pooled": True } },
+          { "class": ConcatTimestepEmbedderND, "args": { "input_key": "original_size_as_tuple" } },
+          { "class": ConcatTimestepEmbedderND, "args": { "input_key": "crop_coords_top_left"   } },
+          { "class": ConcatTimestepEmbedderND, "args": { "input_key": "target_size_as_tuple"   } },
+        ],
+      },
+      "num_timesteps": 1000,
+    },
+  },
+}
+
+def from_pretrained(config_key:str, weights_fn:Optional[str]=None, weights_url:Optional[str]=None, fp16:bool=False) -> StableDiffusion:
+  config = configs.get(config_key, None)
+  assert config is not None, f"Invalid architecture key '{args.arch}', expected value in {list(configs.keys())}"
+  model = config["class"](**config["args"])
+
+  if weights_fn is not None:
+    assert weights_url is None, "Got passed both a weights_fn and weights_url, options are mutually exclusive"
+  else:
+    weights_url = weights_url if weights_url is not None else config["default_weights_url"]
+    weights_fn  = fetch(weights_url, os.path.basename(weights_url))
+
+  loader_map = {
+    "ckpt": lambda fn: torch_load(fn)["state_dict"],
+    "safetensors": safe_load,
+  }
+  loader = loader_map.get(ext := str(weights_fn).split(".")[-1], None)
+  assert loader is not None, f"Unsupported file extension '{ext}' for weights filename, expected value in {list(loader_map.keys())}"
+  state_dict = loader(weights_fn)
+
+  for k,v in state_dict.items():
+    if re.match(r'model\.diffusion_model\..+_block.+proj_[a-z]+\.weight', k):
+      # SDv1 has issue where weights with this pattern are shape (3,3,1,1) when we expect (3,3)
+      state_dict[k] = v.squeeze()
+
+  load_state_dict(model, state_dict, strict=False)
+
+  if fp16:
+    for k,l in get_state_dict(model).items():
+      if (k.startswith("model.")):
+        l.replace(l.cast(dtypes.float16).realize())
+
+  return model
 
 if __name__ == "__main__":
+  arch_parser = argparse.ArgumentParser(description="Run SDXL", add_help=False)
+  arch_parser.add_argument('--arch', type=str, default="SDv1", choices=list(configs.keys()))
+  arch_args, _ = arch_parser.parse_known_args()
+  defaults = {
+    "SDv1": { "width": 512,  "height": 512,  "guidance": 7.5, },
+    "SDXL": { "width": 1024, "height": 1024, "guidance": 6.0, },
+  }[arch_args.arch]
+  print(f"Using Architecture: {arch_args.arch}")
+  sampler_options = list(configs[arch_args.arch]["class"].samplers.keys())
+
   default_prompt = "a horse sized cat eating a bagel"
-  parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--steps', type=int, default=10, help="Number of steps in diffusion")
-  parser.add_argument('--prompt', type=str, default=default_prompt, help="Phrase to render")
-  parser.add_argument('--out', type=str, default=Path(tempfile.gettempdir()) / "rendered.png", help="Output filename")
-  parser.add_argument('--noshow', action='store_true', help="Don't show the image")
-  parser.add_argument('--fp16', action='store_true', help="Cast the weights to float16")
-  parser.add_argument('--timing', action='store_true', help="Print timing per step")
-  parser.add_argument('--seed', type=int, help="Set the random latent seed")
-  parser.add_argument('--guidance', type=float, default=7.5, help="Prompt strength")
+  parser = argparse.ArgumentParser(description="Run StableDiffusion. Note that changing the architecture with --arch will change some" + \
+      "defaults and options, so set that option before running --help.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument('--arch',        type=str,   default="SDv1", choices=list(configs.keys()), help="Model architecture to use")
+  parser.add_argument('--sampler',     type=str,   choices=sampler_options, default=sampler_options[0], help="Sampler for generation")
+  parser.add_argument('--steps',       type=int,   default=10, help="The number of diffusion steps")
+  parser.add_argument('--prompt',      type=str,   default=default_prompt, help="Description of image to generate")
+  parser.add_argument('--out',         type=str,   default=Path(tempfile.gettempdir())/"rendered.png", help="Output filename")
+  parser.add_argument('--seed',        type=int,   help="Set the random latent seed")
+  parser.add_argument('--guidance',    type=float, default=defaults["guidance"], help="Prompt strength")
+  parser.add_argument('--width',       type=int,   default=defaults["width"],  help="The output image width")
+  parser.add_argument('--height',      type=int,   default=defaults["height"], help="The output image height")
+  parser.add_argument('--aesthetic',   type=float, default=5.0, help="Aesthetic store for conditioning, only for SDXL_Refiner")
+  parser.add_argument('--weights-fn',  type=str,   help="Filename of weights to load")
+  parser.add_argument('--weights-url', type=str,   help="Url to download weights from")
+  parser.add_argument('--fp16',        action='store_true', help="Loads the weights as float16")
+  parser.add_argument('--noshow',      action='store_true', help="Don't show the image")
+  parser.add_argument('--timing',      action='store_true', help="Print timing per step")
   args = parser.parse_args()
 
+  N = 1
+  C = 4
+  F = 8
+  SIZE_MULT = F * 4
+  assert (r := args.width  % SIZE_MULT) == 0, f"img_width must be multiple of {SIZE_MULT}, got {args.width} (remainder {r})"
+  assert (r := args.height % SIZE_MULT) == 0, f"img_height must be multiple of {SIZE_MULT}, got {args.height} (remainder {r})"
+
   Tensor.no_grad = True
-  model = StableDiffusion()
+  if args.seed is not None:
+    Tensor.manual_seed(args.seed)
 
-  # load in weights
-  load_state_dict(model, torch_load(fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt'))['state_dict'], strict=False)
+  model = from_pretrained(args.arch, args.weights_fn, args.weights_url, args.fp16)
 
-  if args.fp16:
-    for l in get_state_dict(model).values():
-      l.replace(l.cast(dtypes.float16).realize())
+  c, uc = model.create_conditioning(args.prompt, args.width, args.height, args.aesthetic)
+  model.delete_conditioner()
+  for v in c .values(): v.realize()
+  for v in uc.values(): v.realize()
+  print("created conditioning")
 
-  # run through CLIP to get context
-  tokenizer = ClipTokenizer()
-  prompt = Tensor([tokenizer.encode(args.prompt)])
-  context = model.cond_stage_model.transformer.text_model(prompt).realize()
-  print("got CLIP context", context.shape)
+  # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/inference/helpers.py#L101
+  randn = Tensor.randn(N, C, args.height // F, args.width // F)
 
-  prompt = Tensor([tokenizer.encode("")])
-  unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
-  print("got unconditional CLIP context", unconditional_context.shape)
+  SamplerCls = model.samplers.get(args.sampler, None)
+  assert SamplerCls is not None, f"Somehow failed to resolve sampler '{args.sampler}' from {model.__class__.__name__} class"
 
-  # done with clip model
-  del model.cond_stage_model
-
-  timesteps = list(range(1, 1000, 1000//args.steps))
-  print(f"running for {timesteps} timesteps")
-  alphas = model.alphas_cumprod[Tensor(timesteps)]
-  alphas_prev = Tensor([1.0]).cat(alphas[:-1])
-
-  # start with random noise
-  if args.seed is not None: Tensor.manual_seed(args.seed)
-  latent = Tensor.randn(1,4,64,64)
-
-  @TinyJit
-  def run(model, *x): return model(*x).realize()
-
-  # this is diffusion
+  sampler = SamplerCls(args.guidance, args.timing)
   with Context(BEAM=getenv("LATEBEAM")):
-    for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
-      GlobalCounters.reset()
-      t.set_description("%3d %3d" % (index, timestep))
-      with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
-        tid = Tensor([index])
-        latent = run(model, unconditional_context, context, latent, Tensor([timestep]), alphas[tid], alphas_prev[tid], Tensor([args.guidance]))
-        if args.timing: Device[Device.DEFAULT].synchronize()
-    del run
+    z = sampler(model.denoise, randn, c, uc, args.steps)
+  print("created samples")
+  x = model.decode(z).realize()
+  print("decoded samples")
 
-  # upsample latent space to image with autoencoder
-  x = model.decode(latent)
+  # make image correct size and scale
+  x = (x + 1.0) / 2.0
+  x = x.reshape(3,args.height,args.width).permute(1,2,0).clip(0,1)*255
   print(x.shape)
 
-  # save image
   im = Image.fromarray(x.numpy().astype(np.uint8, copy=False))
   print(f"saving {args.out}")
   im.save(args.out)
-  # Open image.
-  if not args.noshow: im.show()
+
+  if not args.noshow:
+    im.show()
 
   # validation!
-  if args.prompt == default_prompt and args.steps == 10 and args.seed == 0 and args.guidance == 7.5 and THREEFRY:
-    ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "stable_diffusion_seed0.png")))
+  if args.prompt == default_prompt and args.steps == 10 and args.seed == 0 and args.guidance == defaults["guidance"] \
+    and args.width == defaults["width"] and args.height ==  defaults["height"] and not (args.weights_fn or args.weights_url) and THREEFRY:
+    ref_image = Tensor(np.array(Image.open(Path(__file__).parent / f"{args.arch}_seed0.png")))
     distance = (((x - ref_image).cast(dtypes.float) / ref_image.max())**2).mean().item()
     assert distance < 3e-4, colored(f"validation failed with {distance=}", "red")
     print(colored(f"output validated with {distance=}", "green"))
