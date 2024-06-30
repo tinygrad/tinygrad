@@ -267,3 +267,231 @@ ptx_matcher = PatternMatcher([
       (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
         UOp.const(dtypes.int64, 0))+root.src[2:])),
 ])
+
+# Begin RDNA Renderer
+class RDNARenderer(Renderer):
+  device = "AMD"
+  suffix = "RDNA"
+  global_max = (2147483647, 65535, 65535)
+  local_max = (1024, 1024, 64)
+  shared_max = 65536
+  tensor_cores: List[TensorCore] = []  # RDNA3 doesn't have tensor cores like CUDA
+
+  def __init__(self, arch:str):
+    self.arch = arch
+
+  kernel_prefix = """
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1100"
+.text
+.p2align 8
+.global KERNEL_NAME
+.type KERNEL_NAME,@function
+KERNEL_NAME:"""
+
+  barrier = "s_barrier"
+  gid = [f'v[0]', f'v[1]', f'v[2]']
+  lid = [f'v[3]', f'v[4]', f'v[5]']
+
+  asm_for_op: Dict[Op, Callable] = {
+    UnaryOps.NEG: lambda d,a,dt,name: f"v_sub_f32 {d}, 0, {a}" if dtypes.is_float(dt) else f"v_sub_i32 {d}, 0, {a}",
+    UnaryOps.RECIP: lambda d,a,dt,name: f"v_rcp_f32 {d}, {a}",
+    UnaryOps.EXP2: lambda d,a,dt,name: f"v_exp_f32 {d}, {a}",
+    UnaryOps.LOG2: lambda d,a,dt,name: f"v_log_f32 {d}, {a}",
+    UnaryOps.SIN: lambda d,a,dt,name: f"v_sin_f32 {d}, {a}",
+    UnaryOps.SQRT: lambda d,a,dt,name: f"v_sqrt_f32 {d}, {a}",
+    BinaryOps.ADD: lambda d,a,b,dt,name: f"v_add_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
+    BinaryOps.SUB: lambda d,a,b,dt,name: f"v_sub_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
+    BinaryOps.MUL: lambda d,a,b,dt,name: f"v_mul_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
+    BinaryOps.DIV: lambda d,a,b,dt,name: f"v_div_scale_f32 {d}, vcc, {b}, {b}, {a}\n\tv_div_fmas_f32 {d}, {d}, {b}, {a}\n\tv_div_fixup_f32 {d}, {d}, {b}, {a}",
+    BinaryOps.MAX: lambda d,a,b,dt,name: f"v_max_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
+    BinaryOps.CMPLT: lambda d,a,b,dt,name: f"v_cmp_lt_{'f' if dtypes.is_float(dt) else 'i'}32 {d}, {a}, {b}",
+    TernaryOps.MULACC: lambda d,a,b,c,dt,name: f"v_fma_f32 {d}, {a}, {b}, {c}" if dtypes.is_float(dt) else f"v_mad_i32_i24 {d}, {a}, {b}, {c}",
+    TernaryOps.WHERE: lambda d,a,b,c,dt,name: f"v_cndmask_b32 {d}, {c}, {b}, {a}",
+  }
+
+  types: Dict[DType, str] = {
+    dtypes.int8: "s8", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
+    dtypes.uint8: "u8", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
+    dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "b32"
+  }
+
+  def render_const(self, x:ConstType, dtype:DType, mov=None) -> Union[List[str], str]:
+    val = render_val(x, dtype)
+    if dtype == dtypes.bool:
+      return [f"v_cmp_eq_u32 {mov}, 1, {val}"]
+    return [f"v_mov_b32 {mov}, {val}"]
+
+  def render_local(self, name:str, size:int, dtype:DType) -> List[str]:
+    return [f".shared .align {dtype.itemsize} .b8 {name}[{size*dtype.itemsize}];"]
+
+  def render_loop(self, idx:str, start:str, label:str) -> List[str]:
+    return [f"v_mov_b32 {idx}, {start}", f"{label}:"]
+
+  def render_bra(self, b1:str, pred:Optional[str]=None) -> List[str]:
+    return [f"s_cbranch_vccnz {b1}" if pred else f"s_branch {b1}"]
+
+  def render_load(self, lsrc:str, ldst:str, dtype:DType, offset:Union[str,int]=0) -> List[str]:
+    return [f"global_load_{'dword' if dtype.itemsize <= 4 else 'dwordx2'} {ldst}, {lsrc}, off offset:{offset}"]
+
+  def render_store(self, lsrc:str, ldst:str, dtype:DType, offset:Union[str,int]=0) -> List[str]:
+    return [f"global_store_{'dword' if dtype.itemsize <= 4 else 'dwordx2'} {ldst}, {lsrc}, off offset:{offset}"]
+
+  def render_cast(self, src:str, dst:str, dtype:DType, stype:DType) -> List[str]:
+    if dtype == stype: return [f"v_mov_b32 {dst}, {src}"]
+    if dtypes.is_float(dtype) and dtypes.is_int(stype):
+      return [f"v_cvt_f32_i32 {dst}, {src}"]
+    if dtypes.is_int(dtype) and dtypes.is_float(stype):
+      return [f"v_cvt_i32_f32 {dst}, {src}"]
+    if dtype == dtypes.bool:
+      return [f"v_cmp_ne_u32 {dst}, 0, {src}"]
+    raise NotImplementedError(f"cast from {stype} to {dtype} not implemented")
+
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[str]) -> str:
+    kernel_prefix = self.kernel_prefix.replace("KERNEL_NAME", function_name)
+    kernel = [f".reg .{self.types[dtype]} %{reg};" for reg,dtype in bufs] + kernel
+    return kernel_prefix + '\n' + '\n'.join([f"\t{line}" for line in kernel if line])
+
+def render(self, name:str, uops:UOpGraph) -> str:
+        kernel: List[str] = []
+        bufs: List[Tuple[str, DType]] = []
+
+        uops.linearize()
+        if DEBUG >= 4: uops.print()
+
+        def kk(*s: str): kernel.extend(s)
+
+        c: DefaultDict[str, int] = defaultdict(int)
+        r: Dict[UOp, Union[List[str], str]] = {}
+        
+        def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[DType]=None) -> str:
+            nonlocal c, r
+            c[prefix] += 1
+            ret = f"%{prefix}{c[prefix]}"
+            if u is not None: r[u] = ret
+            return ret
+
+        for u in uops:
+            uop, dtype, src, args = u.op, u.dtype, u.src, u.arg
+            if uop == UOps.CONST:
+                r[u] = ssa('const')
+                kk(*self.render_const(args, dtype, r[u]))
+            elif uop == UOps.LOAD:
+                r[u] = ssa('load')
+                kk(*self.render_load(r[src[0]], r[u], dtype, src[1].arg if src[1].op == UOps.CONST else r[src[1]]))
+            elif uop == UOps.STORE:
+                kk(*self.render_store(r[src[2]], r[src[0]], src[2].dtype, src[1].arg if src[1].op == UOps.CONST else r[src[1]]))
+            elif uop == UOps.ALU:
+                r[u] = ssa('alu')
+                kk(self.asm_for_op[args](r[u], *[r[x] for x in src], dtype, self.types[dtype]))
+            elif uop == UOps.DEFINE_GLOBAL:
+                bufs.append((f"data{args[0]}", dtype))
+                r[u] = f"%data{args[0]}"
+            elif uop == UOps.SPECIAL:
+                r[u] = ssa('special')
+                if args[1].startswith('g'):
+                    kk(f"v_mov_b32 {r[u]}, {self.gid[args[0]]}")
+                elif args[1].startswith('l'):
+                    kk(f"v_mov_b32 {r[u]}, {self.lid[args[0]]}")
+            elif uop == UOps.CAST:
+                r[u] = ssa('cast')
+                kk(*self.render_cast(r[src[0]], r[u], dtype, src[0].dtype))
+            elif uop == UOps.PHI:
+                r[u] = r[src[0]]
+            elif uop == UOps.LABEL:
+                kk(f"{args}:")
+            elif uop == UOps.BARRIER:
+                kk(self.barrier)
+            elif uop == UOps.DEFINE_ACC:
+                r[u] = ssa('acc')
+                kk(f"v_mov_b32 {r[u]}, 0")
+            elif uop == UOps.LOOP:
+                idx = ssa('loop_idx')
+                kk(*self.render_loop(idx, r[src[0]], f"LOOP_{idx[1:]}"))
+                r[u] = idx
+            elif uop == UOps.END:
+                kk(f"s_branch LOOP_{r[src[0]][1:]}")
+                kk(f"ENDLOOP_{r[src[0]][1:]}:")
+            elif uop == UOps.COND_BRANCH:
+                kk(*self.render_bra(args[0], r[src[0]]))
+            else:
+                raise NotImplementedError(f"unhandled op {uop}")
+
+        # Generate kernel prologue
+        prologue = [
+            self.kernel_prefix.replace("KERNEL_NAME", name),
+            *(f".reg .{self.types[dtype]} %{reg};" for reg,dtype in bufs)
+        ]
+
+        # Combine prologue, kernel body, and epilogue
+        full_kernel = prologue + kernel + ["s_endpgm"]
+        
+        return '\n'.join(full_kernel)
+
+def uops_to_rdna_asm(function_name:str, uops:UOpGraph) -> str:
+  renderer = RDNARenderer("gfx1100")  # Assuming RDNA3 architecture
+  kernel:List[str] = []
+  bufs:List[str] = []
+
+  uops.linearize()
+  if DEBUG >= 4: uops.print()
+
+  c: DefaultDict[str, int] = defaultdict(int)
+  r: Dict[UOp, Union[List[str], str]] = {}
+
+  def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[DType]=None) -> str:
+    nonlocal c, r
+    c[prefix] += 1
+    if u is not None:
+      r[u] = f"%{prefix}{c[prefix]}"
+    return f"%{prefix}{c[prefix]}"
+
+  for u in uops:
+    uop, dtype, src, args = u.op, u.dtype, u.src, u.arg
+
+    if uop == UOps.CONST:
+      r[u] = ssa('const')
+      kernel.extend(renderer.render_const(args, dtype, r[u]))
+    elif uop == UOps.LOAD:
+      r[u] = ssa('load')
+      kernel.extend(renderer.render_load(r[src[0]], r[u], dtype, src[1].arg if src[1].op == UOps.CONST else r[src[1]]))
+    elif uop == UOps.STORE:
+      kernel.extend(renderer.render_store(r[src[2]], r[src[0]], src[2].dtype, src[1].arg if src[1].op == UOps.CONST else r[src[1]]))
+    elif uop == UOps.ALU:
+      r[u] = ssa('alu')
+      kernel.append(renderer.asm_for_op[args](r[u], *[r[x] for x in src], dtype, renderer.types[dtype]))
+    elif uop == UOps.DEFINE_GLOBAL:
+      bufs.append((f"data{args[0]}", dtype))
+      r[u] = f"%data{args[0]}"
+    elif uop == UOps.SPECIAL:
+      r[u] = ssa('special')
+      if args[1].startswith('g'):
+        kernel.append(f"v_mov_b32 {r[u]}, {renderer.gid[args[0]]}")
+      elif args[1].startswith('l'):
+        kernel.append(f"v_mov_b32 {r[u]}, {renderer.lid[args[0]]}")
+    elif uop == UOps.CAST:
+      r[u] = ssa('cast')
+      kernel.extend(renderer.render_cast(r[src[0]], r[u], dtype, src[0].dtype))
+    elif uop == UOps.PHI:
+      r[u] = r[src[0]]
+    elif uop == UOps.LABEL:
+      kernel.append(f"{args}:")
+    elif uop == UOps.BARRIER:
+      kernel.append(renderer.barrier)
+    elif uop == UOps.COND_BRANCH:
+      kernel.extend(renderer.render_bra(args[0], r[src[0]]))
+    else:
+      raise NotImplementedError(f"unhandled op {uop}")
+
+  return renderer.render_kernel(function_name, kernel, bufs)
+
+rdna_matcher = PatternMatcher([
+  # todo we'll put specific RDNA matching here
+])
+
+def uops_to_asm(function_name:str, uops:UOpGraph, architecture:str) -> str:
+  if architecture.startswith("cuda"):
+    return uops_to_ptx_asm(function_name, uops)
+  elif architecture.startswith("amd"):
+    return uops_to_rdna_asm(function_name, uops)
+  else:
+    raise ValueError(f"Unsupported architecture: {architecture}")
