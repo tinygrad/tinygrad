@@ -3,7 +3,7 @@ from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite, graph_dedup
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite
 #from tinygrad.engine.graph import print_tree
 
 simple_pm = PatternMatcher([
@@ -17,7 +17,7 @@ class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):
     v1 = UOp(UOps.DEFINE_VAR, dtypes.float)
     v2 = UOp(UOps.DEFINE_VAR, dtypes.float)
-    nout = graph_dedup(v1+v2)
+    nout = graph_rewrite(v1+v2, PatternMatcher([]))
     self.assertIs(nout.src[0], nout.src[1])
 
   def test_simple(self):
@@ -185,6 +185,13 @@ class TestUOpGraph(TestUOps):
     # only the second store happens
     self.assertEqual(len(uops.uops), 4)
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
+
+  def test_asserts_bad_gate(self):
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    idx = UOp.const(dtypes.int, 0)
+    bad_gate = UOp.const(dtypes.int, 1)
+    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
+    with self.assertRaises(AssertionError): uops.linearize()
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

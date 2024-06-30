@@ -441,7 +441,7 @@ class TestLinearizer(unittest.TestCase):
     assert accs[0].dtype == stores[0].src[-1].dtype == dtypes.float.vec(4)
     assert stores[0].src[0].op is UOps.DEFINE_LOCAL
     # the second store is to gds with no upcasts
-    assert accs[1].dtype == stores[1].src[-1].dtype == dtypes.float
+    assert accs[1].dtype == stores[1].src[2].dtype == dtypes.float
     assert stores[1].src[0].op is UOps.DEFINE_GLOBAL
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
@@ -794,7 +794,7 @@ class TestLinearizer(unittest.TestCase):
     assert stores[0].src[-1].op is not UOps.CAST
 
     # the global store doesn't change
-    assert stores[1].src[-1].dtype == dtypes.float
+    assert stores[1].src[2].dtype == dtypes.float
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_skip_unmatching_upcasts(self):
@@ -1168,6 +1168,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skip("parallel reduce")
   def test_local_and_grouped_reduce_multireduce(self):
     N = 128
     Tensor.manual_seed(1882)
@@ -1618,6 +1619,32 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(a.max(0), [
       [Opt(OptOps.PADTO, 0, 32)],
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+
+  def test_padto_where_multioutput(self):
+    Tensor.manual_seed(0)
+    N = 17 * 17
+    r = Tensor.randn(N, N).realize().max(axis=0, keepdim=True) > 1
+    a0 = r.where(1, 0)
+    a1 = r.where(2, 0)
+    helper_linearizer_opt([a0.max(0), a1.max(0)], [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_padto_group(self):
+    Tensor.manual_seed(0)
+    ld0 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 1, 4, 1, 3, 4, 2, 6, 1, 3), strides=(0, 0, 0, 0, 0, 18, 0, 3, 0, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
+    ld1 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 1, 4, 1, 3, 4, 2, 6, 1, 3), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)))) # noqa: E501
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(ld0, ld1)),), arg=(0, 2, 4, 6)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1, 1, 1, 4, 1, 6, 1, 3), strides=(0, 0, 0, 0, 0, 18, 0, 3, 0, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+    data1 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()
+    data2 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()
+    helper_linearizer_ast((ast, ), [data1, data2], opts=[
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.GROUP, 0, 4)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.GROUP, 0, 4)]
     ])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")

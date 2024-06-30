@@ -384,5 +384,16 @@ class TestMultioutputJit(unittest.TestCase):
     self._test(fxn)
     assert_jit_cache_len(fxn, 2)
 
+class TestJitInsideJit(unittest.TestCase):
+  def test_jit_jit_error(self):
+    @TinyJit
+    def f(t): return t + 1
+
+    @TinyJit
+    def g(t): return f(t) * 3
+
+    with self.assertRaisesRegex(RuntimeError, "having TinyJit inside another TinyJit is not supported"):
+      g(Tensor([1])).realize()
+
 if __name__ == '__main__':
   unittest.main()
