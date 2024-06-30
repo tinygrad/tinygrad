@@ -59,6 +59,10 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 def data64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
+def disasm(lib):
+  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
+  return '\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x])
+
 class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
@@ -297,9 +301,7 @@ class AMDProgram:
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
 
-    if DEBUG >= 6:
-      asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+    if DEBUG >= 6: print(disasm(lib))
 
     _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
     sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]
