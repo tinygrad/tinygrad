@@ -176,8 +176,10 @@ class Lowerer(Kernel):
             lbuf = v[idx]
             lidx = self.bufs.index(lbuf)
             start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+            # these shapetrackers need to change
             local_buffer = MemBuffer(lidx, start.dtype, self.sts[lidx])
             local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
+
             local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
             # TODO: can these shapetrackers differ?
             #local_load = LazyOp(BufferOps.LOAD, (local_store,), MemBuffer(lidx, start.dtype, ShapeTracker.from_shape(self.sts[lidx].shape)))
