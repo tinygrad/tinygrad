@@ -125,7 +125,7 @@ class Linearizer(Kernel):
 
     dim, amt = None, 1
     # float 4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in ([32,16] if self.amx else [])+[8,4,2]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in ([32,16,8] if self.amx else [4,2]):
       dim, amt = upcast_dim[0], len(float4_expand)
       g_idx, g_valid = self.sts[i].expr_idxs(idxs[:dim] + [float4_expand[0]] + idxs[dim+1:])
       # do not use float4 if idx is not aligned
@@ -188,7 +188,7 @@ class Linearizer(Kernel):
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4,8]+([16,32] if self.amx else []):
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in ([8,16,32] if self.amx else [2,4]):
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (float4_expand[0],) + k[upcast_dim[0]+1:]
