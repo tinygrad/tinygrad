@@ -47,12 +47,6 @@ class TensorCoreOptions:
       elif removed_axis == axes[tc_dim]: axes_exist[tc_dim] = False
     self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
 
-@dataclass
-class AMX:
-  dims: Tuple[int, ...]
-  dtype_out: DType
-  def __str__(self): return "_".join(["MMA"] + list(map(str, self.dims)) + [self.dtype_out.name])
-
 @dataclass(frozen=True)
 class LocalBuffer:
   name: str
