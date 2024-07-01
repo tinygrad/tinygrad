@@ -1,6 +1,6 @@
 import ctypes, time
 from extra.mockgpu.gpu import VirtGPU
-from tinygrad.helpers import to_mv, init_c_struct_t
+from tinygrad.helpers import to_mv, init_c_struct_t, mv_address
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 
 SDMA_MAX_COPY_SIZE = 0x400000
@@ -77,6 +77,7 @@ class PM4Executor(AMDQueue):
       elif op == amd_gpu.PACKET3_RELEASE_MEM: self._exec_release_mem(n)
       elif op == amd_gpu.PACKET3_WAIT_REG_MEM: cont = self._exec_wait_reg_mem(n)
       elif op == amd_gpu.PACKET3_DISPATCH_DIRECT: self._exec_dispatch_direct(n)
+      elif op == amd_gpu.PACKET3_INDIRECT_BUFFER: self._exec_indirect_buffer(n)
       elif op == amd_gpu.PACKET3_EVENT_WRITE: self._exec_event_write(n)
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
       if not cont: return
@@ -154,6 +155,18 @@ class PM4Executor(AMDQueue):
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
+
+  def _exec_indirect_buffer(self, n):
+    addr_lo = self._next_dword()
+    addr_hi = self._next_dword()
+    buf_sz = self._next_dword() & (0x7fffff)
+
+    rptr = memoryview(bytearray(8)).cast('Q')
+    wptr = memoryview(bytearray(8)).cast('Q')
+    rptr[0] = 0
+    wptr[0] = buf_sz
+    PM4Executor(self.gpu, (addr_hi << 32) | addr_lo, buf_sz * 4, mv_address(rptr), mv_address(wptr)).execute()
+    assert rptr[0] == wptr[0], "not everything executed in amdgpu"
 
   def _exec_event_write(self, n):
     assert n == 0
