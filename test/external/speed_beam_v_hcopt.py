@@ -15,7 +15,7 @@ if __name__ == "__main__":
   beam_won, tested = 0, 0
 
   for num, ast in enumerate(ast_strs[:test_n]):
-    def new_lin(): return ast_str_to_lin(ast, opts=dev.renderer)
+    def new_lin(): return ast_str_to_lin(ast, renderer=dev.renderer)
 
     k = new_lin()
     # k.required_optimizations()

@@ -16,13 +16,13 @@ def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
   if DEBUG >= 3:
     from tinygrad.engine.graph import print_tree
     for op in ast: print_tree(op)
-  k = Linearizer(*ast, opts=renderer)
+  k = Linearizer(*ast, renderer=renderer)
   k.required_optimizations()
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
-      kb, k_opt = Linearizer(*ast, opts=renderer), k
+      kb, k_opt = Linearizer(*ast, renderer=renderer), k
       kb.required_optimizations()
       rawbufs = bufs_from_lin(kb, allocate=False)
       k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
@@ -30,7 +30,7 @@ def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
         # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
         lins: List[Tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
         if used_tensor_cores:
-          lins.append(("hc", Linearizer(*ast, opts=renderer)))
+          lins.append(("hc", Linearizer(*ast, renderer=renderer)))
           lins[-1][1].hand_coded_optimizations()
         timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))

@@ -56,8 +56,8 @@ class LocalBuffer:
   def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class Kernel:
-  def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
-    self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
+  def __init__(self, *ast:LazyOp, renderer:Optional[Renderer]=None):
+    self.renderer = renderer if renderer is not None else Device[Device.DEFAULT].renderer
     verify_lazyop(*ast)
     self.ast = ast
     self.lazyops = flatten([op.lazyops for op in self.ast])
@@ -107,7 +107,7 @@ class Kernel:
     ret = type(self).__new__(type(self))
 
     # base linearizer params
-    ret.opts, ret.ast, ret.lazyops = self.opts, self.ast, self.lazyops
+    ret.renderer, ret.ast, ret.lazyops = self.renderer, self.ast, self.lazyops
 
     # things downstream of the AST
     ret.reduceops, ret.outbufs, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
@@ -146,7 +146,7 @@ class Kernel:
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_float4_upcast_dim(self, i:int) -> List[int]:
-    should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in (dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType))
+    should_upcast = self.renderer.supports_float4 and self.bufs[i].dtype in (dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType)
     return [x for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1] if should_upcast else []
 
   @property
@@ -334,8 +334,8 @@ class Kernel:
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
-    if use_tensor_cores and self.opts.has_local and self.reduceop is not None and self.reduceop.op is ReduceOps.SUM:
-      for tc in self.opts.tensor_cores:
+    if use_tensor_cores and self.renderer.has_local and self.reduceop is not None and self.reduceop.op is ReduceOps.SUM:
+      for tc in self.renderer.tensor_cores:
         tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
         # can only fuse reduces with the same tc options
         assert all_same(tensor_core_opts)
@@ -373,8 +373,8 @@ class Kernel:
       1: allows kernels with multiple reduce axes and also multiplication of UnaryOps.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
-    if tc_opt is None: tc_opt = self.opts.tc_opt
-    if not self.opts.tensor_cores and use_tensor_cores != 2: return False
+    if tc_opt is None: tc_opt = self.renderer.tc_opt
+    if not self.renderer.tensor_cores and use_tensor_cores != 2: return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
 
@@ -406,7 +406,7 @@ class Kernel:
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
       check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
-      check((use_tensor_cores:=self.opts.tc) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
+      check((use_tensor_cores:=self.renderer.tc) == 2 or len(self.renderer.tensor_cores) > 0, "must have tensor cores or TC=2")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
       self.applied_opts.append(opt)
       return
@@ -425,15 +425,15 @@ class Kernel:
       upcast_sz = prod([a for a,b in zip(self.full_shape[upcast_idx:], self.sts[0].shape[upcast_idx:]) if a == b])
       local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
       smem_sz = amt*acc_sz*upcast_sz*local_sz
-      check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
+      check(smem_sz <= self.renderer.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.renderer.shared_max}")
 
     if opt.op is OptOps.LOCAL:    # cyan
-      check(self.opts.has_local, "target does not support local")
+      check(self.renderer.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
       self.shift_to(axis, amt, insert_before=self.first_reduce)
       self.local_dims += 1
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
-      check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
+      check(self.renderer.has_local and self.renderer.has_shared, "target does not support local or shared mem")
       check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
@@ -463,7 +463,7 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.NOLOCALS:
-      check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
+      check(self.renderer.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
     elif opt.op is OptOps.PADTO:
@@ -499,8 +499,8 @@ class Kernel:
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
     MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
-    if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
-        self.reduceop is not None and self.reduceop.op is ReduceOps.SUM and len(self.full_shape) >= 2 and self.opts.has_shared and \
+    if self.renderer.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
+        self.reduceop is not None and self.reduceop.op is ReduceOps.SUM and len(self.full_shape) >= 2 and self.renderer.has_shared and \
         (mulop:=self.reduceop.src[0]).op is BinaryOps.MUL and mulop.src[0].op is BufferOps.LOAD and mulop.src[1].op is BufferOps.LOAD:
       st0, st1 = self.sts[self.bufs.index(mulop.src[0].arg)], self.sts[self.bufs.index(mulop.src[1].arg)]
       strides0, strides1 = st0.real_strides(), st1.real_strides()
@@ -515,7 +515,7 @@ class Kernel:
             if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return
 
-    if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
+    if self.renderer.has_local and self.renderer.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:  # noqa: E501
         # TODO: use 1024 if it's allowed in a smarter way
@@ -601,7 +601,7 @@ class Kernel:
 
     # **** local groups ****
 
-    if self.opts.has_local:
+    if self.renderer.has_local:
       if getenv("NOLOCALS") and self.local_dims == 0 and not self.group_for_reduces:
         self.apply_opt(Opt(OptOps.NOLOCALS))
       else:

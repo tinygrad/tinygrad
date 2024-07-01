@@ -12,9 +12,9 @@ for offset in tqdm(range(0, row_count, page_size)):
   cur.execute(f"SELECT val FROM 'process_replay_{VERSION}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
     ast, opts, applied_opts, name, compare_src = pickle.loads(row[0])
-    k = Linearizer(*ast, opts=opts)
+    k = Linearizer(*ast, renderer=opts)
     for opt in applied_opts: k.apply_opt(opt)
-    good_src = k.opts.render(name, k.linearize().uops)
+    good_src = k.renderer.render(name, k.linearize().uops)
     try: assert compare_src == good_src
     except AssertionError as e:
       print("PROCESS REPLAY DETECTED CHANGE")

@@ -287,7 +287,7 @@ class Linearizer(Kernel):
           strides.append((0 if stride == 0 else next_, sz))
           next_ *= 1 if stride == 0 else sz
         return strides
-      upcasts, dev = [upcast_strides(x) for x in [locals_to_store[0][0], locals_to_store[1][0], 0]], self.opts.device
+      upcasts, dev = [upcast_strides(x) for x in [locals_to_store[0][0], locals_to_store[1][0], 0]], self.renderer.device
       # cast initial accs
       wmmas = [UOp(UOps.CAST, (dt3:=tc.dtype_out.vec(wmma_sz[2])), tuple(accs[reduceop][x:x+wmma_sz[2]]))
                for x in range(0, len(accs[reduceop]), wmma_sz[2])]
@@ -324,7 +324,7 @@ class Linearizer(Kernel):
       fake_global_idxs = [x*0 for x in global_idxs]
       stores = self.global_store(out_buf, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop])  # store accumulators
       barrier = UOp(UOps.BARRIER, None, tuple(stores))
-      if self.opts.has_local:
+      if self.renderer.has_local:
         fake_idxs = [NumNode(0)]*len(self.sts[-1].shape)
         fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
         self.late_gate = create_lt_node(self.sts[-1].expr_idxs(fake_idxs)[0], 1)
@@ -423,14 +423,14 @@ class Linearizer(Kernel):
     # define indexes
     gl_dims = self.full_shape[:self.first_reduce+self.group_for_reduces]
     global_idxs, loop_global_idxs, self.global_size = get_grouped_dims("idx" if self.dont_use_locals else "gidx", 0, gl_dims[:self.global_dims],
-                                                                       self.opts.global_max, self.opts.has_local)
+                                                                       self.renderer.global_max, self.renderer.has_local)
     local_idxs, loop_local_idxs, self.local_size = get_grouped_dims("lidx", self.global_dims, gl_dims[self.global_dims:],
-                                                                    self.opts.local_max if self.opts.has_local else (), False)
+                                                                    self.renderer.local_max if self.renderer.has_local else (), False)
     upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.output_shape[self.shape_len-self.upcasted:])]
     full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
 
     # render global and local as specials or a loop
-    if self.opts.has_local:
+    if self.renderer.has_local:
       self.loop_uops.update({x.expr:UOp(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})
       if not self.dont_use_locals:
         self.loop_uops.update({x.expr:UOp(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
@@ -520,10 +520,10 @@ class Linearizer(Kernel):
   def to_program(self) -> Program:
     self.linearize()
     info = get_lazyop_info(self.ast[0])
-    src = self.opts.render(name:=to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src))
+    src = self.renderer.render(name:=to_function_name(self.name), self.uops)
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self.ast, self.renderer, self.applied_opts, name, src))
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size or []) + (self.local_size or []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
+    return Program(self.name, src, self.renderer.device, self.global_size, self.local_size,
                    self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

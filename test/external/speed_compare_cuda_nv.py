@@ -27,7 +27,7 @@ if __name__ == "__main__":
   average_tm_cuda, average_tm_nv = 0, 0
   for num,ast in enumerate(ast_strs):
     # cuda compile
-    culin = ast_str_to_lin(ast, opts=cudev.renderer)
+    culin = ast_str_to_lin(ast, renderer=cudev.renderer)
     culin.hand_coded_optimizations()
     has_bf16 = any(b.dtype == dtypes.bfloat16 for b in culin.membufs)
 
@@ -37,7 +37,7 @@ if __name__ == "__main__":
 
     rdr = nvdev.renderer
     rdr.device = "NV"
-    nvlin = ast_str_to_lin(ast, opts=rdr)
+    nvlin = ast_str_to_lin(ast, renderer=rdr)
     nvlin.hand_coded_optimizations()
     nv_prg = CompiledRunner(nvlin.to_program())
     nvbufs = bufs_from_lin(nvlin)

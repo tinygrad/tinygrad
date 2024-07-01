@@ -29,7 +29,7 @@ if __name__ == "__main__":
   for num,ast in enumerate(ast_strs):
     # cuda compile
     dev.compiler = CUDACompiler(dev.arch)
-    lin = ast_str_to_lin(ast, opts=dev.renderer)
+    lin = ast_str_to_lin(ast, renderer=dev.renderer)
     lin.hand_coded_optimizations()
     cuda_prg = CompiledRunner(lin.to_program())
 
@@ -37,7 +37,7 @@ if __name__ == "__main__":
 
     # ptx compile
     dev.compiler = PTXCompiler(dev.arch)
-    lin = ast_str_to_lin(ast, opts=ptx)
+    lin = ast_str_to_lin(ast, renderer=ptx)
     lin.hand_coded_optimizations()
     lin.linearize()
     ptx_prg = CompiledRunner(lin.to_program())

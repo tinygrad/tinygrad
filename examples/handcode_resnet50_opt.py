@@ -55,18 +55,18 @@ if __name__ == "__main__":
     lins:List[Linearizer] = []
 
     # always try hand coded opt
-    lin = Linearizer(*si.ast, opts=device.renderer)
+    lin = Linearizer(*si.ast, renderer=device.renderer)
     lin.hand_coded_optimizations()
     lins.append(lin)
 
     # maybe try tensor cores
-    lin = Linearizer(*si.ast, opts=device.renderer)
+    lin = Linearizer(*si.ast, renderer=device.renderer)
     if lin.apply_tensor_cores():
       lins.append(lin)
 
     # try a beam search
     if beam:=getenv("BEAM"):
-      lin = Linearizer(*si.ast, opts=device.renderer)
+      lin = Linearizer(*si.ast, renderer=device.renderer)
       lin = beam_search(lin, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
       lins.append(lin)
 
