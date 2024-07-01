@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 import itertools
-from typing import DefaultDict, NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from typing import DefaultDict, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
@@ -35,16 +35,26 @@ class Opt:
     if self.op in {OptOps.GROUP, OptOps.GROUPTOP}: return k.first_reduce+k.group_for_reduces+self.axis
     return self.axis
 
-class TensorCoreOptions(NamedTuple):
-  axes: List[int] # the location of the original N and M axes if still in the shape
-  axes_exist: List[bool] # true if the original N and M axes are still in the shape
-  axis_pads: List[Tuple[int, int]]
-  def fix_axes(self, removed_axis:int): # adjust the TC axes if necesssary when an dimension is removed
-    for tc_dim in [i for i in range(2) if self.axes_exist[i]]:
-      if removed_axis < self.axes[tc_dim]: self.axes[tc_dim] -= 1
-      elif removed_axis == self.axes[tc_dim]: self.axes_exist[tc_dim] = False
+@dataclass
+class TensorCoreOptions:
+  axes: Tuple[int, ...] # the location of the original N and M axes if still in the shape
+  axes_exist: Tuple[bool, ...] # true if the original N and M axes are still in the shape
+  axis_pads: Tuple[Tuple[int, int], ...]
+  def fix_axes(self, removed_axis:int): # adjust the TC axes if necesssary when a dimension is removed
+    axes, axes_exist = list(self.axes), list(self.axes_exist)
+    for tc_dim in [i for i in range(2) if axes_exist[i]]:
+      if removed_axis < axes[tc_dim]: axes[tc_dim] -= 1
+      elif removed_axis == axes[tc_dim]: axes_exist[tc_dim] = False
+    self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
 
-class LocalBuffer(NamedTuple):
+@dataclass
+class AMX:
+  dims: Tuple[int, ...]
+  dtype_out: DType
+  def __str__(self): return "_".join(["MMA"] + list(map(str, self.dims)) + [self.dtype_out.name])
+
+@dataclass(frozen=True)
+class LocalBuffer:
   name: str
   size: int
   dtype: DType = dtypes.float32
@@ -91,7 +101,7 @@ class Kernel:
     # the local aliased buffers for A and B
     self.bufs_for_tensor_core: Dict[LazyOp, Tuple[int, int]] = {}
     self.dont_use_locals: bool = False
-    self.amx: int = 0
+    self.amx: Optional[AMX] = None
 
     # group simplifies
     self.simplify_ones()
@@ -143,7 +153,7 @@ class Kernel:
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_float4_upcast_dim(self, i:int) -> List[int]:
-    should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in (dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType))
+    should_upcast = (self.opts.supports_float4 or self.amx) and (self.bufs[i].dtype in (dtypes.double, dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1] if should_upcast else []
 
   @property
@@ -324,11 +334,11 @@ class Kernel:
     if not(axis < len(axis_choices)): return None
 
     s0, s1, s2 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0], axis_choices[-(axis+1)][2]  # s0 is n, s1 is m, s2 is k
-    axis_pads = [(x, tc.dims[i]) for i, x in enumerate([s0, s1, s2]) if self.full_shape[x]%tc.dims[i] != 0]
+    axis_pads = tuple((x, tc.dims[i]) for i, x in enumerate([s0, s1, s2]) if self.full_shape[x]%tc.dims[i] != 0)
     if axis_pads and (opt_level < 2): return None
     self.bufs_for_tensor_core[reduceop] = (buf0, buf1)
     if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
-    return TensorCoreOptions(axes=[s0, s1, s2], axes_exist=[True, True], axis_pads=axis_pads)
+    return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
     if use_tensor_cores and self.opts.has_local and self.reduceop is not None and self.reduceop.op is ReduceOps.SUM:
@@ -398,18 +408,18 @@ class Kernel:
       return False
 
   def apply_amx(self):
-    if self.opts.device == "AMX" and (r:=self.reduceop) is not None and r.op is ReduceOps.SUM and r.dtype is dtypes.float:
-      if (mul_op:=r.src[0]).op is not BinaryOps.MUL: return False
-      for src in mul_op.src:
-        if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
+    if not (getenv("AMX", 0) and (r := self.reduceop) is not None and r.op is ReduceOps.SUM and (r.dtype in [dtypes.double, dtypes.float])) \
+      or (mul_op := r.src[0]).op is not BinaryOps.MUL:
+      return False
+    for src in mul_op.src:
+      if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
 
-      amx_size = 128//self.outbufs[0].dtype.itemsize
-      if not all(x == self.full_shape[0] and x % amx_size == 0 and x > amx_size for x in self.full_shape): return False
-      for axis in [-2, -1]:
-        self.apply_opt(Opt(OptOps.UNROLL, axis, amx_size))
-      self.amx=amx_size
-      return True
-    return False
+    if not all(x % (amx_size:=128//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
+
+    self.amx=AMX(dims=(amx_size, amx_size), dtype_out=r.dtype.vec(amx_size))
+    self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
+    self.apply_opt(Opt(OptOps.UNROLL, -1, amx_size)) # unroll to support matvec, otherwise cannot upcast reduce dim
+    return True
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
@@ -462,7 +472,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not(self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.threads)), "can't upcast TC locals")
-      check(amt <= 8, "don't upcast more than 8")
+      check(amt <= 32 if self.amx else amt <= 8, "don't upcast more than 32 for AMX or 8 otherwise")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCASTMID:                  # white
