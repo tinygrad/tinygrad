@@ -364,7 +364,7 @@ def train_retinanet():
   # SYNCBN = True
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  loss_scaler = 512.0 if dtypes.default_float in [dtypes.float16] else 1.0
+  loss_scaler = 2048.0 if dtypes.default_float in [dtypes.float16] else 1.0
   TEST = getenv('TEST', 0)
   BENCHMARK = getenv("BENCHMARK", 10000)
   if WANDB:
@@ -413,6 +413,7 @@ def train_retinanet():
   model = retinanet.RetinaNet(resnet_model)
   model.backbone.body.fc = None
   # model.load_from_pretrained()
+  # model.load_checkpoint('ckpts/retinanet_4xgpu015_B64_E1.safe')
 
   for k, v in get_state_dict(model).items():
     if 'head' in k and ('clas' in k or 'reg' in k ): v.requires_grad = True
