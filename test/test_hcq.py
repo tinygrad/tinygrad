@@ -27,6 +27,7 @@ class TestHCQ(unittest.TestCase):
 
     if Device.DEFAULT == "NV":
       # nv need to copy constbuffer there as well
+      if MOCKGPU: TestHCQ.runner.clprg.constbuffer_0[0:2] = [2, 0] # hack for nv mockgpu only. it needs to get count of args and vals.
       to_mv(TestHCQ.d0.kernargs_ptr, 0x160).cast('I')[:] = array.array('I', TestHCQ.runner.clprg.constbuffer_0)
       to_mv(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, 0x160).cast('I')[:] = array.array('I', TestHCQ.runner.clprg.constbuffer_0)
 
@@ -63,7 +64,7 @@ class TestHCQ(unittest.TestCase):
   def test_wait(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       with self.subTest(name=str(queue_type)):
-        fake_signal = TestHCQ.d0._get_signal()    
+        fake_signal = TestHCQ.d0._get_signal()
         TestHCQ.d0._set_signal(fake_signal, 1)
         queue_type().wait(fake_signal, 1) \
                   .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
@@ -82,7 +83,7 @@ class TestHCQ(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
           TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value, timeout=500)
-        
+
         TestHCQ.d0._set_signal(fake_signal, 1)
         TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
