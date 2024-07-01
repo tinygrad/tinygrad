@@ -575,7 +575,10 @@ def train_retinanet():
     coco_eval.accumulate()
     coco_eval.summarize()
     eval_acc = coco_eval.stats[0]
-    print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-bt}', 'green'))
+    eval_time = time.time()-bt
+    print(colored(f'{epoch} EVAL_ACC {eval_acc} || {eval_time}', 'green'))
+    if WANDB:
+        wandb.log({"eval/acc": eval_acc, "eval/forward_time": eval_time, "epoch": epoch})
     if getenv("RESET_STEP", 1): val_step.reset()
 
     if eval_acc>MAP_TARGET:
