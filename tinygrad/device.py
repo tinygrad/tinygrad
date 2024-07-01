@@ -225,6 +225,7 @@ class HCQCompatCompiled(Compiled):
   def _gpu2cpu_time(self, gpu_time, is_copy): raise NotImplementedError("need _gpu2cpu_time")
 
   def _prof_setup(self):
+    if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
     self.profile_logger = ProfileLogger()
 
     def _sync_queue(q_t):
@@ -235,8 +236,6 @@ class HCQCompatCompiled(Compiled):
       return cpu_start_time, self._read_timestamp(self.timeline_signal)
     self.cpu_start_time, self.gpu_start_time = _sync_queue(self.hw_compute_queue_t)
     self.copy_cpu_start_time, self.copy_gpu_start_time = _sync_queue(self.hw_copy_queue_t)
-
-    atexit.register(self._prof_finalize)
 
   def _prof_process_events(self):
     self.raw_prof_records += [(self._read_timestamp(st), self._read_timestamp(en), name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
