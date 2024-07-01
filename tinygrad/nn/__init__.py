@@ -218,7 +218,7 @@ class RMSNorm:
 
   ```python exec="true" source="above" session="tensor" result="python"
   t = Tensor.rand(2, 5) * 2 + 1
-  norm = nn.RMSNorm(t.size(-1), 1e-6)
+  norm = nn.RMSNorm(t.size(-1))
   print(t.std(axis=-1).numpy())
   ```
   ```python exec="true" source="above" session="tensor" result="python"
