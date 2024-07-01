@@ -12,9 +12,9 @@ inf, nan = float('inf'), float('nan')
 from tinygrad.codegen.linearizer import Linearizer
 def ast_str_to_ast(ast_str:str) -> Tuple[LazyOp,...]: return val if isinstance(val:=eval(ast_str), tuple) else (val,)
 def ast_str_to_lin(ast_str:str, renderer=None): return Linearizer(*ast_str_to_ast(ast_str), renderer=renderer)
-def kern_str_to_lin(kern_str:str, opts=None):
+def kern_str_to_lin(kern_str:str, renderer=None):
   (ast, applied_opts,) = eval(kern_str)
-  k = Linearizer(*ast, renderer=opts)
+  k = Linearizer(*ast, renderer=renderer)
   for opt in applied_opts:
     k.apply_opt(opt)
   return k
