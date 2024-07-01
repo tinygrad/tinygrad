@@ -217,13 +217,19 @@ class RMSNorm:
   - Paper: https://arxiv.org/pdf/1910.07467
 
   ```python exec="true" source="above" session="tensor" result="python"
-  rsm_norm = nn.RMSNorm(3, 1e-8)
-  t = Tensor.rand(2, 3) * 3 + 1
+  rms_norm = nn.RMSNorm(3, 1e-8)
+  t = Tensor.randn(2, 3) * 3 + 1
   print(t.numpy())
   ```
   ```python exec="true" source="above" session="tensor" result="python"
-  t = rsm_norm(t)
+  print(t.std().item())
+  ```
+  ```python exec="true" source="above" session="tensor" result="python"
+  t = rms_norm(t)
   print(t.numpy())
+  ```
+  ```python exec="true" source="above" session="tensor" result="python"
+  print(t.std().item())
   ```
   """
   def __init__(self, dim:int, eps:float=1e-6,  elementwise_affine:bool=True):

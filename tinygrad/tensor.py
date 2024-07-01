@@ -2700,13 +2700,20 @@ class Tensor:
     - Described: https://paperswithcode.com/method/rmsnorm
     - Paper: https://arxiv.org/pdf/1910.07467
 
+
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.rand(2, 3) * 3 + 1
+    t = Tensor.randn(2, 3) * 3 + 1
     print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.std().item())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = t.rmsnorm()
     print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.std().item())
     ```
     """
     return self.mul(self.pow(2).mean(axis, keepdim=True).add(eps).rsqrt())
