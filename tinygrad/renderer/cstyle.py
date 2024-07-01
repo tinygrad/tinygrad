@@ -201,8 +201,7 @@ class ClangRenderer(CStyleLanguage):
     for arg in set([uop.arg for uop in uops if uop.op is UOps.MMA]):
       amx_op = {dtypes.double:10, dtypes.float:12, dtypes.half:15}
       kernel.insert(0, "  AMX_SET(0);"), kernel.insert(len(kernel), "  AMX_SET(1);")
-      prefix = [
-        f"""typedef struct {{ {arg[3].name + " x" + ", x".join([str(x) for x in range(arg[2].count)])}; }} {arg[2].name};""",
+      prefix = [f"""typedef struct {{ {arg[3].name + " x" + ", x".join([str(x) for x in range(arg[2].count)])}; }} {arg[2].name};""",
         f"""{arg[2].name} make_{arg[2].name}({arg[3].name + " x" + f", {arg[3].name} x".join([str(x) for x in range(arg[2].count)])}) {{ return ({arg[2].name}) {{x{", x".join([str(x) for x in range(arg[2].count)])}}}; }}""",  # noqa: E501
         '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
         '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
@@ -210,8 +209,7 @@ class ClangRenderer(CStyleLanguage):
         f"""void __MMA_{arg[2].count}_{arg[2].count}_{arg[2].name}({arg[2].name} data1, {arg[2].name} data2){{
 AMX(0, (int *) (&data2), 1ull<<62); AMX(1, (int *) (&data1), 1ull<<62);
 AMX({amx_op[arg[3]]}, 0, 0ull); AMX({amx_op[arg[3]]}, 0, 1ull<<20 | 64<<10); AMX({amx_op[arg[3]]}, 0, 2ull<<20 | 64); AMX({amx_op[arg[3]]}, 0, 3ull<<20 | 64<<10 | 64);
-}}""",  # noqa: E501
-      ]
+}}"""] # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
