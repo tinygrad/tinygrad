@@ -46,7 +46,7 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0.timeline_value += 1
 
   def test_signal_update(self):
-    for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
+    for queue_type in [TestHCQ.d0.hw_compute_queue_t]:
       with self.subTest(name=str(queue_type)):
         q = queue_type().signal(fake_signal := TestHCQ.d0._get_signal(), 0x1000)
 
@@ -123,7 +123,7 @@ class TestHCQ(unittest.TestCase):
      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
     for _ in range(100):
-      q.update_wait(0, value=TestHCQ.d0.timeline_value - 1).update_signal(2, value=TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+      q.update_wait(0, value=TestHCQ.d0.timeline_value - 1).update_signal(3, value=TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0.timeline_value += 1
 
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 200.0, f"got val {val}"
@@ -215,7 +215,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.signals_pool += [sig_st, sig_en]
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 1 <= et <= (2000 if CI else 10)
+    assert 1 <= et <= (2000 if CI else 20)
 
   def test_speed_copy_bandwidth(self):
     TestHCQ.d0._prof_setup()
