@@ -310,9 +310,9 @@ class TestNN(unittest.TestCase):
       error.
       """
       def __init__(self, dim: int, eps: float = 1e-6) -> None:
-          super().__init__()
-          self.eps = eps
-          self.weight = torch.nn.Parameter(torch.ones(dim))
+        super().__init__()
+        self.eps = eps
+        self.weight = torch.nn.Parameter(torch.ones(dim))
 
       def forward(self, x:torch.Tensor) -> torch.Tensor:
         x_fp32 = x.float()
