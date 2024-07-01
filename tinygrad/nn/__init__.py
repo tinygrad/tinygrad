@@ -219,11 +219,11 @@ class RMSNorm:
   ```python exec="true" source="above" session="tensor" result="python"
   t = Tensor.rand(2, 5) * 2 + 1
   norm = nn.RMSNorm(t.size(-1), 1e-6)
-  print(t.std(axis=1).numpy())
+  print(t.std(axis=-1).numpy())
   ```
   ```python exec="true" source="above" session="tensor" result="python"
   t = norm(t)
-  print(t.std(axis=1).numpy())
+  print(t.std(axis=-1).numpy())
   ```
   """
   def __init__(self, dim:int, eps:float=1e-6,  elementwise_affine:bool=True):

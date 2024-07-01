@@ -2703,11 +2703,11 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.randn(2, 5) * 3 + 1
-    print(t.std(axis=1).numpy())
+    print(t.std(axis=-1).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = t.rmsnorm()
-    print(t.std(axis=1).numpy())
+    print(t.std(axis=-1).numpy())
     ```
     """
     return self.mul(self.pow(2).mean(axis, keepdim=True).add(eps).rsqrt())
