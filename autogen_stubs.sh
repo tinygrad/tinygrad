@@ -278,6 +278,14 @@ generate_libc() {
   fixup $BASE/libc.py
 }
 
+generate_msm_kgsl() {
+  clang2py extra/qcom_gpu_driver/msm_kgsl.h -o $BASE/msm_kgsl.py -k cdefstum
+  fixup $BASE/msm_kgsl.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/msm_kgsl.py
+  sed -i -E 's/^#? ?([^= ]+) = _[^,]+, 0x([0-9A-Fa-f]+) .+$/\1 = 0x\2/' $BASE/msm_kgsl.py
+  python3 -c "import tinygrad.runtime.autogen.msm_kgsl"
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -289,6 +297,7 @@ elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
+elif [ "$1" == "msm_kgsl" ]; then generate_msm_kgsl
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
 else echo "usage: $0 <type>"
 fi
