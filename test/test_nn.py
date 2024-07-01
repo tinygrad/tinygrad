@@ -2,11 +2,12 @@
 import unittest
 import numpy as np
 import torch
+import torchtune
 from tinygrad import Tensor, Device, TinyJit
 from tinygrad.helpers import CI, Context
 from tinygrad.ops import BufferOps
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
-from tinygrad.nn import BatchNorm2d, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm
+from tinygrad.nn import BatchNorm2d, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -302,6 +303,28 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
+
+  def test_rmsnorm(self):
+    B, T, embed_size = 5, 15, 30
+
+    torch_layer = torchtune.modules.RMSNorm(embed_size).eval()
+
+    layer = RMSNorm(embed_size)
+    layer.weight = Tensor(torch_layer.scale.detach().numpy(), requires_grad=True)
+
+    for _ in range(10):
+      # forward
+      x = Tensor.randn((B, T, embed_size), requires_grad=True)
+      z = layer(x)
+      torch_x = torch.tensor(x.numpy(), requires_grad=True)
+      torch_z = torch_layer(torch_x)
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
+
+      # backward
+      z.sum().backward()
+      torch_z.sum().backward(retain_graph=True)
+      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
+      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.scale.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
   def test_instancenorm_2d(self):
     N, C, H, W = 20, 10, 10, 10

@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from tinygrad import Tensor, TinyJit, nn
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import load_state_dict, torch_load
-from extra.models.llama import RMSNorm
 
 from tqdm import tqdm
 from transformers import AutoTokenizer
@@ -234,7 +233,7 @@ class MambaBlock:
   def __init__(self, dim: int, norm_eps: float = 1e-5, rms_norm: bool = True, layer_idx: Optional[int] = None):
     self.mixer = MambaMixer(dim, layer_idx=layer_idx)
     if rms_norm:
-      self.norm = RMSNorm(dim, norm_eps)
+      self.norm = nn.RMSNorm(dim, norm_eps)
     else:
       raise NotImplementedError
 
@@ -249,7 +248,7 @@ class MambaBackbone:
     self.embedding = nn.Embedding(vocab_size, dim)
     self.layers = [MambaBlock(dim, rms_norm=rms_norm, layer_idx=i) for i in range(n_layers)]
     if rms_norm:
-      self.norm_f = RMSNorm(dim, norm_eps)
+      self.norm_f = nn.RMSNorm(dim, norm_eps)
 
   def __call__(self, input_ids: Tensor, inference_params=None) -> Any:
     hidden_states = self.embedding(input_ids)

@@ -209,6 +209,33 @@ class GroupNorm:
     # elementwise_affine on channels
     return x * self.weight.reshape(1, -1, *[1] * (len(x.shape)-2)) + self.bias.reshape(1, -1, *[1] * (len(x.shape)-2))
 
+class RMSNorm:
+  """
+  Applies Root Mean Square Layer Normalization over a summed inputs to a neuron in one layer.
+
+  - Described: https://paperswithcode.com/method/rmsnorm
+  - Paper: https://arxiv.org/pdf/1910.07467
+
+  ```python exec="true" source="above" session="tensor" result="python
+  rsm_norm = nn.RMSNorm(10, 1e-8)
+  t = Tensor.rand(23, 21, 2, 3) * 5 + 2
+  print(t.mean.item(), t.std.item())
+  ```
+  ```
+  t = rsm_norm(t)
+  print(t.mean.item(), t.std.item())
+  ```
+  """
+  def __init__(self, dim:int, eps:float=1e-6,  elementwise_affine:bool=True):
+    self.eps, self.dim, self.elementwise_affine = eps, dim, elementwise_affine
+    self.weight = Tensor.ones(dim)
+    self.bias = Tensor.zeros(dim) if elementwise_affine else None
+
+  def __call__(self, x:Tensor) -> Tensor:
+    x = x.rsmnorm(-1, self.eps)
+    if not self.elementwise_affine: return x
+    return x * self.weight + self.bias
+
 class InstanceNorm:
   """
   Applies Instance Normalization over a mini-batch of inputs.

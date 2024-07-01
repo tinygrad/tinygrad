@@ -282,15 +282,14 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_rmsnorm(self):
-    from extra.models.llama import RMSNorm
     B, T, embed_size = 4, 10, 20
 
-    layer_norm = RMSNorm(embed_size)
+    layer_norm = nn.RMSNorm(embed_size)
     x = Tensor.rand((B, T, embed_size)).contiguous().realize()
     y = layer_norm(x)
 
     # for norm layers, the correct way to shard weights is duplication
-    layer_norm_sharded = RMSNorm(embed_size)
+    layer_norm_sharded = nn.RMSNorm(embed_size)
     layer_norm_sharded.weight.shard_(devices_2, axis=None).realize()
 
     # if x is being sharded, then all-reduce is involved
