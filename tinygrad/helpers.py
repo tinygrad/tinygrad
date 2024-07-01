@@ -168,7 +168,7 @@ class ProfileLogger:
       self.mjson.append({"name": name, "ph": "X", "pid": self.actors[actor_name], "tid": self.subactors.get(subactor_key, -1), "ts":st, "dur":et-st})
 
     ProfileLogger.writers -= 1
-    if ProfileLogger.writers == 0:
+    if ProfileLogger.writers == 0 and len(self.mjson) > 0:
       with open(self.path, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
       print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/ to open it.")
 
