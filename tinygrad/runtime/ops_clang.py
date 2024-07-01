@@ -1,7 +1,7 @@
 import ctypes, subprocess, pathlib, tempfile
 from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump, getenv
-from tinygrad.renderer.cstyle import ClangRenderer, AMXRenderer
+from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
+from tinygrad.renderer.cstyle import ClangRenderer
 
 class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
@@ -24,6 +24,5 @@ class ClangProgram:
 
 class ClangDevice(Compiled):
   def __init__(self, device:str):
-    renderer = AMXRenderer() if getenv("AMX", 0) else ClangRenderer()
     from tinygrad.runtime.graph.clang import ClangGraph
-    super().__init__(device, MallocAllocator, renderer, ClangCompiler("compile_clang"), ClangProgram, ClangGraph)
+    super().__init__(device, MallocAllocator, ClangRenderer(), ClangCompiler("compile_clang"), ClangProgram, ClangGraph)

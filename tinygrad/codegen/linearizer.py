@@ -482,13 +482,6 @@ class Linearizer(Kernel):
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
     if len(reduceops) != 0:
-      if self.amx:
-        assert self.buf_uops[1] is not None and self.buf_uops[2] is not None, "amx buffers weren't UOped"
-        r = reduceops[0]
-        ldx = UOp(UOps.GEP, PtrDType(r.dtype), (self.buf_uops[1], self.loop_uops["gidx0"] * self.amx))
-        ldy = UOp(UOps.GEP, PtrDType(r.dtype), (self.buf_uops[2], self.loop_uops["gidx1"] * self.amx))
-        accs[r] = [UOp(UOps.MMA, r.dtype, (ldx, ldy), ("amx", (self.amx**3, self.full_shape[self.first_reduce]), r.dtype, self.amx, self.full_shape))]
-        return [accs[r]]
       # TODO: delete render_reduceop and move the logic for group_for_reduces to Block
       nlidx, nuidx = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,\
                                           global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,fake_reduce_idxs,alias_buf_idxs[r])
