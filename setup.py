@@ -39,7 +39,6 @@ setup(name='tinygrad',
         #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.0.0-rc2"],
         'testing': [
             "torch",
-            "torchtune",
             "pillow",
             "pytest",
             "pytest-xdist",

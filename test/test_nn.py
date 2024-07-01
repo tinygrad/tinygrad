@@ -2,7 +2,6 @@
 import unittest
 import numpy as np
 import torch
-import torchtune
 from tinygrad import Tensor, Device, TinyJit
 from tinygrad.helpers import CI, Context
 from tinygrad.ops import BufferOps
@@ -305,9 +304,25 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
   def test_rmsnorm(self):
+    class PyTorchRMSNorm(torch.nn.Module):
+      """
+      Taken from https://pytorch.org/torchtune/stable/_modules/torchtune/modules/rms_norm.html#RMSNorm
+      """
+      def __init__(self, dim: int, eps: float = 1e-6) -> None:
+          super().__init__()
+          self.eps = eps
+          self.scale = torch.nn.Parameter(torch.ones(dim))
+
+      def forward(self, x:torch.Tensor) -> torch.Tensor:
+        x_fp32 = x.float()
+        x_normed = (
+            x_fp32 * torch.rsqrt(x_fp32.pow(2).mean(-1, keepdim=True) + self.eps)
+        ).type_as(x)
+        return x_normed * self.scale
+
     B, T, embed_size = 5, 15, 30
 
-    torch_layer = torchtune.modules.RMSNorm(embed_size).eval()
+    torch_layer = PyTorchRMSNorm(embed_size).eval()
 
     layer = RMSNorm(embed_size)
     layer.weight = Tensor(torch_layer.scale.detach().numpy(), requires_grad=True)
