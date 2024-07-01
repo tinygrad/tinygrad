@@ -291,6 +291,7 @@ class TestMultiTensor(unittest.TestCase):
     # for norm layers, the correct way to shard weights is duplication
     layer_norm_sharded = nn.RMSNorm(embed_size)
     layer_norm_sharded.weight.shard_(devices_2, axis=None).realize()
+    layer_norm_sharded.bias.shard_(devices_2, axis=None).realize()
 
     # if x is being sharded, then all-reduce is involved
     x_sharded = x.shard(devices_2, axis=2).realize()
