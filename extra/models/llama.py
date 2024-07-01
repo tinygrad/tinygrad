@@ -3,10 +3,11 @@ from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  return Tensor.stack(freqs.cos().half(), freqs.sin().half(), dim=-1).reshape(1, end, 1, dim//2, 2)
+  # TODO: move dtype outside this
+  return Tensor.stack(freqs.cos().cast(dtype), freqs.sin().cast(dtype), dim=-1).reshape(1, end, 1, dim//2, 2)
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, c, d):
@@ -15,7 +16,7 @@ def complex_mult(A, c, d):
   co = a*d + b*c
   return ro.cat(co, dim=-1)
 
-def apply_rotary_emb(xq, xk, freqs_cis) -> Tuple[Tensor, Tensor]:
+def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor]:
   assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
   xq = xq.reshape(*xq.shape[0:-1], -1, 2)
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
@@ -39,7 +40,7 @@ class RMSNorm:
   def _norm(self, x:Tensor):
     return x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     return self._norm(x.float()).cast(x.dtype) * self.weight
 
 class Attention:

@@ -1,13 +1,10 @@
 from __future__ import annotations
-import os, mmap, _posixshmem, io, ctypes, ctypes.util, platform
+import os, sys, mmap, _posixshmem, io, ctypes, ctypes.util, platform, contextlib
 from typing import Optional, Generator, Tuple, Callable, List
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
 import tinygrad.runtime.autogen.io_uring as io_uring
-
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype = ctypes.c_void_p
+import tinygrad.runtime.autogen.libc as libc
 
 class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
@@ -94,7 +91,8 @@ class DiskDevice(Compiled):
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
       if os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
       self.mem = mmap.mmap(self.fd, self.size)
-    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self.mem.madvise(hp) # type: ignore
+    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
+      with contextlib.suppress(OSError): self.mem.madvise(hp) # some systems have transparent_hugepage disabled
   def _might_close(self):
     self.count -= 1
     if self.count == 0:
@@ -103,7 +101,7 @@ class DiskDevice(Compiled):
   def _iouring_setup(self):
     DiskDevice._tried_io_uring_init = True
 
-    if platform.system() != 'Linux': return
+    if platform.system() != 'Linux' or hasattr(sys, "getandroidapilevel"): return
 
     fd = libc.syscall(io_uring.NR_io_uring_setup, 4096, ctypes.byref(p:=io_uring.struct_io_uring_params()))
     if fd < 0: return
