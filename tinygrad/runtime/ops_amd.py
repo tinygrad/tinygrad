@@ -189,7 +189,7 @@ class HWPM4Queue(HWQueue):
     assert self.q[self.cmd_offsets[cmd_idx]] == amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6), f"Command at index {cmd_idx} is not signal"
     if signal is not None:
       self._patch(self.cmd_offsets[cmd_idx] + 3, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
-      if signal.event_mailbox_ptr != 0:
+      if self.cmd_offsets[cmd_idx + 1] - self.cmd_offsets[cmd_idx] > 8: # has trap info
         self._patch(self.cmd_offsets[cmd_idx] + 8 + 3, [*data64_le(signal.event_mailbox_ptr), *data64_le(signal.event_id), signal.event_id])
     if value is not None: self._patch(self.cmd_offsets[cmd_idx] + 5, [*data64_le(value)])
     return self
@@ -259,6 +259,12 @@ class HWCopyQueue(HWQueue):
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
 
     return self._mark_command_end()
+
+  def update_signal(self, cmd_idx, signal=None, value=None):
+    assert self.q[self.cmd_offsets[cmd_idx]] & 0xf == amd_gpu.SDMA_OP_FENCE, f"Command at index {cmd_idx} is not signal"
+    if signal is not None: self._patch(self.cmd_offsets[cmd_idx] + 1, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+    if value is not None: self.q[self.cmd_offsets[cmd_idx] + 3] = value
+    return self
 
   def update_wait(self, cmd_idx, signal=None, value=None):
     assert self.q[self.cmd_offsets[cmd_idx]] & 0xf == amd_gpu.SDMA_OP_POLL_REGMEM, f"Command at index {cmd_idx} is not wait"
