@@ -252,9 +252,8 @@ constant_folder = PatternMatcher([
   (UOp.var("x") + UOp.var("x") * UOp.cvar("c0"), lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),
   # x!=0 -> (bool)x
   (UOp.var("x").ne(0), lambda x: x.cast(dtypes.bool)),
-  # bool != 0 -> bool, bool != 1 -> not bool
-  (UOp.var("x").ne(0), lambda x: x),
-  (UOp.var("x").ne(1), lambda x: not x),
+  # bool != 1 -> not bool
+  (UOp.var("x", dtype=dtypes.bool).ne(1), lambda x: -x),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.alu(TernaryOps.WHERE, UOp.var("gate"), UOp.var("alt"), UOp.load(UOp.var("buf"), UOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
