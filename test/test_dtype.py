@@ -112,11 +112,7 @@ class TestDType(unittest.TestCase):
     dtypes = list(map(np.dtype, ["bool", "uint8", "int8", "int16", "int32", "int64", "float32", "float64"]))
     data = [1., 2., 0., 0.5, -1.5, 5.25]
     for dt in dtypes:
-      try:
-        arr = np.asarray(data, dtype=dt)
-      except OverflowError:
-        # TODO: this happens with numpy 2.0, update with proper behavior
-        continue
+      arr = np.asarray(data).astype(dt)
       tin = Tensor(arr).numpy()
       tor = torch.as_tensor(arr).detach().numpy()
       assert dt == tin.dtype == tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
@@ -467,6 +463,18 @@ class TestTypeSpec(unittest.TestCase):
     indices = Tensor([[0, 0], [1, 0]], dtype=indices_dtype)
     assert X_data.gather(0, indices).dtype == X_data.dtype
     assert X_data.gather(1, indices).dtype == X_data.dtype
+
+  @given(strat.sampled_from(dtype_floats), strat.sampled_from(dtype_floats))
+  def test_attention_returns_same_dtype(self, data_dtype, default_float):
+    dtypes.default_float = default_float
+    query = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
+    key = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
+    value = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
+    mask = (Tensor.rand(32, 8, 128, 128) < 0.5)
+    assert query.scaled_dot_product_attention(key, value, is_causal=True).dtype == data_dtype
+    assert query.scaled_dot_product_attention(key, value, is_causal=True, dropout_p=0.3).dtype == data_dtype
+    assert query.scaled_dot_product_attention(key, value, is_causal=False).dtype == data_dtype
+    assert query.scaled_dot_product_attention(key, value, attn_mask=mask).dtype == data_dtype
 
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))

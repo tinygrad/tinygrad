@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 from typing import Optional, Union
 import argparse
-from tqdm import trange
 import numpy as np
 import tiktoken
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable
-from tinygrad.helpers import Timing, DEBUG, getenv, fetch, colored
+from tinygrad.helpers import Timing, DEBUG, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 

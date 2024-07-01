@@ -6,7 +6,7 @@ from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, Context
 from tinygrad.dtype import dtypes
 
 def _simple_test(add, extract=lambda x: x, N=10):
@@ -65,6 +65,41 @@ class TestJit(unittest.TestCase):
         a = Tensor.randn(10, 10)
         b = Tensor.randn(10, 10)
         add(a, b)
+
+  def test_jit_zero_does_not_jit(self):
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    with Context(JIT=0):
+      for i in range(5):
+        a = Tensor([i])
+        b = Tensor([i])
+        c = add(a, b)
+        np.testing.assert_allclose(c.numpy(), 2*i)
+      assert_jit_cache_len(add, 0)
+
+  def test_jit_not_capturing(self):
+    @TinyJit
+    def add(a, b):
+      Tensor.zeros(4, 4).contiguous().realize()  # no-op kernel is captured
+      return (a+b).realize()
+    for i in range(5):
+      a = Tensor([i])
+      b = Tensor([i])
+      c = add(a, b)
+      np.testing.assert_allclose(c.numpy(), 2*i)
+    assert_jit_cache_len(add, 2)
+
+    @TinyJit
+    def add2(a, b):
+      with Context(CAPTURING=0):  # not captured
+        Tensor.zeros(4, 4).contiguous().realize()
+      return (a+b).realize()
+    for i in range(5):
+      a = Tensor([i])
+      b = Tensor([i])
+      c = add2(a, b)
+      np.testing.assert_allclose(c.numpy(), 2*i)
+    assert_jit_cache_len(add2, 1)
 
   def test_jit_shape_mismatch(self):
     @TinyJit
@@ -348,6 +383,17 @@ class TestMultioutputJit(unittest.TestCase):
     def fxn(a, b): return a+b, a-b, (a*b).realize()
     self._test(fxn)
     assert_jit_cache_len(fxn, 2)
+
+class TestJitInsideJit(unittest.TestCase):
+  def test_jit_jit_error(self):
+    @TinyJit
+    def f(t): return t + 1
+
+    @TinyJit
+    def g(t): return f(t) * 3
+
+    with self.assertRaisesRegex(RuntimeError, "having TinyJit inside another TinyJit is not supported"):
+      g(Tensor([1])).realize()
 
 if __name__ == '__main__':
   unittest.main()

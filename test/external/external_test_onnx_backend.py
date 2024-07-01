@@ -19,7 +19,7 @@ class TinygradModel(BackendRep):
     self.input_names = input_names
 
   def run(self, inputs: Any, **kwargs: Any) -> Tuple[Any, ...]:
-    real_inputs = {k:v for k,v in zip(self.input_names, inputs)}
+    real_inputs = dict(zip(self.input_names, inputs))
     ret = self.fxn(real_inputs, debug=True)
     return tuple(x.numpy() if isinstance(x, Tensor) else [i.numpy() for i in x] if isinstance(x, list) else np.array(x) for x in ret.values())
 

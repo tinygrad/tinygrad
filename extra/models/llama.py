@@ -3,10 +3,11 @@ from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  return Tensor.stack(freqs.cos().half(), freqs.sin().half(), dim=-1).reshape(1, end, 1, dim//2, 2)
+  # TODO: move dtype outside this
+  return Tensor.stack(freqs.cos().cast(dtype), freqs.sin().cast(dtype), dim=-1).reshape(1, end, 1, dim//2, 2)
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, c, d):
@@ -15,7 +16,7 @@ def complex_mult(A, c, d):
   co = a*d + b*c
   return ro.cat(co, dim=-1)
 
-def apply_rotary_emb(xq, xk, freqs_cis) -> Tuple[Tensor, Tensor]:
+def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor]:
   assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
   xq = xq.reshape(*xq.shape[0:-1], -1, 2)
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
@@ -36,9 +37,11 @@ class RMSNorm:
     self.eps = eps
     self.weight = Tensor.ones(dim)
 
-  def __call__(self, x:Tensor):
-    x = x.float()
-    return (x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()) * self.weight
+  def _norm(self, x:Tensor):
+    return x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()
+
+  def __call__(self, x:Tensor) -> Tensor:
+    return self._norm(x.float()).cast(x.dtype) * self.weight
 
 class Attention:
   def __init__(self, dim, n_heads, n_kv_heads, max_context, linear=nn.Linear):
@@ -54,8 +57,7 @@ class Attention:
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
-    x = x.half()
-    xq, xk, xv = self.wq(x).half(), self.wk(x).half(), self.wv(x).half()
+    xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
@@ -101,7 +103,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm(h).half())).contiguous()
+    return (h + self.feed_forward(self.ffn_norm(h))).contiguous()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
@@ -166,7 +168,7 @@ class Transformer:
     h = self.tok_embeddings(tokens)
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h))[:, -1, :]
+    logits = self.output(self.norm(h)).float()[:, -1, :]
 
     return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p).realize()
 

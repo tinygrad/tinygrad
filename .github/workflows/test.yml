@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run_process_replay: ${{ steps.set-env.outputs.run_process_replay }}
+      assert_process_replay: ${{ steps.set-env.outputs.assert_process_replay }}
     timeout-minutes: 5
 
     steps:
@@ -32,11 +33,23 @@ jobs:
     - name: Set process replay
       id: set-env
       run: |
-        COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-        if { echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ] || echo "${{ github.event.pull_request.title }}" | grep -q "\[run_process_replay\]"; } && [ "$GITHUB_REF_NAME" != "master" ]; then
+        RAW_COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+        COMMIT_MESSAGE=$(printf '%q' "$RAW_COMMIT_MESSAGE")
+        RAW_PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+        PR_TITLE=$(printf '%q' "$RAW_PR_TITLE")
+
+        if { echo "$COMMIT_MESSAGE" | grep -q "run_process_replay" || echo "$PR_TITLE" | grep -q "run_process_replay" || [ "${{ github.event.inputs.run_process_replay }}" = "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
           echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
+          echo "enabled process replay"
+          if { echo "$COMMIT_MESSAGE" | grep -q "no_assert" || echo "$PR_TITLE" | grep -q "no_assert"; }; then
+            echo "ASSERT_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
+            echo "running process replay in diff-only mode"
+          else
+            echo "ASSERT_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
+          fi
         else
           echo "RUN_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
+          echo "disabled process replay"
         fi
 
   uops:
@@ -239,7 +252,7 @@ jobs:
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py --durations=20
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
-        run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
+        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -288,6 +301,7 @@ jobs:
     needs: check_process_replay
     env:
       RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
     timeout-minutes: 20
 
     steps:
@@ -333,7 +347,7 @@ jobs:
       run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run process replay tests
       if: env.RUN_PROCESS_REPLAY == '1'
-      run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -376,6 +390,7 @@ jobs:
     needs: check_process_replay
     env:
       RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -399,7 +414,7 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
@@ -451,7 +466,7 @@ jobs:
           EOF
           echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
           sudo apt update || true
-          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev
+          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
           curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
           jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
           sudo xargs curl -L -o /usr/local/lib/libremu.so
@@ -493,6 +508,15 @@ jobs:
           diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
           diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
           diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
+      - name: Verify Linux autogen
+        if: matrix.backend == 'amd'
+        run: |
+          cp tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
+          cp tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
+          ./autogen_stubs.sh libc
+          ./autogen_stubs.sh io_uring
+          diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
+          diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
         run: python -m pytest -n=auto test/ --durations=20
@@ -507,7 +531,7 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --ignore test/test_gc.py --durations=20
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/external/external_test_hcq.py --durations=20
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py --durations=20
       - name: Compile EfficientNet to C and test it
         if: matrix.backend=='clang'
         run: |
@@ -516,7 +540,7 @@ jobs:
           cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
-        run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
+        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test

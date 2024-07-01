@@ -106,6 +106,12 @@ class Neq(Function):
 class Xor(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.XOR, y)
 
+class BitwiseAnd(Function):
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.AND, y)
+
+class BitwiseOr(Function):
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.OR, y)
+
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.ADD, y)
 
@@ -205,7 +211,7 @@ class Shrink(Function):
 
 class Flip(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
-    self.arg = tuple([-1 if i in set(axis) else 1 for i in range(len(x.shape))])
+    self.arg = tuple([-1 if i in axis else 1 for i in range(len(x.shape))])
     return x.stride(self.arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.stride(self.arg)

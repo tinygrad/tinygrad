@@ -8,9 +8,8 @@ from collections import namedtuple
 
 from PIL import Image
 import numpy as np
-from tqdm import tqdm
 from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
-from tinygrad.helpers import Timing, Context, getenv, fetch, colored
+from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm, THREEFRY
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 
@@ -494,7 +493,7 @@ class ClipTokenizer:
     self.cache[token] = word
     return word
 
-  def encode(self, text):
+  def encode(self, text, pad_with_zeros=False):
     bpe_tokens = []
     text = whitespace_clean(text.strip()).lower()
     for token in re.findall(self.pat, text):
@@ -503,7 +502,7 @@ class ClipTokenizer:
     # Truncation, keeping two slots for start and end tokens.
     if len(bpe_tokens) > 75:
       bpe_tokens = bpe_tokens[:75]
-    return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
+    return [49406] + bpe_tokens + [49407] + ([0] if pad_with_zeros else [49407]) * (77 - len(bpe_tokens) - 2)
 
 def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=1000):
   betas = np.linspace(beta_start ** 0.5, beta_end ** 0.5, n_training_steps, dtype=np.float32) ** 2
@@ -576,7 +575,7 @@ class StableDiffusion:
 if __name__ == "__main__":
   default_prompt = "a horse sized cat eating a bagel"
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--steps', type=int, default=10, help="Number of steps in diffusion")
+  parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
   parser.add_argument('--prompt', type=str, default=default_prompt, help="Phrase to render")
   parser.add_argument('--out', type=str, default=Path(tempfile.gettempdir()) / "rendered.png", help="Output filename")
   parser.add_argument('--noshow', action='store_true', help="Don't show the image")
@@ -593,8 +592,9 @@ if __name__ == "__main__":
   load_state_dict(model, torch_load(fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt'))['state_dict'], strict=False)
 
   if args.fp16:
-    for l in get_state_dict(model).values():
-      l.replace(l.cast(dtypes.float16).realize())
+    for k,v in get_state_dict(model).items():
+      if k.startswith("model"):
+        v.replace(v.cast(dtypes.float16).realize())
 
   # run through CLIP to get context
   tokenizer = ClipTokenizer()

@@ -18,7 +18,7 @@ class UnaryOps(Enum):
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHR = auto(); SHL = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto() # noqa: E702
 class TernaryOps(Enum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -125,6 +125,7 @@ python_alu = {
   BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
   BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
+  BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
@@ -144,3 +145,26 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.int32: lambda x: ctypes.c_int32(x).value, dtypes.int64: lambda x: ctypes.c_int64(x).value,}
 
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+
+# the living definition of LazyOps
+def verify_lazyop(*ast:LazyOp):
+  sts: Dict[LazyOp, ShapeTracker] = {}
+  def dfs(op:LazyOp, st:ShapeTracker):
+    if op in sts: return
+    for x in op.src: dfs(x, st)
+    # only reduceop is allowed to change shape, limited to turning n to 1
+    if op.op in ReduceOps:
+      expected_shape = tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape))
+      assert st.shape == expected_shape, f"unexpected reduceop shape {st.shape} != {expected_shape}"
+      st = ShapeTracker.from_shape(expected_shape)
+    else:
+      # movementops are pushed to the edges with LOAD
+      if op.op in BufferOps: st = op.arg.st
+      else: st = sts[op.src[0]]
+      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
+    sts[op] = st
+  for i, out in enumerate(ast):
+    assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
+    assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
+    assert out.arg.st.size == ast[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
+    dfs(out, out.arg.st)
