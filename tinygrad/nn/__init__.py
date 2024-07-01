@@ -211,19 +211,19 @@ class GroupNorm:
 
 class RMSNorm:
   """
-  Applies Root Mean Square Layer Normalization over a summed inputs to a neuron in one layer.
+  Applies Root Mean Square Layer Normalization over the summed inputs to a neuron in one layer.
 
   - Described: https://paperswithcode.com/method/rmsnorm
   - Paper: https://arxiv.org/pdf/1910.07467
 
   ```python exec="true" source="above" session="tensor" result="python"
   t = Tensor.rand(2, 5) * 2 + 1
-  rms_norm = nn.RMSNorm(t.size(-1), 1e-6)
-  print(t.std().item())
+  norm = nn.RMSNorm(t.size(-1), 1e-6)
+  print(t.std(axis=1).numpy())
   ```
   ```python exec="true" source="above" session="tensor" result="python"
-  t = rms_norm(t)
-  print(t.std().item())
+  t = norm(t)
+  print(t.std(axis=1).numpy())
   ```
   """
   def __init__(self, dim:int, eps:float=1e-6,  elementwise_affine:bool=True):
