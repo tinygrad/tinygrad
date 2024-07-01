@@ -69,7 +69,9 @@ jobs:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
         key: uops-packages-${{ hashFiles('**/setup.py') }}-3.12
     - name: Install dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: | 
+        pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        pip install --pre torchtune --extra-index-url https://download.pytorch.org/whl/nightly/cpu --no-cache-dir
     - name: Test IMAGE=2 support
       run: |
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
@@ -196,7 +198,9 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.task }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Install Dependencies
-        run: pip install -e '.[testing,testing_tf]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: |
+          pip install -e '.[testing,testing_tf]' --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install --pre torchtune --extra-index-url https://download.pytorch.org/whl/nightly/cpu --no-cache-dir
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Kernel Count Test
         run: PYTHONPATH="." GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
