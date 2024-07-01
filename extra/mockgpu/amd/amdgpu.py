@@ -188,6 +188,7 @@ class SDMAExecutor(AMDQueue):
       elif op == amd_gpu.SDMA_OP_POLL_REGMEM: cont = self._execute_poll_regmem()
       elif op == amd_gpu.SDMA_OP_GCR: self._execute_gcr()
       elif op == amd_gpu.SDMA_OP_COPY: self._execute_copy()
+      elif op == amd_gpu.SDMA_OP_TIMESTAMP: self._execute_timestamp()
       else: raise RuntimeError(f"Unknown SDMA op {op}")
       if not cont: return
 
@@ -216,6 +217,14 @@ class SDMAExecutor(AMDQueue):
 
     self.rptr[0] += ctypes.sizeof(struct)
     return True
+
+  def _execute_timestamp(self):
+    struct = sdma_pkts.timestamp.from_address(self.base + self.rptr[0] % self.size)
+
+    mem = to_mv(struct.addr, 8).cast('Q')
+    mem[0] = int(time.perf_counter() * 1e8)
+
+    self.rptr[0] += ctypes.sizeof(struct)
 
   def _execute_gcr(self):
     struct = sdma_pkts.gcr.from_address(self.base + self.rptr[0] % self.size)
