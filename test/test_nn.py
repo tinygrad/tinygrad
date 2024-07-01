@@ -312,21 +312,21 @@ class TestNN(unittest.TestCase):
       def __init__(self, dim: int, eps: float = 1e-6) -> None:
           super().__init__()
           self.eps = eps
-          self.scale = torch.nn.Parameter(torch.ones(dim))
+          self.weight = torch.nn.Parameter(torch.ones(dim))
 
       def forward(self, x:torch.Tensor) -> torch.Tensor:
         x_fp32 = x.float()
         x_normed = (
             x_fp32 * torch.rsqrt(x_fp32.pow(2).mean(-1, keepdim=True) + self.eps)
         ).type_as(x)
-        return x_normed * self.scale
+        return x_normed * self.weight
 
     B, T, embed_size = 5, 15, 30
 
     torch_layer = PyTorchRMSNorm(embed_size).eval()
 
     layer = RMSNorm(embed_size)
-    layer.weight = Tensor(torch_layer.scale.detach().numpy(), requires_grad=True)
+    layer.weight = Tensor(torch_layer.weight.detach().numpy(), requires_grad=True)
 
     for _ in range(10):
       # forward
@@ -340,7 +340,7 @@ class TestNN(unittest.TestCase):
       z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
-      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.scale.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
+      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
   def test_instancenorm_2d(self):
     N, C, H, W = 20, 10, 10, 10
