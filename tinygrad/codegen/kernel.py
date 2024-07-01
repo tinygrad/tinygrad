@@ -153,7 +153,7 @@ class Kernel:
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_float4_upcast_dim(self, i:int) -> List[int]:
-    should_upcast = (self.opts.supports_float4 or self.amx) and (self.bufs[i].dtype in (dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType))
+    should_upcast = (self.opts.supports_float4 or self.amx) and (self.bufs[i].dtype in (dtypes.double, dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1] if should_upcast else []
 
   @property
@@ -195,7 +195,7 @@ class Kernel:
   def colors(self) -> List[str]:
     # first non local non reduce dims are global (blue)
     colors = ["blue"] * self.global_dims if not self.dont_use_locals else ["BLUE"] * self.global_dims
-    # after global are local_dims; warp ones used in tensor cores must be closest to first_reduce (cyan)
+    # after global are local_dims; warp ones used in or cores must be closest to first_reduce (cyan)
     colors += ["cyan"] * self.local_dims
     # between first_reduce and first_reduce + group_for_reduces, they are either upcast mid reduce (white), or late upcasted (green)
     colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + self.group_for_reduces)]  # noqa: E501
@@ -408,12 +408,13 @@ class Kernel:
       return False
 
   def apply_amx(self):
-    if not (getenv("AMX", 0) and (r:=self.reduceop) is not None and r.op is ReduceOps.SUM and (r.dtype is dtypes.float)): return False
-    if (mul_op:=r.src[0]).op is not BinaryOps.MUL: return False
+    if not (getenv("AMX", 0) and (r := self.reduceop) is not None and r.op is ReduceOps.SUM and (r.dtype in [dtypes.double, dtypes.float])) \
+      or (mul_op := r.src[0]).op is not BinaryOps.MUL:
+      return False
     for src in mul_op.src:
       if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
 
-    if not all(x % (amx_size:=64//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
+    if not all(x % (amx_size:=128//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
 
     self.amx=AMX(dims=(amx_size, amx_size), dtype_out=r.dtype.vec(amx_size))
     self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))

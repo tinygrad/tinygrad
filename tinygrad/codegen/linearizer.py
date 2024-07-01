@@ -125,7 +125,7 @@ class Linearizer(Kernel):
 
     dim, amt = None, 1
     # float 4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [16,8,4,2]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [32,16,8,4,2]:
       dim, amt = upcast_dim[0], len(float4_expand)
       g_idx, g_valid = self.sts[i].expr_idxs(idxs[:dim] + [float4_expand[0]] + idxs[dim+1:])
       # do not use float4 if idx is not aligned
@@ -188,7 +188,7 @@ class Linearizer(Kernel):
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4,8,16]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4,8,16,32]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (float4_expand[0],) + k[upcast_dim[0]+1:]
@@ -301,11 +301,11 @@ class Linearizer(Kernel):
       accs[reduceop] = [UOp(UOps.PHI, tc.dtype_out, (acc, UOp(UOps.GEP, tc.dtype_out, (wmmas[z//wmma_sz[2]],), z%wmma_sz[2])))
                         for z, acc in enumerate(accs[reduceop])]
     elif self.amx:
-      dto = self.amx.dtype_out
+      dto, reduceop_dto = self.amx.dtype_out, reduceop.dtype
       cast_buf1 = UOp(UOps.CAST, dto, tuple(self.global_load(1,global_idxs+reduce_idxs+[full_upcast_idxs[0]]+[NumNode(0)])))
       cast_buf2 = UOp(UOps.CAST, dto, tuple(self.global_load(2,global_idxs+reduce_idxs+[NumNode(0)]+[full_upcast_idxs[1]])))
       def avoid_GEP(casting): return casting.src[0].src[0] if(all(s.op is UOps.GEP for s in casting.src)) else casting
-      mma = UOp(UOps.MMA, dto, (avoid_GEP(cast_buf1),avoid_GEP(cast_buf2))+tuple(accs[reduceop]), (str(self.amx), self.amx.dims))
+      mma = UOp(UOps.MMA, dto, (avoid_GEP(cast_buf1),avoid_GEP(cast_buf2))+tuple(accs[reduceop]), (str(self.amx), self.amx.dims, dto, reduceop_dto))
       accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for acc in accs[reduceop]]
     else:
       assert not locals_to_store, "storing locals isn't supported here"

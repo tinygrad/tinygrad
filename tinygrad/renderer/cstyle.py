@@ -80,7 +80,9 @@ class CStyleLanguage(Renderer):
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.count == 1 else str(var_dtype.count)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.count > 1:
-      if(var_name.startswith('amx_acc')): return f"__stz(&{buf_name}[{idx}], {int(var_name[7:var_name.index('[')])*buf_dtype.itemsize%64});"
+      if(var_name.startswith('amx_acc')):
+        zreg = int(var_name[7:var_name.index('[')])*buf_dtype.itemsize
+        return f"__ST_{var_dtype.name}(&{buf_name}[{idx}], {(zreg + (2 if zreg>=64 else 0)) % 64});"
       prefix = self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix
       return f"*(({prefix}{self.render_dtype(buf_dtype)}{var_dtype.count}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
@@ -196,19 +198,20 @@ class ClangRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    dto_name, dto_count, dto_cast = 'float', 16, 'float16'
-    kernel.insert(0, '  AMX_SET(0);')
-    kernel.insert(len(kernel), '  AMX_SET(1);')
-    prefix = [
-      f"""typedef struct {{ {dto_name + " x" + ", x".join([str(x) for x in range(dto_count)])}; }} {dto_cast};
-{dto_cast} make_{dto_cast}({dto_name + " x" + f", {dto_name} x".join([str(x) for x in range(dto_count)])}) {{
-    return ({dto_cast}) {{x{", x".join([str(x) for x in range(dto_count)])}}};
-}}""",
-      '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
-      '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
-      f"void __stz({dto_name}* restrict data0, int zreg){{ AMX(5, data0, 0ull<<62 | (zreg*1ull)<<56); }}",
-      f"void __MMA_{dto_count}_{dto_count}_{dto_cast}({dto_cast} data1, {dto_cast} data2){{ AMX(0, (int *) (&data2), 0ull<<62); AMX(1, (int *) (&data1), 0ull<<62); AMX(12, 0, 0ull); }}",
-    ]
+    for arg in set([uop.arg for uop in uops if uop.op is UOps.MMA]):
+      amx_op = {dtypes.double:10, dtypes.float:12, dtypes.half:15}
+      kernel.insert(0, "  AMX_SET(0);"), kernel.insert(len(kernel), "  AMX_SET(1);")
+      prefix = [
+        f"""typedef struct {{ {arg[3].name + " x" + ", x".join([str(x) for x in range(arg[2].count)])}; }} {arg[2].name};""",
+        f"""{arg[2].name} make_{arg[2].name}({arg[3].name + " x" + f", {arg[3].name} x".join([str(x) for x in range(arg[2].count)])}) {{ return ({arg[2].name}) {{x{", x".join([str(x) for x in range(arg[2].count)])}}}; }}""",  # noqa: E501
+        '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
+        '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
+        f"void __ST_{arg[2].name}({arg[3].name}* restrict data0, int zreg){{ AMX(5, data0, 1ull<<62 | (zreg*1ull)<<56); }}",
+        f"""void __MMA_{arg[2].count}_{arg[2].count}_{arg[2].name}({arg[2].name} data1, {arg[2].name} data2){{
+AMX(0, (int *) (&data2), 1ull<<62); AMX(1, (int *) (&data1), 1ull<<62);
+AMX({amx_op[arg[3]]}, 0, 0ull); AMX({amx_op[arg[3]]}, 0, 1ull<<20 | 64<<10); AMX({amx_op[arg[3]]}, 0, 2ull<<20 | 64); AMX({amx_op[arg[3]]}, 0, 3ull<<20 | 64<<10 | 64);
+}}""",  # noqa: E501
+      ]
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
