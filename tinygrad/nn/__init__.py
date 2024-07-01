@@ -217,18 +217,12 @@ class RMSNorm:
   - Paper: https://arxiv.org/pdf/1910.07467
 
   ```python exec="true" source="above" session="tensor" result="python"
-  rms_norm = nn.RMSNorm(3, 1e-8)
-  t = Tensor.randn(2, 3) * 3 + 1
-  print(t.numpy())
-  ```
-  ```python exec="true" source="above" session="tensor" result="python"
+  t = Tensor.rand(2, 5) * 2 + 1
+  rms_norm = nn.RMSNorm(t.size(-1), 1e-6)
   print(t.std().item())
   ```
   ```python exec="true" source="above" session="tensor" result="python"
   t = rms_norm(t)
-  print(t.numpy())
-  ```
-  ```python exec="true" source="above" session="tensor" result="python"
   print(t.std().item())
   ```
   """

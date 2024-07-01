@@ -2702,17 +2702,11 @@ class Tensor:
 
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.randn(2, 3) * 3 + 1
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(2, 5) * 3 + 1
     print(t.std().item())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = t.rmsnorm()
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
     print(t.std().item())
     ```
     """
