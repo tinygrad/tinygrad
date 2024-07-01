@@ -91,6 +91,7 @@
 
 ::: tinygrad.Tensor.linear
 ::: tinygrad.Tensor.sequential
+::: tinygrad.Tensor.rmsnorm
 ::: tinygrad.Tensor.layernorm
 ::: tinygrad.Tensor.batchnorm
 ::: tinygrad.Tensor.dropout

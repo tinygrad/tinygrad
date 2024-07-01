@@ -2693,20 +2693,20 @@ class Tensor:
     """
     return functools.reduce(lambda x,f: f(x), ll, self)
 
-  def rsmnorm(self, axis=-1, eps:float=1e-6) -> Tensor:
+  def rmsnorm(self, axis=-1, eps:float=1e-6) -> Tensor:
     """
     Applies Root Mean Square Layer Normalization over a summed inputs to a neuron in one layer.
 
     - Described: https://paperswithcode.com/method/rmsnorm
     - Paper: https://arxiv.org/pdf/1910.07467
 
-    ```python exec="true" source="above" session="tensor" result="python
-    t = Tensor.rand(23, 21, 2, 3) * 5 + 2
-    print(t.mean.item(), t.std.item())
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.rand(2, 3) * 3 + 1
+    print(t.numpy())
     ```
-    ```
-    t = t.rsmnorm()
-    print(t.mean.item(), t.std.item())
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.rmsnorm()
+    print(t.numpy())
     ```
     """
     return self.mul(self.pow(2).mean(axis, keepdim=True).add(eps).rsqrt())

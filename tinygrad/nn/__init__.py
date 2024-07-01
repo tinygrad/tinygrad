@@ -216,14 +216,14 @@ class RMSNorm:
   - Described: https://paperswithcode.com/method/rmsnorm
   - Paper: https://arxiv.org/pdf/1910.07467
 
-  ```python exec="true" source="above" session="tensor" result="python
-  rsm_norm = nn.RMSNorm(10, 1e-8)
-  t = Tensor.rand(23, 21, 2, 3) * 5 + 2
-  print(t.mean.item(), t.std.item())
+  ```python exec="true" source="above" session="tensor" result="python"
+  rsm_norm = nn.RMSNorm(3, 1e-8)
+  t = Tensor.rand(2, 3) * 3 + 1
+  print(t.numpy())
   ```
-  ```
+  ```python exec="true" source="above" session="tensor" result="python"
   t = rsm_norm(t)
-  print(t.mean.item(), t.std.item())
+  print(t.numpy())
   ```
   """
   def __init__(self, dim:int, eps:float=1e-6,  elementwise_affine:bool=True):
@@ -232,7 +232,7 @@ class RMSNorm:
     self.bias = Tensor.zeros(dim) if elementwise_affine else None
 
   def __call__(self, x:Tensor) -> Tensor:
-    x = x.rsmnorm(-1, self.eps)
+    x = x.rmsnorm(-1, self.eps)
     if not self.elementwise_affine: return x
     return x * self.weight + self.bias
 

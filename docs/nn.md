@@ -7,6 +7,7 @@
 ::: tinygrad.nn.ConvTranspose2d
 ::: tinygrad.nn.Linear
 ::: tinygrad.nn.GroupNorm
+::: tinygrad.nn.RMSNorm
 ::: tinygrad.nn.InstanceNorm
 ::: tinygrad.nn.LayerNorm
 ::: tinygrad.nn.LayerNorm2d
