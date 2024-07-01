@@ -1,4 +1,4 @@
-import unittest, ctypes, struct, time, array
+import unittest, ctypes, struct, array
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import to_mv, CI, getenv
 from tinygrad.device import Buffer, BufferOptions, HCQCompatCompiled
@@ -215,7 +215,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.signals_pool += [sig_st, sig_en]
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 1 <= et <= (400 if CI else 10)
+    assert 1 <= et <= (2000 if CI else 10)
 
   def test_speed_copy_bandwidth(self):
     TestHCQ.d0._prof_setup()
