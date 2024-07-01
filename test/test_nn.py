@@ -306,7 +306,8 @@ class TestNN(unittest.TestCase):
   def test_rmsnorm(self):
     class PyTorchRMSNorm(torch.nn.Module):
       """
-      Taken from https://pytorch.org/torchtune/stable/_modules/torchtune/modules/rms_norm.html#RMSNorm
+      Taken from https://pytorch.org/torchtune/stable/_modules/torchtune/modules/rms_norm.html#RMSNorm, to avoid torchtune setuptools
+      error.
       """
       def __init__(self, dim: int, eps: float = 1e-6) -> None:
           super().__init__()
