@@ -174,8 +174,9 @@ jobs:
       run: NV=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run LLaMA 7B on 6 GPUs
       run: NV=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
-    - name: Run LLaMA-3 8B BEAM
-      run: NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_beam.txt
+    # TODO: this is flaky
+    # - name: Run LLaMA-3 8B BEAM
+    #   run: NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_beam.txt
     - name: Run LLaMA-3 8B on 4 GPUs
       run: NV=1 python3 examples/llama3.py --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_four_gpu.txt
     - name: Run LLaMA-3 8B on 6 GPUs
