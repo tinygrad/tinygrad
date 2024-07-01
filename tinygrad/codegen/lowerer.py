@@ -104,9 +104,10 @@ class Lowerer(Kernel):
       has_valid = valid.op is not UOps.CONST or (valid.arg is not True and valid.arg != 1)
       if x.op is BufferOps.CONST:
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(x.arg.dtype, x.arg.val), UOp.const(x.arg.dtype, 0))
-      if x.arg.idx == -1:
+      if isinstance(self.bufs[x.arg.idx], LocalBuffer):
         # TODO: this should come from somewhere else
-        buf = self.local_buffer_uop
+        lb = self.bufs[x.arg.idx]
+        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(lb.dtype), (), (lb.name, lb.size))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
                   (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
@@ -128,6 +129,12 @@ class Lowerer(Kernel):
   def linearize(self) -> Lowerer:
     self.uop_cache: Dict[LazyOp, UOp] = {}
 
+    # late alias the tensor core buffers
+    if (tc:=self.tensor_core) and self.tensor_core_opts is not None:
+      alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [0]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
+      for op, tc_bufs in self.bufs_for_tensor_core.items():
+        for tc_buf in tc_bufs: self.alias_buffer(op, tc_buf, alias_pattern)
+
     # kernel name (before late upcast)
     self.name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
                  (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
@@ -146,8 +153,7 @@ class Lowerer(Kernel):
         # TODO: the strides of this can be controlled
         self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
         temp_dtype = cast(LazyOp, self.reduceop).dtype
-        self.bufs.append(LocalBuffer(name:=f"temp{i if len(self.reduceops) > 1 else ''}", buf_size:=self.sts[-1].size, temp_dtype))
-        self.local_buffer_uop = UOp(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), (name, buf_size))
+        self.bufs.append(LocalBuffer(f"temp{i if len(self.reduceops) > 1 else ''}", self.sts[-1].size, temp_dtype))
 
     #from tinygrad.engine.graph import print_tree
     #print_tree(self.ast[0])
@@ -156,13 +162,29 @@ class Lowerer(Kernel):
     # transformed to the final LazyOp
     @functools.lru_cache(None)
     def fixup_ast(op:LazyOp) -> LazyOp:
+      #if op in self.local_alias:
+      #  print("local", op)
+      #if op in self.bufs_for_tensor_core:
+      #  alias_pattern = [0]*(self.global_dims) + [2]*(len(self.tensor_core.threads)) + [0]*(self.local_dims-len(self.tensor_core.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
+      #  for tc_buf in self.bufs_for_tensor_core[op]:
+      #    print("TC BUF", tc_buf, alias_pattern)
       if op.op in BufferOps:
-        arg = replace(op.arg, st=self.sts[self.bufs.index(op.arg)])
+        idx = self.bufs.index(op.arg)
+        arg = replace(op.arg, st=self.sts[idx])
+        for v in self.local_alias.values():
+          if idx in v:
+            lbuf = v[idx]
+            lidx = self.bufs.index(lbuf)
+            start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+            local_buffer = MemBuffer(lidx, start.dtype, self.sts[lidx])
+            local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
+            local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
+            # TODO: can these shapetrackers differ?
+            #local_load = LazyOp(BufferOps.LOAD, (local_store,), MemBuffer(lidx, start.dtype, ShapeTracker.from_shape(self.sts[lidx].shape)))
+            #print("BUF HIT")
+            return local_load
       elif op.op in ReduceOps:
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])
-        #if self.tensor_core is not None and op.op is ReduceOps.SUM and op.src[0].op is BinaryOps.MUL:
-        #  print(self.tensor_core, self.tensor_core_opts)
-        #  return LazyOp(ReduceOps.TC, tuple(fixup_ast(x) for x in op.src[0].src))
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
           local_buffer = MemBuffer(-1, start.dtype, self.sts[-1])
@@ -174,7 +196,7 @@ class Lowerer(Kernel):
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
     modified_ast = tuple(fixup_ast(x) for x in self.ast)
 
-    if DEBUG >= 5:
+    if DEBUG >= 4:
       from tinygrad.engine.graph import print_tree
       for mast in modified_ast: print_tree(mast)
 
