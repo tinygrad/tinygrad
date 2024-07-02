@@ -335,8 +335,8 @@ class UOpGraph:
     # fixup gated stores with an IF block to save extra local loads
     @functools.lru_cache(None)
     def _dfs(u:UOp, gate:UOp) -> UOp:
-      if u.op is UOps.LOAD and len(u.src) > 2 and u.src[2].op is UOps.STORE:
-        if_uop = UOp(UOps.IF, None, (gate, UOp(UOps.BARRIER, None, tuple([x for x in u.src if x.op is UOps.STORE]))))
+      if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
+        if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
         return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
       if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
@@ -444,7 +444,7 @@ class UOpGraph:
           arg = src[0].arg
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
-      if uop is UOps.LOAD and len(src) > 2 and src[-1].op is UOps.ALU: assert src[-1].dtype == dtypes.bool
+      if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU: assert src[2].dtype == dtypes.bool and src[3].dtype == dtype
       if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
       if uop is UOps.ALU:
         if arg in UnaryOps:
