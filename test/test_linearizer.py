@@ -813,7 +813,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skip("this will require compaction of BinaryOps.ADD")
+  @unittest.expectedFailure  # this will require compaction of BinaryOps.ADD
   def test_skip_unmatching_upcasts_with_gep(self):
     Tensor.manual_seed(0)
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501

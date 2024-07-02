@@ -155,7 +155,8 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): return fxn(**store)
+      if _match(uop, p, store):
+        if (ret:=fxn(**store)) is not None: return ret  # NOTE: if it returns None, we keep trying to match
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -323,13 +324,23 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
 tc_args = ('WMMA_8_8_8_float_float', (8, 8, 8), dtypes.float, dtypes.float, (2, 2, 2), 'METAL')
 ex_8 = UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(8))).name("ex")
 
+def fix_image_idx(ls:UOp):
+  if ls.src[1].dtype is None or ls.src[1].dtype.count != 1: return None
+  if not isinstance(ls.src[0].dtype, ImageDType): return None
+  idxy = ls.src[1]
+  #if not idxy.divides(4): raise RuntimeError("image index must divide 4")
+  base_shape = ls.src[0].dtype.shape
+  idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
+  image_idx = UOp(UOps.CAST, cast(DType, idxy.dtype).vec(2), (idx, idy))
+  return UOp(ls.op, ls.dtype, (ls.src[0], image_idx) + ls.src[2:], ls.arg)
+
 float4_folding = PatternMatcher([
   (UOp(UOps.STORE, dtype=dtypes.float, src=(UOp.var("buf"), UOp.var("idx")+
     (UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")), UOp.var("var"))).name("store"),
     lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float(2,4) load
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int))).name("load"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("const"))).name("load"),
     float4_expand_load),
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
@@ -343,6 +354,8 @@ float4_folding = PatternMatcher([
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
+  # image indexing
+  (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
 ])
 
 def tc_expand(red_allow_any_len, tc, lb1, lb2, v1, v2):

@@ -88,7 +88,8 @@ class Lowerer(Kernel):
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or (valid.arg is not True and valid.arg != 1)
       if x.op is BufferOps.CONST:
-        return UOp.alu(TernaryOps.WHERE, valid, UOp.const(x.arg.dtype, x.arg.val), UOp.const(x.arg.dtype, 0))
+        dtype = x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype
+        return UOp.alu(TernaryOps.WHERE, valid, UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
       if isinstance(self.bufs[x.arg.idx], LocalBuffer):
         # TODO: this should come from somewhere else
         lb = self.bufs[x.arg.idx]
