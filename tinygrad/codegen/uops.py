@@ -42,7 +42,7 @@ class UOp:
   @functools.cached_property
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg) if self.op is not UOps.ALU else \
+    return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg if isinstance(self.arg, str) else self.arg.expr) if self.op is not UOps.ALU else \
             (type(self.op), self.op.value), self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
@@ -316,7 +316,7 @@ class UOpGraph:
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
-  def vars(self) -> List[Variable]: return sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR], key=lambda v: v)
+  def vars(self) -> List[str]: return sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR])
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
 
   @property

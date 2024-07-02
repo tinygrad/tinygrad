@@ -79,7 +79,7 @@ class CompiledRunner(Runner):
       lra['local_size'] = local_size
       assert len(local_size) == 3, "local size must have len 3"
     try:
-      res = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
+      res = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
     except KeyError as e:
       raise RuntimeError(f"missing variable {e} in {var_vals}")
 

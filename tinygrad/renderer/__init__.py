@@ -29,7 +29,7 @@ class Program:
   mem_estimate:sint=0
 
   @functools.cached_property
-  def vars(self) -> List[Variable]: return [] if self.uops is None else self.uops.vars()
+  def vars(self) -> List[str]: return [] if self.uops is None else self.uops.vars()
 
   @functools.cached_property
   def globals(self) -> List[Tuple[int, bool]]: return [] if self.uops is None else self.uops.globals()
