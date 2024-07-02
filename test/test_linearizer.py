@@ -6,14 +6,14 @@ from test.external.fuzz_linearizer import compare_linearizer
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.lowerer import Lowerer as Linearizer
-from tinygrad.codegen.linearizer import expand_node, expand_idxs, get_grouped_dims
+from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.renderer import TensorCore
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
+from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
@@ -1756,53 +1756,6 @@ class TestKernelOpts(unittest.TestCase):
       ([Opt(OptOps.GROUP, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",32),("blue",32),("red",16),("magenta",2)]),
     ]
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
-
-class TestLinearizerHelper(unittest.TestCase):
-  def test_num_node_expand(self):
-    a = NumNode(42)
-    assert expand_node(a) == [a]
-
-  def test_variable_expand(self):
-    a = Variable("a", 5, 7)
-    assert expand_node(a) == [a]
-
-  def test_variable_expand_expr_none(self):
-    a = Variable("_uidx0", 5, 7)
-    assert expand_node(a) == [NumNode(5), NumNode(6), NumNode(7)]
-
-  def test_mul_node_expand(self):
-    a = Variable("_uidx0", 5, 7)
-    m = MulNode(a, 3)
-    assert expand_node(m) == [NumNode(15), NumNode(18), NumNode(21)]
-
-    b = Variable("b", 1, 3)
-    n = MulNode(b, 3)
-    assert expand_node(n) == [Variable("b", 1, 3)*3]
-
-  def test_sum_node_expand(self):
-    a = Variable("_uidx0", 1, 3)
-    b = Variable("b", 5, 7)
-    s1 = a + b
-    assert expand_node(s1) == [Node.sum([NumNode(i),b]) for i in range(1,4)]
-
-  def test_multi_expand(self):
-    a = Variable("a", 1, 3)
-    b = Variable("b", 14, 17)
-    s1 = a + b
-    # expand increments earlier variables faster than later variables (as specified in the argument)
-    # this behavior was just copied from before, no idea why this should be true
-    assert expand_node(s1, (a, b)) == [NumNode(x + y) for x in range(b.min, b.max + 1) for y in range(a.min, a.max + 1)]
-
-  def test_expand_nonpresent_var(self):
-    a = Variable("a", 1, 3)
-    n = NumNode(3) * Variable("b", 1, 3)
-    assert expand_node(n, (a,)) == [n, n, n]
-
-  def test_expand_idxs(self):
-    uidx0 = Variable("_uidx0", 0, 6)
-    uidx1 = Variable("_uidx1", 0, 1)
-    idxs = (uidx0 // 5, uidx0 * 5, uidx1)
-    assert expand_idxs(idxs) == (uidx0, NumNode(0), uidx1)
 
 if __name__ == '__main__':
   unittest.main()

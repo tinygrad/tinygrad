@@ -9,7 +9,7 @@ from tinygrad.shape.symbolic import Variable, NumNode
 inf, nan = float('inf'), float('nan')
 
 # kernel unpacker
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer as Linearizer
 def ast_str_to_ast(ast_str:str) -> Tuple[LazyOp,...]: return val if isinstance(val:=eval(ast_str), tuple) else (val,)
 def ast_str_to_lin(ast_str:str, opts=None): return Linearizer(*ast_str_to_ast(ast_str), opts=opts)
 def kern_str_to_lin(kern_str:str, opts=None):
