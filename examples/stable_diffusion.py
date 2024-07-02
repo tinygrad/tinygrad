@@ -575,7 +575,7 @@ class StableDiffusion:
 if __name__ == "__main__":
   default_prompt = "a horse sized cat eating a bagel"
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--steps', type=int, default=10, help="Number of steps in diffusion")
+  parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
   parser.add_argument('--prompt', type=str, default=default_prompt, help="Phrase to render")
   parser.add_argument('--out', type=str, default=Path(tempfile.gettempdir()) / "rendered.png", help="Output filename")
   parser.add_argument('--noshow', action='store_true', help="Don't show the image")
@@ -644,7 +644,7 @@ if __name__ == "__main__":
   if not args.noshow: im.show()
 
   # validation!
-  if args.prompt == default_prompt and args.steps == 10 and args.seed == 0 and args.guidance == 7.5 and THREEFRY:
+  if args.prompt == default_prompt and args.steps == 5 and args.seed == 0 and args.guidance == 7.5:
     ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "stable_diffusion_seed0.png")))
     distance = (((x - ref_image).cast(dtypes.float) / ref_image.max())**2).mean().item()
     assert distance < 3e-4, colored(f"validation failed with {distance=}", "red")
