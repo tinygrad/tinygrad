@@ -106,18 +106,18 @@ class UPat:
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
 
   def __post_init__(self):
-    self.f: tuple[Callable[[Any, Any], Any], ...] = ()
+    self.unmatch_funcs: tuple[Callable[[Any, Any], Any], ...] = ()
     op = () if self.op is None else tuple(self.op) if isinstance(self.op, set) else (self.op,)
     arg = () if self.arg is None else tuple(self.arg) if isinstance(self.arg, set) else (self.arg,)
     dtype = () if self.dtype is None else tuple(self.dtype)if isinstance(self.dtype, set) else (self.dtype,)
-    if op: self.f += (lambda uop,_: uop.op not in op,)
-    if arg: self.f += (lambda uop,_: uop.arg not in arg,)
-    if dtype: self.f += (lambda uop,_: uop.dtype is not None and uop.dtype not in dtype,)
+    if op: self.unmatch_funcs += (lambda uop,_: uop.op not in op,)
+    if arg: self.unmatch_funcs += (lambda uop,_: uop.arg not in arg,)
+    if dtype: self.unmatch_funcs += (lambda uop,_: uop.dtype is not None and uop.dtype not in dtype,)
     if self.src is not None:
       self.flat_src: Union[tuple[tuple[UPat, ...], ...], UPat] = tuple(itertools.permutations(self.src)) if isinstance(self.src,list) else\
                                                                  (self.src,) if isinstance(self.src,tuple) else self.src
-      self.f += (self.src_unmatch,)
-    if (n:=self.name) is not None: self.f += (lambda uop,store: store.setdefault(n, uop) is not uop,)
+      self.unmatch_funcs += (self.src_unmatch,)
+    if (n:=self.name) is not None: self.unmatch_funcs += (lambda uop,store: store.setdefault(n, uop) is not uop,)
 
   def src_unmatch(self, uop:UOp, store:Dict[str, UOp]) -> bool:
     for vp in self.flat_src if isinstance(self.flat_src, tuple) else [(self.flat_src,)*len(uop.src)]:
@@ -132,7 +132,7 @@ class UPat:
     return False
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
-  for f in pat.f:
+  for f in pat.unmatch_funcs:
     if f(uop, store): return False
   return True
 
