@@ -47,6 +47,12 @@ class TensorCoreOptions:
       elif removed_axis == axes[tc_dim]: axes_exist[tc_dim] = False
     self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
 
+@dataclass
+class AMX:
+  dims: Tuple[int, ...]
+  dtype_out: DType
+  def __str__(self): return "_".join(["MMA"] + list(map(str, self.dims)) + [self.dtype_out.name])
+
 @dataclass(frozen=True)
 class LocalBuffer:
   name: str
@@ -95,6 +101,7 @@ class Kernel:
     # the local aliased buffers for A and B
     self.bufs_for_tensor_core: Dict[LazyOp, Tuple[int, int]] = {}
     self.dont_use_locals: bool = False
+    self.amx: Optional[AMX] = None
 
     # group simplifies
     self.simplify_ones()
@@ -117,8 +124,8 @@ class Kernel:
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
-    ret.tensor_core, ret.tensor_core_opts, ret.local_alias, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, defaultdict(dict), \
-        self.bufs_for_tensor_core
+    ret.tensor_core, ret.tensor_core_opts, ret.local_alias, ret.bufs_for_tensor_core, ret.amx = self.tensor_core, self.tensor_core_opts, \
+        defaultdict(dict), self.bufs_for_tensor_core, self.amx
 
     # uncached since linearize didn't run
     ret.applied_opts_cache = None
@@ -146,7 +153,7 @@ class Kernel:
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_float4_upcast_dim(self, i:int) -> List[int]:
-    should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in (dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType))
+    should_upcast = (self.opts.supports_float4 or self.amx) and (self.bufs[i].dtype in (dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType) or (self.amx and self.bufs[i].dtype is dtypes.double)) # noqa:E501
     return [x for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1] if should_upcast else []
 
   @property
@@ -400,6 +407,20 @@ class Kernel:
     except KernelOptError:
       return False
 
+  def apply_amx(self):
+    if not (getenv("AMX", 0) and (r := self.reduceop) is not None and r.op is ReduceOps.SUM and (r.dtype in [dtypes.double, dtypes.float])) \
+      or (mul_op := r.src[0]).op is not BinaryOps.MUL:
+      return False
+    for src in mul_op.src:
+      if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
+
+    if not all(x % (amx_size:=128//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
+
+    self.amx=AMX(dims=(amx_size, amx_size), dtype_out=r.dtype.vec(amx_size))
+    self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
+    self.apply_opt(Opt(OptOps.UNROLL, -1, amx_size)) # unroll to support matvec, otherwise cannot upcast reduce dim
+    return True
+
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
 
@@ -451,7 +472,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not(self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.threads)), "can't upcast TC locals")
-      check(amt <= 8, "don't upcast more than 8")
+      check(amt <= 32 if self.amx else amt <= 8, "don't upcast more than 32 for AMX or 8 otherwise")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCASTMID:                  # white

@@ -81,6 +81,9 @@ class CStyleLanguage(Renderer):
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.count == 1 else str(var_dtype.count)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.count > 1:
+      if(var_name.startswith('amx_acc')):
+        zreg = int(var_name[7:var_name.index('[')])*buf_dtype.itemsize
+        return f"__ST_{var_dtype.name}(&{buf_name}[{idx}], {(zreg + (2 if zreg>=64 else 0)) % 64});"
       prefix = self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix
       return f"*(({prefix}{self.render_dtype(buf_dtype)}{var_dtype.count}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
@@ -133,7 +136,7 @@ class CStyleLanguage(Renderer):
           val = self.code_for_op[args](*operands, dtype)
           assert child_count[u] != 0, f"childless ALU op found {u}"
           # TODO: fix index rendering issue. fix clang nested max macro issue
-          if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
+          if child_count[u] == 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('alu',u)} = {val};")
         elif uop is UOps.SPECIAL:
           kk(f"int {args[1]} = {self.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
@@ -144,7 +147,7 @@ class CStyleLanguage(Renderer):
           if len(src) > 3 and src[2].op is UOps.ALU: val = self.code_for_op[TernaryOps.WHERE](r[src[2]], val, r[src[3]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
-          kk(f"{r[src[0]]} = {r[src[1]]};")
+          if not r[src[0]].startswith('amx_acc'): kk(f"{r[src[0]]} = {r[src[1]]};")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           if uop is UOps.BITCAST:
@@ -168,7 +171,12 @@ class CStyleLanguage(Renderer):
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
+        elif uop is UOps.MMA: kk(f"__{args[0]}({r[src[0]]}, {r[src[1]]});")
+        elif uop is UOps.DEFINE_ACC:
+          if not(len(args) == 3 and args[2] == 'amx_acc'): kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
+          else:
+            ssa('amx_acc',u)
+            if(args[1] == 0): kk("AMX_SET(1); AMX_SET(0);")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
@@ -181,6 +189,7 @@ class CStyleLanguage(Renderer):
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
   supports_float4 = False
+  float4 = "make_float4"
   has_local = False
   global_max = None
 
@@ -188,6 +197,21 @@ class ClangRenderer(CStyleLanguage):
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    for arg in set([uop.arg for uop in uops if uop.op is UOps.MMA]):
+      amx_op = {dtypes.double:10, dtypes.float:12, dtypes.half:15}
+      kernel.insert(0, "  AMX_SET(0);"), kernel.insert(len(kernel), "  AMX_SET(1);")
+      prefix = [f"""typedef struct {{ {arg[3].name + " x" + ", x".join([str(x) for x in range(arg[2].count)])}; }} {arg[2].name};""",
+        f"""{arg[2].name} make_{arg[2].name}({arg[3].name + " x" + f", {arg[3].name} x".join([str(x) for x in range(arg[2].count)])}) {{ return ({arg[2].name}) {{x{", x".join([str(x) for x in range(arg[2].count)])}}}; }}""",  # noqa: E501
+        '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
+        '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
+        f"void __ST_{arg[2].name}({arg[3].name}* restrict data0, int zreg){{ AMX(5, data0, 1ull<<62 | (zreg*1ull)<<56); }}",
+        f"""void __MMA_{arg[2].count}_{arg[2].count}_{arg[2].name}({arg[2].name} data1, {arg[2].name} data2){{
+  AMX(0, (int *) (&data2), 1ull<<62); AMX(1, (int *) (&data1), 1ull<<62);
+  AMX({amx_op[arg[3]]}, 0, 0ull); AMX({amx_op[arg[3]]}, 0, 1ull<<20 | 64<<10); AMX({amx_op[arg[3]]}, 0, 2ull<<20 | 64); AMX({amx_op[arg[3]]}, 0, 3ull<<20 | 64<<10 | 64);
+}}"""] # noqa: E501
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
