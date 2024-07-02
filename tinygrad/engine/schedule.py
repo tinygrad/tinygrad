@@ -40,9 +40,9 @@ class _LBScheduleItem:
   ast: Tuple[LazyOp, ...]
   outputs: Tuple[LazyBuffer, ...]
   inputs: Tuple[LazyBuffer, ...]
-  var_vals: Dict[Variable, int]
+  var_vals: Dict[str, int]
 
-def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
+def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[LazyBuffer, ...], var_vals:Dict[str, int], st:ShapeTracker,
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer], cache) -> LazyOp:
   """recursively create a lazyop"""
   if (buf, st) in cache: return cache[(buf, st)]
@@ -58,7 +58,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     var_vals.update(st_var_vals)
     if isinstance(buf.arg, Variable):
       val, var_val = buf.arg.unbind()
-      var_vals.__setitem__(val, var_val)
+      var_vals.__setitem__(val.expr, var_val)
     else:
       assert isinstance(buf.arg, get_args(ConstType)), f"cannot create ConstBuffer with value {buf.arg}"
       val = buf.arg
@@ -104,7 +104,7 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
   """create a schedule item from a list of outputs"""
   inputs: List[LazyBuffer] = []
   ast: List[LazyOp] = []
-  var_vals: Dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
+  var_vals: Dict[str, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
   # single output AST
   if (op:=(out:=outs[0]).op) in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}:
     assert len(outs) == 1, f"can't schedule a group of {op}"
@@ -292,12 +292,12 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
 # *** DAG ordering: breadth first search ***
 
 SCHEDULES: List = []
-def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[str, int]]:
   if seen is None: seen = set()
   graph, in_degree, prescheduled = _graph_schedule(outs, seen)
   queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
   schedule: List[ScheduleItem] = []
-  var_vals: Dict[Variable, int] = {}
+  var_vals: Dict[str, int] = {}
   kernel_number = GlobalCounters.kernel_count
   while queue:
     ps = queue.popleft()

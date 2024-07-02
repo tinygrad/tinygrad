@@ -59,9 +59,9 @@ class ShapeTracker:
   def vars(self) -> Set[Variable]: return set.union(*[v.vars() for v in self.views], set())
 
   @property
-  def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
+  def var_vals(self) -> Dict[str, int]: return merge_dicts([dict([(v.expr, v.val)]) for v in self.vars()])
 
-  def unbind(self) -> Tuple[ShapeTracker, Dict[Variable, int]]:
+  def unbind(self) -> Tuple[ShapeTracker, Dict[str, int]]:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 

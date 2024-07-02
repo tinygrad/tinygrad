@@ -13,7 +13,7 @@ from tinygrad.engine.schedule import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from weakref import WeakKeyDictionary
 
-def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[ExecItem]:
+def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[str, int]) -> List[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
   max_batch_size = getenv("JIT_BATCH_SIZE", 32)
@@ -68,7 +68,7 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
   return input_replace
 
 class GraphRunner(Runner):  # pylint: disable=abstract-method
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[str, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.jc_idx_with_updatable_launch_dims = []
@@ -82,11 +82,11 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
         if ji.prg.p.vars: self.jc_idx_with_updatable_var_vals.append(j)
         if (ji.prg.p.global_size and not all_int(ji.prg.p.global_size)) or (ji.prg.p.local_size and not all_int(ji.prg.p.local_size)):
           self.jc_idx_with_updatable_launch_dims.append(j)
-    self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
+    self.vars = sorted(var_vals.keys(), key=lambda v: v)
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[str, int]):
     self.w_dependency_map: Dict[Any, Any] = {}
     self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
     super().__init__(jit_cache, input_rawbuffers, var_vals)
@@ -142,9 +142,9 @@ class TinyJit(Generic[ReturnType]):
     st_varvals_dtype_device = [(*lb.st.unbind(), lb.dtype, lb.device) for lb in lbs]
     input_buffers: List[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
     assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
-    var_vals: Dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
-                                                [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
-    st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
+    var_vals: Dict[str, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
+                                                [{v.expr: v.val for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable)}])
+    st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v)), x[2], x[3]) for x in st_varvals_dtype_device]
     if not JIT or self.cnt == 0:
       if IN_JIT: raise RuntimeError("having TinyJit inside another TinyJit is not supported")
       # jit ignore
@@ -154,7 +154,7 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt == 1:
       # jit capture
       self.expected_names: List[Union[int, str]] = names
-      self.expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = st_vars_dtype_device
+      self.expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[str, ...], DType, str]] = st_vars_dtype_device
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)

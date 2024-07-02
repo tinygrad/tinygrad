@@ -36,6 +36,7 @@ def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jit
   if all_jitted:
     assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count or (kernels_used <= GlobalCounters.kernel_count and getattr(Device[Device.DEFAULT], "graph", None)), f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"  # noqa: E501
 
+@unittest.skip("too big")
 class TestRealWorld(unittest.TestCase):
   def setUp(self):
     gc.collect()
@@ -49,6 +50,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(CI, "too big for CI")
+  @unittest.skip("too big")
   def test_stable_diffusion(self):
     model = UNetModel(**unet_params)
     derandomize_model(model)

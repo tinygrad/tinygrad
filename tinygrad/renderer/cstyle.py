@@ -160,10 +160,10 @@ class CStyleLanguage(Renderer):
           kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_VAR:
-          assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
-          seen_vars.add(args.expr)
-          bufs.append((args.expr, (dtype,False)))
-          r[u] = args.expr
+          assert args not in seen_vars, f"duplicate variable {args}"
+          seen_vars.add(args)
+          bufs.append((args, (dtype,False)))
+          r[u] = args
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
