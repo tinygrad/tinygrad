@@ -9,8 +9,6 @@ HIDDEN_DIMS = 30
 OUTPUT_DIMS = 220
 
 class TestBug(unittest.TestCase):
-    ALPHA = 10
-
     def optimal_mse(self, y_pred: Tensor, y_true: Tensor, weights: Tensor) -> Tensor:
         """
         This is sort of the core of what I was trying to do. I'm trying to avoid overfitting for 
@@ -20,7 +18,7 @@ class TestBug(unittest.TestCase):
         """
         mse = (y_pred - y_true).pow(2).mean()
 
-        nonzero_penalty = (self.ALPHA * weights).abs().sum() / (weights.shape[0]) # If this is removed, the bug disappears.
+        nonzero_penalty = weights.abs().sum() / (weights.shape[0]) # If this is removed, the bug disappears.
 
         return mse + nonzero_penalty # Add it so if it is smaller, loss is smaller
 
@@ -50,7 +48,11 @@ class TestBug(unittest.TestCase):
             loss = self.optimal_mse(output_pred, output, flat_l3.cat(flat_l4))
             loss.backward()
             opt.step()
-            print(loss.numpy())
+            try:
+                print(loss.numpy())
+
+            except Exception as e:
+                self.fail(f"Strange bug detected: {e}")
 
 
 if __name__ == '__main__':
