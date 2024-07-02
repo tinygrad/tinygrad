@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
+  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto(); TC = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
@@ -70,8 +70,8 @@ class UOp:
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *src:UOp):
-    #if arg in {BinaryOps.ADD, BinaryOps.MUL}:
-    #  return UOp(UOps.ALU, src[-1].dtype, tuple(flatten([[x] if x.arg is not arg else x.src for x in src])), arg)
+    if getenv("FOLD_ALU") and arg in {BinaryOps.ADD, BinaryOps.MUL}:
+      return UOp(UOps.ALU, src[-1].dtype, tuple(flatten([[x] if x.arg is not arg else x.src for x in src])), arg)
     return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
@@ -358,8 +358,20 @@ float4_folding = PatternMatcher([
   (UOp.var("a")*UOp.var("b")*UOp.var("c"), lambda a,b,c: UOp.alu(BinaryOps.MUL, a, b, c)),
 """
 
+def tc_expand(tc, lb1, lb2, v1, v2):
+  ret = UOp(UOps.WMMA, dtype=tc.dtype.vec(2), src=(
+    UOp(UOps.CONTRACT, dtype=v1.dtype, src=(v1,), arg=(5, 2)),
+    UOp(UOps.CONTRACT, dtype=v2.dtype, src=(v2,), arg=(5, 2)),
+    UOp.const(tc.dtype.vec(2), 0.0)), arg=tc.arg)
+  return UOp(UOps.EXPAND, tc.dtype, tuple(UOp(UOps.GEP, tc.dtype, (ret,), i) for i in range(2)), arg=5)
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # tensor core
+  (UOp(UOps.TC, src=(UOp(UOps.REDUCE, src=(
+    UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
+    UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),))), UOp.var())),)).name("tc"),
+    tc_expand),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL, src=[UPat(UOps.CONST, name="mval"),

@@ -6,10 +6,10 @@ from collections import defaultdict
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, get_lazyop_info, BinaryOps
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
-from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
+from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod, flatten
 
 def calc_tc_idxs(local_idxs, local_sizes: List[int], aliases: List[List[int]]):
   replace_idxs, thread_idxs, thread_idx = [], [], Variable("_uidx_tc", 0, prod(local_sizes)-1)
@@ -122,7 +122,12 @@ class Lowerer(Kernel):
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
       # NOTE: always using ridxs is fine here
-      return UOp(UOps.REDUCE, x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
+      #arg = x.op
+      tc = self.tensor_core
+      ret = UOp(UOps.REDUCE, x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
+      wmma_sz = [prod(l) for l in tc.thread_local_sizes]
+      arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device)
+      return UOp(UOps.TC, ret.dtype, (ret,), arg)
     return UOp.alu(x.op, *in_uops)
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
@@ -131,6 +136,12 @@ class Lowerer(Kernel):
 
     # late alias the tensor core buffers
     if (tc:=self.tensor_core) and self.tensor_core_opts is not None:
+      # fixup the shapetrackers for tensor core
+      #shape_szs = {i+1:k for i,(_,k) in enumerate(self.tensor_core.threads)}
+      #shape_szs[-1] = self.tensor_core.thread_local_sizes[-1][0]
+      #self.reshape_and_permute(lambda x: (*x[0:4], 2, 2, 2, *x[5:]) if x[4] == 8 else (*x[0:4], 1, 1, 1, *x[5:]), None)
+      #self.upcasted += 2
+
       # NOTE: the 4 is required if using real locals
       alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [4]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
       for op, tc_bufs in self.bufs_for_tensor_core.items():
@@ -172,23 +183,66 @@ class Lowerer(Kernel):
       if op.op in BufferOps:
         idx = self.bufs.index(op.arg)
         arg = replace(op.arg, st=self.sts[idx])
-        for v in self.local_alias.values():
+        for top, v in self.local_alias.items():
           if idx in v:
             lbuf = v[idx]
             lidx = self.bufs.index(lbuf)
             assert arg.st.real_size() == self.sts[idx].real_size()
-            start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-            # these shapetrackers need to change
-            local_buffer = MemBuffer(lidx, start.dtype, self.sts[lidx])
-            local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
 
-            local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
+            shape_szs = {i+1:k for i,(_,k) in enumerate(self.tensor_core.threads)}
+            shape_szs[-1] = self.tensor_core.thread_local_sizes[-1][0]
+
+            # how to swizzle
+            tc_buf_num = self.bufs_for_tensor_core[top].index(idx)
+            tla = self.tensor_core.thread_local_aliases[tc_buf_num]
+
+            st1:ShapeTracker = arg.st
+            st2 = self.sts[lidx]
+
+            # not true with globals
+            #assert st1.shape == st2.shape
+
+            # very hacky shapetracker fixup
+            new_shape = []
+            for i,t in enumerate(tla):
+              if len(t) == 1:
+                new_shape.append(st1.shape[i])
+              else:
+                for tt in t:
+                  new_shape.append(shape_szs[tt])
+            new_shape = tuple(new_shape)
+            ftla = flatten(tla)
+            perm = {}
+            for i in range(len(self.tensor_core.threads)):
+              perm[i] = ftla.index(i+1)
+              perm[ftla.index(i+1)] = i
+            perm[len(ftla)-1] = ftla.index(-1)
+            perm[ftla.index(-1)] = len(ftla)-1
+            permaxis = tuple([x[1] for x in sorted(perm.items())])
+
+            def fix_st(st):
+              old_shape = st.shape
+              st = st.reshape(new_shape)
+              st = st.permute(permaxis)
+              return st.reshape(old_shape)
+
+            st1 = fix_st(st1)
+            st2 = fix_st(st2)
+
+            # swizzle shapetrackers here
+            print(tla, st1, st2)
+
+            start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), MemBuffer(arg.idx, arg.dtype, st1))
+            #return start
+            local_store = LazyOp(BufferOps.STORE, (start,), MemBuffer(lidx, start.dtype, st2))
+            local_load = LazyOp(BufferOps.LOAD, (local_store,), MemBuffer(lidx, start.dtype, self.sts[lidx]))
             # TODO: can these shapetrackers differ?
             #local_load = LazyOp(BufferOps.LOAD, (local_store,), MemBuffer(lidx, start.dtype, ShapeTracker.from_shape(self.sts[lidx].shape)))
             #print("BUF HIT")
             return local_load
       elif op.op in ReduceOps:
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])
+        #if op in self.bufs_for_tensor_core: assert op.src[0].op is BinaryOps.MUL
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
           local_buffer = MemBuffer(-1, start.dtype, self.sts[-1])
