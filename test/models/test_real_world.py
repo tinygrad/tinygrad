@@ -53,7 +53,7 @@ class TestRealWorld(unittest.TestCase):
     model = UNetModel(**unet_params)
     derandomize_model(model)
     @TinyJit
-    def test(t, t2): return model(t, 801, t2).realize()
+    def test(t, t2): return model(t, Tensor([801]), t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
 
   def test_mini_stable_diffusion(self):
