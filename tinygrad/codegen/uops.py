@@ -141,8 +141,7 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store):
-        return fxn(**store)
+      if _match(uop, p, store): return fxn(**store)
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
