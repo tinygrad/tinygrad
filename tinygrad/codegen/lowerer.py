@@ -123,12 +123,15 @@ class Lowerer(Kernel):
     if x.op in ReduceOps:
       # NOTE: always using ridxs is fine here
       #arg = x.op
-      tc = self.tensor_core
-      ret = UOp(UOps.REDUCE, x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
-      #return ret
-      wmma_sz = [prod(l) for l in tc.thread_local_sizes]
-      arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device)
-      return UOp(UOps.TC, ret.dtype, (ret,), arg)
+      dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
+      if tc := self.tensor_core:
+        wmma_sz = [prod(l) for l in tc.thread_local_sizes]
+        arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, self.shape_len-self.upcasted+1)
+        reduce_axis = self.shape_len-self.upcasted
+        src = (UOp(UOps.TC, dtype, (in_uops[0],), arg),) + tuple(self.ridxs[i] for i in x.arg if i != reduce_axis)
+      else:
+        src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
+      return UOp(UOps.REDUCE, dtype, src, x.op)
     return UOp.alu(x.op, *in_uops)
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
@@ -233,7 +236,7 @@ class Lowerer(Kernel):
             st2 = fix_st(st2)
 
             # swizzle shapetrackers here
-            print(st1, st2)
+            #print(st1, st2)
 
             start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), MemBuffer(arg.idx, arg.dtype, st1))
             #return start

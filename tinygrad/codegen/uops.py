@@ -359,18 +359,19 @@ float4_folding = PatternMatcher([
 """
 
 def tc_expand(tc, lb1, lb2, v1, v2):
+  upcast_axis = tc.arg[-1]
   ret = UOp(UOps.WMMA, dtype=tc.dtype.vec(2), src=(
-    UOp(UOps.CONTRACT, dtype=v1.dtype, src=(v1,), arg=(5, 2)),
-    UOp(UOps.CONTRACT, dtype=v2.dtype, src=(v2,), arg=(5, 2)),
+    UOp(UOps.CONTRACT, dtype=v1.dtype, src=(v1,), arg=(upcast_axis, 2)),
+    UOp(UOps.CONTRACT, dtype=v2.dtype, src=(v2,), arg=(upcast_axis, 2)),
     UOp.const(tc.dtype.vec(2), 0.0)), arg=tc.arg)
-  return UOp(UOps.EXPAND, tc.dtype, tuple(UOp(UOps.GEP, tc.dtype, (ret,), i) for i in range(2)), arg=5)
+  return UOp(UOps.EXPAND, tc.dtype, tuple(UOp(UOps.GEP, tc.dtype, (ret,), i) for i in range(2)), arg=upcast_axis)
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # tensor core
-  (UOp(UOps.TC, src=(UOp(UOps.REDUCE, src=(
+  (UOp(UOps.TC, src=(
     UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
-    UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),))), UOp.var())),)).name("tc"),
+    UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),))),)).name("tc"),
     tc_expand),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
@@ -570,11 +571,13 @@ class UOpGraph:
       sink = graph_rewrite(sink, contractor)
       sink = graph_rewrite(sink, reducer)
 
-      # do upcasts (after reduce unrolls and rewrites)
-      all_parents = set([sink]).union(sink.parents)
-      expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
-      if len(expands):
-        new_nodes = expand_nodes(all_parents, expands, sink)
+      # do upcasts (after reduce unrolls and rewrites) ... one at a time
+      while 1:
+        all_parents = set([sink]).union(sink.parents)
+        expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
+        if not expands: break
+        local_expands = [x for x in expands if x.arg == expands[0].arg]
+        new_nodes = expand_nodes(all_parents, local_expands, sink)
         sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
 
       # do graph rewrite (2)
