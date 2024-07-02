@@ -141,7 +141,7 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): 
+      if _match(uop, p, store):
         return fxn(**store)
     return None
 
@@ -246,11 +246,13 @@ constant_folder = PatternMatcher([
   ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
   # *** rules from symbolic ***
   # var [3 - 8] > 77 -> 0
-  ((UOp(UOps.DEFINE_VAR,src=(UOp.cvar("mn"), UOp.cvar("mx"))) .lt(UOp.cvar('x'))).name("root"), lambda root,x, mn,mx: (UOp.const(dtypes.int, 0) if mx.arg < x.arg else None)),
-  # var a > b -> -a < -(b-1)
-  ((UOp.var("a").ge(UOp.var("b"))).name("root"), lambda root,a,b: UOp.lt(-a, -b+1)),
+  ((UOp(UOps.DEFINE_VAR,src=(UOp.cvar("mn"), UOp.cvar("mx"))) .lt(UOp.cvar('x'))).name("root"),
+   lambda root,x, mn,mx: (UOp.const(dtypes.int, 0) if mx.arg < x.arg else None)),
+  # [int] a >= b -> -a < -(b-1)
+  ((UOp.var("a",dtypes.int).ge(UOp.var("b", dtypes.int))).name("root"), lambda root,a,b: print_tree(root) or UOp.lt(-a, -b+1)),
   # var 2 < [3 - 8] -> 1
-  ((UOp.cvar("x").lt(UOp(UOps.DEFINE_VAR, src=(UOp.cvar("mn"), UOp.cvar("mx")))).name("root"), lambda root,x, mn,mx: (UOp.const(dtypes.int, 1) if x.arg < mn.arg else None))),
+  ((UOp.cvar("x").lt(UOp(UOps.DEFINE_VAR, src=(UOp.cvar("mn"), UOp.cvar("mx")))).name("root"),
+    lambda root,x, mn,mx: (UOp.const(dtypes.int, 1) if x.arg < mn.arg else None))),
 
   # two stage mul, (x*c1)*c2 = x*(c1*c2)
   ((UOp.var("x") * UOp.cvar("c1")) * UOp.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),

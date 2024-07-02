@@ -42,8 +42,7 @@ class Node:
   def ands(ops): return functools.reduce(lambda x,y: x*y, ops)
   def __floordiv__(a,b,unk): return a//b
 def create_lt_node(v:sint, n:sint): return v.lt(n)
-def create_ge_node(v:sint, n:sint): 
-  return v.ge(n)
+def create_ge_node(v:sint, n:sint): return v.ge(n)
 def SumNode(x): return Node.sum(x)
 def MulNode(x, y): return x*y
 
