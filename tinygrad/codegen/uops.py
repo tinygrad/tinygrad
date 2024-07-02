@@ -69,10 +69,7 @@ class UOp:
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
-  def alu(arg, *src:UOp):
-    if getenv("FOLD_ALU") and arg in {BinaryOps.ADD, BinaryOps.MUL}:
-      return UOp(UOps.ALU, src[-1].dtype, tuple(flatten([[x] if x.arg is not arg else x.src for x in src])), arg)
-    return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
+  def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod
@@ -118,8 +115,7 @@ class UPat:
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
     if u.op is UOps.VAR:
-      return UPat(name=name or u.arg, dtype=u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name)) \
-        if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
+      return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
