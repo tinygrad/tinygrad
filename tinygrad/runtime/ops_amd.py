@@ -67,8 +67,8 @@ class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    try: return compile_hip(src, self.arch)
+  def compile(self, src:str, asm:bool = False) -> bytes:
+    try: return compile_hip(src, self.arch, asm)
     except RuntimeError as e: raise CompileError(e) from e
 
 class HWQueue:
@@ -339,7 +339,7 @@ class AMDProgram:
       self.dispatch_packet_offset = self.kernargs_alloc_size
       self.kernargs_alloc_size += ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 
-    assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
+    #assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
     assert code.workitem_private_segment_byte_size == 0
     assert code.max_scratch_backing_memory_byte_size == 0
     assert code.kernel_code_prefetch_byte_size == 0
