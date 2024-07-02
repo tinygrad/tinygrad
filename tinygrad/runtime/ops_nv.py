@@ -388,7 +388,9 @@ class NVDevice(HCQCompatCompiled):
       params=nv_gpu.NVOS33_PARAMETERS(hClient=self.root, hDevice=self.device, hMemory=memory_handle, length=size, flags=flags))
     nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_MAP_MEMORY, made)
     if made.params.status != 0: raise RuntimeError(f"_gpu_map_to_cpu returned {made.params.status}")
-    return libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev, 0)
+    res = libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev, 0)
+    os.close(fd_dev)
+    return res
 
   def _gpu_alloc(self, size:int, contig=False, huge_page=False, va_addr=None, map_to_cpu=False, map_flags=0):
     size = round_up(size, align:=((2 << 20) if huge_page else (4 << 10)))
