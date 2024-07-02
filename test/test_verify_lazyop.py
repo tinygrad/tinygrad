@@ -1,6 +1,6 @@
 from __future__ import annotations
 import unittest
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer as Linearizer
 #from tinygrad.codegen.lowerer import Lowerer
 from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import DEBUG

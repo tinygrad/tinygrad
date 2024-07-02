@@ -1,5 +1,5 @@
 from typing import List, Tuple
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer as Linearizer
 from tinygrad.engine.search import get_linearizer_actions, actions
 
 _net = None

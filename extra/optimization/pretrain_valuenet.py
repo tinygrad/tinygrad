@@ -1,4 +1,4 @@
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer as Linearizer
 from tqdm import tqdm, trange
 import math
 import random

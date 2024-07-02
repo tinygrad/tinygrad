@@ -3,7 +3,7 @@ from collections import defaultdict
 from extra.optimization.helpers import kern_str_to_lin
 from test.external.fuzz_linearizer import compare_linearizer
 from tinygrad.helpers import colored
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer as Linearizer
 from tinygrad.engine.graph import print_tree
 from tinygrad.engine.search import time_linearizer
 

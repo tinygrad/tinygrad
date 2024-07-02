@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer as Linearizer
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.engine.graph import graph_uops
 from tinygrad.engine.schedule import create_schedule

@@ -4,7 +4,7 @@ from extra.optimization.helpers import ast_str_to_lin
 from tinygrad import dtypes
 from tinygrad.helpers import BEAM, getenv
 from tinygrad.device import Device, Compiled
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer as Linearizer
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 
 
