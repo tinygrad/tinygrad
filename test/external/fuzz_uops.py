@@ -5,7 +5,6 @@ from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import DEBUG, colored, getenv
-from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import _to_np_dtype
 
 def fuzz_uops(graph:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int], loops_children:Dict[UOp, Set[UOp]]):
@@ -21,7 +20,7 @@ def fuzz_uops(graph:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int], loops_childr
   return paths
 
 class UOpsFuzzerRunner(CompiledRunner):
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[str, int], wait=False):
     assert self.p.uops is not None and len(self.p.uops.fuzz_paths) >= 1
     init_rawbufs, init_name = {x:x.as_buffer() for x in rawbufs}, self.p.function_name
     init_globals = {i[0]:buf for i, buf in zip(self.p.globals, rawbufs)}

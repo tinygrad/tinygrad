@@ -119,15 +119,15 @@ class View:
     return functools.reduce(operator.or_, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, Node)], set())
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
-  def unbind(self) -> Tuple[View, Dict[Variable, int]]:
+  def unbind(self) -> Tuple[View, Dict[str, int]]:
     var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.val is not None]
-    unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
+    unbound_vars = {v.expr:uv for v,(uv,_) in var_unboundvar_val}
     new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape])
     new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides])
     new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars)
     new_mask = tuple((a if isinstance(a, int) else a.substitute(unbound_vars),
                       b if isinstance(b, int) else b.substitute(unbound_vars)) for (a, b) in self.mask) if self.mask is not None else None
-    return View.create(new_shape, new_strides, new_offset, new_mask), dict(x[1] for x in var_unboundvar_val)
+    return View.create(new_shape, new_strides, new_offset, new_mask), {x[1][0].expr: x[1][1] for x in var_unboundvar_val}
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, vm1:View) -> Optional[View]:
@@ -286,7 +286,7 @@ class View:
         if isinstance(so, int):
           if si != so: raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
         else:
-          var_vals = {v: v.unbind()[1] for v in so.vars()}
+          var_vals = {v.expr: v.unbind()[1] for v in so.vars()}
           if si != sym_infer(so, var_vals): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
       # all dimensions matched, return the new view directly
       return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)

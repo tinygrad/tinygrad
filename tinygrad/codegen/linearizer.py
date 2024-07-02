@@ -90,7 +90,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 @functools.lru_cache(maxsize=None)
 def expand_node(node:Node, idxs:Optional[Tuple[Union[Variable, NumNode], ...]]=None) -> List[Node]:
   if idxs is None: idxs = (expand_idx(node),)
-  return [node.substitute({k:v for k,v in zip(idxs, (NumNode(x) for x in rep)) if isinstance(k, Variable)}) for rep in iter_idxs(idxs)]
+  return [node.substitute({k.expr:v for k,v in zip(idxs, (NumNode(x) for x in rep)) if isinstance(k, Variable)}) for rep in iter_idxs(idxs)]
 
 def variable_to_uop(x, ctx=None) -> UOp:
   if isinstance(x, int): return UOp.const(dtypes.int, x)
@@ -98,7 +98,7 @@ def variable_to_uop(x, ctx=None) -> UOp:
 
 render_ops: Dict[Type, Callable[..., UOp]]  = {
   NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
-  Variable: lambda self, ops, ctx: ctx[self.expr] if self.expr in ctx else UOp(UOps.DEFINE_VAR, dtypes.int, (), self),
+  Variable: lambda self, ops, ctx: ctx[self.expr] if self.expr in ctx else UOp(UOps.DEFINE_VAR, dtypes.int, (), self.expr),
   MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*variable_to_uop(self.b, ctx),
   DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//variable_to_uop(self.b, ctx),
   ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%variable_to_uop(self.b, ctx),

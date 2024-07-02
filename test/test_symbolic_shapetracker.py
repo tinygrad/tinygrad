@@ -50,19 +50,19 @@ class TestSymbolicVarVals(unittest.TestCase):
 
   def test_var_vals_shape(self):
     x = Variable("x", 1, 100).bind(3)
-    assert ShapeTracker.from_shape((x, 3)).var_vals == {Variable("x", 1, 100): 3}
+    assert ShapeTracker.from_shape((x, 3)).var_vals == {"x": 3}
 
   def test_var_vals_offset(self):
     x = Variable("x", 1, 100).bind(3)
     st = ShapeTracker.from_shape((4, 3)).shrink(((x, x+1), (0, 3)))
     assert st.views[-1].offset == x * 3
-    assert st.var_vals == {Variable("x", 1, 100): 3}
+    assert st.var_vals == {"x": 3}
 
   def test_var_vals_mask(self):
     x = Variable("x", 1, 100).bind(3)
     view = View.create(shape=(3,4), strides=(4,1), offset=0, mask=((0, x), (0, 4)))
     st = ShapeTracker(views=(view,))
-    assert st.var_vals == {Variable("x", 1, 100): 3}
+    assert st.var_vals == {"x": 3}
 
   def test_var_vals_complex(self):
     x = Variable("x", 1, 100).bind(3)
@@ -70,13 +70,13 @@ class TestSymbolicVarVals(unittest.TestCase):
     z = Variable("z", 1, 100).bind(5)
     st = ShapeTracker.from_shape((x, 5, y)).shrink(((0, x), (z, z+1), (0, 3)))
     assert st.views[-1].offset == y * z
-    assert st.var_vals == {Variable("x", 1, 100): 3, Variable("y", 1, 100):4, Variable("z", 1, 100): 5}
+    assert st.var_vals == {"x": 3, "y":4, "z": 5}
 
   def test_shrink_reshape(self):
     x = Variable("x", 1, 100).bind(3)
     st = ShapeTracker.from_shape((10, 10, 10)).shrink(((x, x+3), (3, 7), (2, 5)))
     st = st.reshape((3*4*3,))
-    assert st.var_vals == {Variable("x", 1, 100): 3}
+    assert st.var_vals == {"x": 3}
 
 class TestShapeTrackerUnbind(unittest.TestCase):
   def test_view_unbind(self):
@@ -84,7 +84,7 @@ class TestShapeTrackerUnbind(unittest.TestCase):
     bv = Variable("v", 1, 100).bind(3)
     unbound_view, var_val = View.create(shape=(bv, 4)).unbind()
     assert unbound_view == View.create(shape=(v, 4))
-    assert var_val == {v: 3}
+    assert var_val == {"v": 3}
 
   def test_reshape_unbind(self):
     v = Variable("v", 1, 100)

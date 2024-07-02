@@ -40,7 +40,7 @@ class Program:
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 
-  def launch_dims(self, var_vals:Dict[Variable, int]):
+  def launch_dims(self, var_vals:Dict[str, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size

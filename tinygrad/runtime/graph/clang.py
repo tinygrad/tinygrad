@@ -4,19 +4,18 @@ from tinygrad.helpers import dedup, cpu_time_execution, GraphException, DEBUG
 from tinygrad.engine.jit import GraphRunner
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import ExecItem, CompiledRunner
-from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_clang import ClangProgram
 from tinygrad.renderer.cstyle import ClangRenderer
 render_dtype = ClangRenderer().render_dtype
 
 class ClangGraph(GraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[str, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
     prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src for ji in jit_cache]))
     args = [f"{render_dtype(x.dtype)}* arg{i}" for i,x in enumerate(input_rawbuffers)]
-    args += sorted([f"int {v.expr}" for v in var_vals])
+    args += sorted([f"int {v}" for v in var_vals])
     code = ["void batched("+','.join(args)+") {"]
     for ji in jit_cache:
       args = []
@@ -34,6 +33,6 @@ class ClangGraph(GraphRunner):
     assert compiler is not None
     self.clprg = ClangProgram("batched", compiler.compile(prgs+"\n"+"\n".join(code))) # no point in caching the pointers
 
-  def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False):
+  def __call__(self, rawbufs: List[Buffer], var_vals: Dict[str, int], wait=False):
     return cpu_time_execution(
-    lambda: self.clprg(*[x._buf for x in rawbufs], *[x[1] for x in sorted(var_vals.items(), key=lambda x: x[0].expr)]), enable=wait)
+    lambda: self.clprg(*[x._buf for x in rawbufs], *[x[1] for x in sorted(var_vals.items(), key=lambda x: x[0])]), enable=wait)

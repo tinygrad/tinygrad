@@ -29,6 +29,10 @@ class UOps(Enum):
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(frozen=True, eq=False)
 class UOp:
+
+  # def __post_init__(self):
+  #   if self.op is UOps.DEFINE_VAR:
+  #     assert type(self.arg) is str, f"DEFINE_VAR arg must be a string, got {self.arg}"
   op: UOps
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
@@ -38,7 +42,7 @@ class UOp:
   @functools.cached_property
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
+    return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg) if self.op is not UOps.ALU else \
             (type(self.op), self.op.value), self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
@@ -71,8 +75,7 @@ class UOp:
   @staticmethod
   def store(*src:UOp, **kwargs): return UOp(UOps.STORE, None, tuple(src)+tuple(kwargs.values()))
   @staticmethod
-  def var(name:Optional[str]=None, dtype:Optional[DType]=None, minmax:Tuple[int,...] = ()):
-    return UOp(UOps.VAR, dtype=dtype, src=tuple(lambda x: UOp.const(dtypes.int, x)), arg=name)
+  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, src=(), arg=name)
   @staticmethod
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return UOp(UOps.CONST, dtype=dtype).name(name)
   @functools.cached_property
@@ -313,7 +316,7 @@ class UOpGraph:
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
-  def vars(self) -> List[Variable]: return sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR], key=lambda v: v.expr)
+  def vars(self) -> List[Variable]: return sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR], key=lambda v: v)
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
 
   @property

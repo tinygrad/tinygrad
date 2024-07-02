@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING
 from tinygrad.ops import BufferOps, LoadOps, LazyOp
 from tinygrad.device import Device, Buffer
-from tinygrad.shape.symbolic import Variable, sym_infer, sint
+from tinygrad.shape.symbolic import sym_infer, sint
 from tinygrad.renderer import Renderer, Program
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.schedule import ScheduleItem
@@ -48,9 +48,9 @@ class Runner:
     self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
   @property
   def device(self): return Device[self.dname]
-  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
+  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[str, int]]=None) -> Optional[float]:
     return self(rawbufs, {} if var_vals is None else var_vals)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[str, int], wait=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
 class CompiledRunner(Runner):
@@ -63,7 +63,7 @@ class CompiledRunner(Runner):
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[str, int], wait=False) -> Optional[float]:
     global_size, local_size = self.p.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -78,21 +78,26 @@ class CompiledRunner(Runner):
     if local_size:
       lra['local_size'] = local_size
       assert len(local_size) == 3, "local size must have len 3"
-    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
+    try:
+      res = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
+    except KeyError as e:
+      raise RuntimeError(f"missing variable {e} in {var_vals}")
+
+    return res
 
 class CustomOp(Runner):
   def __init__(self, fxn):
     self.fxn = fxn
     super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[str, int], wait=False): self.fxn(*rawbufs)
 
 class EmptyOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[str, int], wait=False): pass
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[str, int], wait=False):
     assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1].base, f"must be base {rawbufs}"
 
 class BufferCopy(Runner):
@@ -109,7 +114,7 @@ class BufferCopy(Runner):
       src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
     else:
       dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[str, int], wait=False):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
@@ -148,7 +153,7 @@ def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
 class ExecItem:
   prg: Runner
   bufs: List[Optional[Buffer]]
-  def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+  def run(self, var_vals:Optional[Dict[str, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
     if do_update_stats:
@@ -186,7 +191,7 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 
 capturing: List = []  # put classes with an add method in here
 
-def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None, do_update_stats=True):
+def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[str, int]]=None, do_update_stats=True):
   for ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
     ei.run(var_vals, do_update_stats=do_update_stats)
