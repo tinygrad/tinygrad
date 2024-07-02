@@ -205,7 +205,7 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
   for n in on_path:
     for x in children[n]:
       in_degree[x] += 1
-  toposort = []
+  toposort: List[UOp] = []
   search2 = [p for p in on_path if in_degree[p] == 0]
   seen: Set[UOp] = set()
   while len(search2):
@@ -224,18 +224,28 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
     else: replacements[r.arg] = list(range(0, len(r.src)))
 
   # get nodes on the path from root to the expand node
-  new_uops: List[UOp] = []
+  rps = list(itertools.product(*replacements.values()))
+
   acc_number = 0
-  for rp in itertools.product(*replacements.values()):
+  replaces = []
+  for rp in rps:
     rpk = dict(zip(replacements.keys(), rp))
     replace = {r:r.src[rpk[r.arg]] for r in expands}
-
     for d in define_accs:
       replace[d] = UOp(d.op, d.dtype, d.src, d.arg + (acc_number,))
       acc_number += 1
-    for cc in toposort: replace[cc] = UOp(cc.op, cc.dtype, tuple(replace.get(x, x) for x in cc.src), cc.arg)
-    new_uops.append(replace.get(base, base))
-  return new_uops
+    replaces.append(replace)
+
+  for cc in toposort:
+    if cc.op is UOps.BARRIER:
+      super_replace = UOp(cc.op, cc.dtype, sum([tuple(replace.get(x, x) for x in cc.src) for replace in replaces], ()), cc.arg)
+      for replace in replaces:
+        replace[cc] = super_replace
+    else:
+      for replace in replaces:
+        replace[cc] = UOp(cc.op, cc.dtype, tuple(replace.get(x, x) for x in cc.src), cc.arg)
+
+  return [x.get(base, base) for x in replaces]
 
 def get_reduce_acc(op, dtype):
   if op is ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
