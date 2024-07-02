@@ -153,7 +153,6 @@ def sum_collapse(phi_input, loop, val1, val2):
       return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+ret
   return None
 
-
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   if not rng.arg[2]: return None   # must be a reduce
   if mval.arg >= 0 or loop_start.arg != 0:
@@ -162,6 +161,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
     return None
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
