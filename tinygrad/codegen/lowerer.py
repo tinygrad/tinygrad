@@ -11,21 +11,6 @@ from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod, flatten
 
-def calc_tc_idxs(local_idxs, local_sizes: List[int], aliases: List[List[int]]):
-  replace_idxs, thread_idxs, thread_idx = [], [], Variable("_uidx_tc", 0, prod(local_sizes)-1)
-  for s in local_sizes:
-    thread_idxs.append(thread_idx % s)
-    thread_idx //= s
-  for alias in aliases:
-    full_var, full_var_sz = NumNode(0), 1
-    if alias[0] != 0:
-      for i in alias:
-        next_var = local_idxs[i-1] if i > 0 else thread_idxs[-i-1]
-        full_var += next_var * full_var_sz
-        full_var_sz *= next_var.max+1
-    replace_idxs.append(full_var)
-  return replace_idxs
-
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
 def variable_to_uop(x, ctx=None) -> UOp:
   if isinstance(x, int): return UOp.const(dtypes.int32, x)
