@@ -6,7 +6,7 @@ from collections import defaultdict
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, get_lazyop_info, BinaryOps
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod, flatten
@@ -140,12 +140,6 @@ class Lowerer(Kernel):
 
     # late alias the tensor core buffers
     if (tc:=self.tensor_core) and self.tensor_core_opts is not None:
-      # fixup the shapetrackers for tensor core
-      #shape_szs = {i+1:k for i,(_,k) in enumerate(self.tensor_core.threads)}
-      #shape_szs[-1] = self.tensor_core.thread_local_sizes[-1][0]
-      #self.reshape_and_permute(lambda x: (*x[0:4], 2, 2, 2, *x[5:]) if x[4] == 8 else (*x[0:4], 1, 1, 1, *x[5:]), None)
-      #self.upcasted += 2
-
       # NOTE: the 4 is required if using real locals
       alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [4]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
       for op, tc_bufs in self.bufs_for_tensor_core.items():
@@ -178,17 +172,11 @@ class Lowerer(Kernel):
     # transformed to the final LazyOp
     @functools.lru_cache(None)
     def fixup_ast(op:LazyOp) -> LazyOp:
-      #if op in self.local_alias:
-      #  print("local", op)
-      #if op in self.bufs_for_tensor_core:
-      #  alias_pattern = [0]*(self.global_dims) + [2]*(len(self.tensor_core.threads)) + [0]*(self.local_dims-len(self.tensor_core.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
-      #  for tc_buf in self.bufs_for_tensor_core[op]:
-      #    print("TC BUF", tc_buf, alias_pattern)
       if op.op in BufferOps:
         idx = self.bufs.index(op.arg)
         arg = replace(op.arg, st=self.sts[idx])
         for top, v in self.local_alias.items():
-          if idx in v:
+          if idx in v and (tc:=self.tensor_core):
             lbuf = v[idx]
             lidx = self.bufs.index(lbuf)
             assert arg.st.real_size() == self.sts[idx].real_size()
@@ -197,15 +185,15 @@ class Lowerer(Kernel):
             st1:ShapeTracker = arg.st
             st2 = self.sts[lidx]
 
-            shape_szs = {i+1:k for i,(_,k) in enumerate(self.tensor_core.threads)}
-            shape_szs[-1] = self.tensor_core.thread_local_sizes[-1][0]
+            shape_szs = {i+1:k for i,(_,k) in enumerate(tc.threads)}
+            shape_szs[-1] = tc.thread_local_sizes[-1][0]
 
             tc_buf_num = self.bufs_for_tensor_core[top].index(idx)
-            tla = self.tensor_core.thread_local_aliases[tc_buf_num]
+            tla = tc.thread_local_aliases[tc_buf_num]
 
             # very hacky shapetracker fixup
             new_shape = tuple(st1.shape[:self.shape_len-self.upcasted])
-            mtla = tla[len(self.tensor_core.threads):]
+            mtla = tla[len(tc.threads):]
             for i,t in enumerate(mtla):
               if len(t) == 1:
                 new_shape += (st1.shape[self.shape_len-self.upcasted+i],)
@@ -219,12 +207,8 @@ class Lowerer(Kernel):
               tidx = self.shape_len-self.upcasted+i
               if a == -1: swap = self.shape_len-self.upcasted+len(fmtla)-1
               elif a > 0: swap = self.global_dims+a-1
-              #print(tidx, swap)
+              else: continue
               permaxis[swap], permaxis[tidx] = permaxis[tidx], permaxis[swap]
-
-            #print(permaxis)
-            # [5, 1, 4, 3, 2, 6, 0, 7] -- (5, 1, 4, 3, 2, 0, 7, 6)
-            # [0, 5, 2, 4, 3, 6, 1]  -- (0, 5, 2, 4, 3, 1, 6)
 
             def fix_st(st):
               old_shape = st.shape
@@ -235,16 +219,9 @@ class Lowerer(Kernel):
             st1 = fix_st(st1)
             st2 = fix_st(st2)
 
-            # swizzle shapetrackers here
-            #print(st1, st2)
-
             start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), MemBuffer(arg.idx, arg.dtype, st1))
-            #return start
             local_store = LazyOp(BufferOps.STORE, (start,), MemBuffer(lidx, start.dtype, st2))
             local_load = LazyOp(BufferOps.LOAD, (local_store,), MemBuffer(lidx, start.dtype, self.sts[lidx]))
-            # TODO: can these shapetrackers differ?
-            #local_load = LazyOp(BufferOps.LOAD, (local_store,), MemBuffer(lidx, start.dtype, ShapeTracker.from_shape(self.sts[lidx].shape)))
-            #print("BUF HIT")
             return local_load
       elif op.op in ReduceOps:
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])

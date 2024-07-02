@@ -369,6 +369,10 @@ def tc_expand(tc, lb1, lb2, v1, v2):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # tensor core
+  (UOp(UOps.TC, src=(UOp.cast(
+    UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
+    UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),)))),)).name("tc"),
+    tc_expand),
   (UOp(UOps.TC, src=(
     UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
     UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),))),)).name("tc"),
