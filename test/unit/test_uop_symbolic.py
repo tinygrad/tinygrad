@@ -42,7 +42,8 @@ class Node:
   def ands(ops): return functools.reduce(lambda x,y: x*y, ops)
   def __floordiv__(a,b,unk): return a//b
 def create_lt_node(v:sint, n:sint): return v.lt(n)
-def create_ge_node(v:sint, n:sint): return v.ge(n)
+def create_ge_node(v:sint, n:sint): 
+  return v.ge(n)
 def SumNode(x): return Node.sum(x)
 def MulNode(x, y): return x*y
 
@@ -81,8 +82,8 @@ class TestSymbolic(unittest.TestCase):
   def test_ge(self):
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 77), 0, 0, "0")
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 9), 0, 0, "0")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, "((a*-1)<-7)")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 4), 0, 1, "((a*-1)<-3)")
+    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, {"((a*-1)<-7)", "(7<a)"})
+    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 4), 0, 1, {"((a*-1)<-3)", "(3<a)"})
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 3), 1, 1, "1")
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 2), 1, 1, "1")
 
