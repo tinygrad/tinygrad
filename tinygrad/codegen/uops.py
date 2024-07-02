@@ -118,10 +118,10 @@ class UPat:
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
     if u.op is UOps.VAR:
-      return UPat(name=name or u.arg, dtype=u.dtype, allow_any_len=(name is not None and 'allow_any_len' in name)) \
+      return UPat(name=name or u.arg, dtype=u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name)) \
         if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
-                name, u.dtype, allow_any_len=(name is not None and 'allow_any_len' in name))
+                name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
@@ -328,19 +328,10 @@ tc_args = ('WMMA_8_8_8_float_float', (8, 8, 8), dtypes.float, dtypes.float, (2, 
 ex_8 = UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(8))).name("ex")
 
 float4_folding = PatternMatcher([
-  # tensor core!
-  #(UOp(UOps.REDUCE, dtype=dtypes.float, src=(UOp(UOps.LOAD).name("x") * UOp(UOps.LOAD, src=(UOp.var("w_src"), UOp.var("w_idx")+ex_8)), ex_8)),
-  #  lambda ex,x,w_src,w_idx: UOp(UOps.WMMA, dtypes.float, (x, UOp(UOps.LOAD, dtypes.float, src=(w_src, w_idx))), tc_args)),
-  # float4 add reorder. NOTE: n-ary ADD will fix this.
-  #(UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-  #  UOp.var("idx")+(UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")))).name("load"),
-  #  lambda buf, load, idx, idx2, ex: UOp(UOps.LOAD, load.dtype, (buf, idx+idx2+ex), load.arg)),
   (UOp(UOps.STORE, dtype=dtypes.float, src=(UOp.var("buf"), UOp.var("idx")+
     (UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")), UOp.var("var"))).name("store"),
     lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
-  # float4 load/store
-  #(UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
-  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"))).name("load"), float4_expand_load),
+  # float(2,4) load
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int))).name("load"),
     float4_expand_load),
@@ -348,8 +339,7 @@ float4_folding = PatternMatcher([
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
-  #(UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
-  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"), UOp.var("var"))), float4_contract_store),
+  # float(2,4) store
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int), UOp.var("var"))).name("store_allow_any_len"),
     float4_contract_store),
@@ -358,19 +348,6 @@ float4_folding = PatternMatcher([
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
 ])
-
-"""
-  # collapse ADD
-  (UOp.var("a")+UOp.var("b")+UOp.var("c")+UOp.var("d")+UOp.var("e")+UOp.var("f"), lambda a,b,c,d,e,f: UOp.alu(BinaryOps.ADD, a, b, c, d, e, f)),
-  (UOp.var("a")+UOp.var("b")+UOp.var("c")+UOp.var("d")+UOp.var("e"), lambda a,b,c,d,e: UOp.alu(BinaryOps.ADD, a, b, c, d, e)),
-  (UOp.var("a")+UOp.var("b")+UOp.var("c")+UOp.var("d"), lambda a,b,c,d: UOp.alu(BinaryOps.ADD, a, b, c, d)),
-  (UOp.var("a")+UOp.var("b")+UOp.var("c"), lambda a,b,c: UOp.alu(BinaryOps.ADD, a, b, c)),
-  # collapse MUL
-  (UOp.var("a")*UOp.var("b")*UOp.var("c")*UOp.var("d")*UOp.var("e")*UOp.var("f"), lambda a,b,c,d,e,f: UOp.alu(BinaryOps.MUL, a, b, c, d, e, f)),
-  (UOp.var("a")*UOp.var("b")*UOp.var("c")*UOp.var("d")*UOp.var("e"), lambda a,b,c,d,e: UOp.alu(BinaryOps.MUL, a, b, c, d, e)),
-  (UOp.var("a")*UOp.var("b")*UOp.var("c")*UOp.var("d"), lambda a,b,c,d: UOp.alu(BinaryOps.MUL, a, b, c, d)),
-  (UOp.var("a")*UOp.var("b")*UOp.var("c"), lambda a,b,c: UOp.alu(BinaryOps.MUL, a, b, c)),
-"""
 
 def tc_expand(red_allow_any_len, tc, lb1, lb2, v1, v2):
   upcast_axis = tc.arg[-1]
@@ -381,10 +358,6 @@ def tc_expand(red_allow_any_len, tc, lb1, lb2, v1, v2):
   ret = UOp(red_allow_any_len.op, red_allow_any_len.dtype.vec(2), src=(ret,)+red_allow_any_len.src[1:], arg=red_allow_any_len.arg)
   return UOp(UOps.EXPAND, tc.dtype, tuple(UOp(UOps.GEP, tc.dtype, (ret,), i) for i in range(2)), arg=upcast_axis)
 
-def tc_fail(tc):
-  from tinygrad.engine.graph import print_tree
-  print_tree(tc)
-  assert False
 tensor_core_pattern = [
   # tensor core
   (UOp(UOps.REDUCE, src=(UOp(UOps.TC, src=(UOp.cast(
@@ -397,21 +370,11 @@ tensor_core_pattern = [
       UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),)))
     ,)).name("tc"),)).name("red_allow_any_len"),
     tc_expand),
-  #(UOp(UOps.TC).name("tc"), tc_fail),
   (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg))]
-#tensor_core_pattern.clear()
-
-#def reduce_expand_reorder(red, ex, src):
-#  new_red = UOp(red.op, red.dtype.vec(len(ex.src)), src=(src,)+red.src[1:], arg=red.arg)
-#  new_geps = [UOp(UOps.GEP, red.dtype, (new_red, ), x.arg) for x in ex.src]
-#  return UOp(UOps.EXPAND, red.dtype, tuple(new_geps), ex.arg)
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher(tensor_core_pattern+[
-  # reduce reorder
-  #(UPat(UOps.REDUCE, name="red", src=(
-  #  UPat(UOps.EXPAND, name="ex", src=UPat(UOps.GEP, src=(UPat(name="src"),)),),), allow_any_len=True), reduce_expand_reorder),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL, src=[UPat(UOps.CONST, name="mval"),
@@ -559,8 +522,10 @@ class UOpGraph:
     self.sinks: List[UOp] = sinks
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
+    self.opts = opts
     self.folder = constant_folder if opts is None or not opts.supports_float4 else constant_folder_w_f4
 
+  def __reduce__(self): return self.__class__, (self.sinks, self.opts)
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
