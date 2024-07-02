@@ -153,7 +153,7 @@ def sum_collapse(phi_input, loop, val1, val2):
   return None
 
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
-  if getenv("DISABLE_LOOP_COLLAPSE") or not rng.arg[2]: return None   # must be a reduce
+  if not rng.arg[2]: return None   # must be a reduce
   if mval.arg >= 0 or loop_start.arg != 0:
     # TODO: support and test this with other mvals and loop_starts
     if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
