@@ -188,7 +188,7 @@ class Compiled:
 
 @contextlib.contextmanager
 def hcq_profile(dev, queue_type, enabled, desc):
-  st, en = (dev._get_signal(), dev._get_signal()) if enabled else (None, None)
+  st, en = (dev._alloc_signal(), dev._alloc_signal()) if enabled else (None, None)
   if enabled: queue_type().timestamp(st).submit(dev)
   try: yield (st, en)
   finally:
@@ -217,7 +217,10 @@ class HCQCompatCompiled(Compiled):
   def _set_signal(self, sig, value): raise NotImplementedError("need _set_signal") # sets a value for a signal
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs): raise NotImplementedError("need _get_signal") # allocates a new signal
+  def _alloc_signal(self, value=0, **kwargs): raise NotImplementedError("need _alloc_signal") # allocates a new signal
+
+  @classmethod
+  def _free_signal(self, sig): raise NotImplementedError("need _free_signal") # frees a signal
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
@@ -225,6 +228,7 @@ class HCQCompatCompiled(Compiled):
   def _gpu2cpu_time(self, gpu_time, is_copy): raise NotImplementedError("need _gpu2cpu_time")
 
   def _prof_setup(self):
+    if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
     self.profile_logger = ProfileLogger()
 
     def _sync_queue(q_t):
@@ -236,11 +240,9 @@ class HCQCompatCompiled(Compiled):
     self.cpu_start_time, self.gpu_start_time = _sync_queue(self.hw_compute_queue_t)
     self.copy_cpu_start_time, self.copy_gpu_start_time = _sync_queue(self.hw_copy_queue_t)
 
-    atexit.register(self._prof_finalize)
-
   def _prof_process_events(self):
     self.raw_prof_records += [(self._read_timestamp(st), self._read_timestamp(en), name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
-    for st, en, _, _ in self.sig_prof_records: self.signals_pool += [st, en] # type: ignore
+    for st, en, _, _ in self.sig_prof_records: map(self._alloc_signal, [st, en])
     self.sig_prof_records = []
 
   def _prof_finalize(self):

@@ -59,6 +59,10 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 def data64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
+def disasm(lib):
+  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
+  return '\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x])
+
 class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
@@ -185,7 +189,7 @@ class HWPM4Queue(HWQueue):
     assert self.q[self.cmd_offsets[cmd_idx]] == amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6), f"Command at index {cmd_idx} is not signal"
     if signal is not None:
       self._patch(self.cmd_offsets[cmd_idx] + 3, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
-      if signal.event_mailbox_ptr != 0:
+      if self.cmd_offsets[cmd_idx + 1] - self.cmd_offsets[cmd_idx] > 8: # has trap info
         self._patch(self.cmd_offsets[cmd_idx] + 8 + 3, [*data64_le(signal.event_mailbox_ptr), *data64_le(signal.event_id), signal.event_id])
     if value is not None: self._patch(self.cmd_offsets[cmd_idx] + 5, [*data64_le(value)])
     return self
@@ -256,6 +260,12 @@ class HWCopyQueue(HWQueue):
 
     return self._mark_command_end()
 
+  def update_signal(self, cmd_idx, signal=None, value=None):
+    assert self.q[self.cmd_offsets[cmd_idx]] & 0xf == amd_gpu.SDMA_OP_FENCE, f"Command at index {cmd_idx} is not signal"
+    if signal is not None: self._patch(self.cmd_offsets[cmd_idx] + 1, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+    if value is not None: self.q[self.cmd_offsets[cmd_idx] + 3] = value
+    return self
+
   def update_wait(self, cmd_idx, signal=None, value=None):
     assert self.q[self.cmd_offsets[cmd_idx]] & 0xf == amd_gpu.SDMA_OP_POLL_REGMEM, f"Command at index {cmd_idx} is not wait"
     if signal is not None: self._patch(self.cmd_offsets[cmd_idx] + 1, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
@@ -297,9 +307,7 @@ class AMDProgram:
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
 
-    if DEBUG >= 6:
-      asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+    if DEBUG >= 6: print(disasm(lib))
 
     _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
     sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]
@@ -358,7 +366,7 @@ class AMDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    sig_st, sig_en = (self.device._get_signal(), self.device._get_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
+    sig_st, sig_en = (self.device._alloc_signal(), self.device._alloc_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
 
     q = HWPM4Queue()
     q.wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
@@ -445,13 +453,16 @@ class AMDDevice(HCQCompatCompiled):
   def _set_signal(self, sig, value): sig.value = value
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs) -> hsa.amd_signal_t:
+  def _alloc_signal(self, value=0, **kwargs) -> hsa.amd_signal_t:
     self._set_signal(ret := self.signals_pool.pop(), value)
     if (sync_event:=kwargs.get('sync_event')) is not None:
       ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       ret.event_id = sync_event.event_id
     else: ret.event_mailbox_ptr = ret.event_id = 0
     return ret
+
+  @classmethod
+  def _free_signal(self, sig): self.signals_pool.append(sig)
 
   @classmethod
   def _wait_signal(self, signal:hsa.amd_signal_t, value=0, timeout=10000):
@@ -488,7 +499,7 @@ class AMDDevice(HCQCompatCompiled):
       self._gpu_map(AMDDevice.event_page)
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
 
-    self.time_event_st, self.time_event_en = AMDDevice._get_signal(), AMDDevice._get_signal()
+    self.time_event_st, self.time_event_en = AMDDevice._alloc_signal(), AMDDevice._alloc_signal()
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -507,7 +518,7 @@ class AMDDevice(HCQCompatCompiled):
     self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HWPM4Queue, HWCopyQueue,
-      timeline_signals=[self._get_signal(sync_event=sync_event), self._get_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))])
+      timeline_signals=[self._alloc_signal(sync_event=sync_event), self._alloc_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))])
 
   def _gpu2cpu_time(self, gpu_time, is_copy):
     if is_copy: return self.copy_cpu_start_time + (gpu_time - self.copy_gpu_start_time) / 1e2
