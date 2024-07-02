@@ -328,7 +328,7 @@ class NVProgram:
     if MOCKGPU: self.constbuffer_0[0:2] = [len(args), len(vals)]
     kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.base)] + list(vals)
 
-    sig_st, sig_en = (self.device._get_signal(), self.device._get_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
+    sig_st, sig_en = (self.device._alloc_signal(), self.device._alloc_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
 
     queue = HWComputeQueue()
     queue.wait(self.device.timeline_signal, self.device.timeline_value - 1)
@@ -528,7 +528,7 @@ class NVDevice(HCQCompatCompiled):
     en_fifo_params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
 
-    self.time_event_st, self.time_event_en = NVDevice._get_signal(), NVDevice._get_signal()
+    self.time_event_st, self.time_event_en = NVDevice._alloc_signal(), NVDevice._alloc_signal()
 
     self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
     self.cmdq: memoryview = to_mv(self.cmdq_page.base, 0x200000).cast("I")
@@ -541,7 +541,7 @@ class NVDevice(HCQCompatCompiled):
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
-                     functools.partial(NVProgram, self), HWComputeQueue, HWCopyQueue, timeline_signals=[self._get_signal(), self._get_signal()])
+                     functools.partial(NVProgram, self), HWComputeQueue, HWCopyQueue, timeline_signals=[self._alloc_signal(), self._alloc_signal()])
 
     self._cmdq_setup_compute_gpfifo()
     self._cmdq_setup_dma_gpfifo()
@@ -558,9 +558,12 @@ class NVDevice(HCQCompatCompiled):
   def _set_signal(self, sig, value): sig[0] = value
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs) -> memoryview:
+  def _alloc_signal(self, value=0, **kwargs) -> memoryview:
     self._set_signal(sig := self.signals_pool.pop(), value)
     return sig
+
+  @classmethod
+  def _free_signal(self, sig): self.signals_pool.append(sig)
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000):
