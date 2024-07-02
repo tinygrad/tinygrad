@@ -113,6 +113,7 @@ class UPat:
   name: Optional[str] = None
   dtype: Optional[Union[DType, Set[DType]]] = None
   allow_len: Set[int] = field(default_factory=set)
+  allow_any_len: bool = False
 
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
@@ -132,7 +133,7 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   # try all permutations if it's a list
   # repeat if it's a UPat
   for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
-    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False
+    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len) and not pat.allow_any_len: return False
     new_store = store.copy()
     if all(_match(uu, vv, new_store) for uu, vv in zip(uop.src, vp)):
       store.update(new_store)
@@ -366,8 +367,7 @@ def tc_expand(tc, lb1, lb2, v1, v2):
     UOp.const(tc.dtype.vec(2), 0.0)), arg=tc.arg)
   return UOp(UOps.EXPAND, tc.dtype, tuple(UOp(UOps.GEP, tc.dtype, (ret,), i) for i in range(2)), arg=upcast_axis)
 
-# this is symbolic 2.0
-constant_folder = PatternMatcher([
+tensor_core_pattern = [
   # tensor core
   (UOp(UOps.TC, src=(UOp.cast(
     UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
@@ -377,6 +377,20 @@ constant_folder = PatternMatcher([
     UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
     UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),))),)).name("tc"),
     tc_expand),
+  (UOp(UOps.DEFINE_ACC).name("dacc") + UOp(UOps.WMMA).name("wmma"),
+    lambda dacc, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], dacc), wmma.arg))]
+#tensor_core_pattern.clear()
+
+def reduce_expand_reorder(red, ex, src):
+  new_red = UOp(red.op, red.dtype.vec(len(ex.src)), src=(src,)+red.src[1:], arg=red.arg)
+  new_geps = [UOp(UOps.GEP, red.dtype, (new_red, ), x.arg) for x in ex.src]
+  return UOp(UOps.EXPAND, red.dtype, tuple(new_geps), ex.arg)
+
+# this is symbolic 2.0
+constant_folder = PatternMatcher(tensor_core_pattern+[
+  # reduce reorder
+  (UPat(UOps.REDUCE, name="red", src=(
+    UPat(UOps.EXPAND, name="ex", src=UPat(UOps.GEP, src=(UPat(name="src"),)),),), allow_any_len=True), reduce_expand_reorder),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL, src=[UPat(UOps.CONST, name="mval"),
