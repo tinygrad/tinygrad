@@ -146,7 +146,6 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 _libraries = {}
 _libraries['libcuda.so'] = ctypes.CDLL(ctypes.util.find_library('cuda'))
-_libraries['libnvrtc.so'] = ctypes.CDLL(ctypes.util.find_library('nvrtc'))
 
 
 cuuint32_t = ctypes.c_uint32
@@ -4921,143 +4920,6 @@ try:
     cuGetExportTable.argtypes = [ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(struct_CUuuid_st)]
 except AttributeError:
     pass
-
-# values for enumeration 'c__EA_nvrtcResult'
-c__EA_nvrtcResult__enumvalues = {
-    0: 'NVRTC_SUCCESS',
-    1: 'NVRTC_ERROR_OUT_OF_MEMORY',
-    2: 'NVRTC_ERROR_PROGRAM_CREATION_FAILURE',
-    3: 'NVRTC_ERROR_INVALID_INPUT',
-    4: 'NVRTC_ERROR_INVALID_PROGRAM',
-    5: 'NVRTC_ERROR_INVALID_OPTION',
-    6: 'NVRTC_ERROR_COMPILATION',
-    7: 'NVRTC_ERROR_BUILTIN_OPERATION_FAILURE',
-    8: 'NVRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION',
-    9: 'NVRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION',
-    10: 'NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID',
-    11: 'NVRTC_ERROR_INTERNAL_ERROR',
-}
-NVRTC_SUCCESS = 0
-NVRTC_ERROR_OUT_OF_MEMORY = 1
-NVRTC_ERROR_PROGRAM_CREATION_FAILURE = 2
-NVRTC_ERROR_INVALID_INPUT = 3
-NVRTC_ERROR_INVALID_PROGRAM = 4
-NVRTC_ERROR_INVALID_OPTION = 5
-NVRTC_ERROR_COMPILATION = 6
-NVRTC_ERROR_BUILTIN_OPERATION_FAILURE = 7
-NVRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION = 8
-NVRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION = 9
-NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID = 10
-NVRTC_ERROR_INTERNAL_ERROR = 11
-c__EA_nvrtcResult = ctypes.c_uint32 # enum
-nvrtcResult = c__EA_nvrtcResult
-nvrtcResult__enumvalues = c__EA_nvrtcResult__enumvalues
-try:
-    nvrtcGetErrorString = _libraries['libnvrtc.so'].nvrtcGetErrorString
-    nvrtcGetErrorString.restype = ctypes.POINTER(ctypes.c_char)
-    nvrtcGetErrorString.argtypes = [nvrtcResult]
-except AttributeError:
-    pass
-try:
-    nvrtcVersion = _libraries['libnvrtc.so'].nvrtcVersion
-    nvrtcVersion.restype = nvrtcResult
-    nvrtcVersion.argtypes = [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetNumSupportedArchs = _libraries['libnvrtc.so'].nvrtcGetNumSupportedArchs
-    nvrtcGetNumSupportedArchs.restype = nvrtcResult
-    nvrtcGetNumSupportedArchs.argtypes = [ctypes.POINTER(ctypes.c_int32)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetSupportedArchs = _libraries['libnvrtc.so'].nvrtcGetSupportedArchs
-    nvrtcGetSupportedArchs.restype = nvrtcResult
-    nvrtcGetSupportedArchs.argtypes = [ctypes.POINTER(ctypes.c_int32)]
-except AttributeError:
-    pass
-class struct__nvrtcProgram(Structure):
-    pass
-
-nvrtcProgram = ctypes.POINTER(struct__nvrtcProgram)
-try:
-    nvrtcCreateProgram = _libraries['libnvrtc.so'].nvrtcCreateProgram
-    nvrtcCreateProgram.restype = nvrtcResult
-    nvrtcCreateProgram.argtypes = [ctypes.POINTER(ctypes.POINTER(struct__nvrtcProgram)), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError:
-    pass
-try:
-    nvrtcDestroyProgram = _libraries['libnvrtc.so'].nvrtcDestroyProgram
-    nvrtcDestroyProgram.restype = nvrtcResult
-    nvrtcDestroyProgram.argtypes = [ctypes.POINTER(ctypes.POINTER(struct__nvrtcProgram))]
-except AttributeError:
-    pass
-try:
-    nvrtcCompileProgram = _libraries['libnvrtc.so'].nvrtcCompileProgram
-    nvrtcCompileProgram.restype = nvrtcResult
-    nvrtcCompileProgram.argtypes = [nvrtcProgram, ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError:
-    pass
-try:
-    nvrtcGetPTXSize = _libraries['libnvrtc.so'].nvrtcGetPTXSize
-    nvrtcGetPTXSize.restype = nvrtcResult
-    nvrtcGetPTXSize.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetPTX = _libraries['libnvrtc.so'].nvrtcGetPTX
-    nvrtcGetPTX.restype = nvrtcResult
-    nvrtcGetPTX.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetCUBINSize = _libraries['libnvrtc.so'].nvrtcGetCUBINSize
-    nvrtcGetCUBINSize.restype = nvrtcResult
-    nvrtcGetCUBINSize.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetCUBIN = _libraries['libnvrtc.so'].nvrtcGetCUBIN
-    nvrtcGetCUBIN.restype = nvrtcResult
-    nvrtcGetCUBIN.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetNVVMSize = _libraries['libnvrtc.so'].nvrtcGetNVVMSize
-    nvrtcGetNVVMSize.restype = nvrtcResult
-    nvrtcGetNVVMSize.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetNVVM = _libraries['libnvrtc.so'].nvrtcGetNVVM
-    nvrtcGetNVVM.restype = nvrtcResult
-    nvrtcGetNVVM.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetProgramLogSize = _libraries['libnvrtc.so'].nvrtcGetProgramLogSize
-    nvrtcGetProgramLogSize.restype = nvrtcResult
-    nvrtcGetProgramLogSize.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetProgramLog = _libraries['libnvrtc.so'].nvrtcGetProgramLog
-    nvrtcGetProgramLog.restype = nvrtcResult
-    nvrtcGetProgramLog.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    nvrtcAddNameExpression = _libraries['libnvrtc.so'].nvrtcAddNameExpression
-    nvrtcAddNameExpression.restype = nvrtcResult
-    nvrtcAddNameExpression.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    nvrtcGetLoweredName = _libraries['libnvrtc.so'].nvrtcGetLoweredName
-    nvrtcGetLoweredName.restype = nvrtcResult
-    nvrtcGetLoweredName.argtypes = [nvrtcProgram, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError:
-    pass
 __all__ = \
     ['CUDA_ARRAY3D_DESCRIPTOR', 'CUDA_ARRAY3D_DESCRIPTOR_v2',
     'CUDA_ARRAY_DESCRIPTOR', 'CUDA_ARRAY_DESCRIPTOR_v2',
@@ -5673,21 +5535,11 @@ __all__ = \
     'CUuserObjectRetain_flags__enumvalues',
     'CUuserObjectRetain_flags_enum', 'CUuserObject_flags',
     'CUuserObject_flags__enumvalues', 'CUuserObject_flags_enum',
-    'CUuuid', 'NVRTC_ERROR_BUILTIN_OPERATION_FAILURE',
-    'NVRTC_ERROR_COMPILATION', 'NVRTC_ERROR_INTERNAL_ERROR',
-    'NVRTC_ERROR_INVALID_INPUT', 'NVRTC_ERROR_INVALID_OPTION',
-    'NVRTC_ERROR_INVALID_PROGRAM',
-    'NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID',
-    'NVRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION',
-    'NVRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION',
-    'NVRTC_ERROR_OUT_OF_MEMORY',
-    'NVRTC_ERROR_PROGRAM_CREATION_FAILURE', 'NVRTC_SUCCESS',
-    'c__EA_nvrtcResult', 'cuArray3DCreate_v2',
-    'cuArray3DGetDescriptor_v2', 'cuArrayCreate_v2', 'cuArrayDestroy',
-    'cuArrayGetDescriptor_v2', 'cuArrayGetPlane',
-    'cuArrayGetSparseProperties', 'cuCtxAttach', 'cuCtxCreate_v2',
-    'cuCtxCreate_v3', 'cuCtxDestroy_v2', 'cuCtxDetach',
-    'cuCtxDisablePeerAccess', 'cuCtxEnablePeerAccess',
+    'CUuuid', 'cuArray3DCreate_v2', 'cuArray3DGetDescriptor_v2',
+    'cuArrayCreate_v2', 'cuArrayDestroy', 'cuArrayGetDescriptor_v2',
+    'cuArrayGetPlane', 'cuArrayGetSparseProperties', 'cuCtxAttach',
+    'cuCtxCreate_v2', 'cuCtxCreate_v3', 'cuCtxDestroy_v2',
+    'cuCtxDetach', 'cuCtxDisablePeerAccess', 'cuCtxEnablePeerAccess',
     'cuCtxGetApiVersion', 'cuCtxGetCacheConfig', 'cuCtxGetCurrent',
     'cuCtxGetDevice', 'cuCtxGetExecAffinity', 'cuCtxGetFlags',
     'cuCtxGetLimit', 'cuCtxGetSharedMemConfig',
@@ -5844,14 +5696,7 @@ __all__ = \
     'cuTexRefSetMipmappedArray', 'cuThreadExchangeStreamCaptureMode',
     'cuUserObjectCreate', 'cuUserObjectRelease', 'cuUserObjectRetain',
     'cuWaitExternalSemaphoresAsync', 'cudaError_enum', 'cuuint32_t',
-    'cuuint64_t', 'nvrtcAddNameExpression', 'nvrtcCompileProgram',
-    'nvrtcCreateProgram', 'nvrtcDestroyProgram', 'nvrtcGetCUBIN',
-    'nvrtcGetCUBINSize', 'nvrtcGetErrorString', 'nvrtcGetLoweredName',
-    'nvrtcGetNVVM', 'nvrtcGetNVVMSize', 'nvrtcGetNumSupportedArchs',
-    'nvrtcGetPTX', 'nvrtcGetPTXSize', 'nvrtcGetProgramLog',
-    'nvrtcGetProgramLogSize', 'nvrtcGetSupportedArchs',
-    'nvrtcProgram', 'nvrtcResult', 'nvrtcResult__enumvalues',
-    'nvrtcVersion', 'size_t', 'struct_CUDA_ARRAY3D_DESCRIPTOR_st',
+    'cuuint64_t', 'size_t', 'struct_CUDA_ARRAY3D_DESCRIPTOR_st',
     'struct_CUDA_ARRAY_DESCRIPTOR_st',
     'struct_CUDA_ARRAY_SPARSE_PROPERTIES_st',
     'struct_CUDA_ARRAY_SPARSE_PROPERTIES_st_tileExtent',
@@ -5906,7 +5751,6 @@ __all__ = \
     'struct_CUstreamMemOpWriteValueParams_st', 'struct_CUstream_st',
     'struct_CUsurfref_st', 'struct_CUtexref_st',
     'struct_CUuserObject_st', 'struct_CUuuid_st',
-    'struct__nvrtcProgram',
     'union_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle',
     'union_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle',
     'union_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_0_nvSciSync',
