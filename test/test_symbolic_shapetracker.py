@@ -92,7 +92,7 @@ class TestShapeTrackerUnbind(unittest.TestCase):
     t = Tensor.rand(3, 4).reshape(bv, 4)
     unbound_st, var_val = t.lazydata.st.unbind()
     assert unbound_st == ShapeTracker((View.create(shape=(v, 4)),))
-    assert var_val == {v: 3}
+    assert var_val == {v.expr: 3}
 
   def test_shrink_unbind(self):
     v = Variable("v", 1, 100)
@@ -100,7 +100,7 @@ class TestShapeTrackerUnbind(unittest.TestCase):
     t = Tensor.rand(3, 4).shrink(((bv, bv+1), (0, 4)))
     unbound_st, var_val = t.lazydata.st.unbind()
     assert unbound_st == ShapeTracker((View.create(shape=(1, 4), offset=4*v),))
-    assert var_val == {v: 2}
+    assert var_val == {v.expr: 2}
 
 class TestSymbolicReshapeFromContiguous(unittest.TestCase):
   def test_reshape_into_symbols_simple(self):
