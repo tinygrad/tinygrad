@@ -597,8 +597,8 @@ class UOpGraph:
       if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
     # NOTE: disabled in lowerer
-    #for i, s in enumerate(self.sinks[:]):
-    #  if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
+    for i, s in enumerate(self.sinks[:]):
+      if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
     # do graph rewrite
