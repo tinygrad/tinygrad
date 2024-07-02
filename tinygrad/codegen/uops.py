@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast
 import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
@@ -93,37 +93,37 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 @dataclass(frozen=True)
 class UPat:
-  op: Optional[Union[UOps, Set[UOps]]] = None
+  op: Tuple[UOps, ...] = ()
   arg: Any = None
-  src: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
+  src: Optional[Union[List[UPat], Tuple[UPat, ...], UPat]] = None
   name: Optional[str] = None
-  dtype: Optional[Union[DType, Set[DType]]] = None
-  allow_len: Set[int] = field(default_factory=set)
+  dtype: Tuple[DType, ...] = ()
+  allow_len: Tuple[int,...] = ()
 
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
-    if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
-    return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
-
-T = TypeVar("T")
-def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
+    if u.op is UOps.VAR:
+      return UPat(name=name or u.arg, dtype=(u.dtype,) if u.dtype is not None else ()) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
+    op, dtype = (u.op,) if u.op is not None else (), (u.dtype,) if u.dtype is not None else (),
+    return UPat(op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, dtype)
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
-  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return False
-  if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
-  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
-  if pat.op is not None and __unmatch(pat.op, uop.op): return False
-  if pat.src is None: return True
-  # only one if it's a tuple
-  # try all permutations if it's a list
-  # repeat if it's a UPat
-  for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
-    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False
-    new_store = store.copy()
-    if all(_match(uu, vv, new_store) for uu, vv in zip(uop.src, vp)):
-      store.update(new_store)
-      return True
-  return False
+  if pat.op and uop.op not in pat.op: return False
+  if pat.dtype and uop.dtype and uop.dtype not in pat.dtype: return False
+  if pat.arg is not None and (uop.arg not in pat.arg if isinstance(pat.arg, (set,tuple)) else pat.arg != uop.arg): return False
+  if pat.src:
+    for vp in itertools.permutations(pat.src) if isinstance(pat.src, list) else (pat.src,) if isinstance(pat.src,tuple) \
+      else [(pat.src,)*len(uop.src)]:
+      if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False
+      new_store = store.copy()
+      for uu, vv in zip(uop.src, vp):
+        if not _match(uu, vv, new_store): break
+      else:
+        store.update(new_store)
+        break
+    else: return False  # None of the src matches
+  if pat.name is not None and store.setdefault(pat.name,uop) is not uop: return False
+  return True
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
@@ -133,10 +133,7 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       if isinstance(p, UOp): p = UPat.compile(p)
       assert p.op is not None
-      if isinstance(p.op, set):
-        for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
-      else:
-        self.pdict[(p.op, p.arg)].append((p, fxn))
+      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
@@ -164,37 +161,37 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
-  (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
-    UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL, src=[UPat(UOps.CONST, name="mval"),
-      UPat(UOps.RANGE, name="rng", src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
-      UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
-  (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
-    UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, UnaryOps.NEG, src=[
-      UPat(UOps.RANGE, name="rng", src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
-      UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))),
+  (UPat((UOps.ALU,), TernaryOps.WHERE, src=(UPat((UOps.ALU,), BinaryOps.CMPLT, src=(
+    UPat((UOps.ALU,), BinaryOps.ADD, src=[UPat(name="idx"), UPat((UOps.ALU,), BinaryOps.MUL, src=[UPat((UOps.CONST,), name="mval"),
+      UPat((UOps.RANGE,), name="rng", src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
+      UPat((UOps.CONST,), name="compval"))), UPat((UOps.CONST,), name="multconst"), UPat((UOps.CONST,), 0))), loop_collapse),
+  (UPat((UOps.ALU,), TernaryOps.WHERE, src=(UPat((UOps.ALU,), BinaryOps.CMPLT, src=(
+    UPat((UOps.ALU,), BinaryOps.ADD, src=[UPat(name="idx"), UPat((UOps.ALU,), UnaryOps.NEG, src=[
+      UPat((UOps.RANGE,), name="rng", src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
+      UPat((UOps.CONST,), name="compval"))), UPat((UOps.CONST,), name="multconst"), UPat((UOps.CONST,), 0))),
       lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # sum collapse to mul (with possible GEP)
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),
-                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
-  (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),)),
-                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  (UPat((UOps.PHI,), src=(UPat((UOps.DEFINE_ACC,), name="phi_input",src=[UPat((UOps.CONST,)),
+   UPat((UOps.RANGE,), name="loop")]), UPat((UOps.ALU,), BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  (UPat((UOps.PHI,), src=(UPat((UOps.GEP,), name="phi_input",src=(UPat((UOps.DEFINE_ACC,), src=[UPat((UOps.CONST,)),
+   UPat((UOps.RANGE,), name="loop")]),)), UPat((UOps.ALU,), BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # deal with UNMUL
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(UOps.UNMUL, src=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
+  (UPat((UOps.ALU,), BinaryOps.MUL, [UPat((UOps.CONST,), name="c1"), UPat((UOps.UNMUL,), src=[UPat((UOps.CONST,), name="c2"), UPat(name="v")])]),
    lambda c1,c2,v: v if c1.arg == c2.arg else None),
   (UOp(UOps.UNMUL, src=(UOp.const(None, 0).name('zero'), UOp.var())), lambda zero: zero),
   (UOp(UOps.UNMUL).name('unmul').cast().name('root'), lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.src[0].cast(root.dtype), unmul.src[1]))),
   # max on special can go away (TODO: special should be variable, same thing applies)
   (UOp.max(UOp.cvar('c'), UOp(UOps.SPECIAL).name('s')), lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
   # const rules
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
-  (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
+  (UPat((UOps.GEP,), name="root", src=(UPat((UOps.CONST,), name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
+  (UPat((UOps.CAST,), name="root", src=UPat((UOps.CONST,), name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST),)), UPat(name="x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
+  (UPat((UOps.PHI,), src=(UPat((UOps.DEFINE_ACC,), name="acc"), UPat(name="acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
+  (UPat((UOps.PHI,), src=(UPat((UOps.DEFINE_ACC,), src=(UPat((UOps.CONST,)),)), UPat(name="x"))), lambda x: x),
+  (UPat((UOps.PHI,), src=(UPat((UOps.CONST,)), UPat(name="x"))), lambda x: x),
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
-  (UPat(UOps.DEFINE_ACC, name="root", src=(UPat(UOps.CONST),)), lambda root: UOp.cast(root.src[0], root.dtype)),
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
+  (UPat((UOps.DEFINE_ACC,), name="root", src=(UPat((UOps.CONST,)),)), lambda root: UOp.cast(root.src[0], root.dtype)),
+  (UPat((UOps.GEP,), name="root", src=(UPat((UOps.CONST,), name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
   (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
   # bool < False is always false, True < bool is always false
@@ -204,7 +201,8 @@ constant_folder = PatternMatcher([
   (UOp.alu(TernaryOps.WHERE, UOp.var(), UOp.var("val"), UOp.var("val")), lambda val: val),
   (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
-  (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
+  (UPat((UOps.ALU,), name="root", src=UPat((UOps.CONST,))),
+   lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
   (-(-UOp.var('x')), lambda x: x),    # -(-x) -> x
   (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
@@ -261,14 +259,15 @@ constant_folder = PatternMatcher([
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, src=tuple(UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(4)))), UOp.store),
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, src=tuple(UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(2)))), UOp.store),
   # CAST-PHI-GEP -> PHI-CAST
-  (UPat(UOps.CAST, name="root", src=tuple(UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
-    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
-  (UPat(UOps.CAST, name="root", src=tuple(UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(2))),
-    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
+  (UPat((UOps.CAST,), name="root", src=tuple(UPat((UOps.PHI,), src=(UPat((UOps.GEP,), i, src=(UPat(name="val"),)),
+   UPat(name=f"v{i}"))) for i in range(4))), lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype,
+     (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
+  (UPat((UOps.CAST,), name="root", src=tuple(UPat((UOps.PHI,), src=(UPat((UOps.GEP,), i, src=(UPat(name="val"),)),
+   UPat(name=f"v{i}"))) for i in range(2))), lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
   (UOp.lt(-UOp.var('x'), UOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(UOp.const(c.dtype, -c.arg), x)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
-  (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
+  (UPat((UOps.CAST,), name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
   (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
   (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.cvar("var"), UOp.var("barrier")),
@@ -278,7 +277,7 @@ constant_folder = PatternMatcher([
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(dtypes.bool, True)), UOp.store),
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(dtypes.bool, False)), lambda: UOp(UOps.NOOP)),
   # remove NOOPs from SINK
-  (UPat(UOps.SINK, name="root"),
+  (UPat((UOps.SINK,), name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None)
 ])
 
