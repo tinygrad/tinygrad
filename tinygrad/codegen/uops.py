@@ -391,7 +391,7 @@ class UOpGraph:
       for u, ss in scope_children.items():
         if x in ss:
           ss.remove(x)
-          if u.op is UOps.RANGE: assert u.op is not UOps.BARRIER, "toposorted barrier inside loop"
+          if u.op is UOps.RANGE: assert x.op is not UOps.BARRIER, "toposorted barrier inside loop"
           if len(ss) == 0: self._uops.append(UOp(end_for_uop[u.op][1], None, (u,)))
       for u in children[x]:
         in_degree[u] -= 1
