@@ -107,33 +107,34 @@ class UPat:
 
   def __post_init__(self):
     self.f: tuple[Callable[[Any, Any], Any], ...] = ()
-    if (o:=self.op) is not None: self.f += (lambda uop,_: uop.op not in o,) if isinstance(o,set) else (lambda uop,_: o != uop.op,)
-    if (a:=self.arg) is not None: self.f += (lambda uop,_: uop.arg not in a,) if isinstance(a,set) else (lambda uop,_: a != uop.arg,)
+    op = () if self.op is None else tuple(self.op) if isinstance(self.op, set) else (self.op,)
+    arg = () if self.arg is None else tuple(self.arg) if isinstance(self.arg, set) else (self.arg,)
+    dtype = () if self.dtype is None else tuple(self.dtype)if isinstance(self.dtype, set) else (self.dtype,)
+    if op: self.f += (lambda uop,_: uop.op not in op,)
+    if arg: self.f += (lambda uop,_: uop.arg not in arg,)
+    if dtype: self.f += (lambda uop,_: uop.dtype is not None and uop.dtype not in dtype,)
     if self.src is not None:
       self.flat_src: Union[tuple[tuple[UPat, ...], ...], UPat] = tuple(itertools.permutations(self.src)) if isinstance(self.src,list) else\
                                                                  (self.src,) if isinstance(self.src,tuple) else self.src
       self.f += (self.src_unmatch,)
-    if isinstance((d:=self.dtype), set):
-      self.f += (lambda uop,_: uop.dtype is not None and uop.dtype not in d,)
-    elif self.dtype is not None: self.f += (lambda uop,_: uop.dtype not in (self.dtype, None),)
     if (n:=self.name) is not None: self.f += (lambda uop,store: store.setdefault(n, uop) is not uop,)
 
-  def src_unmatch(self, uop, store):
+  def src_unmatch(self, uop:UOp, store:Dict[str, UOp]) -> bool:
     for vp in self.flat_src if isinstance(self.flat_src, tuple) else [(self.flat_src,)*len(uop.src)]:
-      if (n:=len(uop.src)) == len(vp) or n in self.allow_len:
-        new_store = store.copy()
-        for uu, vv in zip(uop.src, vp):
-          if not vv._match(uu, new_store): break
-        else:
-          store.update(new_store)
-          break
+      if len(uop.src) != len(vp) and (len(uop.src) not in self.allow_len): return True
+      new_store = store.copy()
+      for uu, vv in zip(uop.src, vp):
+        if not _match(uu, vv, new_store): break
+      else:
+        store.update(new_store)
+        break
     else: return True  # no match
     return False
 
-  def _match(self, uop, store):
-    for f in self.f:
-      if f(uop, store): return False
-    return True
+def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
+  for f in pat.f:
+    if f(uop, store): return False
+  return True
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
@@ -151,7 +152,7 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if p._match(uop, store): return fxn(**store)
+      if _match(uop, p, store): return fxn(**store)
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -307,7 +308,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   replace: Dict[UOp, UOp] = {}
   def __inner_rewrite(n:UOp) -> UOp:
     if n in replace: return replace[n]
-    replace_source = (n.op, n.dtype, tuple([__inner_rewrite(y) for y in n.src]), n.arg)
+    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
     if found := nodes.get(replace_source): replace[n] = found
     else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
     return replace[n]
