@@ -30,7 +30,7 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
   fake_idxs = [Variable(f"__idx{i}", 0, s-1) for i,s in enumerate(st.shape)]
   idx, valid = st.expr_idxs(fake_idxs)
   ctx = dict(zip(fake_idxs, idxs))
-  return idx.render(render_ops, ctx), valid.render(render_ops, ctx)
+  return idx.render(render_ops, ctx), valid.render(render_ops, ctx).cast(dtypes.bool)
 
 """
 if isinstance(dtype, ImageDType):
