@@ -1,7 +1,6 @@
 import os, sys, math, argparse, time
 sys.path.append(os.getcwd())
 from typing import Any, Optional, Dict
-from dataclasses import dataclass, field
 
 from tinygrad import Tensor, TinyJit, nn
 from tinygrad.helpers import fetch
@@ -146,56 +145,52 @@ class MambaMixer:
 
     self.out_proj = nn.Linear(self.d_inner, self.dim, bias=bias)
 
-  def __call__(self, hidden_states: Tensor, inference_params=None):
-    batch, seqlen, dim = hidden_states.shape
+  def __call__(self, hidden_states: Tensor):
+    batch, seqlen, _ = hidden_states.shape
 
-    conv_state, ssm_state = None, None
-    if inference_params is not None:
-      conv_state, ssm_state = self._get_states_from_cache(inference_params, batch)
-      if inference_params.seqlen_offset > 0:
-        # The states are updated inplace
-        out, _, _ = self.step(hidden_states[:, -1:, :], conv_state, ssm_state)
-        return out
+    if not hasattr(self, 'conv_state'):
+      self.conv_state = Tensor.zeros(batch, self.dim * self.expand, self.d_conv).contiguous().realize()
+      self.ssm_state = Tensor.zeros(batch, self.dim * self.expand, self.d_state).realize()
 
-    xz = self.in_proj.weight @ hidden_states.permute(2,0,1).reshape(hidden_states.shape[2],hidden_states.shape[1]*hidden_states.shape[0])
-    xz = xz.reshape(xz.shape[0],xz.shape[1]//seqlen, seqlen).permute(1,0,2)
+      xz = self.in_proj.weight @ hidden_states.permute(2,0,1).reshape(hidden_states.shape[2],hidden_states.shape[1]*hidden_states.shape[0])
+      xz = xz.reshape(xz.shape[0],xz.shape[1]//seqlen, seqlen).permute(1,0,2)
 
-    if self.in_proj.bias is not None:
-      xz = xz + self.in_proj.bias.reshape((-1, 1))
+      if self.in_proj.bias is not None:
+        xz = xz + self.in_proj.bias.reshape((-1, 1))
 
-    A = -self.A_log.exp()
-    x, z = xz.chunk(2, dim=1)
-    # Compute short convolution
-    if conv_state is not None:
-      conv_state.assign(x[:, :, -self.d_conv :])  # Update state (B D W)
+      A = -self.A_log.exp()
+      x, z = xz.chunk(2, dim=1)
+      # Compute short convolution
+      self.conv_state.assign(x[:, :, -self.d_conv :])  # Update state (B D W)
       x = self.conv1d(x)[..., :seqlen].swish()
 
-    x_dbl = self.x_proj(x.permute(0,2,1).reshape(x.shape[0]*x.shape[2], x.shape[1]))
-    dt, B, C = Tensor.split(x_dbl, [self.dt_rank, self.d_state, self.d_state], dim=-1)
-    dt = self.dt_proj.weight @ dt.T
-    dt = dt.reshape(dt.shape[0], dt.shape[1]//seqlen, seqlen).permute(1,0,2)
-    B = B.reshape(B.shape[0]//seqlen, seqlen, B.shape[1]).permute(0,2,1)
-    C = C.reshape(C.shape[0]//seqlen, seqlen, C.shape[1]).permute(0,2,1)
+      x_dbl = self.x_proj(x.permute(0,2,1).reshape(x.shape[0]*x.shape[2], x.shape[1]))
+      dt, B, C = Tensor.split(x_dbl, [self.dt_rank, self.d_state, self.d_state], dim=-1)
+      dt = self.dt_proj.weight @ dt.T
+      dt = dt.reshape(dt.shape[0], dt.shape[1]//seqlen, seqlen).permute(1,0,2)
+      B = B.reshape(B.shape[0]//seqlen, seqlen, B.shape[1]).permute(0,2,1)
+      C = C.reshape(C.shape[0]//seqlen, seqlen, C.shape[1]).permute(0,2,1)
 
-    # TODO: actually implement selective_scan_fn
-    y = selective_scan_ref(x, dt, A, B, C, self.D, z=z, delta_bias=self.dt_proj.bias, delta_softplus=True,
-                           return_last_state=ssm_state is not None)
-    if ssm_state is not None:
+      # TODO: actually implement selective_scan_fn
+      y = selective_scan_ref(x, dt, A, B, C, self.D, z=z, delta_bias=self.dt_proj.bias, delta_softplus=True,
+                            return_last_state=True)
+
       y, last_state = y
-      ssm_state.assign(last_state)
+      self.ssm_state.assign(last_state).realize()
+      y = y.permute(0,2,1)
+      out = self.out_proj(y)
+      return out
+    else:
+      return self.step(hidden_states)
 
-    y = y.permute(0,2,1)
-    out = self.out_proj(y)
-    return out
-
-  def step(self, hidden_states: Tensor, conv_state: Tensor, ssm_state: Tensor):
+  def step(self, hidden_states: Tensor):
     assert hidden_states.shape[1] == 1, f"Only support decoding with 1 token at a time for now, attempted {hidden_states.shape[1]}"
     xz = self.in_proj(hidden_states.squeeze(1))  # (B 2D)
     x, z = xz.chunk(2, dim=-1)  # (B D)
 
     # Conv step
-    conv_state.assign(conv_state[:, :, 1:].cat(x.unsqueeze(-1), dim=-1))
-    x = (conv_state * self.conv1d.weight.squeeze(1)).sum(-1)
+    self.conv_state.assign(self.conv_state[:, :, 1:].cat(x.unsqueeze(-1), dim=-1).realize())
+    x = (self.conv_state * self.conv1d.weight.squeeze(1)).sum(-1)
     if self.conv1d.bias is not None:
       x = x + self.conv1d.bias
     x = x.swish()
@@ -212,23 +207,13 @@ class MambaMixer:
     dt = (dt + self.dt_proj.bias.unsqueeze(-1)).softplus()
     dA = Tensor.einsum("db,dn->bdn", dt, A).exp()
     dB = Tensor.einsum("db,bn->bdn", dt, B)
-    ssm_state.assign(ssm_state * dA + x.unsqueeze(-1) * dB)
-    y = Tensor.einsum("bdn,bn->bd", ssm_state, C)
+    self.ssm_state.assign(self.ssm_state * dA + x.unsqueeze(-1) * dB)
+    y = Tensor.einsum("bdn,bn->bd", self.ssm_state, C)
     y = y + self.D * x
     y = y * z.swish()  # (B D)
 
     out = self.out_proj(y)
-    return out.unsqueeze(1), conv_state, ssm_state
-
-  def _get_states_from_cache(self, inference_params, batch_size, initialize_states=False):
-    assert self.layer_idx is not None
-    if self.layer_idx not in inference_params.key_value_memory_dict:
-      conv_state = Tensor.zeros(batch_size, self.dim * self.expand, self.d_conv).contiguous().realize()
-      ssm_state = Tensor.zeros(batch_size, self.dim * self.expand, self.d_state).realize()
-      inference_params.key_value_memory_dict[self.layer_idx] = (conv_state, ssm_state)
-    else:
-      conv_state, ssm_state = inference_params.key_value_memory_dict[self.layer_idx]
-    return conv_state, ssm_state
+    return out.unsqueeze(1)
 
 class MambaBlock:
   def __init__(self, dim: int, norm_eps: float = 1e-5, rms_norm: bool = True, layer_idx: Optional[int] = None):
@@ -238,10 +223,10 @@ class MambaBlock:
     else:
       raise NotImplementedError
 
-  def __call__(self, hidden_states: Tensor, residual: Optional[Tensor] = None, inference_params=None):
+  def __call__(self, hidden_states: Tensor, residual: Optional[Tensor] = None):
     residual = (hidden_states + residual) if residual is not None else hidden_states
     hidden_states = self.norm(residual)
-    hidden_states = self.mixer(hidden_states, inference_params=inference_params)
+    hidden_states = self.mixer(hidden_states)
     return hidden_states, residual
 
 class MambaBackbone:
@@ -251,15 +236,14 @@ class MambaBackbone:
     if rms_norm:
       self.norm_f = RMSNorm(dim, norm_eps)
 
-  def __call__(self, input_ids: Tensor, inference_params=None) -> Any:
+  def __call__(self, input_ids: Tensor) -> Any:
     hidden_states = self.embedding(input_ids)
     residual = None
     for layer in self.layers:
-      hidden_states, residual = layer(hidden_states, residual, inference_params=inference_params)
+      hidden_states, residual = layer(hidden_states, residual)
 
     residual = (hidden_states + residual) if residual is not None else hidden_states
     hidden_states = self.norm_f(residual)
-
     return hidden_states
 
 class Mamba:
@@ -272,19 +256,13 @@ class Mamba:
 
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, input_ids, inference_params, num_last_tokens):
-    hidden_states = self.backbone(input_ids, inference_params=inference_params)
-    if num_last_tokens > 0:
-      hidden_states = hidden_states[:, -num_last_tokens:]
+  def forward(self, input_ids:Tensor):
+    hidden_states = self.backbone(input_ids)
     return self.lm_head(hidden_states).realize()
 
-  def __call__(self, input_ids, inference_params=None, num_last_tokens=0, jit=True):
-    if inference_params is None:
-      return self.forward(input_ids, inference_params, num_last_tokens)
-    if jit and inference_params.seqlen_offset > 0:
-      return self.forward_jit(input_ids, inference_params, num_last_tokens)
-    else:
-      return self.forward(input_ids, inference_params, num_last_tokens)
+  def __call__(self, input_ids):
+    return self.forward(input_ids)
+
   @staticmethod
   def from_pretrained(model_name: str):
     weights = fetch_weights(model_name)
@@ -293,56 +271,47 @@ class Mamba:
 
     return model
 
-@dataclass
-class InferenceParams:
-  """Inference parameters that are passed to the main model in order
-  to efficienly calculate and store the context during inference."""
-  max_seqlen: int
-  max_batch_size: int
-  seqlen_offset: int = 0
-  batch_size_offset: int = 0
-  key_value_memory_dict: dict = field(default_factory=dict)
-  lengths_per_sample: Optional[Tensor] = None
 
-  def reset(self, max_seqlen, max_batch_size):
-    self.max_seqlen = max_seqlen
-    self.max_batch_size = max_batch_size
-    self.seqlen_offset = 0
-    if self.lengths_per_sample is not None:
-      self.lengths_per_sample.zero_()
-
-def generate(model, tokenizer, prompt: str, n_tokens_to_gen: int = 10, sample: bool = False, top_k: int = None):
+def generate(model, tokenizer, prompt: str, n_tokens_to_gen: int = 10, temp: bool = 1.0, sample: bool = False, top_k: int = None):
   tks = tokenizer(prompt)["input_ids"]
   while len(tks) < 4:
     tks = [50279] + tks
-  # TODO: sampling
-  temperature = 0.5
-  start_pos = 0
-  inference_params = InferenceParams(max_seqlen=1, max_batch_size=1, seqlen_offset=0)
+
+  # Loading in the prompt tokens
+  logits = model.forward(Tensor([tks]))[:, -1, :]
   for _ in tqdm(range(n_tokens_to_gen), desc="Speed Gen"):
-    logits = model(Tensor([tks[start_pos:]]), inference_params, start_pos, jit=False)
-    inference_params.seqlen_offset = len(tks)
-    tok = logits[:, -1, :].argmax(axis=-1).item()
-    start_pos = len(tks)
+    # TODO: topk
+    if sample:
+      tok_Tens = (logits/temp).softmax().multinomial()
+    else:
+      tok_Tens = logits.argmax(axis=-1).unsqueeze(0)
+    tok = tok_Tens.item()
     tks.append(tok)
+    logits = model.forward_jit(tok_Tens)[:, -1, :]
+
   output_completions = ''.join([tokenizer.decode(output) for output in tks])
   return output_completions
 
 if __name__ == "__main__":
+  ORIG_PROMPT = "Why is gravity "
   parser = argparse.ArgumentParser(description="Run Mamba in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--prompt", type=str, default="Why is gravity ", help="Prompt for LLM completion")
   parser.add_argument("--size", type=str, default="370m",
                       help=f"Size of model to use [{', '.join([k for k in MODELS.keys()])}]")
   parser.add_argument("--n_tokens", type=int, default=10, help="Number of tokens to generate")
+  parser.add_argument("--sample", dest="sample", action="store_true", help="Sample flag")
+  parser.add_argument("--temp", type=float, default=1.0, help="Sampling temp has to be <=1.0")
   args = parser.parse_args()
 
   tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
   model = Mamba.from_pretrained(args.size)
   prompt = args.prompt
   num_toks = args.n_tokens
+  sample = args.sample
+  temp = args.temp
   s = time.time()
-  tinyoutput = generate(model, tokenizer, prompt, n_tokens_to_gen=num_toks)
+  tinyoutput = generate(model, tokenizer, prompt, n_tokens_to_gen=num_toks, sample=sample, temp=temp)
   print(tinyoutput)
   print('TIME: ', time.time() - s)
   TORCHOUTPUT = "Why is gravity \nso important?\nBecause it's the only"
-  print('Outputs Match:', tinyoutput == TORCHOUTPUT)
+  if ORIG_PROMPT == prompt and not sample and num_toks==10 and args.size=='370m': print('Outputs Match:', tinyoutput == TORCHOUTPUT)
