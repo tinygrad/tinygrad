@@ -1,24 +1,27 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar, TYPE_CHECKING
 import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from tinygrad.dtype import ConstType, dtypes, DType
+from tinygrad.dtype import ConstType, dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import sint, Variable
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import prod, DEBUG, getenv
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
+from tinygrad.helpers import prod, DEBUG, getenv, flatten, all_same
+
+if TYPE_CHECKING:
+  from tinygrad.renderer import Renderer
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); VAR = auto() # noqa: E702
+  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto(); TC = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
   # math ops
   CAST = auto(); BITCAST = auto() # noqa: E702
-  ALU = auto(); WMMA = auto() # noqa: E702
+  ALU = auto(); REDUCE = auto(); WMMA = auto() # noqa: E702
   # memory/assignment ops
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   # control flow ops
@@ -55,6 +58,7 @@ class UOp:
   def __truediv__(self, x): return UOp.alu(BinaryOps.MUL, self, UOp.alu(UnaryOps.RECIP, ufix(self.dtype, x)))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
   def ne(self, x): return UOp.alu(BinaryOps.CMPNE, self, ufix(self.dtype, x))
+  def eq(self, x): return -self.ne(x)
   def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
   def ge(self, x): return -self.lt(x)
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
@@ -65,7 +69,10 @@ class UOp:
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
-  def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
+  def alu(arg, *src:UOp):
+    if getenv("FOLD_ALU") and arg in {BinaryOps.ADD, BinaryOps.MUL}:
+      return UOp(UOps.ALU, src[-1].dtype, tuple(flatten([[x] if x.arg is not arg else x.src for x in src])), arg)
+    return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod
@@ -79,6 +86,13 @@ class UOp:
   @property  # parents with self
   def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
   def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.op is UOps.DEFINE_VAR])
+  def divides(self, v):
+    if self.op is UOps.CONST:
+      return self.arg%v == 0
+    if self.op is UOps.ALU:
+      if self.arg is BinaryOps.ADD: return all(x.divides(v) for x in self.src)
+      if self.arg is BinaryOps.MUL: return any(x.divides(v) for x in self.src)
+    return False # generic false if we aren't sure
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
@@ -153,7 +167,7 @@ def sum_collapse(phi_input, loop, val1, val2):
   return None
 
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
-  if not rng.arg[2]: return None   # must be a reduce
+  if not rng.arg[1]: return None  # must be a REDUCE
   if mval.arg >= 0 or loop_start.arg != 0:
     # TODO: support and test this with other mvals and loop_starts
     if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
@@ -161,8 +175,203 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
+def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
+  # get children and define_accs
+  children = defaultdict(list)
+  define_accs = []
+  for p in parents:
+    if p.op is UOps.PHI:
+      define_accs.append(p.src[0])
+    for x in p.src:
+      children[x].append(p)
+
+  # get nodes on the path from root to the expand node
+  on_path: Dict[UOp, None] = {}
+  search = expands[:]
+  while len(search):
+    t = search.pop(0)
+    for cc in children[t]:
+      if cc in on_path: continue
+      on_path[cc] = None
+      search.append(cc)
+
+  # toposort the nodes on the path
+  # TODO: library!
+  in_degree: DefaultDict[UOp, int] = defaultdict(int)
+  for n in on_path:
+    for x in children[n]:
+      in_degree[x] += 1
+  toposort = []
+  search2 = [p for p in on_path if in_degree[p] == 0]
+  seen: Set[UOp] = set()
+  while len(search2):
+    n = search2.pop(0)
+    if n in seen: continue
+    toposort.append(n)
+    for x in children[n]:
+      in_degree[x] -= 1
+      if in_degree[x] == 0:
+        search2.append(x)
+
+  # get replacements by index
+  replacements: Dict[int, List[int]] = {}
+  for r in expands:
+    if r.arg in replacements: assert len(replacements[r.arg]) == len(r.src)
+    else: replacements[r.arg] = list(range(0, len(r.src)))
+
+  # get nodes on the path from root to the expand node
+  new_uops: List[UOp] = []
+  acc_number = 0
+  for rp in itertools.product(*replacements.values()):
+    rpk = dict(zip(replacements.keys(), rp))
+    replace = {r:r.src[rpk[r.arg]] for r in expands}
+
+    for d in define_accs:
+      replace[d] = UOp(d.op, d.dtype, d.src, d.arg + (acc_number,))
+      acc_number += 1
+    for cc in toposort: replace[cc] = UOp(cc.op, cc.dtype, tuple(replace.get(x, x) for x in cc.src), cc.arg)
+    new_uops.append(replace.get(base, base))
+  return new_uops
+
+def get_reduce_acc(op, dtype):
+  if op is ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
+  if op is ReduceOps.MAX:
+    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
+    return -math.inf if dtypes.is_float(dtype) else False
+
+acc_number = 0
+def replace_reduce(root):
+  global acc_number
+  expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
+
+  # NOTE: this is making an assumption about root.src[1], i think root.src[1] should just be moved here
+  # never mind, this IF is entirely wrong. you have to check if there's no RANGEs or EXPANDs
+  #if len(expands) == 0: return root.src[0]
+
+  # add other expands for float4. TODO: should be a faster way
+  expand_args = [x.arg for x in expands]
+  expands += [x for x in root.parents if x.op is UOps.EXPAND and x.arg in expand_args]
+
+  if len(expands):
+    new_uops = expand_nodes(root.parents, expands, root.src[0])
+  else:
+    new_uops = [root.src[0]]
+
+  # TODO: DEFINE_ACC should have a const input
+  const = UOp.const(root.dtype.scalar(), get_reduce_acc(root.arg, root.dtype.scalar()))
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x not in expands), (acc_number,))
+  acc_number += 1
+  ret = acc
+  for xx in new_uops: ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
+  return UOp(UOps.PHI, ret.dtype, (acc, ret))
+
+def replace_contract(root:UOp):
+  parents = root.parents
+  expands: List[UOp] = [x for x in parents if x.op is UOps.EXPAND and x.arg == root.arg[0]]
+  assert all_same([root.arg[1]] + [len(x.src) for x in expands])
+  ret = expand_nodes(parents, expands, root.src[0])
+  return UOp(UOps.CAST, cast(DType, root.dtype).vec(root.arg[1]), tuple(ret))
+
+def cast_reduce(cst):
+  if cst.dtype.scalar() == cst.dtype: return None  # not for normal CAST. TODO: the merging one shouldn't be CAST
+  if not all_same([(x.arg, x.src[1:]) for x in cst.src]): return None
+  fst_red = cst.src[0]
+  red = UOp(UOps.CAST, cst.dtype, tuple(x.src[0] for x in cst.src))
+  return UOp(UOps.REDUCE, red.dtype, (red,) + fst_red.src[1:], fst_red.arg)
+
+contractor = PatternMatcher([
+  (UPat(UOps.CONTRACT, name="root"), replace_contract),
+  # CAST after REDUCEs -> one REDUCE
+  (UPat(UOps.CAST, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
+])
+
+reducer = PatternMatcher([
+  (UPat(UOps.REDUCE, name="root"), replace_reduce),
+])
+
+def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), const=None):
+  if len(ex.src) != 4: return None
+  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
+  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
+  if const is not None: idx = idx + const
+  if not idx.divides(len(ex.src)): return None
+
+  if load.dtype.scalar() != load.dtype: return None  # how does this happen?
+  vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
+  return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
+
+def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None):
+  if len(ex.src) != 4: return None
+  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
+  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
+  if const is not None: idx = idx + const
+  if not idx.divides(len(ex.src)): return None
+
+  new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
+  return UOp(UOps.STORE, None, (buf, idx, new_var))
+
+tc_args = ('WMMA_8_8_8_float_float', (8, 8, 8), dtypes.float, dtypes.float, (2, 2, 2), 'METAL')
+ex_8 = UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(8))).name("ex")
+
+float4_folding = PatternMatcher([
+  # tensor core!
+  #(UOp(UOps.REDUCE, dtype=dtypes.float, src=(UOp(UOps.LOAD).name("x") * UOp(UOps.LOAD, src=(UOp.var("w_src"), UOp.var("w_idx")+ex_8)), ex_8)),
+  #  lambda ex,x,w_src,w_idx: UOp(UOps.WMMA, dtypes.float, (x, UOp(UOps.LOAD, dtypes.float, src=(w_src, w_idx))), tc_args)),
+  # float4 add reorder. NOTE: n-ary ADD will fix this.
+  #(UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
+  #  UOp.var("idx")+(UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")))).name("load"),
+  #  lambda buf, load, idx, idx2, ex: UOp(UOps.LOAD, load.dtype, (buf, idx+idx2+ex), load.arg)),
+  (UOp(UOps.STORE, dtype=dtypes.float, src=(UOp.var("buf"), UOp.var("idx")+
+    (UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")), UOp.var("var"))).name("store"),
+    lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
+  # float4 load/store
+  #(UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"))).name("load"), float4_expand_load),
+  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int))).name("load"),
+    float4_expand_load),
+  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
+  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
+    UOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
+  #(UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"), UOp.var("var"))), float4_contract_store),
+  (UOp(UOps.STORE, src=(UOp.var("buf"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int), UOp.var("var"))),
+    float4_contract_store),
+  (UOp(UOps.STORE, src=(UOp.var("buf"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx"), UOp.var("var"))), float4_contract_store),
+  (UOp(UOps.STORE, src=(UOp.var("buf"),
+    UOp(UOps.EXPAND).name("ex"), UOp.var("var"))), float4_contract_store),
+])
+
+"""
+  # collapse ADD
+  (UOp.var("a")+UOp.var("b")+UOp.var("c")+UOp.var("d")+UOp.var("e")+UOp.var("f"), lambda a,b,c,d,e,f: UOp.alu(BinaryOps.ADD, a, b, c, d, e, f)),
+  (UOp.var("a")+UOp.var("b")+UOp.var("c")+UOp.var("d")+UOp.var("e"), lambda a,b,c,d,e: UOp.alu(BinaryOps.ADD, a, b, c, d, e)),
+  (UOp.var("a")+UOp.var("b")+UOp.var("c")+UOp.var("d"), lambda a,b,c,d: UOp.alu(BinaryOps.ADD, a, b, c, d)),
+  (UOp.var("a")+UOp.var("b")+UOp.var("c"), lambda a,b,c: UOp.alu(BinaryOps.ADD, a, b, c)),
+  # collapse MUL
+  (UOp.var("a")*UOp.var("b")*UOp.var("c")*UOp.var("d")*UOp.var("e")*UOp.var("f"), lambda a,b,c,d,e,f: UOp.alu(BinaryOps.MUL, a, b, c, d, e, f)),
+  (UOp.var("a")*UOp.var("b")*UOp.var("c")*UOp.var("d")*UOp.var("e"), lambda a,b,c,d,e: UOp.alu(BinaryOps.MUL, a, b, c, d, e)),
+  (UOp.var("a")*UOp.var("b")*UOp.var("c")*UOp.var("d"), lambda a,b,c,d: UOp.alu(BinaryOps.MUL, a, b, c, d)),
+  (UOp.var("a")*UOp.var("b")*UOp.var("c"), lambda a,b,c: UOp.alu(BinaryOps.MUL, a, b, c)),
+"""
+
+def tc_expand(tc, lb1, lb2, v1, v2):
+  ret = UOp(UOps.WMMA, dtype=tc.dtype.vec(2), src=(
+    UOp(UOps.CONTRACT, dtype=v1.dtype, src=(v1,), arg=(5, 2)),
+    UOp(UOps.CONTRACT, dtype=v2.dtype, src=(v2,), arg=(5, 2)),
+    UOp.const(tc.dtype.vec(2), 0.0)), arg=tc.arg)
+  return UOp(UOps.EXPAND, tc.dtype, tuple(UOp(UOps.GEP, tc.dtype, (ret,), i) for i in range(2)), arg=5)
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # tensor core
+  (UOp(UOps.TC, src=(UOp(UOps.REDUCE, src=(
+    UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
+    UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),))), UOp.var())),)).name("tc"),
+    tc_expand),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL, src=[UPat(UOps.CONST, name="mval"),
@@ -282,6 +491,8 @@ constant_folder = PatternMatcher([
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None)
 ])
 
+constant_folder_w_f4 = PatternMatcher(float4_folding.patterns + constant_folder.patterns)
+
 # *** uop graph ***
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
@@ -304,10 +515,11 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   return __inner_rewrite(sink)
 
 class UOpGraph:
-  def __init__(self, sinks:List[UOp]):
+  def __init__(self, sinks:List[UOp], opts:Optional[Renderer]=None):
     self.sinks: List[UOp] = sinks
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
+    self.folder = constant_folder if opts is None or not opts.supports_float4 else constant_folder_w_f4
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
@@ -328,7 +540,11 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
+  cnt = 0
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
+    global acc_number
+    acc_number = 0
+
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
@@ -344,9 +560,25 @@ class UOpGraph:
       if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
-    # dedup all nodes and do graph rewrite
-    sink = graph_rewrite(sink, constant_folder)
-    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+    # do graph rewrite
+    sink = graph_rewrite(sink, self.folder)
+    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
+
+    UOpGraph.cnt += 1
+    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
+      # do contracts/reduces
+      sink = graph_rewrite(sink, contractor)
+      sink = graph_rewrite(sink, reducer)
+
+      # do upcasts (after reduce unrolls and rewrites)
+      all_parents = set([sink]).union(sink.parents)
+      expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
+      if len(expands):
+        new_nodes = expand_nodes(all_parents, expands, sink)
+        sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
+
+      # do graph rewrite (2)
+      sink = graph_rewrite(sink, self.folder)
 
     # filter nodes that don't link to a sink
     # BFS toposort
