@@ -267,9 +267,9 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
         self.device._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
-        ctypes.memmove(self.b[self.b_next].addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
+        ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
         self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
-                                     .copy(dest.addr+i, self.b[self.b_next].addr, lsize) \
+                                     .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
                                      .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
         self.b_timeline[self.b_next] = self.device.timeline_value
         self.device.timeline_value += 1
@@ -279,13 +279,13 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
       # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
       if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device._read_signal(self.device.timeline_signal):
         self.b_timeline[(self.b_next + 1) % len(self.b)], self.b_next = (1 << 64), (self.b_next + 1) % len(self.b)
-        return (self.b[self.b_next].addr, self.b_next)
+        return (self.b[self.b_next].va_addr, self.b_next)
       return None
 
     with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"DISK -> {self.device.dname}", enabled=PROFILE):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
         self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
-                                     .copy(dest.addr + dst_off, batch_info[0] + src_off, copy_size) \
+                                     .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
                                      .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
         self.b_timeline[batch_info[1]] = self.device.timeline_value
         self.device.timeline_value += 1
@@ -296,12 +296,12 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
     with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
       for i in range(0, dest.nbytes, self.b[0].size):
         self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
-                                     .copy(self.b[0].addr, src.addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
+                                     .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
                                      .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
         self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value)
         self.device.timeline_value += 1
 
-        ctypes.memmove(from_mv(dest[i:]), self.b[0].addr, lsize)
+        ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
   def transfer(self, dest, src, sz: int, src_dev, dest_dev):
     src_dev._gpu_map(dest)
@@ -309,7 +309,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
     with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
       src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
                                .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
-                               .copy(dest.addr, src.addr, sz) \
+                               .copy(dest.va_addr, src.va_addr, sz) \
                                .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
       src_dev.timeline_value += 1
 
@@ -319,4 +319,4 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
                                    .signal(dest_dev.timeline_signal, dest_dev.timeline_value).submit(dest_dev)
       dest_dev.timeline_value += 1
 
-  def offset(self, buf, size:int, offset:int): return HCQRawBuffer(addr=buf.addr+offset)
+  def offset(self, buf, size:int, offset:int): return type(buf)(base=buf.base + offset, va_addr=buf.va_addr + offset, length=size, size=size)
