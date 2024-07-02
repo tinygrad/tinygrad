@@ -11,7 +11,6 @@ def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
   args = timesteps.unsqueeze(1) * freqs.unsqueeze(0)
   return Tensor.cat(args.cos(), args.sin(), dim=-1).cast(dtypes.float16)
 
-# https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L136
 class ResBlock:
   def __init__(self, channels:int, emb_channels:int, out_channels:int):
     self.in_layers = [
@@ -38,7 +37,6 @@ class ResBlock:
     h = h.sequential(self.out_layers)
     return self.skip_connection(x) + h
 
-# https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L163
 class CrossAttention:
   def __init__(self, query_dim:int, ctx_dim:int, n_heads:int, d_head:int):
     self.to_q = Linear(query_dim, n_heads*d_head, bias=False)
@@ -56,7 +54,6 @@ class CrossAttention:
     h_ = attention.reshape(x.shape[0], -1, self.num_heads * self.head_size)
     return h_.sequential(self.to_out)
 
-# https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L180
 class GEGLU:
   def __init__(self, dim_in:int, dim_out:int):
     self.proj = Linear(dim_in, dim_out * 2)
@@ -66,7 +63,6 @@ class GEGLU:
     x, gate = self.proj(x).chunk(2, dim=-1)
     return x * gate.gelu()
 
-# https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L189
 class FeedForward:
   def __init__(self, dim:int, mult:int=4):
     self.net = [
@@ -78,7 +74,6 @@ class FeedForward:
   def __call__(self, x:Tensor) -> Tensor:
     return x.sequential(self.net)
 
-# https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L200
 class BasicTransformerBlock:
   def __init__(self, dim:int, ctx_dim:int, n_heads:int, d_head:int):
     self.attn1 = CrossAttention(dim, dim, n_heads, d_head)
@@ -94,7 +89,6 @@ class BasicTransformerBlock:
     x = x + self.ff(self.norm3(x))
     return x
 
-# https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L215
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/attention.py#L619
 class SpatialTransformer:
   def __init__(self, channels:int, n_heads:int, d_head:int, ctx_dim:Union[int,List[int]], use_linear:bool, depth:int=1):
@@ -121,7 +115,6 @@ class SpatialTransformer:
     x = x.sequential(ops if self.use_linear else ops[::-1])
     return x + x_in
 
-# https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L235
 class Downsample:
   def __init__(self, channels:int):
     self.op = Conv2d(channels, channels, 3, stride=2, padding=1)
@@ -129,7 +122,6 @@ class Downsample:
   def __call__(self, x:Tensor) -> Tensor:
     return self.op(x)
 
-# https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L242
 class Upsample:
   def __init__(self, channels:int):
     self.conv = Conv2d(channels, channels, 3, padding=1)
@@ -139,9 +131,7 @@ class Upsample:
     z = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
     return self.conv(z)
 
-
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/openaimodel.py#L472
-# https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L257
 class UNetModel:
   def __init__(self, adm_in_ch:Optional[int], in_ch:int, out_ch:int, model_ch:int, attention_resolutions:List[int], num_res_blocks:int, channel_mult:List[int], transformer_depth:List[int], ctx_dim:Union[int,List[int]], use_linear:bool=False, d_head:Optional[int]=None, n_heads:Optional[int]=None):
     self.model_ch = model_ch

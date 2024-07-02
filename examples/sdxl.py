@@ -285,7 +285,6 @@ class SDXL:
 
     return run(self.model.diffusion_model, *prep(x*c_in, c_noise, cond["crossattn"], cond["vector"], c_out, x))
 
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L543
   def decode(self, x:Tensor) -> Tensor:
     return self.first_stage_model.decode(1.0 / 0.13025 * x)
 

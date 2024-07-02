@@ -7,6 +7,11 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 import re, gzip
 
+@lru_cache()
+def default_bpe():
+  # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
+  return fetch("https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz", "bpe_simple_vocab_16e6.txt.gz")
+
 class Tokenizer:
   """
   Namespace for CLIP Text Tokenizer components.
@@ -45,15 +50,10 @@ class Tokenizer:
         n += 1
     cs = [chr(n) for n in cs]
     return dict(zip(bs, cs))
-  @lru_cache()
-  @staticmethod
-  def default_bpe():
-    # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
-    return fetch("https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz", "bpe_simple_vocab_16e6.txt.gz")
   class ClipTokenizer:
     def __init__(self):
       self.byte_encoder = Tokenizer.bytes_to_unicode()
-      merges = gzip.open(Tokenizer.default_bpe()).read().decode("utf-8").split('\n')
+      merges = gzip.open(default_bpe()).read().decode("utf-8").split('\n')
       merges = merges[1:49152-256-2+1]
       merges = [tuple(merge.split()) for merge in merges]
       vocab = list(Tokenizer.bytes_to_unicode().values())
@@ -129,8 +129,6 @@ class Closed:
   """
   Namespace for OpenAI CLIP model components.
   """
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L329
   class ClipMlp:
     def __init__(self):
       self.fc1 = Linear(768, 3072)
@@ -142,8 +140,6 @@ class Closed:
       h = self.fc2(h)
       return h
 
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L340
   class ClipAttention:
     def __init__(self):
       self.embed_dim = 768
@@ -161,8 +157,6 @@ class Closed:
       attn_output = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=causal_attention_mask)
       return self.out_proj(attn_output.transpose(1, 2).reshape(bsz, tgt_len, embed_dim))
 
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L357
   class ClipEncoderLayer:
     def __init__(self):
       self.self_attn = Closed.ClipAttention()
@@ -183,8 +177,6 @@ class Closed:
 
       return hidden_states
 
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L386
   class ClipTextEmbeddings:
     def __init__(self):
       self.token_embedding    = Embedding(49408, 768)
@@ -193,8 +185,6 @@ class Closed:
     def __call__(self, input_ids:Tensor, position_ids:Tensor) -> Tensor:
       return self.token_embedding(input_ids) + self.position_embedding(position_ids)
 
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L377
   class ClipEncoder:
     def __init__(self, layer_count:int=12):
       self.layers = [Closed.ClipEncoderLayer() for _ in range(layer_count)]
@@ -206,8 +196,6 @@ class Closed:
         x = l(x, causal_attention_mask)
       return x
 
-
-  # https://github.com/tinygrad/tinygrad/blob/64cda3c481613f4ca98eeb40ad2bce7a9d0749a3/examples/stable_diffusion.py#L394
   class ClipTextTransformer:
     def __init__(self, ret_layer_idx:Optional[int]=None):
       self.embeddings       = Closed.ClipTextEmbeddings()
@@ -241,7 +229,6 @@ class Open:
   """
   Namespace for OpenCLIP model components.
   """
-
   class MultiheadAttention:
     def __init__(self, dims:int, n_heads:int):
       self.dims     = dims
@@ -269,7 +256,6 @@ class Open:
 
       return attn_output
 
-
   class Mlp:
     def __init__(self, dims, hidden_dims):
       self.c_fc   = Linear(dims, hidden_dims)
@@ -277,7 +263,6 @@ class Open:
 
     def __call__(self, x:Tensor) -> Tensor:
       return x.sequential([self.c_fc, Tensor.gelu, self.c_proj])
-
 
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/transformer.py#L210
   class ResidualAttentionBlocks:
@@ -293,7 +278,6 @@ class Open:
       x = x + self.mlp(self.ln_2(x))
       return x
 
-
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/transformer.py#L317
   class ClipTransformer:
     def __init__(self, dims:int, layers:int, n_heads:int, mlp_ratio:float=4.0):
@@ -307,7 +291,6 @@ class Open:
         x = r(x, attn_mask=attn_mask)
       x = x.transpose(0, 1)
       return x
-
 
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/model.py#L220
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/transformer.py#L661
