@@ -34,7 +34,7 @@ def init_graph():
 counts: DefaultDict[type, int] = defaultdict(int)
 def nm(x):
   if not hasattr(x, 'node_id'):
-    setattr(x, 'node_id', counts[type(x)])
+    x.node_id = counts[type(x)]
     counts[type(x)] += 1
   return x.node_id
 
