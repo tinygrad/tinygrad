@@ -304,15 +304,15 @@ def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), const=None):
   vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
   return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
 
-def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0), const=None):
-  if len(ex.src) != 4: return None
+def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtypes.int, 0), const=None):
+  if len(ex.src) not in [2, 4]: return None
   if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
   if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
   if const is not None: idx = idx + const
   if not idx.divides(len(ex.src)): return None
 
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
-  return UOp(UOps.STORE, None, (buf, idx, new_var))
+  return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
 
 tc_args = ('WMMA_8_8_8_float_float', (8, 8, 8), dtypes.float, dtypes.float, (2, 2, 2), 'METAL')
 ex_8 = UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(8))).name("ex")
@@ -341,12 +341,12 @@ float4_folding = PatternMatcher([
   #(UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
   #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"), UOp.var("var"))), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int), UOp.var("var"))),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int), UOp.var("var"))).name("store_allow_any_len"),
     float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex")+UOp.var("idx"), UOp.var("var"))), float4_contract_store),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex"), UOp.var("var"))), float4_contract_store),
+    UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
 ])
 
 """
