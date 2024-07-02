@@ -48,7 +48,7 @@ class TestHCQ(unittest.TestCase):
   def test_signal_update(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t]:
       with self.subTest(name=str(queue_type)):
-        q = queue_type().signal(fake_signal := TestHCQ.d0._get_signal(), 0x1000)
+        q = queue_type().signal(fake_signal := TestHCQ.d0._alloc_signal(), 0x1000)
 
         q.update_signal(0, signal=TestHCQ.d0.timeline_signal, value=TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
         TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
@@ -58,26 +58,26 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-        TestHCQ.d0.signals_pool.append(fake_signal)
+        TestHCQ.d0._free_signal(fake_signal)
 
   # Test wait
   def test_wait(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       with self.subTest(name=str(queue_type)):
-        fake_signal = TestHCQ.d0._get_signal()
+        fake_signal = TestHCQ.d0._alloc_signal()
         TestHCQ.d0._set_signal(fake_signal, 1)
         queue_type().wait(fake_signal, 1) \
                   .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
         TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-        TestHCQ.d0.signals_pool.append(fake_signal)
+        TestHCQ.d0._free_signal(fake_signal)
 
   @unittest.skipIf(MOCKGPU, "Can't handle async update on MOCKGPU for now")
   def test_wait_late_set(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       with self.subTest(name=str(queue_type)):
-        fake_signal = TestHCQ.d0._get_signal()
+        fake_signal = TestHCQ.d0._alloc_signal()
         queue_type().wait(fake_signal, 1) \
                   .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
@@ -89,12 +89,12 @@ class TestHCQ(unittest.TestCase):
 
         TestHCQ.d0.timeline_value += 1
 
-        TestHCQ.d0.signals_pool.append(fake_signal)
+        TestHCQ.d0._free_signal(fake_signal)
 
   def test_wait_update(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       with self.subTest(name=str(queue_type)):
-        fake_signal = TestHCQ.d0._get_signal()
+        fake_signal = TestHCQ.d0._alloc_signal()
         q = queue_type().wait(TestHCQ.d0.timeline_signal, 0xffffffff).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
         TestHCQ.d0._set_signal(fake_signal, 0x30)
@@ -103,7 +103,7 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-        TestHCQ.d0.signals_pool.append(fake_signal)
+        TestHCQ.d0._free_signal(fake_signal)
 
   # Test exec
   def test_exec_one_kernel(self):
@@ -167,7 +167,7 @@ class TestHCQ(unittest.TestCase):
       with self.subTest(name=str(queue_type)):
         if not hasattr(queue_type(), 'bind'): self.skipTest("queue does not support bind api")
 
-        fake_signal = TestHCQ.d0._get_signal()
+        fake_signal = TestHCQ.d0._alloc_signal()
         q = queue_type().wait(TestHCQ.d0.timeline_signal, 0xffffffff).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
         q.bind(TestHCQ.d0)
 
@@ -177,13 +177,13 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-        TestHCQ.d0.signals_pool.append(fake_signal)
+        TestHCQ.d0._free_signal(fake_signal)
 
   # Test multidevice
   def test_multidevice_signal_wait(self):
     d1 = Device[f"{Device.DEFAULT}:1"]
 
-    TestHCQ.d0.hw_copy_queue_t().signal(sig:=TestHCQ.d0._get_signal(value=0), value=0xfff) \
+    TestHCQ.d0.hw_copy_queue_t().signal(sig:=TestHCQ.d0._alloc_signal(value=0), value=0xfff) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
     d1.hw_copy_queue_t().wait(sig, value=0xfff) \
@@ -195,13 +195,13 @@ class TestHCQ(unittest.TestCase):
     d1._wait_signal(d1.timeline_signal, d1.timeline_value)
     d1.timeline_value += 1
 
-    TestHCQ.d0.signals_pool.append(sig)
+    TestHCQ.d0._free_signal(sig)
 
   # Test profile api
   def test_speed_exec_time(self):
     TestHCQ.d0._prof_setup()
 
-    sig_st, sig_en = TestHCQ.d0._get_signal(), TestHCQ.d0._get_signal()
+    sig_st, sig_en = TestHCQ.d0._alloc_signal(), TestHCQ.d0._alloc_signal()
     TestHCQ.d0.hw_compute_queue_t().timestamp(sig_st) \
                                    .exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
                                    .timestamp(sig_en) \
@@ -212,7 +212,8 @@ class TestHCQ(unittest.TestCase):
 
     et = TestHCQ.d0._gpu2cpu_time(TestHCQ.d0._read_timestamp(sig_en), True) - TestHCQ.d0._gpu2cpu_time(TestHCQ.d0._read_timestamp(sig_st), True)
 
-    TestHCQ.d0.signals_pool += [sig_st, sig_en]
+    TestHCQ.d0._free_signal(sig_st)
+    TestHCQ.d0._free_signal(sig_en)
 
     print(f"exec kernel time: {et:.2f} us")
     assert 1 <= et <= (2000 if CI else 20)
@@ -225,7 +226,7 @@ class TestHCQ(unittest.TestCase):
     a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     b = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
 
-    sig_st, sig_en = TestHCQ.d0._get_signal(), TestHCQ.d0._get_signal()
+    sig_st, sig_en = TestHCQ.d0._alloc_signal(), TestHCQ.d0._alloc_signal()
     TestHCQ.d0.hw_copy_queue_t().timestamp(sig_st) \
                                 .copy(a._buf.va_addr, b._buf.va_addr, SZ) \
                                 .timestamp(sig_en) \
@@ -237,7 +238,8 @@ class TestHCQ(unittest.TestCase):
     et = TestHCQ.d0._gpu2cpu_time(TestHCQ.d0._read_timestamp(sig_en), True) - TestHCQ.d0._gpu2cpu_time(TestHCQ.d0._read_timestamp(sig_st), True)
     et_ms = et / 1e3
 
-    TestHCQ.d0.signals_pool += [sig_st, sig_en]
+    TestHCQ.d0._free_signal(sig_st)
+    TestHCQ.d0._free_signal(sig_en)
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
     print(f"same device copy:  {et_ms:.2f} ms, {gb_s:.2f} GB/s")
@@ -251,7 +253,7 @@ class TestHCQ(unittest.TestCase):
     a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     TestHCQ.d0._gpu_map(b._buf)
 
-    sig_st, sig_en = TestHCQ.d0._get_signal(), TestHCQ.d0._get_signal()
+    sig_st, sig_en = TestHCQ.d0._alloc_signal(), TestHCQ.d0._alloc_signal()
     TestHCQ.d0.hw_copy_queue_t().timestamp(sig_st) \
                                 .copy(a._buf.va_addr, b._buf.va_addr, SZ) \
                                 .timestamp(sig_en) \
@@ -263,7 +265,8 @@ class TestHCQ(unittest.TestCase):
     et = TestHCQ.d0._gpu2cpu_time(TestHCQ.d0._read_timestamp(sig_en), True) - TestHCQ.d0._gpu2cpu_time(TestHCQ.d0._read_timestamp(sig_st), True)
     et_ms = et / 1e3
 
-    TestHCQ.d0.signals_pool += [sig_st, sig_en]
+    TestHCQ.d0._free_signal(sig_st)
+    TestHCQ.d0._free_signal(sig_en)
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
     print(f"cross device copy: {et_ms:.2f} ms, {gb_s:.2f} GB/s")
