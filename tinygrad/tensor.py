@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct
+import time, math, itertools, functools, struct, sys
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
 from collections import defaultdict
@@ -8,7 +8,7 @@ import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
+from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps, truncate
@@ -20,18 +20,19 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, me
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
-  def __init__(self, device:Union[str, Tuple[str, ...]], *tensors:Tensor):
+  def __init__(self, device:Union[str, Tuple[str, ...]], *tensors:Tensor, metadata=None):
     self.device = device
     self.needs_input_grad = [t.requires_grad for t in tensors]
     self.requires_grad = True if any(self.needs_input_grad) else None if None in self.needs_input_grad else False
     if self.requires_grad: self.parents = tensors
+    self.metadata = metadata
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
 
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
-    ctx = fxn(x[0].device, *x)
+    ctx = fxn(x[0].device, *x, metadata=_METADATA.get())
     ret = Tensor.__new__(Tensor)
     ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
     ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
@@ -170,6 +171,40 @@ class Tensor:
   def __len__(self):
     if not self.shape: raise TypeError("len() of a 0-d tensor")
     return self.shape[0]
+
+  def __getattribute__(self, name: str):
+    val = object.__getattribute__(self, name)
+    if callable(val) and _METADATA.get() is None:
+      caller_frame = sys._getframe(1)
+      caller_module = caller_frame.f_globals.get("__name__", None)
+      if caller_module is None: return val
+
+      # # if its a nn module we want to look one more frame up
+      if caller_module.startswith("tinygrad.nn"): caller_frame = sys._getframe(2)
+      caller_module = caller_frame.f_globals.get("__name__", None)
+      caller_func = caller_frame.f_code.co_name
+      caller_lineno = caller_frame.f_lineno
+
+      # print(name, caller_module, caller_func)
+
+      # if caller_module.startswith("tinygrad"): return val
+
+      # filter out private methods
+      if name.startswith("_") and not name.startswith("__"): return val
+      # filter out properties
+      if isinstance(val, property): return
+      # filter out special methods
+      if name in ("__class__", "__init__"): return val
+      # if its a sequential we need to look down a frame
+      if name == "sequential": return val
+
+      def wrapper(*args, **kwargs):
+        token = _METADATA.set(f"{name}() called from {caller_module}::{caller_func}:{caller_lineno}")
+        ret = val(*args, **kwargs)
+        _METADATA.reset(token)
+        return ret
+      return wrapper
+    return val
 
   @property
   def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device
@@ -740,7 +775,9 @@ class Tensor:
 
     for t0 in reversed(self._deepwalk()):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
+      token = _METADATA.set(f"{t0._ctx.metadata} bw")
       grads = t0._ctx.backward(t0.grad.lazydata)
+      _METADATA.reset(token)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):

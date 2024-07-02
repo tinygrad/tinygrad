@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 from typing import Union, Optional, Any, Tuple, List
 from tinygrad.dtype import dtypes, DType, ConstType
-from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG
+from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -18,7 +18,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
 
-  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
+  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, metadata=_METADATA.get())
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
@@ -26,8 +26,8 @@ view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None):
-    self.device, self.st, self.dtype, self.shape, self.size = device, st, dtype, st.shape, st.size
+               base:Optional[LazyBuffer]=None, metadata:Optional[str]=None):
+    self.device, self.st, self.dtype, self.shape, self.size, self.metadata = device, st, dtype, st.shape, st.size, metadata
     self._base: Optional[LazyBuffer] = None
     if base is None:
       # properties on base
