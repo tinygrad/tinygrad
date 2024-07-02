@@ -1,9 +1,15 @@
-
 import math
 from typing import Tuple, List
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer, create_lazybuffer
+from tinygrad.multi import MultiLazyBuffer
+
+def bitcast(x, dtype: DType):
+  if isinstance(x, LazyBuffer):
+    return create_lazybuffer(x.device, x.st, dtype, UnaryOps.BITCAST, dtype, (x,))
+  if isinstance(x, MultiLazyBuffer):
+    return MultiLazyBuffer([bitcast(a, dtype) for a in x.lbs], x.axis, x.real)
 
 def is_dtype_fastmath_supported(d: DType):
   return d in [dtypes.float16, dtypes.float32, dtypes.float64]
@@ -71,7 +77,7 @@ def polyN(u: LazyBuffer, s: LazyBuffer, coeffs: List[float]) -> LazyBuffer:
 
 def ilogb2k(d:LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
-  dint = d.cast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype], True)
+  dint = bitcast(d, {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype])
   # ((float_to_bits(d) >> significand_bits(dtype)) & exponent_mask(dtype)) - exponent_bias(dtype)
   return shr(dint, significand_bits(d.dtype)).e(BinaryOps.AND, dint.const(exponent_mask(d.dtype))).e(BinaryOps.ADD, dint.const(-(exponent_bias(d.dtype)+1))) # noqa: E501
 
@@ -81,14 +87,14 @@ def ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   d = d.cast(dtypes.float64) if d.device == "NV" and d.dtype == dtypes.float32 else d
   cast_map = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
   e = e.cast(cast_map[d.dtype])
-  m1 = d.cast(cast_map[d.dtype], True)
+  m1 = bitcast(d, cast_map[d.dtype])
   m2 = shl(e, significand_bits(d.dtype))
-  return m1.e(BinaryOps.ADD, m2).cast(d.dtype, True).cast(dtype)
+  return bitcast(m1.e(BinaryOps.ADD, m2), d.dtype).cast(dtype)
 
 def pow2if(q: LazyBuffer, float_dtype: DType):
   assert q.dtype in (dtypes.int64, dtypes.int32, dtypes.int16, dtypes.uint32)
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype, dtypes.uint32: dtypes.float32}[q.dtype]
-  return shl(q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)), significand_bits(final_dtype)).cast(final_dtype, True) # noqa: E501
+  return bitcast(shl(q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)), significand_bits(final_dtype)), final_dtype) # noqa: E501
 
 def ldexp2kf(d: LazyBuffer, e: LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype) and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
