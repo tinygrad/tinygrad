@@ -210,14 +210,14 @@ class Lowerer(Kernel):
               else: continue
               permaxis[swap], permaxis[tidx] = permaxis[tidx], permaxis[swap]
 
-            def fix_st(st):
+            def fix_st(st, new_shape, permaxis):
               old_shape = st.shape
               st = st.reshape(old_shape[:self.shape_len-self.upcasted] + new_shape[self.shape_len-self.upcasted:])
               st = st.permute(tuple(permaxis))
               return st.reshape(old_shape)
 
-            st1 = fix_st(st1)
-            st2 = fix_st(st2)
+            st1 = fix_st(st1, new_shape, permaxis)
+            st2 = fix_st(st2, new_shape, permaxis)
 
             start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), MemBuffer(arg.idx, arg.dtype, st1))
             local_store = LazyOp(BufferOps.STORE, (start,), MemBuffer(lidx, start.dtype, st2))

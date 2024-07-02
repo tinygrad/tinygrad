@@ -117,8 +117,11 @@ class UPat:
 
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
-    if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
-    return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
+    if u.op is UOps.VAR:
+      return UPat(name=name or u.arg, dtype=u.dtype, allow_any_len=(name is not None and 'allow_any_len' in name)) \
+        if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
+    return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
+                name, u.dtype, allow_any_len=(name is not None and 'allow_any_len' in name))
 
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
@@ -359,38 +362,46 @@ float4_folding = PatternMatcher([
   (UOp.var("a")*UOp.var("b")*UOp.var("c"), lambda a,b,c: UOp.alu(BinaryOps.MUL, a, b, c)),
 """
 
-def tc_expand(tc, lb1, lb2, v1, v2):
+def tc_expand(red_allow_any_len, tc, lb1, lb2, v1, v2):
   upcast_axis = tc.arg[-1]
   ret = UOp(UOps.WMMA, dtype=tc.dtype.vec(2), src=(
     UOp(UOps.CONTRACT, dtype=v1.dtype, src=(v1,), arg=(upcast_axis, 2)),
     UOp(UOps.CONTRACT, dtype=v2.dtype, src=(v2,), arg=(upcast_axis, 2)),
     UOp.const(tc.dtype.vec(2), 0.0)), arg=tc.arg)
+  ret = UOp(red_allow_any_len.op, red_allow_any_len.dtype.vec(2), src=(ret,)+red_allow_any_len.src[1:], arg=red_allow_any_len.arg)
   return UOp(UOps.EXPAND, tc.dtype, tuple(UOp(UOps.GEP, tc.dtype, (ret,), i) for i in range(2)), arg=upcast_axis)
 
+def tc_fail(tc):
+  from tinygrad.engine.graph import print_tree
+  print_tree(tc)
+  assert False
 tensor_core_pattern = [
   # tensor core
-  (UOp(UOps.TC, src=(UOp.cast(
-    UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
-    UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),)))),)).name("tc"),
+  (UOp(UOps.REDUCE, src=(UOp(UOps.TC, src=(UOp.cast(
+      UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
+      UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),)))
+    ),)).name("tc"),)).name("red_allow_any_len"),
     tc_expand),
-  (UOp(UOps.TC, src=(
-    UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
-    UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),))),)).name("tc"),
+  (UOp(UOps.REDUCE, src=(UOp(UOps.TC, src=(
+      UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
+      UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),)))
+    ,)).name("tc"),)).name("red_allow_any_len"),
     tc_expand),
+  #(UOp(UOps.TC).name("tc"), tc_fail),
   (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg))]
 #tensor_core_pattern.clear()
 
-def reduce_expand_reorder(red, ex, src):
-  new_red = UOp(red.op, red.dtype.vec(len(ex.src)), src=(src,)+red.src[1:], arg=red.arg)
-  new_geps = [UOp(UOps.GEP, red.dtype, (new_red, ), x.arg) for x in ex.src]
-  return UOp(UOps.EXPAND, red.dtype, tuple(new_geps), ex.arg)
+#def reduce_expand_reorder(red, ex, src):
+#  new_red = UOp(red.op, red.dtype.vec(len(ex.src)), src=(src,)+red.src[1:], arg=red.arg)
+#  new_geps = [UOp(UOps.GEP, red.dtype, (new_red, ), x.arg) for x in ex.src]
+#  return UOp(UOps.EXPAND, red.dtype, tuple(new_geps), ex.arg)
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher(tensor_core_pattern+[
   # reduce reorder
-  (UPat(UOps.REDUCE, name="red", src=(
-    UPat(UOps.EXPAND, name="ex", src=UPat(UOps.GEP, src=(UPat(name="src"),)),),), allow_any_len=True), reduce_expand_reorder),
+  #(UPat(UOps.REDUCE, name="red", src=(
+  #  UPat(UOps.EXPAND, name="ex", src=UPat(UOps.GEP, src=(UPat(name="src"),)),),), allow_any_len=True), reduce_expand_reorder),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL, src=[UPat(UOps.CONST, name="mval"),
@@ -575,8 +586,9 @@ class UOpGraph:
         return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
       if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
-    for i, s in enumerate(self.sinks[:]):
-      if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
+    # NOTE: disabled in lowerer
+    #for i, s in enumerate(self.sinks[:]):
+    #  if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
     # do graph rewrite
