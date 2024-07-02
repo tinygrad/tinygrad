@@ -152,6 +152,22 @@ def sum_collapse(phi_input, loop, val1, val2):
       return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+ret
   return None
 
+
+def _tree(dag:Union[UOp, UPat], cycles, cnt):
+  cnt[0] += 1
+  src = dag.src if isinstance(dag.src, (list, tuple)) else [] if dag.src is None else [dag.src]
+  if len(src) == 0: return [f"━━ {dag.op} {dag.arg}"]
+  if (lid := id(dag)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
+    return [f"━⬆︎ goto {cycles[id(dag)][0]}: {dag.op}"]
+  cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
+  lines = [f"━┳ {dag.op} {dag.arg}"]
+  childs = [_tree(c, cycles, cnt) for c in src]
+  for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
+  return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
+
+def print_tree(dag:Union[UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(dag, {}, [-1]))]))
+
+
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   if not rng.arg[2]: return None   # must be a reduce
   if mval.arg >= 0 or loop_start.arg != 0:
@@ -160,7 +176,6 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
     return None
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
-
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
@@ -229,6 +244,9 @@ constant_folder = PatternMatcher([
   ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
   # *** rules from symbolic ***
+  (
+    (UOp(UOps.DEFINE_VAR,src=(UOp.cvar("mn"), UOp.cvar("mx"))) .lt(UOp.cvar('x'))).name("root")
+    ,lambda root,x, mn,mx: print(f"\nrule called {mn.arg} {mx.arg}") or print_tree(root) or (UOp.const(dtypes.int, 0) if mx.arg < x.arg else None) ),
   # two stage mul, (x*c1)*c2 = x*(c1*c2)
   ((UOp.var("x") * UOp.cvar("c1")) * UOp.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
   # x%1 -> 0
