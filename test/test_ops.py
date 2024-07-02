@@ -1856,6 +1856,43 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8).type(torch.int32),
                        lambda: Tensor(data).one_hot(8), forward_only=True)
 
+  def test_negative_log_likelihood(self):
+    reduction_types = ['none', 'sum', 'mean']
+    torch_nll_loss = torch.nn.functional.nll_loss
+    torch_log_softmax = torch.nn.functional.log_softmax
+
+    for reduction in reduction_types:
+      for weight in [None, np.random.randn(5)]:
+        if weight is not None:
+          weight_torch, weight_t = torch.tensor(weight), Tensor(weight)
+        else:
+          weight_torch, weight_t = weight, weight
+
+        helper_test_op(None,
+                       lambda data, target: torch_nll_loss(torch_log_softmax(data, dim = 1), target,
+                                                           weight = weight_torch, reduction=reduction),
+                       lambda data, target: Tensor(data.nll_loss(target, weight = weight_t, reduction=reduction).numpy(), dtype=dtypes.float64),
+                       forward_only=True, vals = [np.random.randn(3, 5).astype(np.float64), np.array([1, 0, 4])])
+
+
+  def test_cross_entropy(self):
+    reduction_types = ['none', 'sum', 'mean']
+    torch_cross_entropy = torch.nn.functional.cross_entropy
+
+    for reduction in reduction_types:
+      for weight in [None, np.random.randn(5)]:
+        if weight is not None:
+          weight_torch, weight_t = torch.tensor(weight), Tensor(weight)
+        else:
+          weight_torch, weight_t = weight, weight
+
+        helper_test_op(None,
+                       lambda data, target: torch_cross_entropy(data, target,
+                                                           weight = weight_torch, reduction=reduction),
+                       lambda data, target: Tensor(data.cross_entropy(target, weight = weight_t, reduction=reduction).numpy(), dtype=dtypes.float64),
+                       forward_only=True, vals = [np.random.randn(3, 5), [1, 0, 4]])
+
+
   def test_masked_fill(self):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))
     helper_test_op([(32,10)], lambda x: x.masked_fill((x<0.1).detach(), -math.inf))
