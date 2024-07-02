@@ -190,49 +190,50 @@ class Lowerer(Kernel):
             lidx = self.bufs.index(lbuf)
             assert arg.st.real_size() == self.sts[idx].real_size()
 
-            shape_szs = {i+1:k for i,(_,k) in enumerate(self.tensor_core.threads)}
-            shape_szs[-1] = self.tensor_core.thread_local_sizes[-1][0]
-
-            # how to swizzle
-            tc_buf_num = self.bufs_for_tensor_core[top].index(idx)
-            tla = self.tensor_core.thread_local_aliases[tc_buf_num]
-
+            # two shapetrackers
             st1:ShapeTracker = arg.st
             st2 = self.sts[lidx]
 
-            # not true with globals
-            #assert st1.shape == st2.shape
+            shape_szs = {i+1:k for i,(_,k) in enumerate(self.tensor_core.threads)}
+            shape_szs[-1] = self.tensor_core.thread_local_sizes[-1][0]
+
+            tc_buf_num = self.bufs_for_tensor_core[top].index(idx)
+            tla = self.tensor_core.thread_local_aliases[tc_buf_num]
 
             # very hacky shapetracker fixup
-            new_shape = []
-            for i,t in enumerate(tla):
+            new_shape = tuple(st1.shape[:self.shape_len-self.upcasted])
+            mtla = tla[len(self.tensor_core.threads):]
+            for i,t in enumerate(mtla):
               if len(t) == 1:
-                new_shape.append(st1.shape[i])
+                new_shape += (st1.shape[self.shape_len-self.upcasted+i],)
               else:
-                for tt in t[::-1]:
-                  new_shape.append(shape_szs[tt])
-            new_shape = tuple(new_shape)
-            ftla = flatten([x[::-1] for x in tla])
-            perm = {}
-            for i in range(len(self.tensor_core.threads)):
-              perm[i] = ftla.index(i+1)
-              perm[ftla.index(i+1)] = i
-            perm[len(ftla)-1] = ftla.index(-1)
-            perm[ftla.index(-1)] = len(ftla)-1
-            permaxis = tuple([x[1] for x in sorted(perm.items())])
+                new_shape += tuple(shape_szs[tt] for tt in t[::-1])
+            new_shape += tuple(st1.shape[self.shape_len-self.upcasted+len(mtla):])
+            permaxis = list(range(0, len(new_shape)))
+            fmtla = flatten([x[::-1] for x in mtla])
+
+            for i,a in enumerate(fmtla):
+              tidx = self.shape_len-self.upcasted+i
+              if a == -1: swap = self.shape_len-self.upcasted+len(fmtla)-1
+              elif a > 0: swap = self.global_dims+a-1
+              #print(tidx, swap)
+              permaxis[swap], permaxis[tidx] = permaxis[tidx], permaxis[swap]
+
             #print(permaxis)
+            # [5, 1, 4, 3, 2, 6, 0, 7] -- (5, 1, 4, 3, 2, 0, 7, 6)
+            # [0, 5, 2, 4, 3, 6, 1]  -- (0, 5, 2, 4, 3, 1, 6)
 
             def fix_st(st):
               old_shape = st.shape
-              st = st.reshape(new_shape)
-              st = st.permute(permaxis)
+              st = st.reshape(old_shape[:self.shape_len-self.upcasted] + new_shape[self.shape_len-self.upcasted:])
+              st = st.permute(tuple(permaxis))
               return st.reshape(old_shape)
 
             st1 = fix_st(st1)
             st2 = fix_st(st2)
 
             # swizzle shapetrackers here
-            print(tla, st1, st2)
+            print(st1, st2)
 
             start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), MemBuffer(arg.idx, arg.dtype, st1))
             #return start
