@@ -377,8 +377,8 @@ tensor_core_pattern = [
     UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
     UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),))),)).name("tc"),
     tc_expand),
-  (UOp(UOps.DEFINE_ACC).name("dacc") + UOp(UOps.WMMA).name("wmma"),
-    lambda dacc, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], dacc), wmma.arg))]
+  (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
+    lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg))]
 #tensor_core_pattern.clear()
 
 def reduce_expand_reorder(red, ex, src):
