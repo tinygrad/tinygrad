@@ -59,6 +59,10 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 def data64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
+def disasm(lib):
+  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
+  return '\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x])
+
 class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
@@ -185,7 +189,7 @@ class HWPM4Queue(HWQueue):
     assert self.q[self.cmd_offsets[cmd_idx]] == amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6), f"Command at index {cmd_idx} is not signal"
     if signal is not None:
       self._patch(self.cmd_offsets[cmd_idx] + 3, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
-      if signal.event_mailbox_ptr != 0:
+      if self.cmd_offsets[cmd_idx + 1] - self.cmd_offsets[cmd_idx] > 8: # has trap info
         self._patch(self.cmd_offsets[cmd_idx] + 8 + 3, [*data64_le(signal.event_mailbox_ptr), *data64_le(signal.event_id), signal.event_id])
     if value is not None: self._patch(self.cmd_offsets[cmd_idx] + 5, [*data64_le(value)])
     return self
@@ -256,6 +260,12 @@ class HWCopyQueue(HWQueue):
 
     return self._mark_command_end()
 
+  def update_signal(self, cmd_idx, signal=None, value=None):
+    assert self.q[self.cmd_offsets[cmd_idx]] & 0xf == amd_gpu.SDMA_OP_FENCE, f"Command at index {cmd_idx} is not signal"
+    if signal is not None: self._patch(self.cmd_offsets[cmd_idx] + 1, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+    if value is not None: self.q[self.cmd_offsets[cmd_idx] + 3] = value
+    return self
+
   def update_wait(self, cmd_idx, signal=None, value=None):
     assert self.q[self.cmd_offsets[cmd_idx]] & 0xf == amd_gpu.SDMA_OP_POLL_REGMEM, f"Command at index {cmd_idx} is not wait"
     if signal is not None: self._patch(self.cmd_offsets[cmd_idx] + 1, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
@@ -297,9 +307,7 @@ class AMDProgram:
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
 
-    if DEBUG >= 6:
-      asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+    if DEBUG >= 6: print(disasm(lib))
 
     _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
     sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]

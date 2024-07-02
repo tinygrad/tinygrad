@@ -388,3 +388,4 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
 
 class NVRenderer(CUDARenderer): device = "NV"
+class HIPRenderer(AMDRenderer): device = "HIP"

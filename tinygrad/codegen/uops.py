@@ -54,6 +54,7 @@ class UOp:
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
   def __truediv__(self, x): return UOp.alu(BinaryOps.MUL, self, UOp.alu(UnaryOps.RECIP, ufix(self.dtype, x)))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
+  def ne(self, x): return UOp.alu(BinaryOps.CMPNE, self, ufix(self.dtype, x))
   def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
   def ge(self, x): return -self.lt(x)
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
@@ -249,6 +250,10 @@ constant_folder = PatternMatcher([
     lambda x,c0,c1: UOp.lt(x, UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, -c0.arg])))),
   # (x+x*c0)-> x*(c0+1)
   (UOp.var("x") + UOp.var("x") * UOp.cvar("c0"), lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),
+  # x!=0 -> (bool)x
+  (UOp.var("x").ne(0), lambda x: x.cast(dtypes.bool)),
+  # bool != 1 -> not bool
+  (UOp.var("x", dtype=dtypes.bool).ne(1), lambda x: -x),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.alu(TernaryOps.WHERE, UOp.var("gate"), UOp.var("alt"), UOp.load(UOp.var("buf"), UOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
@@ -356,8 +361,7 @@ class UOpGraph:
 
     # scope children impact the toposort and END* insertion
     end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
-    loops, ifs = [x for x in in_degree if x.op is UOps.RANGE], [x for x in in_degree if x.op is UOps.IF]
-    scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in (loops+ifs)[::-1]}
+    scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in reversed(in_degree) if p.op in end_for_uop}
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):

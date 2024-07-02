@@ -1677,6 +1677,11 @@ class TestOps(unittest.TestCase):
 
     np.testing.assert_allclose(x.repeat((2, 0, 4)).numpy(), Tensor.zeros(8, 0, 12).numpy())
 
+  def test_repeat_interleave(self):
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(6))
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, 1))
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, 0))
+
   def test_simple_repeat(self):
     repeats = [3, 3, 4]
     helper_test_op([(3, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
@@ -1824,6 +1829,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64), (32,8,16,16)],
                    lambda x,y,z,m: torch.nn.functional.scaled_dot_product_attention(x,y,z,attn_mask=m),
                    lambda x,y,z,m: Tensor.scaled_dot_product_attention(x,y,z,attn_mask=m))
+
+  def test_scaled_product_attention_mismatch_ls(self):
+    helper_test_op([(32,8,4,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
 
   def test_scaled_product_attention_causal(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)],
