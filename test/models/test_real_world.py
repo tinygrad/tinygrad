@@ -12,7 +12,8 @@ from test.helpers import derandomize_model, is_dtype_supported
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet, hyp
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
-from examples.stable_diffusion import UNetModel, ResBlock
+from examples.stable_diffusion import UNetModel, unet_params
+from extra.models.unet import ResBlock
 
 global_mem_used = 0
 def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jitted=False):
@@ -49,7 +50,7 @@ class TestRealWorld(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(CI, "too big for CI")
   def test_stable_diffusion(self):
-    model = UNetModel()
+    model = UNetModel(**unet_params)
     derandomize_model(model)
     @TinyJit
     def test(t, t2): return model(t, 801, t2).realize()
