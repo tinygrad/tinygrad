@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 import itertools
-from typing import DefaultDict, Optional, List, Tuple, cast, Dict, Union
+from typing import DefaultDict, NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
@@ -35,20 +35,16 @@ class Opt:
     if self.op in {OptOps.GROUP, OptOps.GROUPTOP}: return k.first_reduce+k.group_for_reduces+self.axis
     return self.axis
 
-@dataclass
-class TensorCoreOptions:
-  axes: Tuple[int, ...] # the location of the original N and M axes if still in the shape
-  axes_exist: Tuple[bool, ...] # true if the original N and M axes are still in the shape
-  axis_pads: Tuple[Tuple[int, int], ...]
-  def fix_axes(self, removed_axis:int): # adjust the TC axes if necesssary when a dimension is removed
-    axes, axes_exist = list(self.axes), list(self.axes_exist)
-    for tc_dim in [i for i in range(2) if axes_exist[i]]:
-      if removed_axis < axes[tc_dim]: axes[tc_dim] -= 1
-      elif removed_axis == axes[tc_dim]: axes_exist[tc_dim] = False
-    self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
+class TensorCoreOptions(NamedTuple):
+  axes: List[int] # the location of the original N and M axes if still in the shape
+  axes_exist: List[bool] # true if the original N and M axes are still in the shape
+  axis_pads: List[Tuple[int, int]]
+  def fix_axes(self, removed_axis:int): # adjust the TC axes if necesssary when an dimension is removed
+    for tc_dim in [i for i in range(2) if self.axes_exist[i]]:
+      if removed_axis < self.axes[tc_dim]: self.axes[tc_dim] -= 1
+      elif removed_axis == self.axes[tc_dim]: self.axes_exist[tc_dim] = False
 
-@dataclass(frozen=True)
-class LocalBuffer:
+class LocalBuffer(NamedTuple):
   name: str
   size: int
   dtype: DType = dtypes.float32
@@ -327,11 +323,11 @@ class Kernel:
     if not(axis < len(axis_choices)): return None
 
     s0, s1, s2 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0], axis_choices[-(axis+1)][2]  # s0 is n, s1 is m, s2 is k
-    axis_pads = tuple((x, tc.dims[i]) for i, x in enumerate([s0, s1, s2]) if self.full_shape[x]%tc.dims[i] != 0)
+    axis_pads = [(x, tc.dims[i]) for i, x in enumerate([s0, s1, s2]) if self.full_shape[x]%tc.dims[i] != 0]
     if axis_pads and (opt_level < 2): return None
     self.bufs_for_tensor_core[reduceop] = (buf0, buf1)
     if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
-    return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
+    return TensorCoreOptions(axes=[s0, s1, s2], axes_exist=[True, True], axis_pads=axis_pads)
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
     if use_tensor_cores and self.opts.has_local and self.reduceop is not None and self.reduceop.op is ReduceOps.SUM:

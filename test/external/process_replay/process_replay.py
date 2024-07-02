@@ -2,7 +2,8 @@
 # compare kernels created by HEAD against master
 import difflib, pickle
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.helpers import colored, db_connection, VERSION, getenv, tqdm
+from tinygrad.helpers import colored, db_connection, VERSION, getenv, tqdm, timeit
+from tinygrad.codegen.uops import UOpGraph
 
 page_size = 100
 conn = db_connection()
@@ -11,10 +12,12 @@ row_count = cur.execute(f"select count(*) from 'process_replay_{VERSION}'").fetc
 for offset in tqdm(range(0, row_count, page_size)):
   cur.execute(f"SELECT val FROM 'process_replay_{VERSION}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
-    ast, opts, applied_opts, name, compare_src = pickle.loads(row[0])
+    ast, opts, applied_opts, name, compare_src, time_baseline = pickle.loads(row[0])
     k = Linearizer(*ast, opts=opts)
     for opt in applied_opts: k.apply_opt(opt)
     good_src = k.opts.render(name, k.linearize().uops)
+    time_ = timeit(UOpGraph(k.uops.sinks).linearize)
+    if (time_ - time_baseline) / max(time_baseline, .1) > 0.1: print(colored(f"PERF: {time_baseline:.2f} -> {time_:.2f}",'red'))
     try: assert compare_src == good_src
     except AssertionError as e:
       print("PROCESS REPLAY DETECTED CHANGE")

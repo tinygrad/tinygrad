@@ -307,3 +307,8 @@ class tqdm:
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+
+def timeit(fn:Callable, *args, **kwargs):
+  st = time.perf_counter()
+  fn(*args, **kwargs)
+  return time.perf_counter()-st

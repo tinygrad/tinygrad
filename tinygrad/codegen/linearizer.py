@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
-from tinygrad.helpers import colored, DEBUG, dedup, diskcache_put, prod, getenv, to_function_name, flatten
+from tinygrad.helpers import colored, DEBUG, dedup, diskcache_put, prod, getenv, to_function_name, flatten, timeit
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node, sint
@@ -520,7 +520,9 @@ class Linearizer(Kernel):
     self.linearize()
     info = get_lazyop_info(self.ast[0])
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src))
+    lintime = timeit(UOpGraph(self.uops.sinks).linearize)
+    if getenv("RUN_PROCESS_REPLAY"):
+      diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src, lintime))
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size or []) + (self.local_size or []))
     # NOTE: we use min here to ignore the indexing FLOPS
