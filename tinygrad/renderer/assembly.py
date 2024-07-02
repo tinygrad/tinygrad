@@ -181,9 +181,10 @@ class PTXRenderer(Renderer):
           assert src[0].dtype == dtypes.int64, "load isn't int64"
           assert src[1].op is UOps.CONST, f"load isn't const {u}"
           mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
+          has_gate = len(src) > 3 and src[2].op is UOps.ALU
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-            if has_gate:=len(src) > 3 and src[2].op is UOps.ALU:
+            if has_gate:
               for v in r[u]: kk(f"mov.{self.mem_types[dtype.scalar()]} {v}, {render_val(0, dtype.scalar())};")
             kk((f"@{r[src[2]]}"if has_gate else "")
               + f" ld{mem_type}.v{dtype.count}.{self.mem_types[dtype.scalar()]} {{{', '.join(r[u])}}}, [{r[src[0]]}+{src[1].arg}];")
