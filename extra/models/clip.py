@@ -316,8 +316,7 @@ class Open:
       x = self.transformer(x, attn_mask=self.attn_mask)
       x = self.ln_final(x)
 
-      pooled = x[Tensor.arange(x.shape[0]), text.argmax(dim=-1)]
-      pooled = pooled @ self.text_projection
+      pooled = x[:, text.argmax(dim=-1)] @ self.text_projection
       return pooled
 
 
