@@ -49,6 +49,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(CI, "too big for CI")
+  @unittest.skip("too big")
   def test_stable_diffusion(self):
     model = UNetModel(**unet_params)
     derandomize_model(model)

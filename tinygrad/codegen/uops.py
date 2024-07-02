@@ -71,7 +71,8 @@ class UOp:
   @staticmethod
   def store(*src:UOp, **kwargs): return UOp(UOps.STORE, None, tuple(src)+tuple(kwargs.values()))
   @staticmethod
-  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
+  def var(name:Optional[str]=None, dtype:Optional[DType]=None, minmax:Tuple[int,...] = ()):
+    return UOp(UOps.VAR, dtype=dtype, src=tuple(lambda x: UOp.const(dtypes.int, x)), arg=name)
   @staticmethod
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return UOp(UOps.CONST, dtype=dtype).name(name)
   @functools.cached_property
