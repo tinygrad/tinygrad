@@ -131,7 +131,8 @@ class Lowerer(Kernel):
 
     # late alias the tensor core buffers
     if (tc:=self.tensor_core) and self.tensor_core_opts is not None:
-      alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [0]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
+      # NOTE: the 4 is required if using real locals
+      alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [4]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
       for op, tc_bufs in self.bufs_for_tensor_core.items():
         for tc_buf in tc_bufs: self.alias_buffer(op, tc_buf, alias_pattern)
 
@@ -175,6 +176,7 @@ class Lowerer(Kernel):
           if idx in v:
             lbuf = v[idx]
             lidx = self.bufs.index(lbuf)
+            assert arg.st.real_size() == self.sts[idx].real_size()
             start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
             # these shapetrackers need to change
             local_buffer = MemBuffer(lidx, start.dtype, self.sts[lidx])
