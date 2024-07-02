@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast
 import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -91,7 +91,7 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 # *** simplification logic ***
 
-@dataclass(frozen=True)
+@dataclass
 class UPat:
   op: Optional[Union[UOps, Set[UOps]]] = None
   arg: Any = None
@@ -105,25 +105,35 @@ class UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
 
-T = TypeVar("T")
-def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
+  def __post_init__(self):
+    self.f: tuple[Callable[[Any, Any], Any], ...] = ()
+    if (o:=self.op) is not None: self.f += (lambda uop,_: uop.op not in o,) if isinstance(o,set) else (lambda uop,_: o != uop.op,)
+    if (a:=self.arg) is not None: self.f += (lambda uop,_: uop.arg not in a,) if isinstance(a,set) else (lambda uop,_: a != uop.arg,)
+    if self.src is not None:
+      self.flat_src: Union[tuple[tuple[UPat, ...], ...], UPat] = tuple(itertools.permutations(self.src)) if isinstance(self.src,list) else\
+                                                                 (self.src,) if isinstance(self.src,tuple) else self.src
+      self.f += (self.src_unmatch,)
+    if isinstance((d:=self.dtype), set):
+      self.f += (lambda uop,_: uop.dtype is not None and uop.dtype not in d,)
+    elif self.dtype is not None: self.f += (lambda uop,_: uop.dtype not in (self.dtype, None),)
+    if (n:=self.name) is not None: self.f += (lambda uop,store: store.setdefault(n, uop) is not uop,)
 
-def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
-  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return False
-  if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
-  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
-  if pat.op is not None and __unmatch(pat.op, uop.op): return False
-  if pat.src is None: return True
-  # only one if it's a tuple
-  # try all permutations if it's a list
-  # repeat if it's a UPat
-  for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
-    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False
-    new_store = store.copy()
-    if all(_match(uu, vv, new_store) for uu, vv in zip(uop.src, vp)):
-      store.update(new_store)
-      return True
-  return False
+  def src_unmatch(self, uop, store):
+    for vp in self.flat_src if isinstance(self.flat_src, tuple) else [(self.flat_src,)*len(uop.src)]:
+      if (n:=len(uop.src)) == len(vp) or n in self.allow_len:
+        new_store = store.copy()
+        for uu, vv in zip(uop.src, vp):
+          if not vv._match(uu, new_store): break
+        else:
+          store.update(new_store)
+          break
+    else: return True  # no match
+    return False
+
+  def _match(self, uop, store):
+    for f in self.f:
+      if f(uop, store): return False
+    return True
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
@@ -141,7 +151,7 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): return fxn(**store)
+      if p._match(uop, store): return fxn(**store)
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -297,7 +307,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   replace: Dict[UOp, UOp] = {}
   def __inner_rewrite(n:UOp) -> UOp:
     if n in replace: return replace[n]
-    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
+    replace_source = (n.op, n.dtype, tuple([__inner_rewrite(y) for y in n.src]), n.arg)
     if found := nodes.get(replace_source): replace[n] = found
     else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
     return replace[n]
