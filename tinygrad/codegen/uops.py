@@ -335,9 +335,9 @@ class UOpGraph:
     # fixup gated stores with an IF block to save extra local loads
     @functools.lru_cache(None)
     def _dfs(u:UOp, gate:UOp) -> UOp:
-      if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
-        if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
-        return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
+      if u.op is UOps.LOAD and u.src[-1].op is UOps.STORE:
+        if_uop = UOp(UOps.IF, None, (gate,)+tuple(x for x in u.src if x.op is UOps.STORE))
+        return UOp(u.op, u.dtype, tuple(x for x in u.src if x.op is not UOps.STORE)+(if_uop, ), u.arg)
       if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
     for i, s in enumerate(self.sinks[:]):
@@ -360,8 +360,9 @@ class UOpGraph:
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
 
     # scope children impact the toposort and END* insertion
-    end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
-    scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in reversed(in_degree) if p.op in end_for_uop}
+    end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE), UOps.DEFINE_LOCAL:(UOps.STORE, UOps.BARRIER)}
+    scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in reversed(in_degree) if p.op in {UOps.IF, UOps.RANGE}}
+    scope_children = {**scope_children, **{p:set([x for x in children[p] if x.op is UOps.STORE]) for p in in_degree if p.op is UOps.DEFINE_LOCAL}}
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
