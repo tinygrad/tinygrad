@@ -125,6 +125,7 @@ class Lowerer(Kernel):
       #arg = x.op
       tc = self.tensor_core
       ret = UOp(UOps.REDUCE, x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
+      #return ret
       wmma_sz = [prod(l) for l in tc.thread_local_sizes]
       arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device)
       return UOp(UOps.TC, ret.dtype, (ret,), arg)
@@ -208,10 +209,10 @@ class Lowerer(Kernel):
               if len(t) == 1:
                 new_shape.append(st1.shape[i])
               else:
-                for tt in t:
+                for tt in t[::-1]:
                   new_shape.append(shape_szs[tt])
             new_shape = tuple(new_shape)
-            ftla = flatten(tla)
+            ftla = flatten([x[::-1] for x in tla])
             perm = {}
             for i in range(len(self.tensor_core.threads)):
               perm[i] = ftla.index(i+1)
@@ -219,6 +220,7 @@ class Lowerer(Kernel):
             perm[len(ftla)-1] = ftla.index(-1)
             perm[ftla.index(-1)] = len(ftla)-1
             permaxis = tuple([x[1] for x in sorted(perm.items())])
+            #print(permaxis)
 
             def fix_st(st):
               old_shape = st.shape
