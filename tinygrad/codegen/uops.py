@@ -68,7 +68,7 @@ class UOp:
   @functools.cached_property
   def bounds(self):
     assert self.dtype in {dtypes.int, dtypes.bool}
-    if self.op is UOps.DEFINE_VAR: return (self.src[0].minval, self.src[0].maxval)
+    if self.op is UOps.DEFINE_VAR: return (self.src[0].minval, self.src[1].maxval)
     if self.op is UOps.CONST: return (self.arg, self.arg)
     # if self.op is UOps.ALU:
     #   if self.arg is UnaryOps.NEG: return (-self.src[0].maxval, -self.src[0].minval)
@@ -183,6 +183,22 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
+# # debugging
+# def _tree(dag:Union[UOp, UPat], cycles, cnt):
+#   cnt[0] += 1
+#   src = dag.src if isinstance(dag.src, (list, tuple)) else [] if dag.src is None else [dag.src]
+#   if len(src) == 0: return [f"━━ {dag.op} {dag.arg}"]
+#   if (lid := id(dag)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
+#     return [f"━⬆︎ goto {cycles[id(dag)][0]}: {dag.op}"]
+#   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
+#   lines = [f"━┳ {dag.op} {dag.arg}"]
+#   childs = [_tree(c, cycles, cnt) for c in src]
+#   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
+#   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
+
+# def print_tree(dag:Union[UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(dag, {}, [-1]))]))
+
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
@@ -253,7 +269,7 @@ constant_folder = PatternMatcher([
   # *** rules from symbolic ***
   # a < b -> 1 if a.max < b.min; a < b -> 0 if a.min >= b.max
   (UPat(op=UOps.ALU, arg=BinaryOps.CMPLT, src=(UPat({UOps.CONST, UOps.DEFINE_VAR}, name='a'), UPat({UOps.CONST, UOps.DEFINE_VAR}, name='b'))),
-   lambda a, b:
+   lambda a, b: #print_tree(a.lt(b)) or print(a.bounds, b.bounds) or
    UOp.const(dtypes.bool, 1) if a.maxval < b.minval else UOp.const(dtypes.bool, 0) if a.minval >= b.maxval else None),
   # [int] a >= b -> -a < -(b-1)
   ((UOp.var("a",dtypes.int).ge(UOp.var("b", dtypes.int))).name("root"), lambda root,a,b: UOp.lt(-a, -b+1)),
