@@ -306,13 +306,13 @@ def fix_image_idx(ls:UOp):
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
   image_idx = UOp(UOps.CAST, cast(DType, idxy.dtype).vec(2), (idx, idy))
   if ls.op is UOps.LOAD and cast(DType, ls.dtype).count == 1:
-    loaded = UOp(ls.op, cast(DType, ls.dtype).vec(4), (ls.src[0], image_idx) + ls.src[2:], ls.arg)
+    cconst = (UOp(UOps.CAST, cast(DType, ls.dtype).vec(4), src=(ls.src[3], ls.src[3], ls.src[3], ls.src[3])),) if len(ls.src) >= 3 else ()
+    loaded = UOp(ls.op, cast(DType, ls.dtype).vec(4), (ls.src[0], image_idx) + ls.src[2:3] + cconst, ls.arg)
     subidx = idxy%4
     ret = UOp.const(ls.dtype, 0)
     for i in range(4): ret = UOp.alu(TernaryOps.WHERE, subidx.ne(i), ret, UOp(UOps.GEP, ls.dtype, (loaded,), i))
     return ret
   return UOp(ls.op, ls.dtype, (ls.src[0], image_idx) + ls.src[2:], ls.arg)
-
 
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), replace_reduce),
@@ -711,7 +711,8 @@ class UOpGraph:
           arg = src[0].arg
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
-      if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU: assert src[2].dtype == dtypes.bool and src[3].dtype == dtype
+      if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU:
+        assert src[2].dtype == dtypes.bool and src[3].dtype == dtype, f"{src[2].dtype} != dtypes.bool OR {src[3].dtype} != {dtype}"
       if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
       if uop is UOps.ALU:
         if arg in UnaryOps:
