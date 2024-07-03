@@ -23,7 +23,7 @@ logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 class ScheduleItem:
   ast: Tuple[LazyOp, ...]
   bufs: Tuple[Buffer, ...]
-  metadata: List[Metadata]
+  metadata: Optional[List[Metadata]] = None
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
