@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import dataclasses
-import time, math, itertools, functools, struct, sys
+import time, math, itertools, functools, struct, sys, inspect
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
 from collections import defaultdict
@@ -172,43 +172,6 @@ class Tensor:
   def __len__(self):
     if not self.shape: raise TypeError("len() of a 0-d tensor")
     return self.shape[0]
-
-  def __getattribute__(self, name: str):
-    val = object.__getattribute__(self, name)
-    if callable(val) and _METADATA.get() is None:
-      caller_frame = sys._getframe(frame := 1)
-      caller_module = caller_frame.f_globals.get("__name__", None)
-      caller_func = caller_frame.f_code.co_name
-      if caller_module is None: return val
-
-      # if its called from a __ method we want to look one more frame up
-      if caller_module.startswith("tinygrad") and caller_func.startswith("__"): caller_frame = sys._getframe(frame := frame + 1)
-      caller_module = caller_frame.f_globals.get("__name__", None)
-      if caller_module is None: return val
-
-      # if its a nn module we want to look one more frame up
-      if caller_module.startswith("tinygrad.nn"): caller_frame = sys._getframe(frame := frame + 1)
-      caller_module = caller_frame.f_globals.get("__name__", None)
-      if caller_module is None: return val
-      caller_func = caller_frame.f_code.co_name
-      caller_lineno = caller_frame.f_lineno
-
-      # filter out properties
-      if isinstance(val, property): return
-      # filter out special methods
-      if name in ("__class__", "__init__"): return val
-      # filter out specific methods
-      if name in ("backward",): return val
-      # if its a sequential we need to look down a frame
-      if name == "sequential": return val
-
-      def wrapper(*args, **kwargs):
-        token = _METADATA.set(Metadata(name=name, caller=f"{caller_module}:{caller_lineno}::{caller_func}"))
-        ret = val(*args, **kwargs)
-        _METADATA.reset(token)
-        return ret
-      return wrapper
-    return val
 
   @property
   def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device
@@ -3050,3 +3013,35 @@ def custom_random(out:Buffer):
   if out.dtype == dtypes.half: rng_np_buffer = (rng.integers(low=0, high=2047, size=out.size) / 2048).astype(np.half, copy=False)
   else: rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=_to_np_dtype(out.dtype), copy=False)
   out.copyin(rng_np_buffer.data)
+
+def _metadata_wrapper(fn):
+  def _wrapper(*args, **kwargs):
+    if _METADATA.get() is not None: return fn(*args, **kwargs)
+
+    caller_frame = sys._getframe(frame := 1)
+    caller_module = caller_frame.f_globals.get("__name__", None)
+    caller_func = caller_frame.f_code.co_name
+    if caller_module is None: return fn(*args, **kwargs)
+
+    # if its called from a __ method we want to look one more frame up
+    if caller_module.startswith("tinygrad") and caller_func.startswith("__"): caller_frame = sys._getframe(frame := frame + 1)
+    caller_module = caller_frame.f_globals.get("__name__", None)
+    if caller_module is None: return fn(*args, **kwargs)
+
+    # if its a nn module we want to look one more frame up
+    if caller_module.startswith("tinygrad.nn"): caller_frame = sys._getframe(frame := frame + 1)
+    caller_module = caller_frame.f_globals.get("__name__", None)
+    if caller_module is None: return fn(*args, **kwargs)
+    caller_func = caller_frame.f_code.co_name
+    caller_lineno = caller_frame.f_lineno
+
+    token = _METADATA.set(Metadata(name=fn.__name__, caller=f"{caller_module}.{caller_func}:{caller_lineno}"))
+    ret = fn(*args, **kwargs)
+    _METADATA.reset(token)
+    return ret
+  return _wrapper
+
+for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
+  if name in ["__class__", "__init__", "__repr__", "backward", "sequential"]: continue
+  if name.startswith("__"): continue
+  setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
