@@ -116,7 +116,7 @@ class TinyJit(Generic[ReturnType]):
     if found:=self.buffer_replace.get(b, None): return found
     if b.is_allocated() or b.lb_refcount > 0: return b
     if b._base is not None:
-      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.buffer_replace.get(b._base, b._base), offset=b.offset)
+      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.add_buffer(b._base), offset=b.offset)
     else:
       self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
     return ret

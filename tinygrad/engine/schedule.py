@@ -6,7 +6,7 @@ from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, Mem
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable
-from tinygrad.dtype import ConstType, ImageDType, dtypes, DType
+from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer, Device
@@ -341,25 +341,20 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
       if buf.base not in first_appearance: first_appearance[buf.base] = i
       last_appearance[buf.base] = i
 
-  buffer_pool = []
+  free_segments = defaultdict(list)
   def find_replace_buffer(buf, st, en):
-    found_buf = -1
-    assert buf.lb_refcount == 0 and buf._base is None
+    seg_st, seg_en, seg_buf = 0, len(buffers) - 1, buf # return the buffer itself if the replace one is not found.
+    key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())
 
-    for i,(candidate_buf, used_segments) in enumerate(buffer_pool):
-      if candidate_buf.device != buf.device or candidate_buf.dtype != buf.dtype or candidate_buf.options != buf.options: continue
-      if not hasattr(Device[candidate_buf.device].allocator, "offset") and buf.nbytes != candidate_buf.nbytes: continue
-      if not any(st <= useg[1] and en >= useg[0] for useg in used_segments):
-        found_buf = i
+    for i,(seg_st,seg_en,_) in enumerate(free_segments[key]):
+      if seg_st <= st and en <= seg_en:
+        seg_st, seg_en, seg_buf = free_segments[key].pop(i)
         break
 
-    # Haven't found any buffer for reuse, allocate a new buffer in this case. -1 now points to it in the pool.
-    if found_buf == -1: buffer_pool.append((buf, []))
+    free_segments[key] += [(seg_st, st - 1, seg_buf)] if st - 1 >= seg_st else []
+    free_segments[key] += [(en + 1, seg_en, seg_buf)] if seg_en >= en + 1 else []
 
-    buffer_pool[found_buf][1].append((st, en))
-    replace_buffer = buffer_pool[found_buf][0]
-
-    return replace_buffer if replace_buffer.nbytes == buf.nbytes else Buffer(buf.device, buf.size, buf.dtype, base=replace_buffer)
+    return seg_buf if seg_buf.nbytes == buf.nbytes else Buffer(buf.device, buf.size, buf.dtype, base=seg_buf)
 
   buffer_requests = sorted([(first_appearance[buf], last_appearance[buf], buf) for buf in first_appearance.keys()], key=lambda x: -x[2].nbytes)
   assigned = {buf:find_replace_buffer(buf, st, en) for st, en, buf in buffer_requests}
@@ -367,10 +362,10 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
   for i,u in enumerate(buffers):
     for buf in u:
       if buf.is_allocated() or buf.lb_refcount > 0: continue
-      if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base).base, offset=buf.offset)
+      if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base).base, offset=buf.offset)
       else: assigned[buf] = assigned.get(buf, buf)
 
-  if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
+  if DEBUG >= 1 and len(ak:=dedup(x for x in assigned.keys() if x._base is None)) != len(av:=dedup(x for x in assigned.values() if x._base is None)):
     print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
           f"{len(ak)} -> {len(av)} bufs")
   return assigned
