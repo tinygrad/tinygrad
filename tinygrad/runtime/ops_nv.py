@@ -221,7 +221,7 @@ class NVProgram:
         print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.rel_info, self.global_init, self.shmem_usage = None, None, 0
+    self.rel_info, self.global_init, self.shmem_usage, self.local_mem_usage = None, None, 0, 0
     constant_buffers_data = {}
 
     if MOCKGPU:
@@ -244,8 +244,9 @@ class NVProgram:
         elif section_name == ".nv.info":
           section_data = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
           for i in range(sh_size // 12):
-            if section_data[i * 3 + 0] & 0xffff == 0x1204 and section_data[i * 3 + 2] + 0x240 > self.device.slm_per_thread:
-              raise RuntimeError("too high local memory")
+            if section_data[i * 3 + 0] & 0xffff == 0x1204: self.local_mem_usage = section_data[i * 3 + 2] + 0x240
+
+    self.device._ensure_has_local_memory(self.local_mem_usage)
 
     # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
     self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
@@ -604,22 +605,16 @@ class NVDevice(HCQCompatCompiled):
                   controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.va_addr + offset + entries * 8))
 
   def _cmdq_setup_compute_gpfifo(self):
-    self.slm_per_thread = 0x900
-    bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
-    bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
-    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True).va_addr
-
     # Set windows addresses to not collide with other allocated buffers.
-    self.shared_mem_window, self.local_mem_window = 0xfe000000, 0xff000000
+    self.shared_mem_window, self.local_mem_window, self.slm_per_thread = 0xfe000000, 0xff000000, 0
 
     queue = HWComputeQueue()
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), self.compute_type]
-    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(self.shader_local_mem)]
-    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(bytes_per_tpc), 0x40]
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *nvdata64(self.local_mem_window)]
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *nvdata64(self.shared_mem_window)]
     queue.signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
+
     self.synchronize()
 
   def _cmdq_setup_dma_gpfifo(self):
@@ -627,4 +622,22 @@ class NVDevice(HCQCompatCompiled):
     queue.q += [nvmethod(4, nv_gpu.NVC6C0_SET_OBJECT, 1), nv_gpu.AMPERE_DMA_COPY_B]
     queue.signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
+
     self.synchronize()
+
+  def _ensure_has_local_memory(self, required):
+    if self.slm_per_thread >= required: return
+
+    self.synchronize()
+    if hasattr(self, 'shader_local_mem'): self._gpu_free(self.shader_local_mem)
+
+    bytes_per_warp = round_up(required * 32, 0x200)
+    bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
+    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True)
+    self.slm_per_thread = required
+
+    queue = HWComputeQueue()
+    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(self.shader_local_mem.va_addr)]
+    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(bytes_per_tpc), 0x40]
+    queue.signal(self.timeline_signal, self.timeline_value).submit(self)
+    self.timeline_value += 1
