@@ -72,7 +72,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 3), 1, 1, "1")
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 2), 1, 1, "1")
 
-  @unittest.expectedFailure
+  # @unittest.expectedFailure
   def test_lt(self):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 77), 1, 1, "1")
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 9), 1, 1, "1")
@@ -273,7 +273,6 @@ class TestSymbolic(unittest.TestCase):
   def test_ge_remove(self):
     self.helper_test_variable(create_ge_node(Variable("a", 0, 6), 25), 0, 0, "0")
 
-  @unittest.expectedFailure
   def test_lt_remove(self):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6), -3), 0, 0, "0")
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6), 3), 0, 1, "(a<3)")
