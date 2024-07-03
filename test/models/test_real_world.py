@@ -47,23 +47,28 @@ class TestRealWorld(unittest.TestCase):
   def tearDown(self):
     dtypes.default_float = self.old_float
 
-  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(CI, "too big for CI")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_stable_diffusion(self):
-    model = UNetModel(**unet_params)
+    params = unet_params
+    if CI:
+      params["model_ch"] = 16
+      params["ctx_dim"] = 16
+      params["num_res_blocks"] = 1
+      params["n_heads"] = 2
+    model = UNetModel(**params)
     derandomize_model(model)
     @TinyJit
     def test(t, t2): return model(t, Tensor([801]), t2).realize()
-    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
+    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, params["ctx_dim"])), test, 18.0, 513 if CI else 839)
 
-  def test_mini_stable_diffusion(self):
+  def test_unet_resblock(self):
     model = [ResBlock(16, 24, 16) for _ in range(4)]
     derandomize_model(model)
     @TinyJit
     def test(t, t2):
       for l in model: t = l(t, t2)
       return t.realize()
-    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 43)
+    helper_test("test_unet_resblock", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 43)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_llama(self):
