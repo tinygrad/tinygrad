@@ -299,14 +299,18 @@ contractor = PatternMatcher([
 def fix_image_idx(ls:UOp):
   if ls.src[1].dtype is None or ls.src[1].dtype.count != 1: return None
   if not isinstance(ls.src[0].dtype, ImageDType): return None
-  if cast(DType, ls.src[2].dtype if ls.op is UOps.STORE else ls.dtype).count != 4:
-    # assert here, image must be float4
-    return None
+  assert ls.op is not UOps.STORE or cast(DType, ls.src[2].dtype).count == 4, "image store must be float4"
   idxy = ls.src[1]
   #if not idxy.divides(4): raise RuntimeError("image index must divide 4")
   base_shape = ls.src[0].dtype.shape
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
   image_idx = UOp(UOps.CAST, cast(DType, idxy.dtype).vec(2), (idx, idy))
+  if ls.op is UOps.LOAD and cast(DType, ls.dtype).count == 1:
+    loaded = UOp(ls.op, cast(DType, ls.dtype).vec(4), (ls.src[0], image_idx) + ls.src[2:], ls.arg)
+    subidx = idxy%4
+    ret = UOp.const(ls.dtype, 0)
+    for i in range(4): ret = UOp.alu(TernaryOps.WHERE, subidx.ne(i), ret, UOp(UOps.GEP, ls.dtype, (loaded,), i))
+    return ret
   return UOp(ls.op, ls.dtype, (ls.src[0], image_idx) + ls.src[2:], ls.arg)
 
 
@@ -340,7 +344,8 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
 
 def no_float4_alu(alu):
-  alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(), tuple(UOp(UOps.GEP, alu.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(4))
+  alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(),
+                   tuple(UOp(UOps.GEP, alu.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.CAST, alu.dtype, alus)
 
 float4_folding = PatternMatcher([
