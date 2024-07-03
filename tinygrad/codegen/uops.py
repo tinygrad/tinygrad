@@ -369,7 +369,7 @@ float4_folding = PatternMatcher([
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   # no ALU on float4 (float4 constructor doesn't work in METAL/GPU)
-  (UOp(UOps.ALU, dtype=dtypes.float.vec(4)).name("alu"), no_float4_alu),
+  (UPat(UOps.ALU, dtype={dtypes.float.vec(2), dtypes.float.vec(4)}, name="alu"), no_float4_alu),
   (UOp(UOps.GEP, src=(UOp(UOps.CAST).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
 ])
 
