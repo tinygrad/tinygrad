@@ -294,42 +294,50 @@ contractor = PatternMatcher([
   (UPat(UOps.CAST, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
 ])
 
-reducer = PatternMatcher([
-  (UPat(UOps.REDUCE, name="root"), replace_reduce),
-])
-
-# ***** float4+image handling *****
-
-def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), const=None):
-  if len(ex.src) != 4: return None
-  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
-  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
-  if const is not None: idx = idx + const
-  if not idx.divides(len(ex.src)): return None
-
-  if load.dtype.scalar() != load.dtype: return None  # how does this happen?
-  vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
-  return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
-
-def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtypes.int, 0), const=None):
-  if len(ex.src) not in [2, 4]: return None
-  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
-  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
-  if const is not None: idx = idx + const
-  if not idx.divides(len(ex.src)): return None
-
-  new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
-  return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
+# ***** reduce+image handling *****
 
 def fix_image_idx(ls:UOp):
   if ls.src[1].dtype is None or ls.src[1].dtype.count != 1: return None
   if not isinstance(ls.src[0].dtype, ImageDType): return None
+  if cast(DType, ls.src[2].dtype if ls.op is UOps.STORE else ls.dtype).count != 4:
+    # assert here, image must be float4
+    return None
   idxy = ls.src[1]
   #if not idxy.divides(4): raise RuntimeError("image index must divide 4")
   base_shape = ls.src[0].dtype.shape
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
   image_idx = UOp(UOps.CAST, cast(DType, idxy.dtype).vec(2), (idx, idy))
   return UOp(ls.op, ls.dtype, (ls.src[0], image_idx) + ls.src[2:], ls.arg)
+
+
+reducer = PatternMatcher([
+  (UPat(UOps.REDUCE, name="root"), replace_reduce),
+  # image indexing. TODO: why can't this just go after the float stuff?
+  (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
+])
+
+# ***** float4 handling *****
+
+def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None):
+  if len(ex.src) != 4: return None
+  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
+  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
+  if idx2 is not None: idx = idx + idx2
+  if not idx.divides(len(ex.src)): return None
+
+  if load.dtype.scalar() != load.dtype: return None  # how does this happen?
+  vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
+  return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
+
+def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtypes.int, 0), idx2=None):
+  if len(ex.src) not in [2, 4]: return None
+  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
+  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
+  if idx2 is not None: idx = idx + idx2
+  if not idx.divides(len(ex.src)): return None
+
+  new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
+  return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
 
 def no_float4_alu(alu):
   alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(), tuple(UOp(UOps.GEP, alu.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(4))
@@ -341,7 +349,7 @@ float4_folding = PatternMatcher([
     lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float(2,4) load
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("const"))).name("load"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("idx2"))).name("load"),
     float4_expand_load),
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
@@ -349,14 +357,12 @@ float4_folding = PatternMatcher([
     UOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
   # float(2,4) store
   (UOp(UOps.STORE, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("const"), UOp.var("var"))).name("store_allow_any_len"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("idx2"), UOp.var("var"))).name("store_allow_any_len"),
     float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
-  # image indexing
-  (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
   # no ALU on float4 (float4 constructor doesn't work in METAL/GPU)
   (UOp(UOps.ALU, dtype=dtypes.float.vec(4)).name("alu"), no_float4_alu),
   (UOp(UOps.GEP, src=(UOp(UOps.CAST).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
