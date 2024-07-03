@@ -114,8 +114,7 @@ class UPat:
 
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
-    if u.op is UOps.VAR:
-      return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
+    if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
@@ -155,8 +154,7 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store):
-        if (ret:=fxn(**store)) is not None: return ret  # NOTE: if it returns None, we keep trying to match
+      if _match(uop, p, store) and (ret:=fxn(**store)) is not None: return ret  # NOTE: if it returns None, we keep trying to match
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -292,13 +290,15 @@ def cast_reduce(cst):
 
 contractor = PatternMatcher([
   (UPat(UOps.CONTRACT, name="root"), replace_contract),
-  # CAST after REDUCEs -> one REDUCE
+  # CAST after REDUCEs -> one REDUCE (breaks TestConv.test_two_binops_no_rerun)
   (UPat(UOps.CAST, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
 ])
 
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), replace_reduce),
 ])
+
+# ***** float4+image handling *****
 
 def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), const=None):
   if len(ex.src) != 4: return None
@@ -321,9 +321,6 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
 
-tc_args = ('WMMA_8_8_8_float_float', (8, 8, 8), dtypes.float, dtypes.float, (2, 2, 2), 'METAL')
-ex_8 = UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(8))).name("ex")
-
 def fix_image_idx(ls:UOp):
   if ls.src[1].dtype is None or ls.src[1].dtype.count != 1: return None
   if not isinstance(ls.src[0].dtype, ImageDType): return None
@@ -333,6 +330,10 @@ def fix_image_idx(ls:UOp):
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
   image_idx = UOp(UOps.CAST, cast(DType, idxy.dtype).vec(2), (idx, idy))
   return UOp(ls.op, ls.dtype, (ls.src[0], image_idx) + ls.src[2:], ls.arg)
+
+def no_float4_alu(alu):
+  alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(), tuple(UOp(UOps.GEP, alu.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(4))
+  return UOp(UOps.CAST, alu.dtype, alus)
 
 float4_folding = PatternMatcher([
   (UOp(UOps.STORE, dtype=dtypes.float, src=(UOp.var("buf"), UOp.var("idx")+
@@ -348,7 +349,7 @@ float4_folding = PatternMatcher([
     UOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
   # float(2,4) store
   (UOp(UOps.STORE, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.cvar("const", dtypes.int), UOp.var("var"))).name("store_allow_any_len"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("const"), UOp.var("var"))).name("store_allow_any_len"),
     float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
@@ -356,7 +357,12 @@ float4_folding = PatternMatcher([
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   # image indexing
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
+  # no ALU on float4 (float4 constructor doesn't work in METAL/GPU)
+  (UOp(UOps.ALU, dtype=dtypes.float.vec(4)).name("alu"), no_float4_alu),
+  (UOp(UOps.GEP, src=(UOp(UOps.CAST).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
 ])
+
+# ***** tensor core handling *****
 
 def tc_expand(red_allow_any_len, tc, lb1, lb2, v1, v2):
   upcast_axis = tc.arg[-1]
