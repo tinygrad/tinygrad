@@ -9,7 +9,7 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Device
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -334,31 +334,39 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
 def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], debug_prefix="") -> Dict[Buffer, Buffer]:
   if getenv("NO_MEMORY_PLANNER"): return {}
-  last_appearance = {}
+  first_appearance, last_appearance = {}, {}
   for i,u in enumerate(buffers):
-    for buf in u: last_appearance[buf] = i
+    for buf in u:
+      if buf.is_allocated() or buf.lb_refcount > 0: continue
+      if buf.base not in first_appearance: first_appearance[buf.base] = i
+      last_appearance[buf.base] = i
 
-  # LRU algorithm
-  assigned: Dict[Buffer, Buffer] = {}
-  local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
+  buffer_pool = []
+  def find_replace_buffer(buf, st, en):
+    found_buf = -1
+    assert buf.lb_refcount == 0
 
-  def handle_buffer(buf):
-    key = (buf.device, buf.size, buf.dtype)
-    if buf not in assigned:
-      if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
-      else: assigned[buf] = Buffer(*key)
-    if i == last_appearance[buf]:
-      if assigned[buf] not in local_cache[key]: local_cache[key].append(assigned[buf])
+    for i,(candidate_buf, used_segments) in enumerate(buffer_pool):
+      if buf.nbytes != candidate_buf.nbytes: continue
+      if candidate_buf.device != buf.device or candidate_buf.dtype != buf.dtype or candidate_buf.options != buf.options: continue
+      if not hasattr(Device[candidate_buf.device].allocator, "offset") and buf.nbytes != candidate_buf.nbytes: continue
+      if not any(st <= useg[1] and en >= useg[0] for useg in used_segments):
+        found_buf = i
+        break
+
+    # Haven't found any buffer for reuse, allocate a new buffer in this case. -1 now points to it in the pool.
+    if found_buf == -1: buffer_pool.append((Buffer(buf.device, buf.size, buf.dtype, options=buf.options), []))
+
+    buffer_pool[found_buf][1].append((st, en))
+    return buffer_pool[found_buf][0]
+
+  buffer_requests = sorted([(first_appearance[buf], last_appearance[buf], buf) for buf in first_appearance.keys()], key=lambda x: -x[2].nbytes)
+  assigned = {buf:find_replace_buffer(buf, st, en) for st, en, buf in buffer_requests}
 
   for i,u in enumerate(buffers):
     for buf in u:
-      # all unallocated unparented buffers are fair game to replace
-      if buf.is_allocated() or buf.lb_refcount > 0: continue
-      # handle view buffers
-      if buf._base is not None:
-        assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base), offset=buf.offset)
-      else:
-        handle_buffer(buf)
+      if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base), offset=buf.offset)
+      else: assigned[buf] = assigned.get(buf, buf)
 
   if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
     print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
