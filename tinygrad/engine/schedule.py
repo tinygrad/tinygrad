@@ -344,10 +344,9 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
   buffer_pool = []
   def find_replace_buffer(buf, st, en):
     found_buf = -1
-    assert buf.lb_refcount == 0
+    assert buf.lb_refcount == 0 and buf._base is None
 
     for i,(candidate_buf, used_segments) in enumerate(buffer_pool):
-      if buf.nbytes != candidate_buf.nbytes: continue
       if candidate_buf.device != buf.device or candidate_buf.dtype != buf.dtype or candidate_buf.options != buf.options: continue
       if not hasattr(Device[candidate_buf.device].allocator, "offset") and buf.nbytes != candidate_buf.nbytes: continue
       if not any(st <= useg[1] and en >= useg[0] for useg in used_segments):
@@ -358,14 +357,16 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
     if found_buf == -1: buffer_pool.append((Buffer(buf.device, buf.size, buf.dtype, options=buf.options), []))
 
     buffer_pool[found_buf][1].append((st, en))
-    return buffer_pool[found_buf][0]
+    replace_buffer = buffer_pool[found_buf][0]
+
+    return replace_buffer if replace_buffer.nbytes == buf.nbytes else Buffer(buf.device, buf.size, buf.dtype, base=replace_buffer)
 
   buffer_requests = sorted([(first_appearance[buf], last_appearance[buf], buf) for buf in first_appearance.keys()], key=lambda x: -x[2].nbytes)
   assigned = {buf:find_replace_buffer(buf, st, en) for st, en, buf in buffer_requests}
 
   for i,u in enumerate(buffers):
     for buf in u:
-      if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base), offset=buf.offset)
+      if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base).base, offset=buf.offset)
       else: assigned[buf] = assigned.get(buf, buf)
 
   if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
