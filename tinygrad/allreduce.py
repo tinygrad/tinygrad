@@ -2,7 +2,7 @@
 from typing import List
 from tinygrad.tensor import Tensor
 
-def allreduce(tensors: List[Tensor]):
+def allreduce(tensors: List[Union[Tensor, float]]):
   # Simple implementation for now
   average = sum(tensor.to('cpu') if isinstance(tensor, Tensor) else tensor for tensor in tensors) / len(tensors)
   for tensor in tensors:
