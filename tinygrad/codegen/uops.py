@@ -233,7 +233,7 @@ constant_folder = PatternMatcher([
   ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
   # *** rules from symbolic ***
-  # rm obvious lt and ge for var and const
+  # [0, 1] < 2 -> 1; [0, 1] < 0 -> 0; 1 < [0, 1] -> 0; 0 < [1, 2] -> 1
   (UPat(op=UOps.ALU, arg=BinaryOps.CMPLT, src=(UPat({UOps.CONST, UOps.DEFINE_VAR}, name='a'), UPat({UOps.CONST, UOps.DEFINE_VAR}, name='b'))),
    lambda a, b:
    UOp.const(dtypes.bool, 1) if a.maxval().arg < b.minval().arg else UOp.const(dtypes.bool, 0) if a.minval().arg >= b.maxval().arg else None),
