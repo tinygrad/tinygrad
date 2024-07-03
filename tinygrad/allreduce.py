@@ -1,5 +1,5 @@
 # allreduce.py
-from typing import List
+from typing import List, Union
 from tinygrad.tensor import Tensor
 
 def allreduce(tensors: List[Union[Tensor, float]]):
