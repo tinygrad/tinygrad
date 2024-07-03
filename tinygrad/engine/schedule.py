@@ -341,7 +341,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
       if buf.base not in first_appearance: first_appearance[buf.base] = i
       last_appearance[buf.base] = i
 
-  free_segments: Dict[Tuple, Tuple[int, int, Buffer]] = defaultdict(list) # Dict[buffer key, Tuple[start, end, buffer that can be reused on the seg]]
+  free_segments: Dict[Tuple, List[Tuple[int, int, Buffer]]] = defaultdict(list) # Dict[buffer key, Tuple[start, end, buffer to reuse on the seg]]
   def find_replace_buffer(buf, st, en):
     seg_st, seg_en, seg_buf = 0, len(buffers) - 1, buf # return the buffer itself if the replace one is not found.
     key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())

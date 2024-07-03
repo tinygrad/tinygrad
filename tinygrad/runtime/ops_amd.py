@@ -413,6 +413,7 @@ class AMDDevice(HCQCompatCompiled):
   gpus:List[pathlib.Path] = []
 
   def _gpu_map(self, mem):
+    mem = mem._base if hasattr(mem, '_base') else mem
     if self.gpu_id in getattr(mem, "mapped_gpu_ids", []): return
     mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_id])
     c_gpus = (ctypes.c_int32 * len(mem.mapped_gpu_ids))(*mem.mapped_gpu_ids)
