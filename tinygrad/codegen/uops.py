@@ -67,7 +67,7 @@ class UOp:
   def maxval(self)->int: return cast(int, self.bounds[1])
   @functools.cached_property
   def bounds(self):
-    assert self.dtype in {dtypes.int, dtypes.bool}
+    assert self.dtype in {dtypes.int, dtypes.bool}, f"bounds {self}"
     if self.op is UOps.DEFINE_VAR: return (self.src[0].minval, self.src[1].maxval)
     if self.op is UOps.CONST: return (self.arg, self.arg)
     # if self.op is UOps.ALU:
@@ -79,7 +79,6 @@ class UOp:
     #   if self.arg is BinaryOps.MOD: return (0, self.src[1].maxval-1)
     #   if self.arg is BinaryOps.IDIV: return (self.src[0].minval//self.src[1].maxval, self.src[0].maxval//self.src[1].minval)
     raise NotImplementedError(f"bounds {self}")
-
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
@@ -268,7 +267,8 @@ constant_folder = PatternMatcher([
   ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
   # *** rules from symbolic ***
   # a < b -> 1 if a.max < b.min; a < b -> 0 if a.min >= b.max
-  (UPat(op=UOps.ALU, arg=BinaryOps.CMPLT, src=(UPat({UOps.CONST, UOps.DEFINE_VAR}, name='a'), UPat({UOps.CONST, UOps.DEFINE_VAR}, name='b'))),
+  (UPat(op=UOps.ALU, arg=BinaryOps.CMPLT, src=(UPat({UOps.CONST, UOps.DEFINE_VAR}, name='a', dtype={dtypes.int, dtypes.bool}),
+                                               UPat({UOps.CONST, UOps.DEFINE_VAR}, name='b', dtype={dtypes.int, dtypes.bool}))),
    lambda a, b: #print_tree(a.lt(b)) or print(a.bounds, b.bounds) or
    UOp.const(dtypes.bool, 1) if a.maxval < b.minval else UOp.const(dtypes.bool, 0) if a.minval >= b.maxval else None),
   # [int] a >= b -> -a < -(b-1)
