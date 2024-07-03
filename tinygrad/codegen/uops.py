@@ -91,6 +91,38 @@ class UOp:
       if self.arg is BinaryOps.MUL: return any(x.divides(v) for x in self.src)
     return False # generic false if we aren't sure
 
+def type_verify(uops):
+  for u in uops:
+    uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
+    if uop in (UOps.CONST, UOps.DEFINE_ACC):
+      if uop is UOps.DEFINE_ACC:
+        assert dtype is not None and src[0].dtype == dtype.scalar(), f"type of {src[0].dtype=} must be a scalar {dtype.scalar()}"
+        arg = src[0].arg
+      assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
+    if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
+    if uop is UOps.CAST and dtype is not None and dtype.count > 1: assert len(src) == dtype.count
+    if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU:
+      assert src[2].dtype == dtypes.bool and src[3].dtype == dtype, f"{src[2].dtype} != dtypes.bool OR {src[3].dtype} != {dtype}"
+    if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
+    if uop is UOps.ALU:
+      if arg in UnaryOps:
+        assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
+      elif arg in (BinaryOps.CMPLT, BinaryOps.CMPNE):
+        assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
+        assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
+      elif arg is BinaryOps.IDIV:
+        assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), \
+            f"input dtype mismatch {dtypes.int} != {src[0].dtype=} != {src[1].dtype=}"
+        assert dtypes.is_int(dtype), f"{arg} output dtype mismatch {dtype=} != {dtypes.int}"
+      elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
+        # the distance to shift isn't typechecked
+        assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
+      elif arg in BinaryOps:
+        assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
+      elif arg == TernaryOps.WHERE:
+        assert src[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {src[0].dtype=} != {dtypes.bool}"
+        assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
+
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
   if u.op is UOps.DEFINE_VAR: return u.arg
@@ -279,6 +311,7 @@ def replace_contract(root:UOp):
   expands: List[UOp] = [x for x in parents if x.op is UOps.EXPAND and x.arg == root.arg[0]]
   assert all_same([root.arg[1]] + [len(x.src) for x in expands])
   ret = expand_nodes(parents, expands, root.src[0])
+  if len(ret) == 1: ret = ret*root.arg[1]   # TODO: why is this needed?
   return UOp(UOps.CAST, cast(DType, root.dtype).vec(root.arg[1]), tuple(ret))
 
 def cast_reduce(cst):
@@ -572,7 +605,7 @@ class UOpGraph:
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
   cnt = 0
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, do_type_verify=True):
     global acc_number
     acc_number = 0
 
@@ -665,7 +698,7 @@ class UOpGraph:
     assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
 
-    if type_verify: self.type_verify()
+    if do_type_verify: type_verify(self.uops)
 
   # *** checker functions ***
 
@@ -701,34 +734,3 @@ class UOpGraph:
         assert u.arg[1] is not None
         flops += 2 * prod(u.arg[1]) // 32 * mults
     return flops, mem
-
-  def type_verify(self):
-    for u in self.uops:
-      uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
-      if uop in (UOps.CONST, UOps.DEFINE_ACC):
-        if uop is UOps.DEFINE_ACC:
-          assert dtype is not None and src[0].dtype == dtype.scalar(), f"type of {src[0].dtype=} must be a scalar {dtype.scalar()}"
-          arg = src[0].arg
-        assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
-      if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
-      if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU:
-        assert src[2].dtype == dtypes.bool and src[3].dtype == dtype, f"{src[2].dtype} != dtypes.bool OR {src[3].dtype} != {dtype}"
-      if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
-      if uop is UOps.ALU:
-        if arg in UnaryOps:
-          assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-        elif arg in (BinaryOps.CMPLT, BinaryOps.CMPNE):
-          assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
-          assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
-        elif arg is BinaryOps.IDIV:
-          assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), \
-              f"input dtype mismatch {dtypes.int} != {src[0].dtype=} != {src[1].dtype=}"
-          assert dtypes.is_int(dtype), f"{arg} output dtype mismatch {dtype=} != {dtypes.int}"
-        elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
-          # the distance to shift isn't typechecked
-          assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-        elif arg in BinaryOps:
-          assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
-        elif arg == TernaryOps.WHERE:
-          assert src[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {src[0].dtype=} != {dtypes.bool}"
-          assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
