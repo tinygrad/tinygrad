@@ -25,7 +25,6 @@ Example:
   fsdp.backward(loss)
 """
 from typing import List
-from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing
 class FSDP:
   def __init__(self, module, devices: List[str]):
