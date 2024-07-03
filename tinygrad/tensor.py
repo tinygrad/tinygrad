@@ -779,7 +779,7 @@ class Tensor:
 
     for t0 in reversed(self._deepwalk()):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
-      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := _METADATA.get()) is not None else None)
+      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := t0._ctx.metadata) is not None else None)
       grads = t0._ctx.backward(t0.grad.lazydata)
       _METADATA.reset(token)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
