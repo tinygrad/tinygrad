@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, List, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from dataclasses import dataclass
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, Compiler, CompileError, BufferOptions
+from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions
 from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -366,7 +366,7 @@ class AMDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    sig_st, sig_en = (self.device._get_signal(), self.device._get_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
+    sig_st, sig_en = (self.device._alloc_signal(), self.device._alloc_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
 
     q = HWPM4Queue()
     q.wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
@@ -385,7 +385,7 @@ class AMDProgram:
 class AMDAllocator(HCQCompatAllocator):
   def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
 
-  def _alloc(self, size:int, options:BufferOptions):
+  def _alloc(self, size:int, options:BufferOptions) -> HCQCompatAllocRes:
     try:
       if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
       return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
@@ -453,13 +453,16 @@ class AMDDevice(HCQCompatCompiled):
   def _set_signal(self, sig, value): sig.value = value
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs) -> hsa.amd_signal_t:
+  def _alloc_signal(self, value=0, **kwargs) -> hsa.amd_signal_t:
     self._set_signal(ret := self.signals_pool.pop(), value)
     if (sync_event:=kwargs.get('sync_event')) is not None:
       ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       ret.event_id = sync_event.event_id
     else: ret.event_mailbox_ptr = ret.event_id = 0
     return ret
+
+  @classmethod
+  def _free_signal(self, sig): self.signals_pool.append(sig)
 
   @classmethod
   def _wait_signal(self, signal:hsa.amd_signal_t, value=0, timeout=10000):
@@ -496,7 +499,7 @@ class AMDDevice(HCQCompatCompiled):
       self._gpu_map(AMDDevice.event_page)
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
 
-    self.time_event_st, self.time_event_en = AMDDevice._get_signal(), AMDDevice._get_signal()
+    self.time_event_st, self.time_event_en = AMDDevice._alloc_signal(), AMDDevice._alloc_signal()
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -515,7 +518,7 @@ class AMDDevice(HCQCompatCompiled):
     self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HWPM4Queue, HWCopyQueue,
-      timeline_signals=[self._get_signal(sync_event=sync_event), self._get_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))])
+      timeline_signals=[self._alloc_signal(sync_event=sync_event), self._alloc_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))])
 
   def _gpu2cpu_time(self, gpu_time, is_copy):
     if is_copy: return self.copy_cpu_start_time + (gpu_time - self.copy_gpu_start_time) / 1e2

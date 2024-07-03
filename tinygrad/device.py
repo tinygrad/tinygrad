@@ -2,7 +2,7 @@ from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, cast
+from typing import List, Optional, Dict, Tuple, Any, cast, Protocol
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib
 from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
 from tinygrad.dtype import DType, ImageDType
@@ -188,7 +188,7 @@ class Compiled:
 
 @contextlib.contextmanager
 def hcq_profile(dev, queue_type, enabled, desc):
-  st, en = (dev._get_signal(), dev._get_signal()) if enabled else (None, None)
+  st, en = (dev._alloc_signal(), dev._alloc_signal()) if enabled else (None, None)
   if enabled: queue_type().timestamp(st).submit(dev)
   try: yield (st, en)
   finally:
@@ -217,7 +217,10 @@ class HCQCompatCompiled(Compiled):
   def _set_signal(self, sig, value): raise NotImplementedError("need _set_signal") # sets a value for a signal
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs): raise NotImplementedError("need _get_signal") # allocates a new signal
+  def _alloc_signal(self, value=0, **kwargs): raise NotImplementedError("need _alloc_signal") # allocates a new signal
+
+  @classmethod
+  def _free_signal(self, sig): raise NotImplementedError("need _free_signal") # frees a signal
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
@@ -239,7 +242,7 @@ class HCQCompatCompiled(Compiled):
 
   def _prof_process_events(self):
     self.raw_prof_records += [(self._read_timestamp(st), self._read_timestamp(en), name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
-    for st, en, _, _ in self.sig_prof_records: self.signals_pool += [st, en] # type: ignore
+    for st, en, _, _ in self.sig_prof_records: map(self._alloc_signal, [st, en])
     self.sig_prof_records = []
 
   def _prof_finalize(self):
@@ -252,6 +255,9 @@ class HCQCompatCompiled(Compiled):
     self._set_signal(self.timeline_signal, 0)
     cast(HCQCompatAllocator, self.allocator).b_timeline = [0] * len(cast(HCQCompatAllocator, self.allocator).b)
 
+# Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
+class HCQCompatAllocRes(Protocol): va_addr: int; size: int # noqa: E702
+
 class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
   def __init__(self, device, batch_size=(2 << 20), batch_cnt=32):
     self.device = device
@@ -259,7 +265,9 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
 
-  def copyin(self, dest, src: memoryview):
+  def _alloc(self, size:int, options:BufferOptions) -> HCQCompatAllocRes: raise NotImplementedError("need hcq compat alloc")
+
+  def copyin(self, dest: HCQCompatAllocRes, src: memoryview):
     with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"CPU -> {self.device.dname}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
@@ -271,7 +279,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
         self.b_timeline[self.b_next] = self.device.timeline_value
         self.device.timeline_value += 1
 
-  def copy_from_disk(self, dest, src, size):
+  def copy_from_disk(self, dest: HCQCompatAllocRes, src, size):
     def _get_temp_buf():
       # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
       if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device._read_signal(self.device.timeline_signal):
@@ -287,7 +295,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
         self.b_timeline[batch_info[1]] = self.device.timeline_value
         self.device.timeline_value += 1
 
-  def copyout(self, dest:memoryview, src):
+  def copyout(self, dest:memoryview, src: HCQCompatAllocRes):
     self.device.synchronize()
 
     with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
@@ -300,7 +308,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
 
         ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
-  def transfer(self, dest, src, sz: int, src_dev, dest_dev):
+  def transfer(self, dest: HCQCompatAllocRes, src: HCQCompatAllocRes, sz: int, src_dev, dest_dev):
     src_dev._gpu_map(dest)
 
     with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
@@ -316,4 +324,6 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
                                    .signal(dest_dev.timeline_signal, dest_dev.timeline_value).submit(dest_dev)
       dest_dev.timeline_value += 1
 
-  def offset(self, buf, size:int, offset:int): return type(buf)(base=buf.base + offset, va_addr=buf.va_addr + offset, length=size, size=size)
+  def offset(self, buf, size:int, offset:int) -> HCQCompatAllocRes:
+    return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
+                     **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']})

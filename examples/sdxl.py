@@ -6,7 +6,7 @@
 from tinygrad import Tensor, TinyJit, dtypes
 from tinygrad.nn import Conv2d, GroupNorm
 from tinygrad.nn.state import safe_load, load_state_dict
-from tinygrad.helpers import fetch, trange, colored
+from tinygrad.helpers import fetch, trange, colored, Timing, GlobalCounters
 from extra.models.clip import Embedder, FrozenClosedClipEmbedder, FrozenOpenClipEmbedder
 from extra.models.unet import UNetModel, Upsample, Downsample, timestep_embedding
 from examples.stable_diffusion import ResnetBlock, Mid
@@ -335,25 +335,26 @@ class DPMPP2MSampler:
     x = Tensor.where(append_dims(next_sigma, x) > 0.0, x_advanced, x_standard)
     return x, denoised
 
-  def __call__(self, denoiser, x:Tensor, c:Dict, uc:Dict, num_steps:int) -> Tensor:
+  def __call__(self, denoiser, x:Tensor, c:Dict, uc:Dict, num_steps:int, timing=False) -> Tensor:
     sigmas = self.discretization(num_steps)
     x *= Tensor.sqrt(1.0 + sigmas[0] ** 2.0)
     num_sigmas = len(sigmas)
 
     old_denoised = None
     for i in trange(num_sigmas - 1):
-      x, old_denoised = self.sampler_step(
-        old_denoised=old_denoised,
-        prev_sigma=(None if i==0 else sigmas[i-1].reshape(x.shape[0])),
-        sigma=sigmas[i].reshape(x.shape[0]),
-        next_sigma=sigmas[i+1].reshape(x.shape[0]),
-        denoiser=denoiser,
-        x=x,
-        c=c,
-        uc=uc,
-      )
-      x.realize()
-      old_denoised.realize()
+      with Timing("step in ", enabled=timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
+        x, old_denoised = self.sampler_step(
+          old_denoised=old_denoised,
+          prev_sigma=(None if i==0 else sigmas[i-1].reshape(x.shape[0])),
+          sigma=sigmas[i].reshape(x.shape[0]),
+          next_sigma=sigmas[i+1].reshape(x.shape[0]),
+          denoiser=denoiser,
+          x=x,
+          c=c,
+          uc=uc,
+        )
+        x.realize()
+        old_denoised.realize()
 
     return x
 
@@ -369,6 +370,7 @@ if __name__ == "__main__":
   parser.add_argument('--width',    type=int,   default=1024, help="The output image width")
   parser.add_argument('--height',   type=int,   default=1024, help="The output image height")
   parser.add_argument('--weights',  type=str,   help="Custom path to weights")
+  parser.add_argument('--timing', action='store_true', help="Print timing per step")
   parser.add_argument('--noshow',   action='store_true', help="Don't show the image")
   args = parser.parse_args()
 
@@ -400,7 +402,7 @@ if __name__ == "__main__":
   randn = Tensor.randn(shape)
 
   sampler = DPMPP2MSampler(args.guidance)
-  z = sampler(model.denoise, randn, c, uc, args.steps)
+  z = sampler(model.denoise, randn, c, uc, args.steps, timing=args.timing)
   print("created samples")
   x = model.decode(z).realize()
   print("decoded samples")
