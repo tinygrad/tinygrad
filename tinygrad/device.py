@@ -255,8 +255,8 @@ class HCQCompatCompiled(Compiled):
     self._set_signal(self.timeline_signal, 0)
     cast(HCQCompatAllocator, self.allocator).b_timeline = [0] * len(cast(HCQCompatAllocator, self.allocator).b)
 
-# used for copying and transfering, allocator implementations must have this set up.
-class HCQCompatAllocRes(Protocol): va_addr: int; base: int; size: int; length: int # noqa: E702
+# Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
+class HCQCompatAllocRes(Protocol): va_addr: int; size: int # noqa: E702
 
 class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
   def __init__(self, device, batch_size=(2 << 20), batch_cnt=32):
@@ -325,4 +325,5 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
       dest_dev.timeline_value += 1
 
   def offset(self, buf, size:int, offset:int) -> HCQCompatAllocRes:
-    return type(buf)(base=buf.base + offset, va_addr=buf.va_addr + offset, length=size, size=size)
+    return type(buf)(va_addr=buf.va_addr + offset, size=size, **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', [])},
+                     **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']})
