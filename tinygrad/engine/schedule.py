@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
 from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType
 from tinygrad.lazy import LazyBuffer
@@ -23,7 +23,7 @@ logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 class ScheduleItem:
   ast: Tuple[LazyOp, ...]
   bufs: Tuple[Buffer, ...]
-  metadata: List[Optional[str]]
+  metadata: List[Metadata]
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
@@ -42,7 +42,7 @@ class _LBScheduleItem:
   outputs: Tuple[LazyBuffer, ...]
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
-  metadata: List[Optional[str]]
+  metadata: List[Metadata]
 
 def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer], cache) -> LazyOp:

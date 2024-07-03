@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
 import itertools, urllib.request, subprocess, shutil, math, json, contextvars
+from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
@@ -105,7 +106,16 @@ WINO, THREEFRY, CAPTURING = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), Co
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
 MULTIOUTPUT, PROFILE = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0)
 
-_METADATA = contextvars.ContextVar("_METADATA", default=None)
+@dataclass
+class Metadata:
+  name: str
+  backward: bool = False
+  caller: Optional[str] = None
+  def __hash__(self): return hash(self.name)
+  def __repr__(self): return self.name + (" bw" if self.backward else "") + (f" - {self.caller}" if self.caller else "")
+  def __str__(self): return self.name + (" bw" if self.backward else "")
+
+_METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
 
 # **************** global state Counters ****************
 
