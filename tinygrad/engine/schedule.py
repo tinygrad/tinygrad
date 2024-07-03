@@ -354,7 +354,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
         break
 
     # Haven't found any buffer for reuse, allocate a new buffer in this case. -1 now points to it in the pool.
-    if found_buf == -1: buffer_pool.append((Buffer(buf.device, buf.size, buf.dtype, options=buf.options), []))
+    if found_buf == -1: buffer_pool.append((buf, []))
 
     buffer_pool[found_buf][1].append((st, en))
     replace_buffer = buffer_pool[found_buf][0]
@@ -366,6 +366,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 
   for i,u in enumerate(buffers):
     for buf in u:
+      if buf.is_allocated() or buf.lb_refcount > 0: continue
       if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base).base, offset=buf.offset)
       else: assigned[buf] = assigned.get(buf, buf)
 
