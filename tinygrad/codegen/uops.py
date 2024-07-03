@@ -81,12 +81,13 @@ class UOp:
   def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
   def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.op is UOps.DEFINE_VAR])
   def divides(self, v):
-    if self.op is UOps.CONST:
-      return self.arg%v == 0
-    if self.op is UOps.ALU:
-      if self.arg is BinaryOps.ADD: return all(x.divides(v) for x in self.src)
-      if self.arg is BinaryOps.MUL: return any(x.divides(v) for x in self.src)
-    return False # generic false if we aren't sure
+    def _modulo(self, v):
+      if self.op is UOps.CONST: return self.arg%v
+      if self.op is UOps.ALU:
+        if self.arg is BinaryOps.ADD: return sum(_modulo(x, v) for x in self.src)%v
+        if self.arg is BinaryOps.MUL: return prod(_modulo(x, v) for x in self.src)%v
+      return float('nan') # return nan if we're not sure
+    return _modulo(self, v) == 0
 
 def type_verify(uops):
   for u in uops:
