@@ -159,10 +159,8 @@ class TinyJit(Generic[ReturnType]):
         try:
           self.ret = self.fxn(*args, **kwargs)
           if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
-          capturing.clear()
-        except Exception as e:
-          capturing.clear()
-          raise e
+        except Exception as e: raise e
+        finally: capturing.clear()
       del self.buffer_replace
       assert len(self.jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_buffers)} inputs")
