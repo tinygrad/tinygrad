@@ -1,8 +1,10 @@
 # allreduce.py
 from typing import List
 from tinygrad.tensor import Tensor
+
 def allreduce(tensors: List[Tensor]):
   # Simple implementation for now
-  average = sum(tensor.to('cpu') for tensor in tensors) / len(tensors)
+  average = sum(tensor.to('cpu') if isinstance(tensor, Tensor) else tensor for tensor in tensors) / len(tensors)
   for tensor in tensors:
-    tensor.assign(average.to(tensor.device))
+    if isinstance(tensor, Tensor):
+      tensor.assign(average.to(tensor.device))
