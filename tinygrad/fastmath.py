@@ -279,6 +279,7 @@ def _xexp2_base(d: LazyBuffer) -> LazyBuffer:
   u = d.e(BinaryOps.CMPNE, d.const(upper)).e(TernaryOps.WHERE, u, d.const(math.inf))
   u = d.e(BinaryOps.CMPLT, d.const(upper)).e(TernaryOps.WHERE, u, d.const(math.inf))
   u = d.e(BinaryOps.CMPLT, d.const(lower)).e(TernaryOps.WHERE, d.const(0.0), u)
+  u = d.e(BinaryOps.CMPLT, d.const(math.inf)).e(TernaryOps.WHERE, u, u.const(math.nan))
   return u
 
 # when denormal=True, dedicated to x < FLT_MIN, when False, dedicated to x >= FLT_MIN
