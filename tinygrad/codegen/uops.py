@@ -61,8 +61,26 @@ class UOp:
   def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
 
   # symbolic min max
-  def maxval(self): return self.src[1] if self.op is UOps.DEFINE_VAR and len(self.src) == 2 else self
-  def minval(self): return self.src[0] if self.op is UOps.DEFINE_VAR and len(self.src) == 2 else self
+  @property
+  def minval(self)->int: return cast(int, self.bounds[0])
+  @property
+  def maxval(self)->int: return cast(int, self.bounds[1])
+  @functools.cached_property
+  def bounds(self):
+    assert self.dtype in {dtypes.int, dtypes.bool}
+    if self.op is UOps.DEFINE_VAR: return (self.src[0].minval, self.src[0].maxval)
+    if self.op is UOps.CONST: return (self.arg, self.arg)
+    # if self.op is UOps.ALU:
+    #   if self.arg is UnaryOps.NEG: return (-self.src[0].maxval, -self.src[0].minval)
+    #   if self.arg is BinaryOps.ADD: return (self.src[0].minval+self.src[1].minval, self.src[0].maxval+self.src[1].maxval)
+    #   if self.arg is BinaryOps.MUL: return (self.src[0].minval*self.src[1].minval, self.src[0].maxval*self.src[1].maxval)
+    #   if self.arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}: return (0, 1)
+    #   if self.arg is BinaryOps.MAX: return (max(self.src[0].minval, self.src[1].minval), max(self.src[0].maxval, self.src[1].maxval))
+    #   if self.arg is BinaryOps.MOD: return (0, self.src[1].maxval-1)
+    #   if self.arg is BinaryOps.IDIV: return (self.src[0].minval//self.src[1].maxval, self.src[0].maxval//self.src[1].minval)
+    raise NotImplementedError(f"bounds {self}")
+
+
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def const(dtype:Optional[DType], b:ConstType|Variable):
@@ -236,7 +254,7 @@ constant_folder = PatternMatcher([
   # a < b -> 1 if a.max < b.min; a < b -> 0 if a.min >= b.max
   (UPat(op=UOps.ALU, arg=BinaryOps.CMPLT, src=(UPat({UOps.CONST, UOps.DEFINE_VAR}, name='a'), UPat({UOps.CONST, UOps.DEFINE_VAR}, name='b'))),
    lambda a, b:
-   UOp.const(dtypes.bool, 1) if a.maxval().arg < b.minval().arg else UOp.const(dtypes.bool, 0) if a.minval().arg >= b.maxval().arg else None),
+   UOp.const(dtypes.bool, 1) if a.maxval < b.minval else UOp.const(dtypes.bool, 0) if a.minval >= b.maxval else None),
   # [int] a >= b -> -a < -(b-1)
   ((UOp.var("a",dtypes.int).ge(UOp.var("b", dtypes.int))).name("root"), lambda root,a,b: UOp.lt(-a, -b+1)),
 
