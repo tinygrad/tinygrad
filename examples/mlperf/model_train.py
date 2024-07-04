@@ -353,7 +353,7 @@ def train_retinanet():
   Tensor.manual_seed(SEED)
   np.random.seed(SEED)
   WANDB = getenv('WANDB')
-  HOSTNAME = config['HOST'] = getenv('SLURM_STEP_NODELIST', 'other')
+  HOSTNAME = config['HOST'] = getenv('SLURM_STEP_NODELIST', 'tiny')
   EPOCHS = config['EPOCHS'] = 5
   BS = config['BS'] = getenv('BS', 32)
   BS_EVAL = config['BS_EVAL'] = getenv('BS_EVAL', BS if BS<32 else 32)
@@ -366,6 +366,9 @@ def train_retinanet():
   LOSS_SCALAR = config['LOSS_SCALAR'] = 2048.0 if dtypes.default_float in [dtypes.float16] else 1.0
   TEST = config['TEST'] = getenv('TEST', 0)
   BENCHMARK = config['BENCHMARK'] = getenv("BENCHMARK", 10000)
+  EVAL_ONLY = config['EVAL_ONLY'] = getenv('EVAL_ONLY')
+  CHKPT_PATH = config['CHKPT_PATH'] = getenv('CHKPT_PATH', 'ckpts/retinanet_6xother_B60_E0.safe')
+  
   if WANDB:
     import wandb
     wandb.init(project='RetinaNet', config=config)
@@ -413,6 +416,8 @@ def train_retinanet():
   model.backbone.body.fc = None
   # model.load_from_pretrained()
   # model.load_checkpoint('ckpts/retinanet_4xgpu015_B64_E1.safe')
+  if EVAL_ONLY:
+    model.load_checkpoint(CHKPT_PATH)
 
   for k, v in get_state_dict(model).items():
     if 'head' in k and ('clas' in k or 'reg' in k ): v.requires_grad = True
@@ -479,7 +484,7 @@ def train_retinanet():
     # **********TRAIN***************
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    if TEST:
+    if TEST or EVAL_ONLY:
       cnt, proc = 0, fake_data_get(BS)
     else:
       batch_loader = batch_load_retinanet(coco_train, bs=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP)
@@ -487,7 +492,7 @@ def train_retinanet():
       cnt, proc = 0, data_get(it)
 
     st = time.perf_counter()
-    while proc is not None:
+    while not EVAL_ONLY and proc is not None:
       GlobalCounters.reset()
       loss, proc = train_step(proc[0], proc[1], proc[2], proc[3]), proc[4]
 
@@ -515,12 +520,12 @@ def train_retinanet():
       cnt+=1
       if TEST and cnt>BENCHMARK:
         return
-
-    if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-    fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
-    state_dict = get_state_dict(model)
-    safe_save(state_dict, fn)
-    print(f" *** Model saved to {fn} ***")
+    if not EVAL_ONLY:
+      if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+      fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
+      state_dict = get_state_dict(model)
+      safe_save(state_dict, fn)
+      print(f" *** Model saved to {fn} ***")
    
     # ***********EVAL******************
     bt = time.time()
