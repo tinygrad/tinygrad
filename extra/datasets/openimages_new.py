@@ -5,10 +5,11 @@ from typing import Any, List
 import numpy as np
 import random
 from tinygrad import Tensor, dtypes, Device
+from tinygrad.helpers import getenv
 from pycocotools.coco import COCO
 
 SIZE = (800, 800)
-
+CPUS = getenv('CORES', 5)
 def prep_data(image, target):
   w,h = image.size
   image_id = target["image_id"]
@@ -239,7 +240,7 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, anchor_np=[1,2,3,
 
 
     # for _ in range(cpu_count()):
-    for _ in range(10):
+    for _ in range(CPUS):
       p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco, YB, YL, YM, anchor_np))
       p.daemon = True
       p.start()
@@ -322,7 +323,7 @@ def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None):
     Y_IDX = [None] * (bs*BATCH_COUNT)
 
     # for _ in range(cpu_count()):
-    for _ in range(10):
+    for _ in range(CPUS):
       p = Process(target=loader_process_val, args=(q_in, q_out, X, seed, coco))
       p.daemon = True
       p.start()
