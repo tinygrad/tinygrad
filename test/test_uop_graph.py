@@ -124,12 +124,12 @@ class TestUOpGraph(TestUOps):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
     idx = UOp(UOps.CONST, dtypes.int, arg=0)
     ld = UOp(UOps.LOAD, dtypes.float.vec(2), (d0, idx))
-    cast = UOp(UOps.CAST, dtypes.float.vec(2), (ld,))
-    x = UOp(UOps.GEP, dtypes.float, (cast, ), arg=0)
+    vec = UOp(UOps.VECTORIZE, dtypes.float.vec(2), (ld,))
+    x = UOp(UOps.GEP, dtypes.float, (vec, ), arg=0)
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
     out = UOp(UOps.STORE, dtypes.float, (d0, idx, alu))
     g = UOpGraph([out])
-    self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
+    self.assertEqual(len([x for x in g.uops if x.op is UOps.VECTORIZE]), 0)
 
   def test_depth_2_const_fold(self):
     v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('tmp', 0, 1))

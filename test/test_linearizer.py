@@ -750,7 +750,7 @@ class TestLinearizer(unittest.TestCase):
     # check that the float4 cast collapses
     store_vals = [u.src[-1] for u in k.uops if u.op is UOps.STORE]
     for val in store_vals:
-      assert val.dtype == dtypes.float.vec(4) and val.op is not UOps.CAST
+      assert val.dtype == dtypes.float.vec(4) and val.op not in {UOps.VECTORIZE, UOps.CAST}
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_values(self):
@@ -758,7 +758,7 @@ class TestLinearizer(unittest.TestCase):
     out = x.flip((0,1)).contiguous()
     k = helper_linearizer_opt(out)[-1]
     store_val = [u.src[-1] for u in k.uops if u.op is UOps.STORE][0]
-    assert store_val.dtype == dtypes.float.vec(4) and store_val.op is not UOps.CAST
+    assert store_val.dtype == dtypes.float.vec(4) and store_val.op not in {UOps.VECTORIZE, UOps.CAST}
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -776,7 +776,7 @@ class TestLinearizer(unittest.TestCase):
     barrier = [u for u in k.uops if u.op is UOps.BARRIER][0]
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
-      assert store.src[2].dtype == dtypes.float.vec(2) and store.src[2].op is not UOps.CAST
+      assert store.src[2].dtype == dtypes.float.vec(2) and store.src[2].op not in {UOps.VECTORIZE, UOps.CAST}
     # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
@@ -793,7 +793,7 @@ class TestLinearizer(unittest.TestCase):
 
     # the float4 value stores directly in lds and we skip upcast
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
-    assert stores[0].src[-1].op is not UOps.CAST
+    assert stores[0].src[-1].op not in {UOps.VECTORIZE, UOps.CAST}
 
     # the global store doesn't change
     assert stores[1].src[2].dtype == dtypes.float
@@ -808,7 +808,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     k = helper_linearizer_ast(ast, [Tensor.randn(240*40).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is UOps.STORE][0]
-    assert out.src[-1].op is UOps.CAST and out.src[-1].dtype == dtypes.float.vec(4)
+    assert out.src[-1].op is UOps.VECTORIZE and out.src[-1].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -820,7 +820,7 @@ class TestLinearizer(unittest.TestCase):
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
     k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is UOps.STORE][0]
-    assert out.src[-1].op is UOps.CAST and out.src[-1].dtype == dtypes.float.vec(2)
+    assert out.src[-1].op is UOps.VECTORIZE and out.src[-1].dtype == dtypes.float.vec(2)
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
