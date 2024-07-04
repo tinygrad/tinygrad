@@ -71,13 +71,13 @@ class UOp:
     # assert self.dtype in {dtypes.int, dtypes.bool}, f"bounds {self}"
     if self.op is UOps.DEFINE_VAR: return (self.src[0].minval, self.src[1].maxval)
     if self.op is UOps.CONST: return (self.arg, self.arg)
-    if self.op is UOps.ALU:
-      if self.arg is BinaryOps.ADD: return (self.src[0].minval+self.src[1].minval, self.src[0].maxval+self.src[1].maxval)
-      if self.arg is BinaryOps.MUL: return (self.src[0].minval*self.src[1].minval, self.src[0].maxval*self.src[1].maxval)
-      if self.arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}: return (0, 1)
-      if self.arg is BinaryOps.IDIV: return (self.src[0].minval//self.src[1].maxval, self.src[0].maxval//self.src[1].minval)
-      if self.arg is UnaryOps.NEG: return (0, 1)
-      if self.arg is BinaryOps.MOD: return (0, self.src[1].maxval-1)
+
+    if self.arg is BinaryOps.ADD: return (self.src[0].minval+self.src[1].minval, self.src[0].maxval+self.src[1].maxval)
+    if self.arg is BinaryOps.MUL: return (self.src[0].minval*self.src[1].minval, self.src[0].maxval*self.src[1].maxval)
+    if self.arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}: return (0, 1)
+    if self.arg is BinaryOps.IDIV: return (self.src[0].minval//self.src[1].maxval, self.src[0].maxval//self.src[1].minval)
+    if self.arg is UnaryOps.NEG: return (0, 1)
+    if self.arg is BinaryOps.MOD: return (0, self.src[1].maxval-1)
     # raise NotImplementedError(f"bounds {self}")
     return float('-inf'), float('inf')
 
