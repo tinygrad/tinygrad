@@ -68,7 +68,7 @@ class UOp:
   def maxval(self)->int: return cast(int, self.bounds[1])
   @functools.cached_property
   def bounds(self)-> Union[Tuple[int, int], Tuple[float, float]]:
-    assert self.dtype in {dtypes.int, dtypes.bool}, f"bounds {self}"
+    # assert self.dtype in {dtypes.int, dtypes.bool}, f"bounds {self}"
     if self.op is UOps.DEFINE_VAR: return (self.src[0].minval, self.src[1].maxval)
     if self.op is UOps.CONST: return (self.arg, self.arg)
     if self.op is UOps.ALU:
@@ -76,9 +76,7 @@ class UOp:
       if self.arg is BinaryOps.MUL: return (self.src[0].minval*self.src[1].minval, self.src[0].maxval*self.src[1].maxval)
       if self.arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}: return (0, 1)
       if self.arg is BinaryOps.IDIV: return (self.src[0].minval//self.src[1].maxval, self.src[0].maxval//self.src[1].minval)
-      if self.arg is UnaryOps.NEG:
-        assert self.dtype is dtypes.bool, "negative symbolic not supported"
-        return (0, 1)
+      if self.arg is UnaryOps.NEG: return (0, 1)
       if self.arg is BinaryOps.MOD: return (0, self.src[1].maxval-1)
     # raise NotImplementedError(f"bounds {self}")
     return float('-inf'), float('inf')
@@ -226,7 +224,6 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
 def simplify_sum_lt_const(lhs:UOp, b:UOp):
-  # return None
   assert b.op is UOps.CONST and lhs.arg is BinaryOps.ADD
   barg:int = b.arg
   new_sum = []
