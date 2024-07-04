@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import prod, DEBUG, getenv
+from tinygrad.helpers import prod, DEBUG, getenv, partition
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -239,6 +239,24 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 
 # def print_tree(dag:Union[UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(dag, {}, [-1]))]))
 
+def simplify_sum_lt_const(lhs:UOp, b:UOp):
+  assert b.op is UOps.CONST and lhs.op is UOps.ALU and lhs.arg is BinaryOps.ADD
+  b = b.arg
+  new_sum = []
+  for x in lhs.src:
+    if x.op is UOps.CONST: b -= x.arg
+    else: new_sum.append(x)
+  if len(new_sum) == 1: return UOp.alu(BinaryOps.CMPLT, new_sum[0], UOp.const(lhs.dtype, b))
+  lhs = UOp.alu(BinaryOps.ADD, *new_sum)
+  muls, others = partition(lhs.src, lambda x: x.arg is BinaryOps.MUL and x.src[1].op is UOps.CONST and x.src[1].arg > 0 and x.maxval >= x.src[1].arg)
+  if muls:
+    mul_gcd = b
+    for m in muls: 
+      mul_gcd = math.gcd(mul_gcd, m.src[1].arg)
+    all_others = UOp.alu(BinaryOps.ADD, *others) if len(others) > 1 else others[0]
+    if all_others.minval >= 0 and all_others.maxval < mul_gcd:
+      ret = UOp.alu(BinaryOps.CMPLT, *[mul // mul_gcd for mul in muls], UOp.const(dtypes.int, b // mul_gcd))
+      return ret
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
@@ -315,6 +333,8 @@ constant_folder = PatternMatcher([
    UOp.const(dtypes.bool, 1) if a.maxval < b.minval else UOp.const(dtypes.bool, 0) if a.minval >= b.maxval else None),
   # [int] a >= b -> -a < -(b-1)
   ((UOp.var("a",dtypes.int).ge(UOp.var("b", dtypes.int))).name("root"), lambda root,a,b: UOp.lt(-a, -b+1)),
+  # ge_divides
+  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, name='lhs', dtype=dtypes.int), UPat(UOps.CONST, name='b', dtype=dtypes.int))),lambda lhs, b: simplify_sum_lt_const(lhs, b)),
 
   # two stage mul, (x*c1)*c2 = x*(c1*c2)
   ((UOp.var("x") * UOp.cvar("c1")) * UOp.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),

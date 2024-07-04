@@ -80,7 +80,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 3), 0, 0, "0")
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 2), 0, 0, "0")
 
-  @unittest.expectedFailure
   def test_ge_divides(self):
     expr = create_lt_node(Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)
     self.helper_test_variable(expr, 0, 1, "(idx<128)")
