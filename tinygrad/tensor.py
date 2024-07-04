@@ -3043,5 +3043,4 @@ def _metadata_wrapper(fn):
 
 for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
   if name in ["__class__", "__init__", "__repr__", "backward", "sequential"]: continue
-  if name.startswith("__"): continue
   setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
