@@ -67,7 +67,7 @@ class UOp:
   @property
   def maxval(self)->int: return cast(int, self.bounds[1])
   @functools.cached_property
-  def bounds(self):
+  def bounds(self)-> Union[Tuple[int, int], Tuple[float, float]]:
     assert self.dtype in {dtypes.int, dtypes.bool}, f"bounds {self}"
     if self.op is UOps.DEFINE_VAR: return (self.src[0].minval, self.src[1].maxval)
     if self.op is UOps.CONST: return (self.arg, self.arg)
@@ -80,7 +80,8 @@ class UOp:
         assert self.dtype is dtypes.bool, "negative symbolic not supported"
         return (0, 1)
       if self.arg is BinaryOps.MOD: return (0, self.src[1].maxval-1)
-    raise NotImplementedError(f"bounds {self}")
+    # raise NotImplementedError(f"bounds {self}")
+    return float('-inf'), float('inf')
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
@@ -224,38 +225,43 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
-# # debugging
-# def _tree(dag:Union[UOp, UPat], cycles, cnt):
-#   cnt[0] += 1
-#   src = dag.src if isinstance(dag.src, (list, tuple)) else [] if dag.src is None else [dag.src]
-#   if len(src) == 0: return [f"━━ {dag.op} {dag.arg}"]
-#   if (lid := id(dag)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
-#     return [f"━⬆︎ goto {cycles[id(dag)][0]}: {dag.op}"]
-#   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
-#   lines = [f"━┳ {dag.op} {dag.arg}"]
-#   childs = [_tree(c, cycles, cnt) for c in src]
-#   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
-#   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
+# debugging
+def _tree(dag:Union[UOp, UPat], cycles, cnt):
+  cnt[0] += 1
+  src = dag.src if isinstance(dag.src, (list, tuple)) else [] if dag.src is None else [dag.src]
+  if len(src) == 0: return [f"━━ {dag.op} {dag.arg}"]
+  if (lid := id(dag)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
+    return [f"━⬆︎ goto {cycles[id(dag)][0]}: {dag.op}"]
+  cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
+  lines = [f"━┳ {dag.op} {dag.arg}"]
+  childs = [_tree(c, cycles, cnt) for c in src]
+  for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
+  return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
-# def print_tree(dag:Union[UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(dag, {}, [-1]))]))
+def print_tree(dag:Union[UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(dag, {}, [-1]))]))
 
 def simplify_sum_lt_const(lhs:UOp, b:UOp):
-  assert b.op is UOps.CONST and lhs.op is UOps.ALU and lhs.arg is BinaryOps.ADD
-  b = b.arg
+  # return None
+  assert b.op is UOps.CONST and lhs.arg is BinaryOps.ADD
+  barg:int = b.arg
   new_sum = []
   for x in lhs.src:
-    if x.op is UOps.CONST: b -= x.arg
+    if x.op is UOps.CONST: barg -= x.arg
     else: new_sum.append(x)
-  if len(new_sum) == 1: return UOp.alu(BinaryOps.CMPLT, new_sum[0], UOp.const(lhs.dtype, b))
+  if len(new_sum) == 1: return UOp.alu(BinaryOps.CMPLT, new_sum[0], UOp.const(lhs.dtype, barg))
   lhs = UOp.alu(BinaryOps.ADD, *new_sum)
-  muls, others = partition(lhs.src, lambda x: x.arg is BinaryOps.MUL and x.src[1].op is UOps.CONST and x.src[1].arg > 0 and x.maxval >= x.src[1].arg)
+  muls, others = cast(Tuple[List[UOp], List[UOp]], partition(list(lhs.src),
+    lambda x: x.arg is BinaryOps.MUL and x.src[1].op is UOps.CONST and x.src[1].arg > 0 and x.maxval >= x.src[1].arg))
+  if not others: return None
   if muls:
-    mul_gcd = b
-    for m in muls:
-      mul_gcd = math.gcd(mul_gcd, m.src[1].arg)
+    mul_gcd = barg
+    for m in muls: mul_gcd = math.gcd(mul_gcd, m.src[1].arg)
     all_others = UOp.alu(BinaryOps.ADD, *others) if len(others) > 1 else others[0]
     if all_others.minval >= 0 and all_others.maxval < mul_gcd:
-      ret = UOp.alu(BinaryOps.CMPLT, *[mul // mul_gcd for mul in muls], UOp.const(dtypes.int, b // mul_gcd))
+      ret = UOp.alu(BinaryOps.CMPLT, *[mul // mul_gcd for mul in muls], UOp.const(dtypes.int, barg // mul_gcd))
+
+      print_tree(lhs.lt(b))
+      print_tree(ret)
       return ret
 
 # this is symbolic 2.0
@@ -334,7 +340,8 @@ constant_folder = PatternMatcher([
   # [int] a >= b -> -a < -(b-1)
   ((UOp.var("a",dtypes.int).ge(UOp.var("b", dtypes.int))).name("root"), lambda root,a,b: UOp.lt(-a, -b+1)),
   # ge_divides
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, name='lhs', dtype=dtypes.int), UPat(UOps.CONST, name='b', dtype=dtypes.int))),lambda lhs, b: simplify_sum_lt_const(lhs, b)),
+  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, name='lhs', dtype=dtypes.int), UPat(UOps.CONST, name='b', dtype=dtypes.int))),
+    simplify_sum_lt_const),
 
   # two stage mul, (x*c1)*c2 = x*(c1*c2)
   ((UOp.var("x") * UOp.cvar("c1")) * UOp.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
