@@ -348,28 +348,28 @@ def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
   import math
-
-  SEED = getenv("SEED", 42)
+  config = {}
+  SEED = config['SEED'] = getenv("SEED", 42)
   Tensor.manual_seed(SEED)
   np.random.seed(SEED)
   WANDB = getenv('WANDB')
-  HOSTNAME = getenv('SLURM_STEP_NODELIST', 'other')
-  EPOCHS = 5
-  BS = getenv('BS', 32)
-  BS_EVAL = getenv('BS_EVAL', BS if BS<32 else 32)
-  LR = 0.000085
-  MAP_TARGET = 0.34
-  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  SYNCBN = False
-  # SYNCBN = True
-  TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
-  EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  loss_scaler = 2048.0 if dtypes.default_float in [dtypes.float16] else 1.0
-  TEST = getenv('TEST', 0)
-  BENCHMARK = getenv("BENCHMARK", 10000)
+  HOSTNAME = config['HOST'] = getenv('SLURM_STEP_NODELIST', 'other')
+  EPOCHS = config['EPOCHS'] = 5
+  BS = config['BS'] = getenv('BS', 32)
+  BS_EVAL = config['BS_EVAL'] = getenv('BS_EVAL', BS if BS<32 else 32)
+  LR = config['LR'] = 0.000085
+  MAP_TARGET = config['MAP_TARGET'] = 0.34
+  GPUS = config['GPUS'] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  SYNCBN = config['SYNCBN'] = False
+  # SYNCBN = config[''] = True
+  TRAIN_BEAM = config['TRAIN_BEAM'] = getenv("TRAIN_BEAM", BEAM.value)
+  EVAL_BEAM = config['EVAL_BEAM'] = getenv("EVAL_BEAM", BEAM.value)
+  LOSS_SCALAR = config['LOSS_SCALAR'] = 2048.0 if dtypes.default_float in [dtypes.float16] else 1.0
+  TEST = config['TEST'] = getenv('TEST', 0)
+  BENCHMARK = config['BENCHMARK'] = getenv("BENCHMARK", 10000)
   if WANDB:
     import wandb
-    wandb.init(project='RetinaNet')
+    wandb.init(project='RetinaNet', config=config)
  
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
@@ -443,8 +443,8 @@ def train_retinanet():
     loss_reg = mdl_reg_loss(r.cast(dtypes.float32), matched_idxs, boxes_temp)
     loss_class = mdl_class_loss(c.cast(dtypes.float32), matched_idxs, labels_temp)
     loss = loss_reg+loss_class
-    (loss*loss_scaler).backward()
-    for t in optimizer.params: t.grad = t.grad.contiguous() / loss_scaler
+    (loss*LOSS_SCALAR).backward()
+    for t in optimizer.params: t.grad = t.grad.contiguous() / LOSS_SCALAR
     optimizer.step()
     return loss.realize()
   @TinyJit
