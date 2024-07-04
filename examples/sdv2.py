@@ -1,6 +1,6 @@
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import fetch
-from tinygrad.nn.state import safe_load, load_state_dict
+from tinygrad.nn.state import safe_load, load_state_dict, get_state_dict
 from examples.stable_diffusion import AutoencoderKL, get_alphas_cumprod
 from examples.sdxl import DPMPP2MSampler, append_dims, LegacyDDPMDiscretization
 from extra.models.unet import UNetModel
@@ -90,12 +90,14 @@ if __name__ == "__main__":
   parser.add_argument('--prompt',      type=str,   default=default_prompt, help="Description of image to generate")
   parser.add_argument('--out',         type=str,   default=Path(tempfile.gettempdir()) / "rendered.png", help="Output filename")
   parser.add_argument('--seed',        type=int,   help="Set the random latent seed")
-  parser.add_argument('--guidance',    type=float, default=6.0, help="Prompt strength")
+  parser.add_argument('--guidance',    type=float, default=7.5, help="Prompt strength")
   parser.add_argument('--width',       type=int,   default=768, help="The output image width")
   parser.add_argument('--height',      type=int,   default=768, help="The output image height")
   parser.add_argument('--weights-fn',  type=str,   help="Filename of weights to use")
   parser.add_argument('--weights-url', type=str,   help="Custom URL to download weights from")
+  parser.add_argument('--timing',      action='store_true', help="Print timing per step")
   parser.add_argument('--noshow',      action='store_true', help="Don't show the image")
+  parser.add_argument('--fp16',        action='store_true', help="Cast the weights to float16")
   args = parser.parse_args()
 
   N = 1
@@ -105,6 +107,9 @@ if __name__ == "__main__":
   assert args.height % F == 0, f"img_height must be multiple of {F}, got {args.height}"
 
   Tensor.no_grad = True
+  if args.seed is not None:
+    Tensor.manual_seed(args.seed)
+
   model = StableDiffusionV2(**params)
 
   default_weights_url = 'https://huggingface.co/stabilityai/stable-diffusion-2-1/resolve/main/v2-1_768-ema-pruned.safetensors'
@@ -114,8 +119,13 @@ if __name__ == "__main__":
     weights_fn  = fetch(weights_url, os.path.basename(str(weights_url)))
   load_state_dict(model, safe_load(weights_fn), strict=False)
 
-  c  = model.cond_stage_model(args.prompt)
-  uc = model.cond_stage_model("")
+  if args.fp16:
+    for k,v in get_state_dict(model).items():
+      if k.startswith("model"):
+        v.replace(v.cast(dtypes.float16).realize())
+
+  c  = { "crossattn": model.cond_stage_model(args.prompt) }
+  uc = { "crossattn": model.cond_stage_model("") }
   del model.cond_stage_model
   print("created conditioning")
 
@@ -123,7 +133,7 @@ if __name__ == "__main__":
   randn = Tensor.randn(shape)
 
   sampler = DPMPP2MSampler(args.guidance)
-  z = sampler(model.denoise, randn, {"crossattn":c}, {"crossattn":uc}, args.steps)
+  z = sampler(model.denoise, randn, c, uc, args.steps, timing=args.timing)
   print("created samples")
   x = model.decode(z, args.height, args.width).realize()
   print("decoded samples")
