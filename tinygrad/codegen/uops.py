@@ -225,21 +225,6 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
-# debugging
-def _tree(dag:Union[UOp, UPat], cycles, cnt):
-  cnt[0] += 1
-  src = dag.src if isinstance(dag.src, (list, tuple)) else [] if dag.src is None else [dag.src]
-  if len(src) == 0: return [f"━━ {dag.op} {dag.arg}"]
-  if (lid := id(dag)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
-    return [f"━⬆︎ goto {cycles[id(dag)][0]}: {dag.op}"]
-  cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
-  lines = [f"━┳ {dag.op} {dag.arg}"]
-  childs = [_tree(c, cycles, cnt) for c in src]
-  for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
-  return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
-
-def print_tree(dag:Union[UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(dag, {}, [-1]))]))
-
 def simplify_sum_lt_const(lhs:UOp, b:UOp):
   # return None
   assert b.op is UOps.CONST and lhs.arg is BinaryOps.ADD
@@ -258,11 +243,7 @@ def simplify_sum_lt_const(lhs:UOp, b:UOp):
     for m in muls: mul_gcd = math.gcd(mul_gcd, m.src[1].arg)
     all_others = UOp.alu(BinaryOps.ADD, *others) if len(others) > 1 else others[0]
     if all_others.minval >= 0 and all_others.maxval < mul_gcd:
-      ret = UOp.alu(BinaryOps.CMPLT, *[mul // mul_gcd for mul in muls], UOp.const(dtypes.int, barg // mul_gcd))
-
-      print_tree(lhs.lt(b))
-      print_tree(ret)
-      return ret
+      return UOp.alu(BinaryOps.CMPLT, *[mul // mul_gcd for mul in muls], UOp.const(dtypes.int, barg // mul_gcd))
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
@@ -335,8 +316,7 @@ constant_folder = PatternMatcher([
   # a < b -> 1 if a.max < b.min; a < b -> 0 if a.min >= b.max
   (UPat(op=UOps.ALU, arg=BinaryOps.CMPLT, src=(UPat({UOps.CONST, UOps.DEFINE_VAR}, name='a', dtype={dtypes.int, dtypes.bool}),
                                                UPat({UOps.CONST, UOps.DEFINE_VAR}, name='b', dtype={dtypes.int, dtypes.bool}))),
-   lambda a, b: #print_tree(a.lt(b)) or print(a.bounds, b.bounds) or
-   UOp.const(dtypes.bool, 1) if a.maxval < b.minval else UOp.const(dtypes.bool, 0) if a.minval >= b.maxval else None),
+   lambda a, b: UOp.const(dtypes.bool, 1) if a.maxval < b.minval else UOp.const(dtypes.bool, 0) if a.minval >= b.maxval else None),
   # [int] a >= b -> -a < -(b-1)
   ((UOp.var("a",dtypes.int).ge(UOp.var("b", dtypes.int))).name("root"), lambda root,a,b: UOp.lt(-a, -b+1)),
   # ge_divides
