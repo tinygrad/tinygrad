@@ -3035,7 +3035,7 @@ def _metadata_wrapper(fn):
     caller_func = caller_frame.f_code.co_name
     caller_lineno = caller_frame.f_lineno
 
-    token = _METADATA.set(Metadata(name=fn.__name__, caller=f"{caller_module}.{caller_func}:{caller_lineno}"))
+    token = _METADATA.set(Metadata(name=fn.__name__, caller=f"{caller_module}:{caller_lineno}::{caller_func}"))
     ret = fn(*args, **kwargs)
     _METADATA.reset(token)
     return ret
