@@ -5,6 +5,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.lazy import LazyBuffer, create_lazybuffer
 from tinygrad.multi import MultiLazyBuffer
 
+# [TODO] remove this function after fixing cycle graph dependency errors
 def bitcast(x, dtype: DType):
   if isinstance(x, LazyBuffer):
     return create_lazybuffer(x.device, x.st, dtype, UnaryOps.BITCAST, dtype, (x,))
@@ -13,6 +14,10 @@ def bitcast(x, dtype: DType):
 
 def is_dtype_fastmath_supported(d: DType):
   return d in [dtypes.float16, dtypes.float32, dtypes.float64]
+
+# [WIP] MultiLazyBuffer cannot be compiled...?
+def is_buffer_fastmath_supported(d: LazyBuffer):
+  return isinstance(d, LazyBuffer) and is_dtype_fastmath_supported(d.dtype)
 
 def _lazy_map_numbers(x: LazyBuffer, inf: LazyBuffer, _inf: LazyBuffer, nan: LazyBuffer, ratio: LazyBuffer):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
@@ -52,11 +57,11 @@ def exponent_mask(d: DType) -> int:
 
 def float_to_bits(d: LazyBuffer) -> LazyBuffer:
   cast_to = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[d.dtype]
-  return d.cast(cast_to, True)
+  return bitcast(d, cast_to)
 
 def bits_to_float(d: LazyBuffer, float_dtype: DType) -> LazyBuffer:
   cast_to = {dtypes.uint64: dtypes.float64, dtypes.uint32: dtypes.float32, dtypes.uint16: float_dtype}[d.dtype]
-  return d.cast(cast_to, True)
+  return bitcast(d, cast_to)
 
 # **** utils ****
 def shr(x: LazyBuffer, y:int) -> LazyBuffer: return x.e(BinaryOps.IDIV, x.const(2**y))
@@ -282,18 +287,20 @@ def _xexp2_base(d: LazyBuffer) -> LazyBuffer:
   u = d.e(BinaryOps.CMPLT, d.const(math.inf)).e(TernaryOps.WHERE, u, u.const(math.nan))
   return u
 
-# when denormal=True, dedicated to x < FLT_MIN, when False, dedicated to x >= FLT_MIN
-def _xlog2_base(d: LazyBuffer, denormal: bool) -> LazyBuffer:
+def xlog2(d: LazyBuffer) -> LazyBuffer:
+  assert is_dtype_fastmath_supported(d.dtype)
   if 0 in d.shape: return d
   fp64_p = d.dtype == dtypes.float64
-
-  # d *= 2**32 * 2**32
+  FLT_MIN = d.const(1e-6 if d.dtype == dtypes.float16 else 1e-4)
+  Y_FLT_MIN = d.const(math.log2({dtypes.float64: 1e-228, dtypes.float32: 1e-38, dtypes.float16: 1e-6}[d.dtype]))
+  d_orig = d
+  denormal_map = d.e(BinaryOps.CMPLT, FLT_MIN)
   for _ in range(2):
-    d = d.e(BinaryOps.MUL, d.const(2 ** 32)) if denormal else d
+    d = denormal_map.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(2 ** 32)), d)
 
   e = ilogb2k(d.e(BinaryOps.MUL, d.const(1.0 / 0.75))).cast(d.dtype)
   m = ldexp3k(d, e.e(UnaryOps.NEG))
-  e = e.e(BinaryOps.ADD, e.const(-64)) if denormal else e
+  e = denormal_map.e(TernaryOps.WHERE, e.e(BinaryOps.ADD, e.const(-64)), e)
 
   if fp64_p:
     x = m.e(BinaryOps.ADD, m.const(-1.0)).e(BinaryOps.MUL, m.e(BinaryOps.ADD, m.const(1.0)).e(UnaryOps.RECIP))
@@ -308,16 +315,23 @@ def _xlog2_base(d: LazyBuffer, denormal: bool) -> LazyBuffer:
     sx, sy = dfadd2_f2_f2_f2(e, e.const(0), *dfmul2_f2_f2_f2(xx, xy, xx.const(2.8853900432586669922), xy.const(3.2734474483568488616e-08)))
     sx, sy = dfadd2_f2_f2_f2(sx, sy, x2.const(0), x2.e(BinaryOps.MUL, xx).e(BinaryOps.MUL, t))
     r = sx.e(BinaryOps.ADD, sy)
-
-  isinf_map = d.e(BinaryOps.CMPNE, d.const(math.inf))
-  nan_map1 = d.e(BinaryOps.CMPLT, d.const(0.0))
-  nan_map2 = d.e(BinaryOps.CMPNE, d)
-  zero_map = d.e(BinaryOps.CMPNE, d.const(0.0))
-
-  r = isinf_map.e(TernaryOps.WHERE, r, r.const(math.inf))
-  r = nan_map1.e(TernaryOps.WHERE, r.const(math.nan), r)
-  r = nan_map2.e(TernaryOps.WHERE, r.const(math.nan), r)
-  r = zero_map.e(TernaryOps.WHERE, r, r.const(-math.inf))
+  # log2(Inf) = Inf
+  r = d_orig.e(BinaryOps.CMPNE, d.const(math.inf)).e(TernaryOps.WHERE, r, r.const(math.inf))
+  # log2(x=-0.01) = NaN. where x < 0
+  r = d_orig.e(BinaryOps.CMPLT, d.const(-0.0)).e(TernaryOps.WHERE, r.const(math.nan), r)
+  # log2(0) = -Inf
+  r = d_orig.e(BinaryOps.CMPNE, d.const(0.0)).e(TernaryOps.WHERE, r, r.const(-math.inf))
+  # y=log2(x) must be existing in the range of [log2(FLT_MIN), log2(Inf)]. otherwise the input was poisoned.
+  # one exception is that x=0.0, it becomes -inf.
+  r_inf_mapped = d_orig.e(BinaryOps.CMPNE, d_orig.const(0.0)).e(TernaryOps.WHERE, r.const(math.nan), r.const(-math.inf))
+  r = r.e(BinaryOps.CMPLT, Y_FLT_MIN).e(TernaryOps.WHERE, r_inf_mapped, r)
+  # log(NaN) = NaN, using for all real number x, either of x < Inf, x == Inf becomes True.
+  r = d_orig.e(BinaryOps.CMPLT, d_orig.const(math.inf)).e(
+    TernaryOps.WHERE, r, d_orig.e(BinaryOps.CMPNE, d_orig.const(math.inf)).e(
+      TernaryOps.WHERE, d.const(math.nan), d))
+  # [TODO] This line should be deleted.
+  # log(-0.0) = -Inf. In PTX, x == -0.0 won't be true. so making reciprocal.
+  r = d_orig.e(UnaryOps.RECIP).e(BinaryOps.CMPNE, d_orig.const(-math.inf)).e(TernaryOps.WHERE, r, r.const(-math.inf))
   return r
 
 # ****** toplevel functions for fastmath *****
@@ -326,18 +340,9 @@ def xsin(x: LazyBuffer, fast: bool=False) -> LazyBuffer:
   if 0 in x.shape: return x
   return _lazy_map_numbers(x, x.const(math.nan), x.const(math.nan), x.const(math.nan), _xsin_base(x, fast=fast))
 
-def xlog2(d: LazyBuffer) -> LazyBuffer:
-  assert is_dtype_fastmath_supported(d.dtype)
-  FLT_MIN = d.const(1e-6 if d.dtype == dtypes.float16 else 1e-4)
-  Y_FLT_MIN = d.const(math.log2({dtypes.float64: 1e-228, dtypes.float32: 1e-38, dtypes.float16: 1e-6}[d.dtype]))
-  out = d.e(BinaryOps.CMPLT, FLT_MIN).e(TernaryOps.WHERE, _xlog2_base(d, True), _xlog2_base(d, False))
-  out = out.e(BinaryOps.CMPLT, Y_FLT_MIN).e(TernaryOps.WHERE, out.const(math.nan), out)
-  return d.e(BinaryOps.CMPNE, d.const(0.0)).e(TernaryOps.WHERE, out, d.const(-math.inf))
-
 def xexp2(d: LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   if 0 in d.shape: return d
   x = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
   d = _lazy_map_numbers(d, d.const(math.inf), d.const(0.0), d.const(math.nan), _xexp2_base(x))
   return d
-
