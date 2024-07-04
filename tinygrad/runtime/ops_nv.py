@@ -462,6 +462,7 @@ class NVDevice(HCQCompatCompiled):
                                        gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size)
 
   def _gpu_map(self, mem):
+    mem = mem._base if hasattr(mem, '_base') else mem
     if self.gpu_uuid in getattr(mem, "mapped_gpu_ids", []): return
     mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_uuid])
     return self._gpu_uvm_map(mem.va_addr, mem.size, mem.hMemory, create_range=False)

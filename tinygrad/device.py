@@ -326,4 +326,4 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
 
   def offset(self, buf, size:int, offset:int) -> HCQCompatAllocRes:
     return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
-                     **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']})
+                     **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']}, _base=buf)
