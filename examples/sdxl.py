@@ -370,7 +370,7 @@ if __name__ == "__main__":
   parser.add_argument('--width',    type=int,   default=1024, help="The output image width")
   parser.add_argument('--height',   type=int,   default=1024, help="The output image height")
   parser.add_argument('--weights',  type=str,   help="Custom path to weights")
-  parser.add_argument('--timing', action='store_true', help="Print timing per step")
+  parser.add_argument('--timing',   action='store_true', help="Print timing per step")
   parser.add_argument('--noshow',   action='store_true', help="Don't show the image")
   args = parser.parse_args()
 

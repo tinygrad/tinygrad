@@ -319,5 +319,14 @@ class TestAssembly(unittest.TestCase):
     self.assertEqual(uops.uops[-1].arg, BinaryOps.IDIV)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.SHR)
 
+class TestUOpCompare(unittest.TestCase):
+  def test_alu_same_src_different_arg(self):
+    a = UOp(UOps.CONST, dtypes.float, (), 2.0)
+    b = UOp(UOps.CONST, dtypes.float, (), 3.0)
+
+    add = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.ADD)
+    mul = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.MUL)
+    assert (add < mul) or (mul < add), "add and mul with same src should have an order"
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
