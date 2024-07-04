@@ -332,12 +332,12 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
 # *** memory planning ***
 
-def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], debug_prefix="") -> Dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], debug_prefix="", keep_buffers=None) -> Dict[Buffer, Buffer]:
   if getenv("NO_MEMORY_PLANNER"): return {}
   first_appearance, last_appearance = {}, {}
   for i,u in enumerate(buffers):
     for buf in u:
-      if buf.is_allocated() or buf.lb_refcount > 0: continue
+      if buf.is_allocated() or buf.lb_refcount > 0 or (keep_buffers is not None and buf.base in keep_buffers): continue
       if buf.base not in first_appearance: first_appearance[buf.base] = i
       last_appearance[buf.base] = i
 
@@ -361,7 +361,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 
   for i,u in enumerate(buffers):
     for buf in u:
-      if buf.is_allocated() or buf.lb_refcount > 0: continue
+      if buf.is_allocated() or buf.lb_refcount > 0 or (keep_buffers is not None and buf.base in keep_buffers): continue
       if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base).base, offset=buf.offset)
       else: assigned[buf] = assigned.get(buf, buf)
 
@@ -371,5 +371,6 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
   return assigned
 
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
-  assigned = _internal_memory_planner([si.bufs for si in schedule])
+  # Do not optimize buffers which are copies (or similar) to keep parallelism level.
+  assigned = _internal_memory_planner([si.bufs for si in schedule], keep_buffers=[b for si in schedule if si.ast[0].op in LoadOps for b in si.bufs])
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]

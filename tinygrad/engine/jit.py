@@ -173,7 +173,9 @@ class TinyJit(Generic[ReturnType]):
             self.extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 
       # memory planning (optional)
-      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in self.jit_cache], debug_prefix="JIT ")
+      # Do not optimize buffers which are used in transfers to keep parallelism level.
+      keep_buffers = [b for ji in self.jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs]
+      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in self.jit_cache], keep_buffers=keep_buffers, debug_prefix="JIT ")
       self.jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in self.jit_cache]
 
       # Condense the items into a graph executor.
