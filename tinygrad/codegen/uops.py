@@ -224,7 +224,6 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
 def simplify_sum_lt_const(lhs:UOp, b:UOp):
-  assert b.op is UOps.CONST and lhs.arg is BinaryOps.ADD
   barg:int = b.arg
   new_sum = []
   for x in lhs.src:
@@ -234,8 +233,7 @@ def simplify_sum_lt_const(lhs:UOp, b:UOp):
   lhs = UOp.alu(BinaryOps.ADD, *new_sum)
   muls, others = cast(Tuple[List[UOp], List[UOp]], partition(list(lhs.src),
     lambda x: x.arg is BinaryOps.MUL and x.src[1].op is UOps.CONST and x.src[1].arg > 0 and x.maxval >= x.src[1].arg))
-  if not others: return None
-  if muls:
+  if muls and others:
     mul_gcd = barg
     for m in muls: mul_gcd = math.gcd(mul_gcd, m.src[1].arg)
     all_others = UOp.alu(BinaryOps.ADD, *others) if len(others) > 1 else others[0]
