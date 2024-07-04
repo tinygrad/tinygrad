@@ -66,11 +66,12 @@ optim = nn.optim.Adam([model.l1, model.l2], lr=0.001)
 
 x, y = Tensor.rand(4, 1, 28, 28), Tensor([2,4,3,7])  # replace with real mnist dataloader
 
-for i in range(10):
-  optim.zero_grad()
-  loss = model(x).sparse_categorical_crossentropy(y).backward()
-  optim.step()
-  print(i, loss.item())
+with Tensor.train():
+  for i in range(10):
+    optim.zero_grad()
+    loss = model(x).sparse_categorical_crossentropy(y).backward()
+    optim.step()
+    print(i, loss.item())
 ```
 
 See [examples/beautiful_mnist.py](examples/beautiful_mnist.py) for the full version that gets 98% in ~5 seconds
