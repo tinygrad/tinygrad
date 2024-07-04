@@ -3023,7 +3023,7 @@ def _metadata_wrapper(fn):
     caller_func = caller_frame.f_code.co_name
     if caller_module is None: return fn(*args, **kwargs)
 
-    # if its called from a __ method we want to look one more frame up
+    # if its called from a __ method in tinygrad we want to look one more frame up
     if caller_module.startswith("tinygrad") and caller_func.startswith("__"): caller_frame = sys._getframe(frame := frame + 1)
     caller_module = caller_frame.f_globals.get("__name__", None)
     if caller_module is None: return fn(*args, **kwargs)
