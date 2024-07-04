@@ -251,7 +251,7 @@ def simplify_sum_lt_const(lhs:UOp, b:UOp):
   muls, others = partition(lhs.src, lambda x: x.arg is BinaryOps.MUL and x.src[1].op is UOps.CONST and x.src[1].arg > 0 and x.maxval >= x.src[1].arg)
   if muls:
     mul_gcd = b
-    for m in muls: 
+    for m in muls:
       mul_gcd = math.gcd(mul_gcd, m.src[1].arg)
     all_others = UOp.alu(BinaryOps.ADD, *others) if len(others) > 1 else others[0]
     if all_others.minval >= 0 and all_others.maxval < mul_gcd:
