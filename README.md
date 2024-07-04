@@ -51,7 +51,7 @@ And we can change `DEBUG` to `4` to see the generated code.
 As it turns out, 90% of what you need for neural networks are a decent autograd/tensor library.
 Throw in an optimizer, a data loader, and some compute, and you have all you need.
 
-```py
+```python
 from tinygrad import Tensor, nn
 
 class LinearNet:
@@ -114,7 +114,7 @@ Documentation along with a quick start guide can be found on the [docs website](
 
 ### Quick example comparing to PyTorch
 
-```py
+```python
 from tinygrad import Tensor
 
 x = Tensor.eye(3, requires_grad=True)
@@ -127,7 +127,7 @@ print(y.grad.numpy())  # dz/dy
 ```
 
 The same thing but in PyTorch:
-```py
+```python
 import torch
 
 x = torch.eye(3, requires_grad=True)
