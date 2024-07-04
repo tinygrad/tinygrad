@@ -360,8 +360,7 @@ def train_retinanet():
   LR = config['LR'] = 0.000085
   MAP_TARGET = config['MAP_TARGET'] = 0.34
   GPUS = config['GPUS'] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  SYNCBN = config['SYNCBN'] = False
-  # SYNCBN = config[''] = True
+  SYNCBN = config['SYNCBN'] = getenv("SYNCBN", 0)
   TRAIN_BEAM = config['TRAIN_BEAM'] = getenv("TRAIN_BEAM", BEAM.value)
   EVAL_BEAM = config['EVAL_BEAM'] = getenv("EVAL_BEAM", BEAM.value)
   LOSS_SCALAR = config['LOSS_SCALAR'] = 2048.0 if dtypes.default_float in [dtypes.float16] else 1.0
