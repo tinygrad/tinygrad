@@ -104,7 +104,7 @@ class HWPM4Queue(HWQueue):
     self._invalidate_cache()
     return self._mark_command_end()
 
-  def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), signal=None, signal_value=0):
+  def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
     self._invalidate_cache()
 
     user_data = [*data64_le(kernargs)]
@@ -130,7 +130,6 @@ class HWPM4Queue(HWQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
-    if signal is not None: self.signal(signal, signal_value)
     return self._mark_command_end()
 
   def update_exec(self, cmd_idx, global_size, local_size):
