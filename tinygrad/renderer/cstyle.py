@@ -146,7 +146,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.PHI:
           kk(f"{r[src[0]]} = {r[src[1]]};")
           r[u] = r[src[0]]
-        elif uop in {UOps.CAST, UOps.BITCAST}:
+        elif uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}:
           if uop is UOps.BITCAST:
             assert len(src) == 1
             precast = ssa('precast')

@@ -100,7 +100,7 @@ class PythonProgram:
               del ul[i]
               i = loop_ends[i] + 1
               continue
-        elif uop in (UOps.CAST, UOps.BITCAST):
+        elif uop in (UOps.CAST, UOps.BITCAST, UOps.VECTORIZE):
           if dtype.count > 1: ul[i] = inp
           else:
             assert dtp[0].fmt and dtype.fmt
