@@ -343,18 +343,15 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 
   # Sort buffers by size in descending order, prioritizing largest buffers for allocation first.
   # Track free segments, each containing (start, stop, and buffer that could be reused on this segment).
-  free_segments: Dict[Tuple, List[Tuple[int, int, Buffer]]] = defaultdict(list) # Dict[buffer key, Tuple[start, end, buffer to reuse on the seg]]
+  free_segs: Dict[Tuple, List[Tuple[int, int, Buffer]]] = defaultdict(list) # Dict[buffer key, Tuple[start, end, buffer to reuse on the seg]]
   def find_replace_buffer(buf, st, en):
-    seg_st, seg_en, seg_buf = 0, len(buffers) - 1, buf # return the buffer itself if the replace one is not found.
     key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())
 
-    for i,(seg_st,seg_en,_) in enumerate(free_segments[key]):
-      if seg_st <= st and en <= seg_en:
-        seg_st, seg_en, seg_buf = free_segments[key].pop(i)
-        break
+    default_buf = (0, len(buffers) - 1, buf) # will return the buffer itself if the replace one is not found.
+    seg_st, seg_en, seg_buf = next((free_segs[key].pop(i) for i,(sst,sen,_) in enumerate(free_segs[key]) if sst <= st and en <= sen), default_buf)
 
-    free_segments[key] += [(seg_st, st - 1, seg_buf)] if st - 1 >= seg_st else []
-    free_segments[key] += [(en + 1, seg_en, seg_buf)] if seg_en >= en + 1 else []
+    free_segs[key] += [(seg_st, st - 1, seg_buf)] if st - 1 >= seg_st else []
+    free_segs[key] += [(en + 1, seg_en, seg_buf)] if seg_en >= en + 1 else []
 
     return seg_buf if seg_buf.nbytes == buf.nbytes else Buffer(buf.device, buf.size, buf.dtype, base=seg_buf)
 
@@ -374,5 +371,5 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
-  assigned = _internal_memory_planner([si.bufs for si in schedule], noopt_buffers=[b for si in schedule if si.ast[0].op in LoadOps for b in si.bufs])
+  assigned = _internal_memory_planner([si.bufs for si in schedule], noopt_buffers={b for si in schedule if si.ast[0].op in LoadOps for b in si.bufs})
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]

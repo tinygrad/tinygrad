@@ -174,7 +174,7 @@ class TinyJit(Generic[ReturnType]):
 
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.
-      noopt_buffers = [b for ji in self.jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs]
+      noopt_buffers = {b for ji in self.jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
       assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in self.jit_cache], noopt_buffers, debug_prefix="JIT ")
       self.jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in self.jit_cache]
 
