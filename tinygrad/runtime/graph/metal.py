@@ -24,7 +24,7 @@ class MetalGraph(GraphRunner):
     if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
-    all_resources = [self.int_buf] if len(self.vars) else []
+    all_resources = [self.int_buf.buf] if len(self.vars) else []
 
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
