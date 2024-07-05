@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 from typing import Union, Optional, Any, Tuple, List
 from tinygrad.dtype import dtypes, DType, ConstType
-from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA
+from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -26,7 +26,7 @@ view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None, metadata:Optional[str]=None):
+               base:Optional[LazyBuffer]=None, metadata:Optional[Metadata]=None):
     self.device, self.st, self.dtype, self.shape, self.size, self.metadata = device, st, dtype, st.shape, st.size, metadata
     self._base: Optional[LazyBuffer] = None
     if base is None:
