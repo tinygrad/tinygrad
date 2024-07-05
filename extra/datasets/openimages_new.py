@@ -346,29 +346,21 @@ def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None):
     shm.close()
     shm.unlink()
 
-
 if __name__ == '__main__':
-  BS=2
-  from extra.models.retinanet import AnchorGenerator
-  anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
-  aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
-  anchor_generator = AnchorGenerator(
-      anchor_sizes, aspect_ratios
-  )
+  BS=60
+  
+  from extra.models.retinanet import anchor_generator
   feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
   ANCHORS = anchor_generator((BS,3,800,800), feature_shapes)
   ANCHOR_NP = ANCHORS[0].numpy()
+  
   from extra.datasets.openimages_new import get_openimages
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
-  coco_train = get_openimages(NAME,ROOT, 'train')
-  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  print(f"Training on {GPUS}")
-  for x in GPUS: Device[x]
-  with tqdm(total=len(coco_train)) as pbar:
-    for x, y, yb, yl, c in batch_load_retinanet(coco_train, bs=BS, seed=42, anchor_np=ANCHOR_NP):
-      # x = x.shard(GPUS,axis=0).realize()
-      # yb = yb.shard(GPUS,axis=0).realize()
+  coco = get_openimages(NAME,ROOT, 'val')
+
+  with tqdm(total=len(coco)) as pbar:
+    for x, y, yb, yl, c in batch_load_retinanet(coco, bs=BS, seed=42, anchor_np=ANCHOR_NP):
       pbar.update(x.shape[0])
 
   
