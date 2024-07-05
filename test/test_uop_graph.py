@@ -77,7 +77,6 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.src[1].arg, 3.0)
 
 class TestUOpGraph(TestUOps):
-  # TODO: move to test.helpers
   def test_add_constant_fold(self):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
@@ -127,6 +126,15 @@ class TestUOpGraph(TestUOps):
     cast = UOp(UOps.CAST, dtypes.float.vec(2), (ld,))
     x = UOp(UOps.GEP, dtypes.float, (cast, ), arg=0)
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
+    out = UOp(UOps.STORE, dtypes.float, (d0, idx, alu))
+    g = UOpGraph([out])
+    self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
+
+  def test_cast_alu_fold(self):
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(0, True))
+    idx = UOp(UOps.CONST, dtypes.int, arg=0)
+    ld = UOp(UOps.LOAD, dtypes.int, (d0, idx))
+    alu = ld.lt(1).cast(dtypes.bool)
     out = UOp(UOps.STORE, dtypes.float, (d0, idx, alu))
     g = UOpGraph([out])
     self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
