@@ -47,7 +47,7 @@ class MetalProgram:
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a, 0, i)
+    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a.buf, a.offset, i)
     for i,a in enumerate(vals,start=len(bufs)): encoder.setBytes_length_atIndex_(ctypes.c_int32(a), 4, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     encoder.endEncoding()
@@ -56,6 +56,9 @@ class MetalProgram:
       wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     self.device.mtl_buffers_in_flight.append(command_buffer)
+
+class MetalBuffer:
+  def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
@@ -67,28 +70,29 @@ class MetalAllocator(LRUAllocator):
     for x in self.track_cross_device: x.synchronize()
     self.track_cross_device.clear()
     return super().free_cache()
-  def _alloc(self, size:int, options) -> Any:
+  def _alloc(self, size:int, options) -> MetalBuffer:
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
-    return ret
-  def transfer(self, dest:Any, src:Any, sz:int, src_dev: MetalDevice, **kwargs):
+    return MetalBuffer(ret, size)
+  def _free(self, opaque:MetalBuffer, options): opaque.buf.release()
+  def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev: MetalDevice, **kwargs):
     src_dev.synchronize()
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.blitCommandEncoder()
-    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)
+    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src.buf, src.offset, dest.buf, dest.offset, sz)
     encoder.endEncoding()
     command_buffer.commit()
     self.device.mtl_buffers_in_flight.append(command_buffer)
   def from_buffer(self, src:memoryview) -> Optional[Any]:
-    ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
+    ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, src.nbytes, Metal.MTLResourceStorageModeShared, None)
     if ret: self.device.mv_in_metal.append(src)
-    return ret
-  def _free(self, opaque:Any, options): opaque.release()
-  def as_buffer(self, src:Any) -> memoryview:
+    return MetalBuffer(ret, src.nbytes)
+  def as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
-    return src.contents().as_buffer(src.length())
-  def copyin(self, dest:Any, src:memoryview): self.as_buffer(dest)[:] = src
-  def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
+    return src.buf.contents().as_buffer(src.offset+src.size)[src.offset:]
+  def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
+  def copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)
+  def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
