@@ -86,10 +86,6 @@ class LLVMRenderer(Renderer):
     for a in func.args:
       if a.type.is_pointer: a.add_attribute("noalias")
 
-    # add the function attribute "no-nans-fp-math"="true", which informs llvm that it allowed to use vectorization optimizations
-    func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
-    func.attributes.add('"no-nans-fp-math"="true"')
-
     bb = [ir.IRBuilder(func.append_basic_block("entry"))]
     loop_blocks: List = []
     reduce_phis: List = []

@@ -24,7 +24,6 @@ binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, oper
 # TODO: LLVM comparing with nan is incorrect
 if Device.DEFAULT == "LLVM":
   binary_operations.remove(operator.lt)
-  binary_operations.remove(operator.eq)
 
 integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
                                                  (Tensor.bitwise_or, np.bitwise_or)]
@@ -41,8 +40,7 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
 # TODO: CUDACPU segfaults on sin
-# TODO: METAL sin is flaky for float16
-if getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "METAL": unary_operations.remove((Tensor.sin, np.sin))
+if getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV"): unary_operations.remove((Tensor.sin, np.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)

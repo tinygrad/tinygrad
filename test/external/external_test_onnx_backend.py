@@ -171,17 +171,6 @@ if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')
 
-# TODO: llvm has problems with inf
-if Device.DEFAULT in ['LLVM']:
-  backend_test.exclude('test_isinf_cpu')
-  backend_test.exclude('test_isinf_negative_cpu')
-  backend_test.exclude('test_isinf_positive_cpu')
-
-# # TODO: problems with nan
-if Device.DEFAULT in ['LLVM']:
-  backend_test.exclude('test_isnan_float16_cpu')
-  backend_test.exclude('test_isnan_cpu')
-
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
   for x in backend_test.test_suite:
