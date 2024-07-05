@@ -339,6 +339,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   def __inner_rewrite(n:UOp) -> UOp:
     if n in replace: return replace[n]
     replace_source = (n.op, n.dtype, (lambda x: tuple(sorted(x) if n.commutative() else x))(__inner_rewrite(y) for y in n.src), n.arg)
+    # replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
     if found := nodes.get(replace_source): replace[n] = found
     else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
     return replace[n]
@@ -366,8 +367,12 @@ class UOpGraph:
     graph_uops(self.uops)
 
   def print(self):
-    for i,u in enumerate(self):
-      print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
+    # for i,u in enumerate(self):
+      # print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
+    from tinygrad.engine.graph import print_tree
+    for sink in self.sinks:
+      print_tree(sink)
+
 
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, do_type_verify=True):
     # NOTE: relinearizering should be okay

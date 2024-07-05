@@ -15,8 +15,8 @@ simple_pm = PatternMatcher([
 
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):
-    v1 = UOp(UOps.DEFINE_VAR, dtypes.float)
-    v2 = UOp(UOps.DEFINE_VAR, dtypes.float)
+    v1 = UOp(UOps.DEFINE_VAR, dtypes.float, arg = Variable('tmp', 0, 1))
+    v2 = UOp(UOps.DEFINE_VAR, dtypes.float, arg = Variable('tmp', 0, 1))
     nout = graph_rewrite(v1+v2, PatternMatcher([]))
     self.assertIs(nout.src[0], nout.src[1])
 
@@ -67,7 +67,7 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.arg, 3.0)
 
   def test_depth_2_fold(self):
-    v = UOp(UOps.DEFINE_VAR, dtypes.float)
+    v = UOp(UOps.DEFINE_VAR, dtypes.float, arg=Variable('tmp', 0, 1))
     c1 = UOp.const(dtypes.float, 1.0)
     c2 = UOp.const(dtypes.float, 2.0)
     nout = graph_rewrite(v+c1+c2, simple_pm)

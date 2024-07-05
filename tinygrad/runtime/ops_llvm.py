@@ -12,6 +12,7 @@ class LLVMCompiler(Compiler):
     super().__init__("compile_llvm")
   def compile(self, src:str) -> bytes:
     mod = llvm.parse_assembly(src)
+    # print(str(mod))
     mod.verify()
     self.device.optimizer.run(mod)
     if DEBUG >= 5: print(self.device.target_machine.emit_assembly(mod))
