@@ -196,6 +196,8 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
 # Set fast=True to skip Payne-Hanek reduction.
 def _xsin_base(d: LazyBuffer, fast:bool=False) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
+  if d.dtype == dtypes.float16:
+    fast = True # worked at sin(max(float16))
   d = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
   fp64_p = d.dtype == dtypes.float64
   trig_range_lv1 = d.const(15.0 if fp64_p else 125.0)
