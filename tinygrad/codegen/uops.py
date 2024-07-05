@@ -386,7 +386,7 @@ class UOpGraph:
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
     # dedup all nodes and do graph rewrite
-    sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns + extra_pm) if extra_pm else constant_folder)
+    sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns + PatternMatcher(extra_pm).patterns) if extra_pm else constant_folder)
 
     # filter nodes that don't link to a sink
     # BFS toposort
