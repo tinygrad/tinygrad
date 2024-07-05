@@ -207,7 +207,7 @@ def get_mlperf_bert_config():
     "vocab_size": 30522
   }
 
-def get_mlperf_bert_model(checkpoint_path:str):
+def get_mlperf_bert_model(checkpoint_path:str=""):
   from extra.models import bert
   from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert
 
@@ -219,7 +219,9 @@ def get_mlperf_bert_model(checkpoint_path:str):
   config = get_mlperf_bert_config()
   if getenv("DISABLE_DROPOUT", 0):
     config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
-  return BertForPretraining(**config).load_from_pretrained(checkpoint_path)
+  model = BertForPretraining(**config)
+  if checkpoint_path: model.load_from_pretrained(checkpoint_path)
+  return model
 
 def get_data_bert(GPUS:list[str], it):
   data: dict[str, Tensor] = next(it)

@@ -91,7 +91,7 @@ class UOp:
 def type_verify(uops):
   for u in uops:
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
-    if uop in (UOps.CONST, UOps.DEFINE_ACC):
+    if uop in {UOps.CONST, UOps.DEFINE_ACC}:
       if uop is UOps.DEFINE_ACC:
         assert dtype is not None and src[0].dtype == dtype.scalar(), f"type of {src[0].dtype=} must be a scalar {dtype.scalar()}"
         arg = src[0].arg
@@ -99,11 +99,13 @@ def type_verify(uops):
     if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
     if uop is UOps.CAST and dtype is not None and dtype.count > 1: assert len(src) == dtype.count
     if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU: assert src[2].dtype == dtypes.bool and src[3].dtype == dtype
-    if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
+    if uop is UOps.STORE:
+      assert dtype is None, f"{uop} dtype must be None, got {dtype}"
+      if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
     if uop is UOps.ALU:
       if arg in UnaryOps:
         assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-      elif arg in (BinaryOps.CMPLT, BinaryOps.CMPNE):
+      elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
         assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
         assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
       elif arg is BinaryOps.IDIV:
