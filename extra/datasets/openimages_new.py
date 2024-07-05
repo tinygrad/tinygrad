@@ -357,7 +357,7 @@ if __name__ == '__main__':
   from extra.datasets.openimages_new import get_openimages
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
-  coco = get_openimages(NAME,ROOT, 'val')
+  coco = get_openimages(NAME,ROOT, 'train')
 
   with tqdm(total=len(coco)) as pbar:
     for x, y, yb, yl, c in batch_load_retinanet(coco, bs=BS, seed=42, anchor_np=ANCHOR_NP):
