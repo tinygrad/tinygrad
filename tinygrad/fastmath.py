@@ -147,13 +147,11 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
   a1 = _take(i.const(0).cast(dtypes.uint32), 0)
   a2 = _take(i.const(0).cast(dtypes.uint32), 1)
   a3 = _take(i.const(0).cast(dtypes.uint32), 2)
-  a1p1 = _take(a1.const(0), 1)
-  a2p1 = _take(a2.const(0), 2)
-  a3p1 = _take(a3.const(0), 3)
+  a4 = _take(i.const(0).cast(dtypes.uint32), 3)
   # assume e != 0 because this reduction is only applied for x >= 39000.0
-  hi = _shl_lazy(a1, e).e(BinaryOps.OR, _shr_lazy(a1p1, offset))
-  mi = _shl_lazy(a2, e).e(BinaryOps.OR, _shr_lazy(a2p1, offset))
-  lo = _shl_lazy(a3, e).e(BinaryOps.OR, _shr_lazy(a3p1, offset))
+  hi = _shl_lazy(a1, e).e(BinaryOps.OR, _shr_lazy(a2, offset))
+  mi = _shl_lazy(a2, e).e(BinaryOps.OR, _shr_lazy(a3, offset))
+  lo = _shl_lazy(a3, e).e(BinaryOps.OR, _shr_lazy(a4, offset))
 
   def _hp_mul(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer: return x.cast(dtypes.uint64).e(BinaryOps.MUL, y.cast(dtypes.uint64))
   p = _hp_mul(ia, lo)
