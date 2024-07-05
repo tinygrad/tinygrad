@@ -9,7 +9,7 @@ def is_dtype_fastmath_supported(d: DType):
 
 # [WIP] MultiLazyBuffer cannot be compiled...?
 def is_buffer_fastmath_supported(d: LazyBuffer):
-  return isinstance(d, LazyBuffer) and is_dtype_fastmath_supported(d.dtype)
+  return is_dtype_fastmath_supported(d.dtype)
 
 def _lazy_map_numbers(x: LazyBuffer, inf: LazyBuffer, _inf: LazyBuffer, nan: LazyBuffer, ratio: LazyBuffer):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
