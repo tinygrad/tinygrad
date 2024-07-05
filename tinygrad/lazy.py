@@ -92,7 +92,7 @@ class LazyBuffer:
     self.base.forced_realize = True
     return self
 
-  def cast(self, dtype:DType, bitcast:bool=False, bitcast_no_fuse:bool=False):
+  def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True):
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:
@@ -107,7 +107,7 @@ class LazyBuffer:
     elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       # TODO: applying this makes gpt2 slower
       return self.base.cast(dtype, bitcast)._view(self.st)
-    cast_op: Union[LoadOps, UnaryOps] = (LoadOps.VIEW if self.can_view() and not bitcast_no_fuse else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
+    cast_op: Union[LoadOps, UnaryOps] = (LoadOps.VIEW if self.can_view() and allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST and not isinstance(self.base.arg, Variable)
