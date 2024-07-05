@@ -85,7 +85,7 @@ def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
   max_dim = max(len(shape) for shape in shapes)
   return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
-  return tuple(0 if any(size == 0 for size in nth_dim_sizes) else max(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
+  return tuple(0 if 0 in nth_dim_sizes else max(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
 
 class Tensor:
   """
@@ -1078,6 +1078,19 @@ class Tensor:
     """
     # checks for shapes and number of dimensions delegated to cat
     return self.unsqueeze(dim).cat(*[t.unsqueeze(dim) for t in args], dim=dim)
+
+  def repeat_interleave(self, repeats:int, dim:Optional[int]=None) -> Tensor:
+    """
+    Repeat elements of a tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.repeat_interleave(2).numpy())
+    ```
+    """
+    x, dim = (self.flatten(), 0) if dim is None else (self, dim)
+    shp = x.shape
+    return x.reshape(*shp[:dim+1], 1, *shp[dim+1:]).expand(*shp[:dim+1], repeats, *shp[dim+1:]).reshape(*shp[:dim], shp[dim]*repeats, *shp[dim+1:])
 
   def repeat(self, repeats, *args) -> Tensor:
     """
@@ -2340,7 +2353,7 @@ class Tensor:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
-      assert isinstance(y, (float, int, bool, Node)), f"{type(y)=}, {y=}"
+      assert isinstance(y, (*get_args(ConstType), Node)), f"{type(y)=}, {y=}"
       if isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       elif not isinstance(y, Node): y_dtype = dtypes.from_py(y)
       if isinstance(y, Node): y = Tensor.from_node(y, device=x.device)
@@ -2461,6 +2474,36 @@ class Tensor:
     ```
     """
     return F.Xor.apply(*self._broadcasted(x, reverse))
+
+  def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Compute the bit-wise AND of `self` and `x`.
+    Equivalent to `self & x`.
+    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([2, 5, 255]).bitwise_and(Tensor([3, 14, 16])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
+    ```
+    """
+    assert dtypes.is_int(self.dtype)
+    return F.BitwiseAnd.apply(*self._broadcasted(x, reverse))
+
+  def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Compute the bit-wise OR of `self` and `x`.
+    Equivalent to `self | x`.
+    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([2, 5, 255]).bitwise_or(Tensor([4, 4, 4])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
+    ```
+    """
+    assert dtypes.is_int(self.dtype)
+    return F.BitwiseOr.apply(*self._broadcasted(x, reverse))
 
   def lshift(self, x:int):
     """
@@ -2586,6 +2629,8 @@ class Tensor:
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __truediv__(self, x) -> Tensor: return self.div(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
+  def __and__(self, x) -> Tensor: return self.bitwise_and(x)
+  def __or__(self, x) -> Tensor: return self.bitwise_or(x)
   def __xor__(self, x) -> Tensor: return self.xor(x)
   def __lshift__(self, x) -> Tensor: return self.lshift(x)
   def __rshift__(self, x) -> Tensor: return self.rshift(x)
@@ -2596,6 +2641,8 @@ class Tensor:
   def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rtruediv__(self, x) -> Tensor: return self.div(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
+  def __rand__(self, x) -> Tensor: return self.bitwise_and(x, True)
+  def __ror__(self, x) -> Tensor: return self.bitwise_or(x, True)
   def __rxor__(self, x) -> Tensor: return self.xor(x, True)
 
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
@@ -2604,6 +2651,8 @@ class Tensor:
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
+  def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x))
+  def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x))
   def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))

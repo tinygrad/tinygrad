@@ -24,9 +24,9 @@ binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, oper
 # TODO: LLVM comparing with nan is incorrect
 if Device.DEFAULT == "LLVM":
   binary_operations.remove(operator.lt)
-  binary_operations.remove(operator.eq)
 
-integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor)]
+integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
+                                                 (Tensor.bitwise_or, np.bitwise_or)]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
 

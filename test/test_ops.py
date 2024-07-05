@@ -467,6 +467,20 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor^0x1337, lambda: ten^0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337^tor, lambda: 0x1337^ten, forward_only=True)
 
+  def test_and(self):
+    tor = torch.tensor([[1,-8,1],[32,1,6]], dtype=torch.int)
+    ten = Tensor([[1,-8,1],[32,1,6]], dtype=dtypes.int32)
+    helper_test_op([], lambda: tor&tor, lambda: ten&ten, forward_only=True)
+    helper_test_op([], lambda: tor&0x1337, lambda: ten&0x1337, forward_only=True)
+    helper_test_op([], lambda: 0x1337&tor, lambda: 0x1337&ten, forward_only=True)
+
+  def test_or(self):
+    tor = torch.tensor([[1,-8,1],[32,1,6]], dtype=torch.int)
+    ten = Tensor([[1,-8,1],[32,1,6]], dtype=dtypes.int32)
+    helper_test_op([], lambda: tor|tor, lambda: ten|ten, forward_only=True)
+    helper_test_op([], lambda: tor|0x1337, lambda: ten|0x1337, forward_only=True)
+    helper_test_op([], lambda: 0x1337|tor, lambda: 0x1337|ten, forward_only=True)
+
   def test_lshift(self):
     data = [[0,1,2],[1<<8,1<<16,1<<31-1]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -751,6 +765,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot)
   def test_small_gemm(self):
     helper_test_op([(8,8), (8,8)], lambda x,y: x.matmul(y), lambda x,y: x@y)
+  def test_9_gemm(self):
+    helper_test_op([(9,9), (9,9)], lambda x,y: x.matmul(y), lambda x,y: x@y)
+  def test_small_gemm_padded(self):
+    helper_test_op([(9,9), (9,9)],
+                   lambda x,y: torch.nn.functional.pad(x, (0,7,0,7)).matmul(torch.nn.functional.pad(y, (0,7,0,7))),
+                   lambda x,y: x.pad(((0,7),(0,7)))@y.pad(((0,7),(0,7))))
   def test_small_gemm_range(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.arange(0,64,dtype=np.float32).reshape(8,8),
                                                                          np.arange(64,128,dtype=np.float32).reshape(8,8)])
@@ -1663,6 +1683,11 @@ class TestOps(unittest.TestCase):
 
     np.testing.assert_allclose(x.repeat((2, 0, 4)).numpy(), Tensor.zeros(8, 0, 12).numpy())
 
+  def test_repeat_interleave(self):
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(6))
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, 1))
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, 0))
+
   def test_simple_repeat(self):
     repeats = [3, 3, 4]
     helper_test_op([(3, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
@@ -1810,6 +1835,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64), (32,8,16,16)],
                    lambda x,y,z,m: torch.nn.functional.scaled_dot_product_attention(x,y,z,attn_mask=m),
                    lambda x,y,z,m: Tensor.scaled_dot_product_attention(x,y,z,attn_mask=m))
+
+  def test_scaled_product_attention_mismatch_ls(self):
+    helper_test_op([(32,8,4,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
 
   def test_scaled_product_attention_causal(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)],

@@ -8,7 +8,7 @@ with open(directory / 'README.md', encoding='utf-8') as f:
   long_description = f.read()
 
 setup(name='tinygrad',
-      version='0.9.0',
+      version='0.9.1',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
       author='George Hotz',
       license='MIT',
@@ -51,6 +51,7 @@ setup(name='tinygrad',
             "transformers",
             "sentencepiece",
             "tiktoken",
+            "blobfile",
             "librosa",
             "networkx",
             "hypothesis",

@@ -51,7 +51,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.synchronize() # wait for copyins to complete
 
   def test_run_1000_times_one_submit(self):
-    temp_signal, temp_value = TestHCQ.d0._get_signal(value=0), 0
+    temp_signal, temp_value = TestHCQ.d0._alloc_signal(value=0), 0
     q = TestHCQ.compute_queue()
     for _ in range(1000):
       q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
@@ -69,7 +69,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 2000.0, f"got val {val}"
 
   def test_run_1000_times(self):
-    temp_signal = TestHCQ.d0._get_signal(value=0)
+    temp_signal = TestHCQ.d0._alloc_signal(value=0)
     q = TestHCQ.compute_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
     q.signal(temp_signal, 2).wait(temp_signal, 2)
@@ -84,7 +84,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 2000.0, f"got val {val}"
 
   def test_run_to_3(self):
-    temp_signal = TestHCQ.d0._get_signal(value=0)
+    temp_signal = TestHCQ.d0._alloc_signal(value=0)
     q = TestHCQ.compute_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
     q.signal(temp_signal, 1).wait(temp_signal, 1)
@@ -109,7 +109,7 @@ class TestHCQ(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT == "NV", "Only NV supports bind")
   def test_bind_run(self):
-    temp_signal = TestHCQ.d0._get_signal(value=0)
+    temp_signal = TestHCQ.d0._alloc_signal(value=0)
     q = TestHCQ.compute_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
     q.signal(temp_signal, 2).wait(temp_signal, 2)
@@ -141,7 +141,7 @@ class TestHCQ(unittest.TestCase):
 
   @unittest.skipIf(CI, "Can't handle async update on CPU")
   def test_wait_signal(self):
-    temp_signal = TestHCQ.d0._get_signal(value=0)
+    temp_signal = TestHCQ.d0._alloc_signal(value=0)
     TestHCQ.compute_queue().wait(temp_signal, value=1).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value, timeout=50)
@@ -152,7 +152,7 @@ class TestHCQ(unittest.TestCase):
 
   @unittest.skipIf(CI, "Can't handle async update on CPU")
   def test_wait_copy_signal(self):
-    temp_signal = TestHCQ.d0._get_signal(value=0)
+    temp_signal = TestHCQ.d0._alloc_signal(value=0)
     TestHCQ.copy_queue().wait(temp_signal, value=1).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value, timeout=50)
@@ -267,7 +267,7 @@ class TestHCQ(unittest.TestCase):
     q = TestHCQ.compute_queue()
     qc = TestHCQ.copy_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)  # b = [1, 2]
-    q.signal(sig:=TestHCQ.d0._get_signal(value=0), value=1)
+    q.signal(sig:=TestHCQ.d0._alloc_signal(value=0), value=1)
     qc.wait(sig, value=1)
     qc.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)
     qc.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
@@ -282,7 +282,7 @@ class TestHCQ(unittest.TestCase):
     d1 = Device[f"{Device.DEFAULT}:1"]
     q1 = TestHCQ.compute_queue()
     q2 = TestHCQ.compute_queue()
-    q1.signal(sig:=TestHCQ.d0._get_signal(value=0), value=0xfff)
+    q1.signal(sig:=TestHCQ.d0._alloc_signal(value=0), value=0xfff)
     q2.wait(sig, value=0xfff)
     q2.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     q2.submit(TestHCQ.d0)

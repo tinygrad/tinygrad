@@ -3,10 +3,80 @@ from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite
+#from tinygrad.engine.graph import print_tree
+
+simple_pm = PatternMatcher([
+  (UOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
+  (UOp.cvar('x') + UOp.cvar('y'), lambda x,y: UOp.const(dtypes.float, x.arg+y.arg)),
+  (UOp.cvar('x') * UOp.cvar('y') * UOp.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
+  ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x + UOp.const(x.dtype, c1.arg+c2.arg)),
+])
+
+class TestGraphRewrite(unittest.TestCase):
+  def test_dedup(self):
+    v1 = UOp(UOps.DEFINE_VAR, dtypes.float)
+    v2 = UOp(UOps.DEFINE_VAR, dtypes.float)
+    nout = graph_rewrite(v1+v2, PatternMatcher([]))
+    self.assertIs(nout.src[0], nout.src[1])
+
+  def test_simple(self):
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    nout = graph_rewrite(c1+c2, simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 3.0)
+
+  def test_depth_2_late(self):
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    c3 = UOp.const(dtypes.float, 3.0)
+    nout = graph_rewrite(c1*c2*(c3+c3), simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 12.0)
+
+  def test_double(self):
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    c3 = UOp.const(dtypes.float, 3.0)
+    nout = graph_rewrite(c1+c2+c3, simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 6.0)
+
+  def test_triple(self):
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    c3 = UOp.const(dtypes.float, 3.0)
+    c4 = UOp.const(dtypes.float, 4.0)
+    nout = graph_rewrite(c1+c2+c3+c4, simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 10.0)
+
+  def test_diamond(self):
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    c3 = UOp.const(dtypes.float, 3.0)
+    nout = graph_rewrite((c1+c2)+(c1+c3), simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 7.0)
+
+  def test_magic_4(self):
+    c1 = UOp.const(dtypes.int, 4.0)
+    nout = graph_rewrite(c1, simple_pm)
+    self.assertEqual(nout.op, UOps.CONST)
+    self.assertEqual(nout.arg, 3.0)
+
+  def test_depth_2_fold(self):
+    v = UOp(UOps.DEFINE_VAR, dtypes.float)
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
+    nout = graph_rewrite(v+c1+c2, simple_pm)
+    self.assertEqual(nout.op, UOps.ALU)
+    self.assertEqual(nout.src[0].op, UOps.DEFINE_VAR)
+    self.assertEqual(nout.src[1].op, UOps.CONST)
+    self.assertEqual(nout.src[1].arg, 3.0)
 
 class TestUOpGraph(TestUOps):
-  # TODO: move to test.helpers
   def test_add_constant_fold(self):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
@@ -51,14 +121,34 @@ class TestUOpGraph(TestUOps):
 
   def test_cast_vectorized_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
-    idx = UOp(UOps.CONST, dtypes.int, arg=0)
+    idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.float.vec(2), (d0, idx))
     cast = UOp(UOps.CAST, dtypes.float.vec(2), (ld,))
     x = UOp(UOps.GEP, dtypes.float, (cast, ), arg=0)
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
-    out = UOp(UOps.STORE, dtypes.float, (d0, idx, alu))
+    out = UOp(UOps.STORE, None, (d0, idx, alu))
     g = UOpGraph([out])
     self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
+
+  def test_cast_alu_fold(self):
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=(0, True))
+    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(1, False))
+    idx = UOp.const(dtypes.int, 0)
+    ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
+    alu = ld.lt(1).cast(dtypes.bool)
+    out = UOp(UOps.STORE, None, (d0, idx, alu))
+    g = UOpGraph([out])
+    self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
+
+  def test_double_cast_fold(self):
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
+    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(1, False))
+    idx = UOp.const(dtypes.int, 0)
+    ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
+    alu = ld.cast(dtypes.float).cast(dtypes.float)
+    out = UOp(UOps.STORE, None, (d0, idx, alu))
+    g = UOpGraph([out])
+    self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 1)
 
   def test_depth_2_const_fold(self):
     v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('tmp', 0, 1))
@@ -114,6 +204,13 @@ class TestUOpGraph(TestUOps):
     # only the second store happens
     self.assertEqual(len(uops.uops), 4)
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
+
+  def test_asserts_bad_gate(self):
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    idx = UOp.const(dtypes.int, 0)
+    bad_gate = UOp.const(dtypes.int, 1)
+    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
+    with self.assertRaises(AssertionError): uops.linearize()
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

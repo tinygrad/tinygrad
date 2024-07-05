@@ -1,25 +1,17 @@
 from __future__ import annotations
-import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
+import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any
 from dataclasses import dataclass
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, Compiler, CompileError, BufferOptions
+from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions
 from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod, PROFILE
 from tinygrad.renderer.cstyle import NVRenderer
-from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler
-import tinygrad.runtime.autogen.cuda as cuda
+from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler, PTXCompiler, PTX
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
-if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401
-
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype = ctypes.c_void_p
-libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-libc.munmap.restype = ctypes.c_int
-
-if MOCKGPU:=getenv("MOCKGPU"):
-  import extra.mockgpu.mockgpu  # noqa: F401
-  libc.mmap = extra.mockgpu.mockgpu._mmap # type: ignore
-  libc.munmap = extra.mockgpu.mockgpu._munmap # type: ignore
+import tinygrad.runtime.autogen.nvrtc as nvrtc
+from tinygrad.renderer.assembly import PTXRenderer
+import tinygrad.runtime.autogen.libc as libc
+if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
+if MOCKGPU:=getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
 def nv_iowr(fd, nr, args):
   ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
@@ -70,19 +62,26 @@ def nvdata64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
 class NVCompiler(Compiler):
   def __init__(self, arch:str):
-    self.arch = arch
-    #NVCompiler.compiler_opts = replace(NVCompiler.compiler_opts, has_tensor_cores=int(arch[3:]) >= 80)
-    cuda_check(cuda.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
-    self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
+    self.arch, self.compile_options = arch, [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
+    cuda_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_nv_{self.arch}")
   def compile(self, src:str) -> bytes:
-    cuda_check(cuda.nvrtcCreateProgram(ctypes.byref(prog := cuda.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
-    status = cuda.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
+    cuda_check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
+    status = nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
 
     if status != 0:
-      raise CompileError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, cuda_check).decode()}")
-    return _get_bytes(prog, cuda.nvrtcGetCUBIN, cuda.nvrtcGetCUBINSize, cuda_check)
+      raise CompileError(f"compile failed: {_get_bytes(prog, nvrtc.nvrtcGetProgramLog, nvrtc.nvrtcGetProgramLogSize, cuda_check).decode()}")
+    return _get_bytes(prog, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize, cuda_check)
+
+class NVPTXCompiler(NVCompiler):
+  def compile(self, src:str) -> bytes:
+    ptxsrc = src.replace("TARGET", self.arch).replace("VERSION", "7.8" if self.arch >= "sm_89" else "7.5")
+    cuda_check(nvrtc.nvJitLinkCreate(handle := nvrtc.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])))
+    cuda_check(nvrtc.nvJitLinkAddData(handle, nvrtc.NVJITLINK_INPUT_PTX, ptxsrc.encode(), len(ptxsrc), "<null>".encode()))
+    if nvrtc.nvJitLinkComplete(handle) != 0:
+      raise CompileError(f"compile failed: {_get_bytes(handle, nvrtc.nvJitLinkGetErrorLog, nvrtc.nvJitLinkGetErrorLogSize, cuda_check).decode()}")
+    return _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, cuda_check)
 
 class HWQueue:
   def __init__(self): self.q, self.binded_device, self.cmd_offsets = [], None, [0]
@@ -120,7 +119,7 @@ class HWQueue:
   def bind(self, device: NVDevice):
     self.binded_device = device
     self.hw_page = device._gpu_alloc(len(self.q) * 4, map_to_cpu=True)
-    hw_view = to_mv(self.hw_page.base, self.hw_page.length).cast("I")
+    hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
     for i, value in enumerate(self.q): hw_view[i] = value
 
     # From now on, the queue is on the device for faster submission.
@@ -129,15 +128,15 @@ class HWQueue:
   def _submit(self, dev, gpfifo:GPFifo):
     if len(self.q) == 0: return
 
-    if dev == self.binded_device: cmdq_addr = self.hw_page.base
+    if dev == self.binded_device: cmdq_addr = self.hw_page.va_addr
     else:
-      if dev.cmdq_wptr + len(self.q) * 4 > dev.cmdq_page.length:
-        assert (gpfifo.ring[gpfifo.controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.base + len(self.q) * 4 or \
+      if dev.cmdq_wptr + len(self.q) * 4 > dev.cmdq_page.size:
+        assert (gpfifo.ring[gpfifo.controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.va_addr + len(self.q) * 4 or \
                gpfifo.controls.GPGet == gpfifo.controls.GPPut, "cmdq overrun"
         dev.cmdq_wptr = 0
 
       dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
-      cmdq_addr = dev.cmdq_page.base+dev.cmdq_wptr
+      cmdq_addr = dev.cmdq_page.va_addr+dev.cmdq_wptr
       dev.cmdq_wptr += len(self.q) * 4
 
     gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self.q) << 42) | (1 << 41)
@@ -147,8 +146,8 @@ class HWQueue:
 
 class HWComputeQueue(HWQueue):
   def __init__(self):
-    super().__init__()
     self.cmd_idx_to_qmd, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}
+    super().__init__()
 
   def copy_from_cpu(self, gpuaddr, data):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_OFFSET_OUT_UPPER, 2), *nvdata64(gpuaddr)]
@@ -157,7 +156,7 @@ class HWComputeQueue(HWQueue):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + list(data)
     return self._mark_command_end()
 
-  def exec(self, prg, kernargs, global_size=(1,1,1), local_size=(1,1,1), signal=None, signal_value=0):
+  def exec(self, prg, kernargs, global_size=(1,1,1), local_size=(1,1,1)):
     ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     self.cmd_idx_to_qmd[len(self)] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[len(self)] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
@@ -165,14 +164,7 @@ class HWComputeQueue(HWQueue):
 
     qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
     qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
-    qmd.constant_buffer_addr_lower_0 = kernargs & 0xffffffff
-    qmd.constant_buffer_addr_upper_0 = kernargs >> 32
-    if signal is not None:
-      qmd.release0_address_lower = ctypes.addressof(from_mv(signal)) & 0xffffffff
-      qmd.release0_address_upper = ctypes.addressof(from_mv(signal)) >> 32
-      qmd.release0_payload_lower = signal_value & 0xffffffff
-      qmd.release0_payload_upper = signal_value >> 32
-      qmd.release0_enable = 1
+    qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = nvdata64(kernargs)
 
     if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 1)) is None:
       self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
@@ -189,6 +181,20 @@ class HWComputeQueue(HWQueue):
     # Patch the exec cmd with new launch dims
     self.cmd_idx_to_global_dims[cmd_idx][:] = array.array('I', global_size)
     self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
+
+  def signal(self, signal, value=0):
+    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 1)) is None or prev_qmd.release0_enable == 1: return super().signal(signal, value)
+    prev_qmd.release0_address_upper, prev_qmd.release0_address_lower = nvdata64(ctypes.addressof(from_mv(signal)))
+    prev_qmd.release0_payload_upper, prev_qmd.release0_payload_lower = nvdata64(value)
+    prev_qmd.release0_enable = 1
+    self.cmd_idx_to_qmd[len(self)] = prev_qmd # this command is embedded into qmd.
+    return self._mark_command_end()
+
+  def update_signal(self, cmd_idx, signal=None, value=None):
+    if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super().update_signal(cmd_idx, signal, value)
+    if signal is not None: qmd.release0_address_upper, qmd.release0_address_lower = nvdata64(ctypes.addressof(from_mv(signal)))
+    if value is not None: qmd.release0_payload_upper, qmd.release0_payload_lower = nvdata64(value)
+    return self
 
   def submit(self, dev:NVDevice): self._submit(dev, dev.compute_gpfifo)
 
@@ -222,7 +228,7 @@ class NVProgram:
         print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.global_init, self.shmem_usage = None, 0
+    self.rel_info, self.global_init, self.shmem_usage = None, None, 0
     constant_buffers_data = {}
 
     if MOCKGPU:
@@ -241,6 +247,7 @@ class NVProgram:
         if match := re.match(r'\.nv\.constant(\d+)', section_name):
           constant_buffers_data[int(match.group(1))] = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
         if section_name == ".nv.global.init": self.global_init = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
+        elif section_name.startswith(".rel.text"): self.rel_info = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast('I')
         elif section_name == ".nv.info":
           section_data = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
           for i in range(sh_size // 12):
@@ -256,10 +263,6 @@ class NVProgram:
                            round_up(0 if self.global_init is None else self.global_init.nbytes, 128)), 0x1000)
     self.lib_gpu = self.device.allocator.alloc(self.lib_sz)
 
-    HWComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).submit(self.device)
-    for st in range(0, len(self.program), 4095):
-      HWComputeQueue().copy_from_cpu(self.lib_gpu.base+st*4, self.program[st:st+4095]).submit(self.device)
-
     self.constbuffer_0 = [0] * 88
     self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
 
@@ -270,8 +273,8 @@ class NVProgram:
                             shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
                             max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
                             barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program.nbytes>>8,
-                            program_address_lower=self.lib_gpu.base&0xffffffff, program_address_upper=self.lib_gpu.base>>32, sass_version=0x89,
-                            program_prefetch_addr_lower_shifted=self.lib_gpu.base>>8, program_prefetch_addr_upper_shifted=self.lib_gpu.base>>40,
+                            program_address_lower=self.lib_gpu.va_addr&0xffffffff, program_address_upper=self.lib_gpu.va_addr>>32, sass_version=0x89,
+                            program_prefetch_addr_lower_shifted=self.lib_gpu.va_addr>>8, program_prefetch_addr_upper_shifted=self.lib_gpu.va_addr>>40,
                             constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
@@ -283,20 +286,34 @@ class NVProgram:
     if 0 in constant_buffers_data: constant_buffers_data.pop(0)
 
     off = round_up(self.program.nbytes, 128)
+
+    if self.rel_info is not None:
+      assert self.global_init is not None
+      global_init_addr = self.lib_gpu.va_addr + off
+      for rel_i in range(0, len(self.rel_info), 4):
+        if self.rel_info[rel_i+2] == 0x39: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr >> 32) # R_CUDA_ABS32_HI_32
+        elif self.rel_info[rel_i+2] == 0x38: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr & 0xffffffff) # R_CUDA_ABS32_LO_32
+        else: raise RuntimeError(f"unknown reloc: {self.rel_info[rel_i+2]}")
+
+    HWComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).submit(self.device)
+    for st in range(0, len(self.program), 4095):
+      HWComputeQueue().copy_from_cpu(self.lib_gpu.va_addr+st*4, self.program[st:st+4095]).submit(self.device)
+
     if self.global_init is not None:
-      # Constbuffer 4 contains a pointer to nv.global.init, load section and set up the pointer.
-      assert 4 in constant_buffers_data and constant_buffers_data[4].nbytes == 8
-      HWComputeQueue().copy_from_cpu(load_addr:=(self.lib_gpu.base + off), self.global_init).submit(self.device)
-      constant_buffers_data[4][0:2] = memoryview(struct.pack('Q', load_addr)).cast('I')
+      HWComputeQueue().copy_from_cpu(load_addr:=(self.lib_gpu.va_addr + off), self.global_init).submit(self.device)
       off += round_up(self.global_init.nbytes, 128)
+      if 4 in constant_buffers_data: # >= 12.4
+        # Constbuffer 4 contains a pointer to nv.global.init, load section and set up the pointer.
+        assert constant_buffers_data[4].nbytes == 8
+        constant_buffers_data[4][0:2] = memoryview(struct.pack('Q', load_addr)).cast('I')
 
     for i,data in constant_buffers_data.items():
-      self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (self.lib_gpu.base + off) >> 32)
-      self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (self.lib_gpu.base + off) & 0xffffffff)
+      self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (self.lib_gpu.va_addr + off) >> 32)
+      self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (self.lib_gpu.va_addr + off) & 0xffffffff)
       self.qmd.__setattr__(f'constant_buffer_size_shifted4_{i}', data.nbytes)
       self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
 
-      HWComputeQueue().copy_from_cpu(self.lib_gpu.base + off, data).submit(self.device)
+      HWComputeQueue().copy_from_cpu(self.lib_gpu.va_addr + off, data).submit(self.device)
       off += round_up(data.nbytes, 128)
 
     HWComputeQueue().signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
@@ -311,14 +328,14 @@ class NVProgram:
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError("Invalid global/local dims")
 
-    if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - self.kernargs_alloc_size):
-      self.device.kernargs_ptr = self.device.kernargs_page.base
+    if self.device.kernargs_ptr >= (self.device.kernargs_page.va_addr + self.device.kernargs_page.size - self.kernargs_alloc_size):
+      self.device.kernargs_ptr = self.device.kernargs_page.va_addr
 
     # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
     if MOCKGPU: self.constbuffer_0[0:2] = [len(args), len(vals)]
-    kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.base)] + list(vals)
+    kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.va_addr)] + list(vals)
 
-    sig_st, sig_en = (self.device._get_signal(), self.device._get_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
+    sig_st, sig_en = (self.device._alloc_signal(), self.device._alloc_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
 
     queue = HWComputeQueue()
     queue.wait(self.device.timeline_signal, self.device.timeline_value - 1)
@@ -338,7 +355,7 @@ class NVProgram:
 class NVAllocator(HCQCompatAllocator):
   def __init__(self, device:NVDevice): super().__init__(device)
 
-  def _alloc(self, size:int, options:BufferOptions):
+  def _alloc(self, size:int, options:BufferOptions) -> HCQCompatAllocRes:
     if options.host: return self.device._gpu_host_alloc(size)
     return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)))
 
@@ -378,7 +395,9 @@ class NVDevice(HCQCompatCompiled):
       params=nv_gpu.NVOS33_PARAMETERS(hClient=self.root, hDevice=self.device, hMemory=memory_handle, length=size, flags=flags))
     nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_MAP_MEMORY, made)
     if made.params.status != 0: raise RuntimeError(f"_gpu_map_to_cpu returned {made.params.status}")
-    return libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev, 0)
+    res = libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev, 0)
+    os.close(fd_dev)
+    return res
 
   def _gpu_alloc(self, size:int, contig=False, huge_page=False, va_addr=None, map_to_cpu=False, map_flags=0):
     size = round_up(size, align:=((2 << 20) if huge_page else (4 << 10)))
@@ -417,11 +436,11 @@ class NVDevice(HCQCompatCompiled):
     made = nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectOld=mem.hMemory)
     nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
     if made.status != 0: raise RuntimeError(f"_gpu_free returned {made.status}")
-    uvm.free(self.fd_uvm, base=mem.base, length=mem.length)
+    uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
 
   def _gpu_host_free(self, mem):
-    uvm.free(self.fd_uvm, base=mem.base, length=mem.length)
-    libc.munmap(mem.base, mem.length)
+    uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
+    libc.munmap(mem.va_addr, mem.size)
 
   def _map_to_gpu(self, va_base, size):
     NVDevice.host_object_enumerator += 1
@@ -443,9 +462,10 @@ class NVDevice(HCQCompatCompiled):
                                        gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size)
 
   def _gpu_map(self, mem):
+    mem = mem._base if hasattr(mem, '_base') else mem
     if self.gpu_uuid in getattr(mem, "mapped_gpu_ids", []): return
     mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_uuid])
-    return self._gpu_uvm_map(mem.base, mem.length, mem.hMemory, create_range=False)
+    return self._gpu_uvm_map(mem.va_addr, mem.size, mem.hMemory, create_range=False)
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10)):
     NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
@@ -458,10 +478,7 @@ class NVDevice(HCQCompatCompiled):
       fd_uvm_2 = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.root = rm_alloc(self.fd_ctl, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
       uvm.initialize(self.fd_uvm)
-      try:
-        uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm)
-      except RuntimeError:
-        pass  # this error is okay, CUDA hits it too
+      with contextlib.suppress(RuntimeError): uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm) # this error is okay, CUDA hits it too
 
       NVDevice.gpus_info = (nv_gpu.nv_ioctl_card_info_t*64)()
       nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, NVDevice.gpus_info)
@@ -504,7 +521,7 @@ class NVDevice(HCQCompatCompiled):
 
     if NVDevice.signals_page is None:
       NVDevice.signals_page = self._gpu_system_alloc(16 * 65536, map_to_cpu=True)
-      NVDevice.signals_pool = [to_mv(self.signals_page.base + off, 16).cast("Q") for off in range(0, NVDevice.signals_page.length, 16)]
+      NVDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, NVDevice.signals_page.size, 16)]
     else: self._gpu_map(NVDevice.signals_page)
 
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
@@ -521,19 +538,20 @@ class NVDevice(HCQCompatCompiled):
     en_fifo_params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
 
-    self.time_event_st, self.time_event_en = NVDevice._get_signal(), NVDevice._get_signal()
+    self.time_event_st, self.time_event_en = NVDevice._alloc_signal(), NVDevice._alloc_signal()
 
     self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
-    self.cmdq: memoryview = to_mv(self.cmdq_page.base, 0x200000).cast("I")
+    self.cmdq: memoryview = to_mv(self.cmdq_page.va_addr, 0x200000).cast("I")
     self.cmdq_wptr: int = 0 # in bytes
 
     self.kernargs_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x4000000, map_to_cpu=True)
-    self.kernargs_ptr: int = self.kernargs_page.base
+    self.kernargs_ptr: int = self.kernargs_page.va_addr
 
     self.arch: str = "sm_89" if not MOCKGPU else "sm_35" # TODO: fix
 
-    super().__init__(device, NVAllocator(self), NVRenderer(self.arch), CUDACompiler(self.arch) if MOCKGPU else NVCompiler(self.arch),
-                     functools.partial(NVProgram, self), HWComputeQueue, HWCopyQueue, timeline_signals=[self._get_signal(), self._get_signal()])
+    compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
+    super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
+                     functools.partial(NVProgram, self), HWComputeQueue, HWCopyQueue, timeline_signals=[self._alloc_signal(), self._alloc_signal()])
 
     self._cmdq_setup_compute_gpfifo()
     self._cmdq_setup_dma_gpfifo()
@@ -550,9 +568,12 @@ class NVDevice(HCQCompatCompiled):
   def _set_signal(self, sig, value): sig[0] = value
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs) -> memoryview:
+  def _alloc_signal(self, value=0, **kwargs) -> memoryview:
     self._set_signal(sig := self.signals_pool.pop(), value)
     return sig
+
+  @classmethod
+  def _free_signal(self, sig): self.signals_pool.append(sig)
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000):
@@ -573,7 +594,7 @@ class NVDevice(HCQCompatCompiled):
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
     notifier = self._gpu_system_alloc(48 << 20)
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.hMemory, hObjectBuffer=gpfifo_area.hMemory,
-      gpFifoOffset=gpfifo_area.base+offset, gpFifoEntries=entries, hContextShare=ctxshare,
+      gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare,
       hUserdMemory=(ctypes.c_uint32*8)(gpfifo_area.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
     gpfifo = rm_alloc(self.fd_ctl, nv_gpu.AMPERE_CHANNEL_GPFIFO_A, self.root, channel_group, params).hObjectNew
     rm_alloc(self.fd_ctl, self.compute_type, self.root, gpfifo, None)
@@ -587,14 +608,14 @@ class NVDevice(HCQCompatCompiled):
     uvm.register_channel(self.fd_uvm, gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), rmCtrlFd=self.fd_ctl, hClient=self.root,
                          hChannel=gpfifo, base=channel_base, length=0x4000000)
 
-    return GPFifo(ring=to_mv(gpfifo_area.base + offset, entries * 8).cast("Q"), entries_count=entries, token=ws_token_params.workSubmitToken,
-                  controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.base + offset + entries * 8))
+    return GPFifo(ring=to_mv(gpfifo_area.va_addr + offset, entries * 8).cast("Q"), entries_count=entries, token=ws_token_params.workSubmitToken,
+                  controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.va_addr + offset + entries * 8))
 
   def _cmdq_setup_compute_gpfifo(self):
     self.slm_per_thread = 0x900
     bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
     bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
-    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True).base
+    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True).va_addr
 
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window = 0xfe000000, 0xff000000
