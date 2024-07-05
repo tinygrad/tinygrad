@@ -369,7 +369,7 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
-  def linearize(self, extra_pm:Optional[List]=None, do_type_verify=True):
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, do_type_verify=True):
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
@@ -386,7 +386,7 @@ class UOpGraph:
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
     # dedup all nodes and do graph rewrite
-    sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns + PatternMatcher(extra_pm).patterns) if extra_pm else constant_folder)
+    sink = graph_rewrite(sink, PatternMatcher(constant_folder.patterns + extra_pm.patterns) if extra_pm else constant_folder)
 
     # filter nodes that don't link to a sink
     # BFS toposort
