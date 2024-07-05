@@ -126,35 +126,34 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
 
   input_dtype: DType = d.dtype
   dtype_via = dtypes.float32 if d.dtype == dtypes.float16 else d.dtype
+  acc_dtype = dtypes.uint32 if input_dtype == dtypes.float16 else dtypes.uint64
 
   f, e = frexp(d)
   ia = (k := f.cast(dtype_via)).e(BinaryOps.MUL, k.const(4.294967296e9)).cast(dtypes.uint64)
   i = shr(e.cast(dtypes.uint64), 5)
-  e = (k := e.cast(dtypes.uint64)).e(BinaryOps.AND, k.const(31))
+  e = (k := e.cast(dtypes.uint64)).e(BinaryOps.AND, k.const(31)).cast(dtypes.uint32)
+  offset = e.const(32).e(BinaryOps.ADD, e.e(UnaryOps.NEG))
+
   def _eq(arr: LazyBuffer, eq_to: int) -> LazyBuffer: return arr.e(BinaryOps.CMPNE, arr.const(eq_to))
   def _take(an: LazyBuffer, offset:int, count:int=0) -> LazyBuffer:
+    """an = two_over_pi_f[i+offset]"""
     if count+offset <= len(two_over_pi_f[0:-2]):
       an = _eq(i, count).e(TernaryOps.WHERE, _take(an, offset, count=count+1), an.const(two_over_pi_f[count+offset]))
     return an
+  def _exact_pow2if(x): return ldexp3k(x.const(1), x).cast(acc_dtype)
+  def _shl_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.MUL, _exact_pow2if(y.cast(d.dtype))).cast(dtypes.uint32)
+  def _shr_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.IDIV, _exact_pow2if(y.cast(d.dtype))).cast(dtypes.uint32)
   # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
   a1 = _take(i.const(0).cast(dtypes.uint32), 0)
   a2 = _take(i.const(0).cast(dtypes.uint32), 1)
   a3 = _take(i.const(0).cast(dtypes.uint32), 2)
-  a1p1 = _take(a1.const(0), 1, count=0)
-  a2p1 = _take(a2.const(0), 2, count=0)
-  a3p1 = _take(a3.const(0), 3, count=0)
-
-  e = e.cast(dtypes.uint32)
-  offset = e.const(32).e(BinaryOps.ADD, e.e(UnaryOps.NEG))
-
-  acc_dtype = dtypes.uint32 if input_dtype == dtypes.float16 else dtypes.uint64
-  def _exact_pow2if(x): return ldexp3k(x.const(1), x).cast(acc_dtype)
-  def _shl(x, y): return x.cast(acc_dtype).e(BinaryOps.MUL, _exact_pow2if(y.cast(d.dtype))).cast(dtypes.uint32)
-  def _shr(x, y): return x.cast(acc_dtype).e(BinaryOps.IDIV, _exact_pow2if(y.cast(d.dtype))).cast(dtypes.uint32)
+  a1p1 = _take(a1.const(0), 1)
+  a2p1 = _take(a2.const(0), 2)
+  a3p1 = _take(a3.const(0), 3)
   # assume e != 0 because this reduction is only applied for x >= 39000.0
-  hi = _shl(a1, e).e(BinaryOps.OR, _shr(a1p1, offset))
-  mi = _shl(a2, e).e(BinaryOps.OR, _shr(a2p1, offset))
-  lo = _shl(a3, e).e(BinaryOps.OR, _shr(a3p1, offset))
+  hi = _shl_lazy(a1, e).e(BinaryOps.OR, _shr_lazy(a1p1, offset))
+  mi = _shl_lazy(a2, e).e(BinaryOps.OR, _shr_lazy(a2p1, offset))
+  lo = _shl_lazy(a3, e).e(BinaryOps.OR, _shr_lazy(a3p1, offset))
 
   def _hp_mul(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer: return x.cast(dtypes.uint64).e(BinaryOps.MUL, y.cast(dtypes.uint64))
   p = _hp_mul(ia, lo)
@@ -174,15 +173,12 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
   r = d.cast(input_dtype)
 
   lt_zero_map = d_base.e(BinaryOps.CMPLT, d_base.const(0.0))
-
   q = q.e(BinaryOps.MOD, q.const(4))
   q_mod_2 = q.e(BinaryOps.MOD, q.const(2))
   rotate_map = q_mod_2.e(BinaryOps.CMPNE, q_mod_2.const(1))
   rotations = rotate_map.e(TernaryOps.WHERE, r.const(0), r.const(math.pi / 2))
   r = r.e(BinaryOps.ADD, rotations)
-
   add_map = q.e(BinaryOps.CMPLT, q.const(2))
-
   r = add_map.e(TernaryOps.WHERE, r, r.e(UnaryOps.NEG))
   r = lt_zero_map.e(TernaryOps.WHERE, r.e(UnaryOps.NEG), r)
   return r.cast(input_dtype)
