@@ -6,6 +6,7 @@ from tinygrad.lazy import LazyBuffer, create_lazybuffer
 from tinygrad.multi import MultiLazyBuffer
 
 # [TODO] remove this function after fixing cycle graph dependency errors
+# Fix: https://github.com/tinygrad/tinygrad/pull/5172
 def bitcast(x, dtype: DType):
   if isinstance(x, LazyBuffer):
     return create_lazybuffer(x.device, x.st, dtype, UnaryOps.BITCAST, dtype, (x,))
@@ -131,21 +132,17 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
   i = shr(e.cast(dtypes.uint64), 5)
   e = (k := e.cast(dtypes.uint64)).e(BinaryOps.AND, k.const(31))
   def _eq(arr: LazyBuffer, eq_to: int) -> LazyBuffer: return arr.e(BinaryOps.CMPNE, arr.const(eq_to))
+  def _take(an: LazyBuffer, offset:int, count:int=0) -> LazyBuffer:
+    if count+offset <= len(two_over_pi_f[0:-2]):
+      an = _eq(i, count).e(TernaryOps.WHERE, _take(an, offset, count=count+1), an.const(two_over_pi_f[count+offset]))
+    return an
   # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
-  a1 = i.const(0).cast(dtypes.uint32)
-  a2 = i.const(0).cast(dtypes.uint32)
-  a3 = i.const(0).cast(dtypes.uint32)
-  for n in range(len(two_over_pi_f[:-2])):
-    a1 = _eq(i, n).e(TernaryOps.WHERE, a1, a1.const(two_over_pi_f[n+0]))
-    a2 = _eq(i, n).e(TernaryOps.WHERE, a2, a2.const(two_over_pi_f[n+1]))
-    a3 = _eq(i, n).e(TernaryOps.WHERE, a3, a3.const(two_over_pi_f[n+2]))
-  a1p1 = a1.const(0)
-  a2p1 = a2.const(0)
-  a3p1 = a3.const(0)
-  for n in range(len(two_over_pi_f[0:-3])):
-    a1p1 = _eq(i, n).e(TernaryOps.WHERE, a1p1, a1p1.const(two_over_pi_f[n+1]))
-    a2p1 = _eq(i, n).e(TernaryOps.WHERE, a2p1, a2p1.const(two_over_pi_f[n+2]))
-    a3p1 = _eq(i, n).e(TernaryOps.WHERE, a3p1, a3p1.const(two_over_pi_f[n+3]))
+  a1 = _take(i.const(0).cast(dtypes.uint32), 0)
+  a2 = _take(i.const(0).cast(dtypes.uint32), 1)
+  a3 = _take(i.const(0).cast(dtypes.uint32), 2)
+  a1p1 = _take(a1.const(0), 1, count=0)
+  a2p1 = _take(a2.const(0), 2, count=0)
+  a3p1 = _take(a3.const(0), 3, count=0)
 
   e = e.cast(dtypes.uint32)
   offset = e.const(32).e(BinaryOps.ADD, e.e(UnaryOps.NEG))
@@ -154,7 +151,7 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
   def _exact_pow2if(x): return ldexp3k(x.const(1), x).cast(acc_dtype)
   def _shl(x, y): return x.cast(acc_dtype).e(BinaryOps.MUL, _exact_pow2if(y.cast(d.dtype))).cast(dtypes.uint32)
   def _shr(x, y): return x.cast(acc_dtype).e(BinaryOps.IDIV, _exact_pow2if(y.cast(d.dtype))).cast(dtypes.uint32)
-  # assume e != 0
+  # assume e != 0 because this reduction is only applied for x >= 39000.0
   hi = _shl(a1, e).e(BinaryOps.OR, _shr(a1p1, offset))
   mi = _shl(a2, e).e(BinaryOps.OR, _shr(a2p1, offset))
   lo = _shl(a3, e).e(BinaryOps.OR, _shr(a3p1, offset))
@@ -195,7 +192,7 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
 def _xsin_base(d: LazyBuffer, fast:bool=False) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   if d.dtype == dtypes.float16:
-    fast = True # worked at sin(max(float16))
+    fast = True # worked at sin(max(float16)) w/o payne hanek reduction.
   d = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
   fp64_p = d.dtype == dtypes.float64
   trig_range_lv1 = d.const(15.0 if fp64_p else 125.0)
