@@ -10,7 +10,6 @@ def is_dtype_fastmath_supported(d: DType):
 def _lazy_map_numbers(x: LazyBuffer, inf: LazyBuffer, _inf: LazyBuffer, nan: LazyBuffer, ratio: LazyBuffer):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
   return x.e(BinaryOps.CMPNE, x.const(math.inf)).e(TernaryOps.WHERE, x.e(BinaryOps.CMPNE, x).e(TernaryOps.WHERE, nan, x.e(BinaryOps.CMPNE, x.const(-math.inf)).e(TernaryOps.WHERE, ratio, _inf)), inf) # noqa: E501
-
 # *** helper functions for double/quad precision arithmetics ***
 def dfadd2_f2_f2_f2(xx: LazyBuffer, xy: LazyBuffer, yx: LazyBuffer, yy: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   rx = xx.e(BinaryOps.ADD, yx)
@@ -30,7 +29,6 @@ def dfdiv2_f2_f2_f2(nx: LazyBuffer, ny: LazyBuffer, dx: LazyBuffer, dy: LazyBuff
   u = qx.e(UnaryOps.NEG).e(BinaryOps.ADD, nx.e(BinaryOps.MUL, t)).e(BinaryOps.ADD, qx.e(BinaryOps.MUL, dx.const(1).e(BinaryOps.ADD, dx.e(BinaryOps.MUL, t).e(UnaryOps.NEG)))) # noqa: E501
   qy = t.e(BinaryOps.MUL, ny.e(BinaryOps.ADD, qx.e(BinaryOps.MUL, dy).e(UnaryOps.NEG))).e(BinaryOps.ADD, u)
   return qx, qy
-
 # *** helper functions for bit manipulation ***
 def significand_bits(d: DType) -> int:
   assert is_dtype_fastmath_supported(d)
@@ -226,7 +224,6 @@ def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffe
   r, q = reduction_algo(x_abs)
   if not fast:
     # Payne Hanek Reduction assumes abs(x) >= pi/4, for smaller values, use cody_waite_reduction.
-    # TODO: Eliminate switch_over
     switch_over_map = x_abs.e(BinaryOps.CMPLT, x.const(switch_over))
     r_fast, q_fast = cody_waite_reduction(x_abs)
     r = switch_over_map.e(TernaryOps.WHERE, r_fast, r)
@@ -237,7 +234,6 @@ def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffe
   result = result.e(BinaryOps.MUL, x_sign)
   return _lazy_map_numbers(d, d.const(math.nan), d.const(math.nan), d.const(math.nan), result)
 
-# *** base implementation for xsin/xlog2/xexp2 ***
 def xexp2(x: LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(x.dtype)
   if 0 in x.shape: return x
@@ -305,4 +301,3 @@ def xlog2(d: LazyBuffer) -> LazyBuffer:
   # log(-0.0) = -Inf. In PTX, x == -0.0 won't be true. so making reciprocal.
   r = d_orig.e(UnaryOps.RECIP).e(BinaryOps.CMPNE, d_orig.const(-math.inf)).e(TernaryOps.WHERE, r, r.const(-math.inf))
   return r
-
