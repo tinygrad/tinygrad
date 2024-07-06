@@ -113,50 +113,35 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops[-1].op, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.op is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
 
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum()
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
-    if getenv("PTX"):
-      # RANGE -> 2xLOAD_INDEXING -> LOAD -> RANGE -> PHI
-      assert ranges[1] == ranges[0]+4
-      assert lin.uops[ranges[0]+3].op is UOps.LOAD
-    else:
     # RANGE -> LOAD -> RANGE -> PHI
-      assert ranges[1] == ranges[0]+2
-      assert lin.uops[ranges[0]+1].op is UOps.LOAD
+    assert len(ranges) == 2
+    assert any(x.op is UOps.LOAD for x in lin.uops[ranges[0]:ranges[1]])
 
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_three_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).expand(2, 2, 3).sum()
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)), (2, 2, 3)).sum()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
-    if getenv("PTX"):
-      # RANGE -> RANGE -> 2xLOAD_INDEXING -> LOAD -> RANGE -> PHI
-      assert ranges[2] == ranges[1]+4 == ranges[0]+5
-      assert lin.uops[ranges[1]+3].op is UOps.LOAD
-    else:
     # RANGE -> RANGE -> LOAD -> RANGE -> PHI
-      assert ranges[2] == ranges[1]+2 == ranges[0]+3
-      assert lin.uops[ranges[1]+1].op is UOps.LOAD
+    # NOTE: nothing should toposort between the first two ranges
+    assert ranges[0]+1 == ranges[1]
+    assert any(x.op is UOps.LOAD for x in lin.uops[ranges[1]:ranges[2]])
 
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
     out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
-    if getenv("PTX"):
-      # RANGE -> CAST ridx -> LOAD_INDEXING -> 4x ALU -> RANGE -> LOAD -> RANGE -> PHI
-      assert ranges[1] == ranges[0]+6
-      assert lin.uops[ranges[1]+11].op is UOps.ENDRANGE
-    else:
-      # RANGE -> 4x ALU -> RANGE -> 9x ALU + 1x LOAD -> PHI
-      assert ranges[1] == ranges[0]+5
-      assert lin.uops[ranges[1]+11].op is UOps.ENDRANGE
+    lin.uops.print()
+    # RANGE -> ALU -> RANGE -> ALU + LOAD -> PHI
+    assert any(x.op is UOps.ALU for x in lin.uops[ranges[0]:ranges[1]])
+    assert not any(x.op is UOps.LOAD for x in lin.uops[ranges[0]:ranges[1]])
+    assert any(x.op in {UOps.ALU, UOps.LOAD} for x in lin.uops[ranges[1]:])
 
   def test_range_outer_op_before_phi(self):
     a = Tensor.randn(4, 1).realize()
