@@ -196,15 +196,23 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     forced_realize = r in group
     if not forced_realize and len(group) > 1:
       # create a multi output kernel if the LazyBufferss can cleanly group
+      cache: Set[LazyBuffer] = set()
       rc_parents, rc_children = deque(group), deque(group)
-      while rc_parents and not forced_realize:
+      while rc_parents:
+        if (p:=rc_parents.pop()) in cache: continue
+        cache.add(p)
         # max one reduceop per kernel
-        if (p:=rc_parents.pop()).op in ReduceOps: forced_realize = True
-        else: rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+        if p.op in ReduceOps:
+          forced_realize = True
+          break
+        rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
       # search descendants of the reduceop that can cleanly group
+      cache.clear()
       realized_descendants: Set[LazyBuffer] = set()
       while rc_children and not forced_realize:
-        if (c:=rc_children.pop()).op in ReduceOps or not c.st.contiguous or c.st.size != r.st.size or c in reduce_for_op:
+        if (c:=rc_children.pop()) in cache: continue
+        cache.add(c)
+        if c.op in ReduceOps or not c.st.contiguous or c.st.size != r.st.size or c in reduce_for_op:
           realized_descendants.clear()
           break
         if c in realizes and c not in group: realized_descendants.add(c)
