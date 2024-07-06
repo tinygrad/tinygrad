@@ -146,7 +146,7 @@ class LLVMRenderer(Renderer):
           lvars[backward] = lvars[u]
         elif uop is UOps.ALU:
           lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in src], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else src[0].dtype)
-        elif uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: lvars[u] = cast(bb, lvars[src[0]], src[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
+        elif uop in {UOps.CAST, UOps.BITCAST}: lvars[u] = cast(bb, lvars[src[0]], src[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
         elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
         elif uop is UOps.SPECIAL: lvars[u] = lvars[args.expr]
         elif uop is UOps.CONST: lvars[u] = const(args, dtype)

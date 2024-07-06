@@ -287,7 +287,7 @@ class Linearizer(Kernel):
           next_ *= 1 if stride == 0 else sz
         return strides
       upcasts, dev = [upcast_strides(x) for x in [locals_to_store[0][0], locals_to_store[1][0], 0]], self.opts.device
-      # cast initial accs
+      # vectorize initial accs
       wmmas = [UOp(UOps.VECTORIZE, (dt3:=tc.dtype_out.vec(wmma_sz[2])), tuple(accs[reduceop][x:x+wmma_sz[2]]))
                for x in range(0, len(accs[reduceop]), wmma_sz[2])]
       for it in [x[::-1] for x in itertools.product(*list([range(sz) for _,sz in upcasts[0]][::-1]))]:
