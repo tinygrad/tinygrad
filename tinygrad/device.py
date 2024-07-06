@@ -3,7 +3,7 @@ import multiprocessing
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol
-import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib
+import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.renderer import Renderer
@@ -185,6 +185,25 @@ class Compiled:
   def synchronize(self): pass  # override this in your device
 
 # **************** for HCQ Compatible Devices ****************
+
+class HWCommandQueue:
+  """
+  HWCommandQueue is a base class for compute/copy queues implemetations for hcq compatible devices.
+  """
+
+  def __init__(self): self.q, self.binded_device, self.cmds_offset, self.cmds_len = [], None, [], []
+
+  def __len__(self): return len(self.cmds_offset)
+
+  def _patch(self, off, data): self.q[off:off+len(data)] = array.array('I', data)
+
+  def command(func):
+    def _cmdwrapper(self, *args, **kwargs):
+        self.cmds_offset.append(len(self.q))
+        func(self, *args, **kwargs)
+        self.cmds_len.append(len(self.q) - self.cmds_offset[-1])
+        return self
+    return _cmdwrapper
 
 @contextlib.contextmanager
 def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
