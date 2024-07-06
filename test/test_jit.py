@@ -2,6 +2,7 @@
 import unittest, functools
 import numpy as np
 
+from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
@@ -20,29 +21,16 @@ def _simple_test(add, extract=lambda x: x, N=10):
   assert_jit_cache_len(add, 1)
 
 class TestJit(unittest.TestCase):
-  def test_approx_exp2_jit(self):
-    model = [ResBlock(16, 24, 16) for _ in range(4)]
-    @TinyJit
-    def fw_exp2(t, t2):
-      for l in model: t = l(t, t2)
-      return t.exp2().realize()
-    fw_exp2(Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24))
 
-  def test_approx_log2_jit(self):
+  @settings(deadline=2e4)
+  @given(strat.sampled_from([Tensor.exp2, Tensor.log2, Tensor.sin]))
+  def test_approx_jit_timeout(self, op):
     model = [ResBlock(16, 24, 16) for _ in range(4)]
     @TinyJit
-    def fw_log2(t, t2):
+    def fw_approx(t, t2):
       for l in model: t = l(t, t2)
-      return t.log2().realize()
-    fw_log2(Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24))
-
-  def test_approx_sin_jit(self):
-    model = [ResBlock(16, 24, 16) for _ in range(4)]
-    @TinyJit
-    def fw_sin(t, t2):
-      for l in model: t = l(t, t2)
-      return t.sin().realize()
-    fw_sin(Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24))
+      return op(t).realize()
+    fw_approx(Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24))
 
   def test_simple_jit(self):
     @TinyJit
