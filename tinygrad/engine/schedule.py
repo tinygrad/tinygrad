@@ -162,12 +162,11 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     if not st.contiguous or st.size != r.st.size or tr in reduce_for_op: group.add(r)
     return group.add(tr)
   for tr_next in children[tr]:
-    if tr_next.realized is None:
-      # max one reduceop per kernel
-      if tr_next.op in ReduceOps: return group.add(r)
-      # can only fuse contiguous
-      if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
-      _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
+    # max one reduceop per kernel
+    if tr_next.op in ReduceOps: return group.add(r)
+    # can only fuse contiguous
+    if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
+    _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
