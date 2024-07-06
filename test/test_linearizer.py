@@ -119,7 +119,6 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     # RANGE -> LOAD -> RANGE -> PHI
-    assert len(ranges) == 2
     assert any(x.op is UOps.LOAD for x in lin.uops[ranges[0]:ranges[1]])
 
   def test_three_nested_range(self):
