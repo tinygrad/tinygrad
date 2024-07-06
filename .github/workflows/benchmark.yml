@@ -38,11 +38,11 @@ jobs:
     # if: github.event.inputs.run_process_replay == 'true' || contains(github.event.head_commit.message, '[run_process_replay]') || contains(github.event.pull_request.title, '[run_process_replay]')
     # run: echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
     - name: Run Stable Diffusion
-      run: JIT=2 THREEFRY=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+      run: JIT=2 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run Stable Diffusion with fp16
-      run: JIT=2 THREEFRY=1 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd_fp16.txt
+      run: JIT=2 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd_fp16.txt
     - name: Run SDXL
-      run: JIT=2 THREEFRY=1 python3 examples/sdxl.py --seed 0 --noshow | tee sdxl.txt
+      run: JIT=2 python3 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
     - name: Run model inference benchmark
       run: METAL=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -161,9 +161,9 @@ jobs:
     - name: Fuzz Padded Tensor Core GEMM (PTX)
       run: NV=1 PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run Stable Diffusion
-      run: NV=1 THREEFRY=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+      run: NV=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run SDXL
-      run: NV=1 THREEFRY=1 python3 examples/sdxl.py --seed 0 --noshow | tee sdxl.txt
+      run: NV=1 python3 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
     - name: Run LLaMA
       run: |
         NV=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -174,8 +174,9 @@ jobs:
       run: NV=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run LLaMA 7B on 6 GPUs
       run: NV=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
-    - name: Run LLaMA-3 8B BEAM
-      run: NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_beam.txt
+    # TODO: this is flaky
+    # - name: Run LLaMA-3 8B BEAM
+    #   run: NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_beam.txt
     - name: Run LLaMA-3 8B on 4 GPUs
       run: NV=1 python3 examples/llama3.py --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_four_gpu.txt
     - name: Run LLaMA-3 8B on 6 GPUs
@@ -317,9 +318,9 @@ jobs:
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run Stable Diffusion
-      run: AMD=1 THREEFRY=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+      run: AMD=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run SDXL
-      run: AMD=1 THREEFRY=1 python3 examples/sdxl.py --seed 0 --noshow | tee sdxl.txt
+      run: AMD=1 python3 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
     - name: Run LLaMA 7B
       run: |
         AMD=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt

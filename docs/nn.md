@@ -10,6 +10,7 @@
 ::: tinygrad.nn.InstanceNorm
 ::: tinygrad.nn.LayerNorm
 ::: tinygrad.nn.LayerNorm2d
+::: tinygrad.nn.RMSNorm
 ::: tinygrad.nn.Embedding
 
 ## Optimizers
