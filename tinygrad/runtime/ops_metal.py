@@ -63,24 +63,29 @@ class MetalBuffer:
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
     self.device:MetalDevice = device
-    self.track_cross_device: Set[MetalDevice] = set()
     super().__init__()
-  def free_cache(self):
-    self.device.synchronize()
-    for x in self.track_cross_device: x.synchronize()
-    self.track_cross_device.clear()
-    return super().free_cache()
   def _alloc(self, size:int, options) -> MetalBuffer:
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): opaque.buf.release()
-  def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev: MetalDevice, **kwargs):
-    src_dev.synchronize()
-    command_buffer = self.device.mtl_queue.commandBuffer()
+  def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
+    if src_dev != dest_dev:
+      command_buffer = dest_dev.mtl_queue.commandBuffer()
+      command_buffer.encodeSignalEvent(dest_dev.timeline_signal, dest_dev.timeline_value)
+      command_buffer.encodeWaitForEvent(src_dev.timeline_signal, src_dev.timeline_value)
+      command_buffer.commit()
+      dest_dev.mtl_buffers_in_flight.append(command_buffer)
+      dest_dev.timeline_value += 1
+
+    command_buffer = src_dev.mtl_queue.commandBuffer()
+    if src_dev != dest_dev: command_buffer.encodeWaitForEvent(dest_dev.timeline_signal, dest_dev.timeline_value)
     encoder = command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src.buf, src.offset, dest.buf, dest.offset, sz)
     encoder.endEncoding()
+    if src_dev != dest_dev:
+      command_buffer.encodeSignalEvent(src_dev.timeline_signal, src_dev.timeline_value)
+      src_dev.timeline_value += 1
     command_buffer.commit()
     self.device.mtl_buffers_in_flight.append(command_buffer)
   def from_buffer(self, src:memoryview) -> Optional[Any]:
@@ -100,7 +105,10 @@ class MetalDevice(Compiled):
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
-    self.track_cross_buffer: List[Any] = []
+
+    self.timeline_signal = self.device.newSharedEvent()
+    self.timeline_value = 0
+
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
                      functools.partial(MetalProgram, self), MetalGraph)
@@ -108,4 +116,3 @@ class MetalDevice(Compiled):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()
     self.mtl_buffers_in_flight.clear()
-    self.track_cross_buffer.clear()
