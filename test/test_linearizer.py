@@ -136,7 +136,6 @@ class TestLinearizer(unittest.TestCase):
     out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
-    lin.uops.print()
     # RANGE -> ALU -> RANGE -> ALU + LOAD -> PHI
     assert any(x.op is UOps.ALU for x in lin.uops[ranges[0]:ranges[1]])
     assert not any(x.op is UOps.LOAD for x in lin.uops[ranges[0]:ranges[1]])
