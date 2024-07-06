@@ -152,7 +152,7 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
-                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer], cache:Set[Tuple[LazyBuffer,ShapeTracker]]):
+                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer], cache:Set):
   """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
   if (tr, st) in cache: return
   cache.add((tr, st))
@@ -189,7 +189,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     if r.op not in ReduceOps or r in realizes: continue
 
     group: Set[LazyBuffer] = set()
-    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, set())
+    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache=set())
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
