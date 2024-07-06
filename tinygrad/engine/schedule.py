@@ -117,7 +117,7 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
       output_view, vv = output_view.simplify().unbind()
       if vv: var_vals.update(vv)
       ast.append(LazyOp(BufferOps.STORE, (lop, ), MemBuffer(i, out.dtype, output_view)))
-  return tuple(ast), tuple(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x not in inputs])
+  return tuple(ast), tuple(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
