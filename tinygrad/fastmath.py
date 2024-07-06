@@ -7,10 +7,6 @@ from tinygrad.lazy import LazyBuffer
 def is_dtype_fastmath_supported(d: DType):
   return d in [dtypes.float16, dtypes.float32, dtypes.float64]
 
-# [WIP] MultiLazyBuffer cannot be compiled...?
-def is_buffer_fastmath_supported(d: LazyBuffer):
-  return is_dtype_fastmath_supported(d.dtype)
-
 def _lazy_map_numbers(x: LazyBuffer, inf: LazyBuffer, _inf: LazyBuffer, nan: LazyBuffer, ratio: LazyBuffer):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
   return x.e(BinaryOps.CMPNE, x.const(math.inf)).e(TernaryOps.WHERE, x.e(BinaryOps.CMPNE, x).e(TernaryOps.WHERE, nan, x.e(BinaryOps.CMPNE, x.const(-math.inf)).e(TernaryOps.WHERE, ratio, _inf)), inf) # noqa: E501

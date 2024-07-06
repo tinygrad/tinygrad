@@ -7,7 +7,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
-from tinygrad.fastmath import xsin, xlog2, xexp2, is_buffer_fastmath_supported
+from tinygrad.fastmath import xsin, xlog2, xexp2, is_dtype_fastmath_supported
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -41,7 +41,7 @@ class Reciprocal(Function):
 class Sin(Function):
   def forward(self, x: LazyBuffer) -> LazyBuffer:
     self.x = x
-    self.fast_approx = is_buffer_fastmath_supported(x)
+    self.fast_approx = is_dtype_fastmath_supported(x.dtype)
     if self.fast_approx:
       return xsin(x)
     return x.e(UnaryOps.SIN)
@@ -63,7 +63,7 @@ class Relu(Function):
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    fast_approx = is_buffer_fastmath_supported(x)
+    fast_approx = is_dtype_fastmath_supported(x.dtype)
     x = xlog2(x) if fast_approx else x.e(UnaryOps.LOG2)
     return x.e(BinaryOps.MUL, x.const(math.log(2)))
 
@@ -71,7 +71,7 @@ class Log(Function):
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    fast_approx = is_buffer_fastmath_supported(x)
+    fast_approx = is_dtype_fastmath_supported(x.dtype)
     self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2)))
     self.ret = xexp2(self.ret) if fast_approx else self.ret.e(UnaryOps.EXP2)
     return self.ret
