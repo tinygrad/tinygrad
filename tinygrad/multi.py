@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Union, Any, Tuple, List
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG, RING
-from tinygrad.dtype import DType, ConstType, dtypes
+from tinygrad.dtype import DType, ConstType
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
@@ -112,11 +112,10 @@ class MultiLazyBuffer:
       if mlb.axis == axis or not_all_real: srcs.append(mlb.lbs)
       elif mlb.axis is None and axis is not None: srcs.append(to_sharded(mlb.lbs, axis))
       else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis))
-    # NOTE: lsrcs[-1].const(0) is correct for where
+    new_real_lbs = {i:lsrcs[0].e(op, *lsrcs[1:], arg=arg) for i,(lsrcs,r) in enumerate(zip(zip(*srcs),new_real)) if r}
     # NOTE: const dtype should match real
-    # new_real_lbs = {i:lsrcs[0].e(op, *lsrcs[1:], arg=arg) for i, (lsrcs,r) in enumerate(zip(zip(*srcs),new_real)) if r}
-    return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) if r else lsrcs[-1].const(0).cast(dtypes.bool if op in \
-        {BinaryOps.CMPNE, BinaryOps.CMPLT} else lsrcs[-1].dtype) for lsrcs,r in zip(zip(*srcs),new_real)], axis, new_real)
+    return MultiLazyBuffer([new_real_lbs[i] if r else lsrcs[0].const(0).cast(new_real_lbs.popitem()[1].dtype)
+                            for i, (lsrcs,r) in enumerate(zip(zip(*srcs),new_real))], axis, new_real)
 
   def _shape_to_single_shard(self, shape:Tuple[sint, ...], lb:LazyBuffer) -> Tuple[sint, ...]:
     return tuple(lb.shape[self.axis] if a == self.axis else s for a,s in enumerate(shape))
