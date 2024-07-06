@@ -213,13 +213,12 @@ def sin_poly_large(d: LazyBuffer, q: LazyBuffer) -> LazyBuffer:
   r = sin_poly(d, q)
   return r.e(BinaryOps.MUL, _ifand(2).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
 
-# fast assumes x <= 39800.0
+# fast=True assumes x <= 39800.0
 def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=1.0) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   if 0 in d.shape: return d
   if d.dtype == dtypes.float16:
     fast = True  # confirmed xsin(max(Float16)) works
-
   use_sin_poly = sin_poly_small if fast else sin_poly_large
   reduction_algo = cody_waite_reduction if fast else payne_hanek_reduction
   # mask +-inf/nan as zero
@@ -244,8 +243,11 @@ def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=1.0) -> LazyBuffer:
   return _lazy_map_numbers(d, d.const(math.nan), d.const(math.nan), d.const(math.nan), result)
 
 # *** base implementation for xsin/xlog2/xexp2 ***
-def _xexp2_base(d: LazyBuffer) -> LazyBuffer:
-  fp64_p = d.dtype == dtypes.float64
+def xexp2(x: LazyBuffer) -> LazyBuffer:
+  assert is_dtype_fastmath_supported(x.dtype)
+  if 0 in x.shape: return x
+  fp64_p = x.dtype == dtypes.float64
+  d = _lazy_map_numbers(x, x.const(0.0), x.const(0.0), x.const(0.0), x)
   q = rintk(d)
   s = d.e(BinaryOps.ADD, q.cast(d.dtype).e(UnaryOps.NEG))
   # a polynomial approximation with 13 non-zero terms in the range of [−(log 2)/2,(log 2)/2].
@@ -260,7 +262,7 @@ def _xexp2_base(d: LazyBuffer) -> LazyBuffer:
   u = d.e(BinaryOps.CMPLT, d.const(upper)).e(TernaryOps.WHERE, u, d.const(math.inf))
   u = d.e(BinaryOps.CMPLT, d.const(lower)).e(TernaryOps.WHERE, d.const(0.0), u)
   u = d.e(BinaryOps.CMPLT, d.const(math.inf)).e(TernaryOps.WHERE, u, u.const(math.nan))
-  return u
+  return _lazy_map_numbers(x, x.const(math.inf), x.const(0.0), x.const(math.nan), u)
 
 def xlog2(d: LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
@@ -309,11 +311,3 @@ def xlog2(d: LazyBuffer) -> LazyBuffer:
   r = d_orig.e(UnaryOps.RECIP).e(BinaryOps.CMPNE, d_orig.const(-math.inf)).e(TernaryOps.WHERE, r, r.const(-math.inf))
   return r
 
-# ****** toplevel functions for fastmath *****
-# [todo] integrate _xexp2_base into xexp2
-def xexp2(d: LazyBuffer) -> LazyBuffer:
-  assert is_dtype_fastmath_supported(d.dtype)
-  if 0 in d.shape: return d
-  x = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
-  d = _lazy_map_numbers(d, d.const(math.inf), d.const(0.0), d.const(math.nan), _xexp2_base(x))
-  return d
