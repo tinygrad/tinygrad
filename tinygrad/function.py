@@ -39,14 +39,14 @@ class Reciprocal(Function):
 
 # ************* unary ops *************
 class Sin(Function):
-  def forward(self, x: LazyBuffer) -> LazyBuffer:
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
     self.fast_approx = is_dtype_fastmath_supported(x.dtype)
     if self.fast_approx:
       return xsin(x)
     return x.e(UnaryOps.SIN)
 
-  def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     k = self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG))
     k = xsin(k) if self.fast_approx else k.e(UnaryOps.SIN)
     return k.e(BinaryOps.MUL, grad_output)

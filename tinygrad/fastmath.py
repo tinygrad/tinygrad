@@ -4,64 +4,64 @@ from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.lazy import LazyBuffer
 
-def is_dtype_fastmath_supported(d: DType):
+def is_dtype_fastmath_supported(d:DType):
   return d in [dtypes.float16, dtypes.float32, dtypes.float64]
 
-def _lazy_map_numbers(x: LazyBuffer, inf: LazyBuffer, _inf: LazyBuffer, nan: LazyBuffer, ratio: LazyBuffer):
+def _lazy_map_numbers(x:LazyBuffer, inf:LazyBuffer, _inf:LazyBuffer, nan:LazyBuffer, ratio:LazyBuffer):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
   return x.e(BinaryOps.CMPNE, x.const(math.inf)).e(TernaryOps.WHERE, x.e(BinaryOps.CMPNE, x).e(TernaryOps.WHERE, nan, x.e(BinaryOps.CMPNE, x.const(-math.inf)).e(TernaryOps.WHERE, ratio, _inf)), inf) # noqa: E501
 # *** helper functions for double/quad precision arithmetics ***
-def dfadd2_f2_f2_f2(xx: LazyBuffer, xy: LazyBuffer, yx: LazyBuffer, yy: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+def dfadd2_f2_f2_f2(xx:LazyBuffer, xy:LazyBuffer, yx:LazyBuffer, yy:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   rx = xx.e(BinaryOps.ADD, yx)
   v = rx.e(BinaryOps.ADD, xx.e(UnaryOps.NEG))
   ry = xx.e(BinaryOps.ADD, rx.e(BinaryOps.ADD, v.e(UnaryOps.NEG)).e(UnaryOps.NEG)).e(BinaryOps.ADD, yx.e(BinaryOps.ADD, v.e(UnaryOps.NEG)))
   ry = xy.e(BinaryOps.ADD, yy)
   return rx, ry
 
-def dfmul2_f2_f2_f2(xx: LazyBuffer, xy: LazyBuffer, yx: LazyBuffer, yy: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+def dfmul2_f2_f2_f2(xx:LazyBuffer, xy:LazyBuffer, yx:LazyBuffer, yy:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   rx = xx.e(BinaryOps.MUL, yx)
   ry = xx.e(BinaryOps.MUL, yx).e(BinaryOps.ADD, rx.e(UnaryOps.NEG)).e(BinaryOps.ADD, xx.e(BinaryOps.MUL, yy)).e(BinaryOps.ADD, xy.e(BinaryOps.MUL, yx)) # noqa: E501
   return rx, ry
 
-def dfdiv2_f2_f2_f2(nx: LazyBuffer, ny: LazyBuffer, dx: LazyBuffer, dy: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+def dfdiv2_f2_f2_f2(nx:LazyBuffer, ny:LazyBuffer, dx:LazyBuffer, dy:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   t = dx.e(UnaryOps.RECIP)
   qx = nx.e(BinaryOps.MUL, t)
   u = qx.e(UnaryOps.NEG).e(BinaryOps.ADD, nx.e(BinaryOps.MUL, t)).e(BinaryOps.ADD, qx.e(BinaryOps.MUL, dx.const(1).e(BinaryOps.ADD, dx.e(BinaryOps.MUL, t).e(UnaryOps.NEG)))) # noqa: E501
   qy = t.e(BinaryOps.MUL, ny.e(BinaryOps.ADD, qx.e(BinaryOps.MUL, dy).e(UnaryOps.NEG))).e(BinaryOps.ADD, u)
   return qx, qy
 # *** helper functions for bit manipulation ***
-def significand_bits(d: DType) -> int:
+def significand_bits(d:DType) -> int:
   assert is_dtype_fastmath_supported(d)
   return {dtypes.float64: 52, dtypes.float32: 23, dtypes.float16: 10}[d]
 
-def exponent_bias(d: DType) -> int:
+def exponent_bias(d:DType) -> int:
   return {dtypes.float64: 1022, dtypes.float32: 126, dtypes.float16: 14}[d]
 
-def exponent_mask(d: DType) -> int:
+def exponent_mask(d:DType) -> int:
   assert is_dtype_fastmath_supported(d)
   return {dtypes.float64: 0x7FF, dtypes.float32: 0xFF, dtypes.float16: 0x1F}[d]
 
-def float_to_bits(d: LazyBuffer) -> LazyBuffer:
+def float_to_bits(d:LazyBuffer) -> LazyBuffer:
   cast_to = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[d.dtype]
   return d.cast(cast_to, True, allow_buffer_view=False)
 
-def bits_to_float(d: LazyBuffer, float_dtype: DType) -> LazyBuffer:
+def bits_to_float(d:LazyBuffer, float_dtype:DType) -> LazyBuffer:
   cast_to = {dtypes.uint64: dtypes.float64, dtypes.uint32: dtypes.float32, dtypes.uint16: float_dtype}[d.dtype]
   return d.cast(cast_to, True, allow_buffer_view=False)
 
 # **** utils ****
-def shr(x: LazyBuffer, y:int) -> LazyBuffer: return x.e(BinaryOps.IDIV, x.const(2**y))
-def shl(x: LazyBuffer, y:int) -> LazyBuffer: return x.e(BinaryOps.MUL, x.const(2**y))
+def shr(x:LazyBuffer, y:int) -> LazyBuffer: return x.e(BinaryOps.IDIV, x.const(2**y))
+def shl(x:LazyBuffer, y:int) -> LazyBuffer: return x.e(BinaryOps.MUL, x.const(2**y))
 
-def rintk(d: LazyBuffer) -> LazyBuffer:
+def rintk(d:LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   return_t = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype]
   return d.e(BinaryOps.ADD, d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.const(-0.5), d.const(0.5))).cast(return_t)
 
-def mla(x: LazyBuffer, y: LazyBuffer, z: LazyBuffer) -> LazyBuffer:
+def mla(x:LazyBuffer, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer:
   return x.e(BinaryOps.MUL, y).e(BinaryOps.ADD, z)
 
-def polyN(u: LazyBuffer, s: LazyBuffer, coeffs: List[float]) -> LazyBuffer:
+def polyN(u:LazyBuffer, s:LazyBuffer, coeffs:List[float]) -> LazyBuffer:
   for c in coeffs:
     u = mla(u, s, u.const(c))
   return u
@@ -82,16 +82,16 @@ def ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   m2 = shl(e, significand_bits(d.dtype))
   return m1.e(BinaryOps.ADD, m2).cast(d.dtype, True, allow_buffer_view=False).cast(dtype)
 
-def pow2if(q: LazyBuffer, float_dtype: DType):
+def pow2if(q:LazyBuffer, float_dtype:DType):
   assert q.dtype in (dtypes.int64, dtypes.int32, dtypes.int16, dtypes.uint32)
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype, dtypes.uint32: dtypes.float32}[q.dtype]
   return shl(q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)), significand_bits(final_dtype)).cast(final_dtype, True, allow_buffer_view=False) # noqa: E501
 
-def ldexp2kf(d: LazyBuffer, e: LazyBuffer) -> LazyBuffer:
+def ldexp2kf(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype) and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
   return d.e(BinaryOps.MUL, pow2if(shr(e, 1), d.dtype)).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.ADD, shr(e, 1).e(UnaryOps.NEG)), d.dtype)) # noqa: E501
 
-def frexp(v: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+def frexp(v:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   m1 = {dtypes.float64: 0x800FFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype] # noqa: E501
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3C00}[v.dtype] # noqa: E501
   bits = float_to_bits(v)
@@ -105,7 +105,7 @@ def frexp(v: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
 
 # *** reduction algorithm for trig ***
 # d = abs(d_base)
-def payne_hanek_reduction(d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+def payne_hanek_reduction(d:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   assert is_dtype_fastmath_supported(d.dtype)
   two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410] # noqa: E501
 
@@ -119,8 +119,8 @@ def payne_hanek_reduction(d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   e = (k := e.cast(dtypes.uint64)).e(BinaryOps.AND, k.const(31)).cast(dtypes.uint32)
   offset = e.const(32).e(BinaryOps.ADD, e.e(UnaryOps.NEG))
 
-  def _eq(arr: LazyBuffer, eq_to: int) -> LazyBuffer: return arr.e(BinaryOps.CMPNE, arr.const(eq_to))
-  def _take(an: LazyBuffer, offset:int, count:int=0) -> LazyBuffer:
+  def _eq(arr:LazyBuffer, eq_to:int) -> LazyBuffer: return arr.e(BinaryOps.CMPNE, arr.const(eq_to))
+  def _take(an:LazyBuffer, offset:int, count:int=0) -> LazyBuffer:
     """an = two_over_pi_f[i+offset]"""
     if count+offset <= len(two_over_pi_f[0:-2]):
       an = _eq(i, count).e(TernaryOps.WHERE, _take(an, offset, count=count+1), an.const(two_over_pi_f[count+offset]))
@@ -138,7 +138,7 @@ def payne_hanek_reduction(d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   mi = _eq(e, 0).e(TernaryOps.WHERE, _shl_lazy(a2, e).e(BinaryOps.OR, _shr_lazy(a3, offset)), a2)
   lo = _eq(e, 0).e(TernaryOps.WHERE, _shl_lazy(a3, e).e(BinaryOps.OR, _shr_lazy(a4, offset)), a3)
 
-  def _hp_mul(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer: return x.cast(dtypes.uint64).e(BinaryOps.MUL, y.cast(dtypes.uint64))
+  def _hp_mul(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.cast(dtypes.uint64).e(BinaryOps.MUL, y.cast(dtypes.uint64))
   p = _hp_mul(ia, lo)
   p = _hp_mul(ia, mi).e(BinaryOps.ADD, shr(p, 32))
   p = shl(_hp_mul(ia, hi), 32).e(BinaryOps.ADD, p)
@@ -156,14 +156,14 @@ def payne_hanek_reduction(d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   q = fraction_map.e(TernaryOps.WHERE, q, q.e(BinaryOps.ADD, q.const(1)))
   return r, q
 
-def cody_waite_reduction(d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+def cody_waite_reduction(d:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   m_1_pi = 0.318309886183790671537767526745028724
   qdh = d.e(BinaryOps.MUL, d.const(m_1_pi / 16777216)).cast(dtypes.int64).cast(d.dtype).e(BinaryOps.MUL, d.const(16777216.0))
-  def _quadrant(x: LazyBuffer) -> LazyBuffer:
+  def _quadrant(x:LazyBuffer) -> LazyBuffer:
     if x.dtype == dtypes.float64:
       return rintk(mla(d, d.const(m_1_pi), qdh.e(UnaryOps.NEG))).cast(x.dtype)
     return rintk(x.e(BinaryOps.MUL, d.const(m_1_pi))).cast(x.dtype)
-  def _reduce_d(x: LazyBuffer, q: LazyBuffer):
+  def _reduce_d(x:LazyBuffer, q:LazyBuffer):
     if x.dtype == dtypes.float64:
       d = mla(qdh, x.const(-3.1415926218032836914), x)
       d = mla(q, x.const(-3.1415926218032836914), d)
@@ -180,7 +180,7 @@ def cody_waite_reduction(d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
     return d
   return _reduce_d(d, (q := _quadrant(d))), q.cast(dtypes.int32)
 
-def trig_poly(d: LazyBuffer, q: LazyBuffer, coeff32, coeff64):
+def trig_poly(d:LazyBuffer, q:LazyBuffer, coeff32, coeff64):
   u = None
   s = d.e(BinaryOps.MUL, d)
   if d.dtype == dtypes.float64:
@@ -194,21 +194,21 @@ def trig_poly(d: LazyBuffer, q: LazyBuffer, coeff32, coeff64):
     u = polyN(s.const(coeff32[0]), s, coeff32[1:])
   return mla(s, u.e(BinaryOps.MUL, d), d)
 
-def sin_poly(d: LazyBuffer, q: LazyBuffer) -> LazyBuffer: return trig_poly(d, q, [2.6083159809786593541503e-06, -0.0001981069071916863322258, 0.00833307858556509017944336, -0.166666597127914428710938], [-7.97255955009037868891952e-18, 2.81009972710863200091251e-15, -7.64712219118158833288484e-13, 1.60590430605664501629054e-10, -2.50521083763502045810755e-08, 2.75573192239198747630416e-06, -0.000198412698412696162806809, 0.00833333333333332974823815, -0.166666666666666657414808]) # noqa: E501
+def sin_poly(d:LazyBuffer, q:LazyBuffer) -> LazyBuffer: return trig_poly(d, q, [2.6083159809786593541503e-06, -0.0001981069071916863322258, 0.00833307858556509017944336, -0.166666597127914428710938], [-7.97255955009037868891952e-18, 2.81009972710863200091251e-15, -7.64712219118158833288484e-13, 1.60590430605664501629054e-10, -2.50521083763502045810755e-08, 2.75573192239198747630416e-06, -0.000198412698412696162806809, 0.00833333333333332974823815, -0.166666666666666657414808]) # noqa: E501
 
-def sin_poly_small(d: LazyBuffer, q: LazyBuffer) -> LazyBuffer:
+def sin_poly_small(d:LazyBuffer, q:LazyBuffer) -> LazyBuffer:
   def _ifand(n: int): return q.e(BinaryOps.AND, q.const(n)).e(BinaryOps.CMPNE, q.const(0))
   r = sin_poly(d, q)
   return r.e(BinaryOps.MUL, _ifand(1).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
 
-def sin_poly_large(d: LazyBuffer, q: LazyBuffer) -> LazyBuffer:
+def sin_poly_large(d:LazyBuffer, q:LazyBuffer) -> LazyBuffer:
   def _ifand(n: int): return q.e(BinaryOps.AND, q.const(n)).e(BinaryOps.CMPNE, q.const(0))
   d = d.e(BinaryOps.ADD, _ifand(1).e(TernaryOps.WHERE, d.const(math.pi / 2), d.const(0)))
   r = sin_poly(d, q)
   return r.e(BinaryOps.MUL, _ifand(2).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
 
 # fast=True assumes x <= 39800.0
-def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffer:
+def xsin(d:LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   if 0 in d.shape: return d
   if d.dtype == dtypes.float16:
@@ -234,7 +234,7 @@ def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffe
   result = result.e(BinaryOps.MUL, x_sign)
   return _lazy_map_numbers(d, d.const(math.nan), d.const(math.nan), d.const(math.nan), result)
 
-def xexp2(x: LazyBuffer) -> LazyBuffer:
+def xexp2(x:LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(x.dtype)
   if 0 in x.shape: return x
   fp64_p = x.dtype == dtypes.float64
@@ -255,7 +255,7 @@ def xexp2(x: LazyBuffer) -> LazyBuffer:
   u = d.e(BinaryOps.CMPLT, d.const(math.inf)).e(TernaryOps.WHERE, u, u.const(math.nan))
   return _lazy_map_numbers(x, x.const(math.inf), x.const(0.0), x.const(math.nan), u)
 
-def xlog2(d: LazyBuffer) -> LazyBuffer:
+def xlog2(d:LazyBuffer) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   if 0 in d.shape: return d
   fp64_p = d.dtype == dtypes.float64
