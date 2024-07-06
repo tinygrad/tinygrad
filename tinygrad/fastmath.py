@@ -214,7 +214,7 @@ def sin_poly_large(d: LazyBuffer, q: LazyBuffer) -> LazyBuffer:
   return r.e(BinaryOps.MUL, _ifand(2).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
 
 # fast=True assumes x <= 39800.0
-def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=1.0) -> LazyBuffer:
+def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   if 0 in d.shape: return d
   if d.dtype == dtypes.float16:
