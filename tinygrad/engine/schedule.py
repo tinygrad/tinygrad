@@ -152,21 +152,22 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
-                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer], seen:Set[LazyBuffer]):
+                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer], cache:Dict):
   """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
-  if tr in seen: return
-  seen.add(tr)
+  if cache.get((tr, st)): return
+  cache[(tr, st)] = None
   if tr in realizes:
     # can only fuse contiguous
     # max one reduceop per kernel
     if not st.contiguous or st.size != r.st.size or tr in reduce_for_op: group.add(r)
     return group.add(tr)
   for tr_next in children[tr]:
-    # max one reduceop per kernel
-    if tr_next.op in ReduceOps: return group.add(r)
-    # can only fuse contiguous
-    if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
-    _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, seen)
+    if tr_next.realized is None:
+      # max one reduceop per kernel
+      if tr_next.op in ReduceOps: return group.add(r)
+      # can only fuse contiguous
+      if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
+      _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
@@ -189,7 +190,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     if r.op not in ReduceOps or r in realizes: continue
 
     group: Set[LazyBuffer] = set()
-    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, set())
+    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, {})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
