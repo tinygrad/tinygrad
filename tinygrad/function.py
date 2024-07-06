@@ -39,17 +39,16 @@ class Reciprocal(Function):
 
 # ************* unary ops *************
 class Sin(Function):
-  def forward(self, x: LazyBuffer, fast:bool=False) -> LazyBuffer:
+  def forward(self, x: LazyBuffer) -> LazyBuffer:
     self.x = x
-    self.fast = fast or self.device in ["PTX", "NV", "CUDA"]
     self.fast_approx = is_buffer_fastmath_supported(x)
     if self.fast_approx:
-      return xsin(x, fast=self.fast)
+      return xsin(x)
     return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
     k = self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG))
-    k = xsin(k, fast=self.fast) if self.fast_approx else k.e(UnaryOps.SIN)
+    k = xsin(k) if self.fast_approx else k.e(UnaryOps.SIN)
     return k.e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0

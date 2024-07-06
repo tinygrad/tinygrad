@@ -139,7 +139,7 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> Tuple[LazyBuffer
   a2 = _take(i.const(0).cast(dtypes.uint32), 1)
   a3 = _take(i.const(0).cast(dtypes.uint32), 2)
   a4 = _take(i.const(0).cast(dtypes.uint32), 3)
-  
+
   hi = _eq(e, 0).e(TernaryOps.WHERE, _shl_lazy(a1, e).e(BinaryOps.OR, _shr_lazy(a2, offset)), a1)
   mi = _eq(e, 0).e(TernaryOps.WHERE, _shl_lazy(a2, e).e(BinaryOps.OR, _shr_lazy(a3, offset)), a2)
   lo = _eq(e, 0).e(TernaryOps.WHERE, _shl_lazy(a3, e).e(BinaryOps.OR, _shr_lazy(a4, offset)), a3)
@@ -151,7 +151,7 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> Tuple[LazyBuffer
 
   q = shr(p, 62).cast(dtypes.int32)
   p = p.e(BinaryOps.AND, p.const(0x3fffffffffffffff))
-  
+
   d = p.cast(dtype_via)
   d = d.e(BinaryOps.MUL, d.const(3.4061215800865545e-19))
   r = d.cast(input_dtype)
@@ -168,8 +168,7 @@ def cody_waite_reduction(_d_abs: LazyBuffer, d: LazyBuffer) -> Tuple[LazyBuffer,
   def _quadrant(x: LazyBuffer) -> LazyBuffer:
     if x.dtype == dtypes.float64:
       return rintk(mla(d, d.const(m_1_pi), qdh.e(UnaryOps.NEG))).cast(x.dtype)
-    else:
-      return rintk(x.e(BinaryOps.MUL, d.const(m_1_pi))).cast(x.dtype)
+    return rintk(x.e(BinaryOps.MUL, d.const(m_1_pi))).cast(x.dtype)
   def _reduce_d(x: LazyBuffer, q: LazyBuffer):
     if x.dtype == dtypes.float64:
       d = mla(qdh, x.const(-3.1415926218032836914), x)
@@ -201,9 +200,9 @@ def trig_poly(d: LazyBuffer, q: LazyBuffer, coeff32, coeff64):
     u = polyN(s.const(coeff32[0]), s, coeff32[1:])
   return mla(s, u.e(BinaryOps.MUL, d), d)
 
-def sin_poly(d: LazyBuffer, q: LazyBuffer) -> LazyBuffer: return trig_poly(d, q, [2.6083159809786593541503e-06, -0.0001981069071916863322258, 0.00833307858556509017944336, -0.166666597127914428710938], [-7.97255955009037868891952e-18, 2.81009972710863200091251e-15, -7.64712219118158833288484e-13, 1.60590430605664501629054e-10, -2.50521083763502045810755e-08, 2.75573192239198747630416e-06, -0.000198412698412696162806809, 0.00833333333333332974823815, -0.166666666666666657414808])
+def sin_poly(d: LazyBuffer, q: LazyBuffer) -> LazyBuffer: return trig_poly(d, q, [2.6083159809786593541503e-06, -0.0001981069071916863322258, 0.00833307858556509017944336, -0.166666597127914428710938], [-7.97255955009037868891952e-18, 2.81009972710863200091251e-15, -7.64712219118158833288484e-13, 1.60590430605664501629054e-10, -2.50521083763502045810755e-08, 2.75573192239198747630416e-06, -0.000198412698412696162806809, 0.00833333333333332974823815, -0.166666666666666657414808]) # noqa: E501
 
-def sin_poly_small(d, q):
+def sin_poly_small(d: LazyBuffer, q: LazyBuffer) -> LazyBuffer:
   def _ifand(n: int): return q.e(BinaryOps.AND, q.const(n)).e(BinaryOps.CMPNE, q.const(0))
   r = sin_poly(d, q)
   return r.e(BinaryOps.MUL, _ifand(1).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
@@ -214,7 +213,8 @@ def sin_poly_large(d: LazyBuffer, q: LazyBuffer) -> LazyBuffer:
   r = sin_poly(d, q)
   return r.e(BinaryOps.MUL, _ifand(2).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
 
-def xsin(d: LazyBuffer, fast:bool=False) -> LazyBuffer:
+# fast assumes x <= 39800.0
+def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=1.0) -> LazyBuffer:
   assert is_dtype_fastmath_supported(d.dtype)
   if 0 in d.shape: return d
   if d.dtype == dtypes.float16:
@@ -222,7 +222,6 @@ def xsin(d: LazyBuffer, fast:bool=False) -> LazyBuffer:
 
   use_sin_poly = sin_poly_small if fast else sin_poly_large
   reduction_algo = cody_waite_reduction if fast else payne_hanek_reduction
-  
   # mask +-inf/nan as zero
   x = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
   # x_sign = sign(x)
@@ -231,18 +230,19 @@ def xsin(d: LazyBuffer, fast:bool=False) -> LazyBuffer:
   r, q = reduction_algo(x.e(BinaryOps.MUL, x_sign), x)
   if not fast:
     # Payne Hanek Reduction assumes abs(x) >= pi/4, for smaller values, use cody_waite_reduction.
-    switch_over_map = x.e(BinaryOps.MUL, x_sign).e(BinaryOps.CMPLT, x.const(1.0))
+    switch_over_map = x.e(BinaryOps.MUL, x_sign).e(BinaryOps.CMPLT, x.const(switch_over))
     r_fast, q_fast = cody_waite_reduction(x.e(BinaryOps.MUL, x_sign), x)
     r = switch_over_map.e(TernaryOps.WHERE, r_fast, r)
     q = switch_over_map.e(TernaryOps.WHERE, q_fast, q)
-    # sin_poly(abs(x))
+    # y1 = sin_poly(abs(x)) where abs(x) >= switch_over
+    # y2 = sin_poly(x)      where abs(x) < switch_over
     result = switch_over_map.e(TernaryOps.WHERE, sin_poly_small(r, q), sin_poly_large(r, q))
-    # result *= sign(x)
-    result = result.e(BinaryOps.MUL, x_sign)
+    # result = where(switch_over_map, y1 * x_sign, y2)
+    result = switch_over_map.e(TernaryOps.WHERE, result, result.e(BinaryOps.MUL, x_sign))
   else:
     result = use_sin_poly(r, q)
-  return _lazy_map_numbers(d, d.const(math.nan), d.const(math.nan), d.const(math.nan), result)  
-  
+  return _lazy_map_numbers(d, d.const(math.nan), d.const(math.nan), d.const(math.nan), result)
+
 # *** base implementation for xsin/xlog2/xexp2 ***
 def _xexp2_base(d: LazyBuffer) -> LazyBuffer:
   fp64_p = d.dtype == dtypes.float64
