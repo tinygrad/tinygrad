@@ -36,7 +36,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
         assign_targets[out.srcs[1]] = out
     for x in ps[2]:
       if x not in ground_truth and x.device != "NPY": prerealized[x] = x.buffer.as_buffer()
-    si = ScheduleItem(ps[1], tuple(x.buffer for x in (tuple(ps[0])+ps[2]) if x.size != 0))
+    si = ScheduleItem(ps[1], tuple(x.buffer for x in ps[0]+ps[2] if x.size != 0))
     _exec_si(si, seed)
     for out in ps[0]:
       ground_truth[out] = out.buffer.as_buffer()
@@ -57,7 +57,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
           elif x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
           else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
-      si = ScheduleItem(ps[1], tuple(rawbufs[x] for x in (tuple(ps[0])+ps[2]) if x.size != 0))
+      si = ScheduleItem(ps[1], tuple(rawbufs[x] for x in ps[0]+ps[2] if x.size != 0))
       _exec_si(si, seed)
       for out in ps[0]:
         outbuf = np.frombuffer(rawbufs[out].as_buffer(), _to_np_dtype(out.dtype))
