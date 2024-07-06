@@ -98,7 +98,9 @@ def type_verify(uops):
       assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
     if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
     if uop is UOps.CAST and dtype is not None and dtype.count > 1: assert len(src) == dtype.count
-    if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU: assert src[2].dtype == dtypes.bool and src[3].dtype == dtype
+    if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU:
+      assert src[0].dtype == dtype.scalar(), f"{uop} dtype mismatch {src[0].dtype=} != {dtype.scalar()}"
+      assert src[2].dtype == dtypes.bool and src[3].dtype == dtype
     if uop is UOps.STORE:
       assert dtype is None, f"{uop} dtype must be None, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
