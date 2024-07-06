@@ -151,7 +151,7 @@ def payne_hanek_reduction(d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   r = d.cast(input_dtype)
 
   fraction_map = f.e(BinaryOps.CMPLT, f.const(0.5))
-  # if fraction >- 0.5, r -= pi/2, q += 1
+  # if fraction >= 0.5, r -= pi/2, q += 1
   r = fraction_map.e(TernaryOps.WHERE, r, r.e(BinaryOps.ADD, r.const(-math.pi / 2)))
   q = fraction_map.e(TernaryOps.WHERE, q, q.e(BinaryOps.ADD, q.const(1)))
   return r, q
