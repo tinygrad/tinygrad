@@ -114,7 +114,7 @@ class MultiLazyBuffer:
       else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis))
     new_real_lbs = {i:lsrcs[0].e(op, *lsrcs[1:], arg=arg) for i,(lsrcs,r) in enumerate(zip(zip(*srcs),new_real)) if r}
     # NOTE: const dtype should match real
-    real_dtype = list(new_real_lbs.values())[0].dtype
+    real_dtype = next(iter(new_real_lbs.values())).dtype
     return MultiLazyBuffer([new_real_lbs[i] if r else lsrcs[0].const(0).cast(real_dtype) \
         for i, (lsrcs,r) in enumerate(zip(zip(*srcs),new_real))], axis, new_real)
 

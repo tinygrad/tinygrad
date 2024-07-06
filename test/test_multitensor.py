@@ -141,7 +141,7 @@ class TestMultiTensor(unittest.TestCase):
     W = Tensor.randn(8, 8).realize()
     X.shard_(devices_4, 0)
     W.shard_(devices_4, 0)
-    O = X.shrink(((0, 2),None)).mul(W.shrink(((0, 2),None))) < 2
+    O = X.shrink(((0, 2), None)) * W.shrink(((0, 2), None)) < 2
     np.testing.assert_allclose(O.numpy(), X.numpy()[0:2]*W.numpy()[0:2] < 2)
 
   @given(strat.sampled_from((4, 5)), strat.sampled_from((devices_2, devices_3)), strat.sampled_from((ReduceOps.SUM, ReduceOps.MAX)),
