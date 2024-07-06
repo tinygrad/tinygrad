@@ -107,7 +107,7 @@ def frexp(v: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
 
 # *** reduction algorithm for trig ***
 # d = abs(d_base)
-def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+def payne_hanek_reduction(d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   assert is_dtype_fastmath_supported(d.dtype)
   two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410] # noqa: E501
 
@@ -158,7 +158,7 @@ def payne_hanek_reduction(d: LazyBuffer, d_base: LazyBuffer) -> Tuple[LazyBuffer
   q = fraction_map.e(TernaryOps.WHERE, q, q.e(BinaryOps.ADD, q.const(1)))
   return r, q
 
-def cody_waite_reduction(_d_abs: LazyBuffer, d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+def cody_waite_reduction(d: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   m_1_pi = 0.318309886183790671537767526745028724
   qdh = d.e(BinaryOps.MUL, d.const(m_1_pi / 16777216)).cast(dtypes.int64).cast(d.dtype).e(BinaryOps.MUL, d.const(16777216.0))
   def _quadrant(x: LazyBuffer) -> LazyBuffer:
@@ -221,21 +221,20 @@ def xsin(d: LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffe
   x = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
   # x_sign = sign(x)
   x_sign = x.e(BinaryOps.CMPNE, d.const(0)).e(TernaryOps.WHERE, x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1)), x.const(0)) # noqa: E501
-  # r, q = reduce(abs(x), x)
-  r, q = reduction_algo(x.e(BinaryOps.MUL, x_sign), x)
+  x_abs = x.e(BinaryOps.MUL, x_sign)
+  # r, q = reduce(abs(x))
+  r, q = reduction_algo(x_abs)
   if not fast:
     # Payne Hanek Reduction assumes abs(x) >= pi/4, for smaller values, use cody_waite_reduction.
-    switch_over_map = x.e(BinaryOps.MUL, x_sign).e(BinaryOps.CMPLT, x.const(switch_over))
-    r_fast, q_fast = cody_waite_reduction(x.e(BinaryOps.MUL, x_sign), x)
+    # TODO: Eliminate switch_over
+    switch_over_map = x_abs.e(BinaryOps.CMPLT, x.const(switch_over))
+    r_fast, q_fast = cody_waite_reduction(x_abs)
     r = switch_over_map.e(TernaryOps.WHERE, r_fast, r)
     q = switch_over_map.e(TernaryOps.WHERE, q_fast, q)
-    # y1 = sin_poly(abs(x)) where abs(x) >= switch_over
-    # y2 = sin_poly(x)      where abs(x) < switch_over
     result = switch_over_map.e(TernaryOps.WHERE, sin_poly_small(r, q), sin_poly_large(r, q))
-    # result = where(switch_over_map, y1 * x_sign, y2)
-    result = switch_over_map.e(TernaryOps.WHERE, result, result.e(BinaryOps.MUL, x_sign))
   else:
     result = use_sin_poly(r, q)
+  result = result.e(BinaryOps.MUL, x_sign)
   return _lazy_map_numbers(d, d.const(math.nan), d.const(math.nan), d.const(math.nan), result)
 
 # *** base implementation for xsin/xlog2/xexp2 ***
