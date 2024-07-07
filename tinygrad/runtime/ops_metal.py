@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
-from typing import List, Set, Any, Tuple, Optional
+from typing import Any, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
@@ -42,7 +42,7 @@ class MetalProgram:
     self.fxn = self.library.newFunctionWithName_(name)
     self.pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if prod(local_size) > self.pipeline_state.maxTotalThreadsPerThreadgroup(): raise RuntimeError(f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}")  # noqa: E501
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
@@ -63,7 +63,7 @@ class MetalBuffer:
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
     self.device:MetalDevice = device
-    self.track_cross_device: Set[MetalDevice] = set()
+    self.track_cross_device: set[MetalDevice] = set()
     super().__init__()
   def free_cache(self):
     self.device.synchronize()
@@ -98,9 +98,9 @@ class MetalDevice(Compiled):
   def __init__(self, device:str):
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
-    self.mtl_buffers_in_flight: List[Any] = []
-    self.mv_in_metal: List[memoryview] = []
-    self.track_cross_buffer: List[Any] = []
+    self.mtl_buffers_in_flight: list[Any] = []
+    self.mv_in_metal: list[memoryview] = []
+    self.track_cross_buffer: list[Any] = []
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
                      functools.partial(MetalProgram, self), MetalGraph)

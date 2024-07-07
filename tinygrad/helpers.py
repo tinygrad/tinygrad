@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
 import itertools, urllib.request, subprocess, shutil, math, json
-from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
+from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   from tinygrad.shape.shapetracker import sint
@@ -22,29 +22,29 @@ def argfix(*x):
     return tuple(x[0])
   return x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def all_same(items:List[T]): return all(x == items[0] for x in items)
-def all_int(t: Sequence[Any]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
+def all_same(items:list[T]): return all(x == items[0] for x in items)
+def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
-def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
+def make_pair(x:Union[int, tuple[int, ...]], cnt=2) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l): return [item for sublist in l for item in (fully_flatten(sublist) if isinstance(sublist, (tuple, list)) else [sublist])]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def round_up(num, amt:int): return (num+amt-1)//amt * amt
-def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
+def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"  # noqa: E501
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst:List[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
-  a:List[T] = []
-  b:List[T] = []
+def partition(lst:list[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]]:
+  a:list[T] = []
+  b:list[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
-def unwrap2(x:Tuple[T,Any]) -> T:
+def unwrap2(x:tuple[T,Any]) -> T:
   ret, err = x
   assert err is None, str(err)
   return ret
@@ -55,14 +55,14 @@ def get_child(obj, key):
     else: obj = getattr(obj, k)
   return obj
 
-def get_shape(x) -> Tuple[int, ...]:
+def get_shape(x) -> tuple[int, ...]:
   if not isinstance(x, (list, tuple)): return ()
   subs = [get_shape(xi) for xi in x]
   if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
+def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> Optional[list[list[int]]]:
   acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
   try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
   except ValueError: return None
@@ -77,7 +77,7 @@ def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posi
 class GraphException(Exception): pass
 
 class Context(contextlib.ContextDecorator):
-  stack: ClassVar[List[dict[str, int]]] = [{}]
+  stack: ClassVar[list[dict[str, int]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
     Context.stack[-1] = {k:o.value for k,o in ContextVar._cache.items()} # Store current state.
@@ -87,7 +87,7 @@ class Context(contextlib.ContextDecorator):
     for k in Context.stack.pop(): ContextVar._cache[k].value = Context.stack[-1].get(k, ContextVar._cache[k].value)
 
 class ContextVar:
-  _cache: ClassVar[Dict[str, ContextVar]] = {}
+  _cache: ClassVar[dict[str, ContextVar]] = {}
   value: int
   key: str
   def __new__(cls, key, default_value):
@@ -146,9 +146,9 @@ class Profiling(contextlib.ContextDecorator):
 
 class ProfileLogger:
   writers: int = 0
-  mjson: List[Dict] = []
-  actors: Dict[str, int] = {}
-  subactors: Dict[Tuple[str, str], int] = {}
+  mjson: list[dict] = []
+  actors: dict[str, int] = {}
+  subactors: dict[tuple[str, str], int] = {}
   path = getenv("PROFILE_OUTPUT_FILE", temp("tinygrad_profile.json"))
 
   def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
@@ -193,7 +193,7 @@ def diskcache_clear():
   drop_tables = cur.execute("SELECT 'DROP TABLE IF EXISTS ' || quote(name) || ';' FROM sqlite_master WHERE type = 'table';").fetchall()
   cur.executescript("\n".join([s[0] for s in drop_tables]))
 
-def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
+def diskcache_get(table:str, key:Union[dict, str, int]) -> Any:
   if CACHELEVEL == 0: return None
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
@@ -206,7 +206,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   return None
 
 _db_tables = set()
-def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
+def diskcache_put(table:str, key:Union[dict, str, int], val:Any):
   if CACHELEVEL == 0: return val
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
@@ -268,9 +268,9 @@ def from_mv(mv:memoryview, to_type=ctypes.c_char):
   return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type * len(mv))).contents
 def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 def mv_address(mv:memoryview): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
-def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])  # noqa: E501
+def to_char_p_p(options: list[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])  # noqa: E501
 @functools.lru_cache(maxsize=None)
-def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
+def init_c_struct_t(fields: tuple[tuple[str, ctypes._SimpleCData], ...]):
   class CStruct(ctypes.Structure):
     _pack_, _fields_ = 1, fields
   return CStruct

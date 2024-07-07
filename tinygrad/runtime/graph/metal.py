@@ -1,4 +1,5 @@
-from typing import List, Any, Dict, cast, Optional
+from __future__ import annotations
+from typing import Any, cast, Optional
 import Metal
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, unwrap2, GraphException
@@ -9,7 +10,7 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_metal import wait_check
 
 class MetalGraph(GraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
@@ -48,7 +49,7 @@ class MetalGraph(GraphRunner):
     self.command_buffer: Any = None
     if len(self.vars): self.int_buf_view = self.int_buf.buf.contents().as_buffer(self.int_buf.buf.length()).cast('i')
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], wait=False) -> Optional[float]:
     if self.command_buffer is not None and self.command_buffer in self.device.mtl_buffers_in_flight: wait_check(self.command_buffer)
     all_resources = dedup(self.all_resources + [x._buf.buf for x in input_rawbuffers])
 

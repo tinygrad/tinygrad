@@ -4,7 +4,6 @@
 # 3. a "LazyBuffer" that fuses the compute into kernels, using memory only when needed
 # 4. a "Tensor" that provides an easy to use frontend with autograd ".backward()"
 
-
 print("******** first, the runtime ***********")
 
 from tinygrad.runtime.ops_clang import ClangProgram, ClangCompiler, MallocAllocator

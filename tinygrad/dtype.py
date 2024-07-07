@@ -1,4 +1,5 @@
-from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
+from __future__ import annotations
+from typing import Final, Optional, ClassVar, Union
 from dataclasses import dataclass
 import functools
 from tinygrad.helpers import getenv
@@ -21,7 +22,7 @@ class DType:
 # dependent typing?
 @dataclass(frozen=True, repr=False)
 class ImageDType(DType):
-  shape: Tuple[int, ...]   # arbitrary arg for the dtype, used in image for the shape
+  shape: tuple[int, ...]   # arbitrary arg for the dtype, used in image for the shape
   base: DType
   def scalar(self): return self.base
   def vec(self, sz:int): return self.base.vec(sz)
@@ -53,7 +54,7 @@ class dtypes:
   @staticmethod
   def as_const(val: ConstType, dtype:DType): return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
-  def fields() -> Dict[str, DType]: return DTYPES_DICT
+  def fields() -> dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
   int8: Final[DType] = DType(1, 1, "char", 'b', 1)
   uint8: Final[DType] = DType(2, 1, "unsigned char", 'B', 1)
@@ -95,7 +96,7 @@ promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes
   dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
 
 @functools.lru_cache(None)
-def _get_recursive_parents(dtype:DType) -> Set[DType]:
+def _get_recursive_parents(dtype:DType) -> set[DType]:
   return set.union(*[_get_recursive_parents(d) for d in promo_lattice[dtype]], {dtype}) if dtype != dtypes.float64 else {dtypes.float64}
 @functools.lru_cache(None)
 def least_upper_dtype(*ds:DType) -> DType:

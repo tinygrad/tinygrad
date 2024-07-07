@@ -1,5 +1,6 @@
+from __future__ import annotations
 import collections, array, time
-from typing import List, Any, Dict, cast, Optional, Tuple, Set
+from typing import Any, cast, Optional
 from tinygrad.helpers import round_up, to_mv, PROFILE
 from tinygrad.device import Buffer, BufferOptions, Compiled, Device
 from tinygrad.shape.symbolic import Variable
@@ -7,22 +8,22 @@ from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     self.devices = list(set(cast(Any, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
     # Allocate kernel args.
-    kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
+    kernargs_size: dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
       kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
-    self.kernargs_bufs: Dict[Compiled, Any] = {dev:dev.allocator._alloc(sz, BufferOptions(cpu_access=True)) for dev,sz in kernargs_size.items()}
-    kernargs_ptrs: Dict[Compiled, int] = {dev:buf.va_addr for dev,buf in self.kernargs_bufs.items()}
+    self.kernargs_bufs: dict[Compiled, Any] = {dev:dev.allocator._alloc(sz, BufferOptions(cpu_access=True)) for dev,sz in kernargs_size.items()}
+    kernargs_ptrs: dict[Compiled, int] = {dev:buf.va_addr for dev,buf in self.kernargs_bufs.items()}
 
     # Fill initial arguments.
-    self.kargs_addrs: Dict[int, int] = {}
-    self.ji_args_bufs: Dict[int, memoryview] = {}
-    self.ji_args_vars: Dict[int, memoryview] = {}
+    self.kargs_addrs: dict[int, int] = {}
+    self.ji_args_bufs: dict[int, memoryview] = {}
+    self.ji_args_vars: dict[int, memoryview] = {}
     for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
       self.kargs_addrs[j] = kernargs_ptrs[ji.prg.device]
@@ -41,19 +42,19 @@ class HCQGraph(MultiGraphRunner):
     # graph-related tasks. This synchronization uses a global timeline signal per device. Within the graph, the compute queue coordinates with
     # global operations and sets a kickoff signal. Any queue accessing a buffer from another device waits for this signal from the device’s
     # compute queue to ensure exclusive access. The compute queue signals the completion of the graph, synchronizing with the device's copy queue.
-    self.comp_queues: Dict[Compiled, Any] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
-    self.copy_queues: Dict[Compiled, Any] = {dev: dev.hw_copy_queue_t() for dev in self.devices}
+    self.comp_queues: dict[Compiled, Any] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
+    self.copy_queues: dict[Compiled, Any] = {dev: dev.hw_copy_queue_t() for dev in self.devices}
 
-    self.signal_sched: Dict[int, Tuple[List, Any, Optional[int], Optional[List]]] = {} # Dict[ji_idx, (deps, signal, sigval, prof_info)]
+    self.signal_sched: dict[int, tuple[list, Any, Optional[int], Optional[list]]] = {} # dict[ji_idx, (deps, signal, sigval, prof_info)]
     self.signals = {q: self.devices[0]._alloc_signal(value=0) for q in list(self.comp_queues.values())+list(self.copy_queues.values())}
-    self.dev_kickoff_signal = {dev: self.devices[0]._alloc_signal(value=0) for dev in self.devices + ['CPU']} # Dict[dev, signal]
+    self.dev_kickoff_signal = {dev: self.devices[0]._alloc_signal(value=0) for dev in self.devices + ['CPU']} # dict[dev, signal]
     self.kickoff_value = 0
 
-    self.save_devs: Dict[Any, Set] = {q: set() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
+    self.save_devs: dict[Any, set] = {q: set() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
     for dev in self.devices: self.save_devs[self.comp_queues[dev]].add(dev)
 
-    self.graph_timeline = {dev: 0 for dev in self.devices} # Dict[dev, last graph sigval]
-    self.last_ji: Dict[Any, Any] = {q: None for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
+    self.graph_timeline = {dev: 0 for dev in self.devices} # dict[dev, last graph sigval]
+    self.last_ji: dict[Any, Any] = {q: None for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
 
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev = ji.prg.device if isinstance(ji.prg, CompiledRunner) else Device[ji.bufs[1].device] #type:ignore
@@ -82,9 +83,9 @@ class HCQGraph(MultiGraphRunner):
       self.last_ji[enqueue_queue] = j
 
     # Build hardware queues.
-    self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
-    self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
-    self.kickoff_wait_cmds: Dict[Any, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
+    self.exec_ptrs: dict[int, tuple[Any, int]] = {}
+    self.copy_to_devs: dict[Compiled, set[Compiled]] = {dev: set() for dev in self.devices}
+    self.kickoff_wait_cmds: dict[Any, list] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
 
     for dev in self.devices:
       self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1) \
@@ -124,7 +125,7 @@ class HCQGraph(MultiGraphRunner):
       if hasattr(self.comp_queues[dev], 'bind'): self.comp_queues[dev].bind(dev)
       if hasattr(self.copy_queues[dev], 'bind') and self.last_ji[self.copy_queues[dev]] is not None: self.copy_queues[dev].bind(dev)
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
     self.kickoff_value += 1
     for dev in self.devices: dev._wait_signal(dev.timeline_signal, self.graph_timeline[dev])

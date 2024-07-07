@@ -1,6 +1,7 @@
+from __future__ import annotations
 import os, atexit, functools, contextlib
 from collections import defaultdict
-from typing import List, Any, DefaultDict, Union
+from typing import Any, Union
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters, getenv
@@ -31,7 +32,7 @@ def init_graph():
   G = nx.DiGraph()
   atexit.register(functools.partial(save_graph, G, GRAPHPATH)) # -Gnslimit=100 can make it finish, but you won't like results
 
-counts: DefaultDict[type, int] = defaultdict(int)
+counts: defaultdict[type, int] = defaultdict(int)
 def nm(x):
   if not hasattr(x, 'node_id'):
     setattr(x, 'node_id', counts[type(x)])
@@ -88,7 +89,7 @@ def _tree(dag:Union[LazyOp, UOp, UPat], cycles, cnt):
 
 def print_tree(dag:Union[LazyOp, UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(dag, {}, [-1]))]))
 
-def graph_uops(uops:List[UOp]):
+def graph_uops(uops:list[UOp]):
   colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
             UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0",
             UOps.RANGE: "#c8a0e0", UOps.PHI: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0"}

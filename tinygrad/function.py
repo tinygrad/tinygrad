@@ -1,6 +1,7 @@
 """This is where the forwards and backwards passes live."""
+from __future__ import annotations
 import math
-from typing import Tuple, Optional
+from typing import Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
@@ -97,11 +98,11 @@ class Sign(Function):
 
 class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.CMPLT, y)
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]: return None, None
+  def backward(self, grad_output:LazyBuffer) -> tuple[Optional[LazyBuffer], Optional[LazyBuffer]]: return None, None
 
 class Neq(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.CMPNE, y)
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]: return None, None
+  def backward(self, grad_output:LazyBuffer) -> tuple[Optional[LazyBuffer], Optional[LazyBuffer]]: return None, None
 
 class Xor(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.XOR, y)
@@ -115,7 +116,7 @@ class BitwiseOr(Function):
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.ADD, y)
 
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output if self.needs_input_grad[0] else None, \
            grad_output if self.needs_input_grad[1] else None
 
@@ -124,7 +125,7 @@ class Mul(Function):
     self.x, self.y = x, y
     return x.e(BinaryOps.MUL, y)
 
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return self.y.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None, \
            self.x.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
 
@@ -133,7 +134,7 @@ class Div(Function):
     self.x, self.y = x, y
     return x.e(BinaryOps.MUL, y.e(UnaryOps.RECIP)) if not dtypes.is_int(x.dtype) else x.e(BinaryOps.IDIV, y)
 
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output.e(BinaryOps.MUL, self.y.e(UnaryOps.RECIP)) if self.needs_input_grad[0] else None, \
            grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(BinaryOps.MUL, self.y.e(BinaryOps.MUL, self.y).e(UnaryOps.RECIP)) if self.needs_input_grad[1] else None  # noqa: E501
 
@@ -144,7 +145,7 @@ class Where(Function):
     self.x = x
     return self.x.e(TernaryOps.WHERE, y, z)
 
-  def backward(self, grad_output:LazyBuffer) -> Tuple[None, Optional[LazyBuffer], Optional[LazyBuffer]]:
+  def backward(self, grad_output:LazyBuffer) -> tuple[None, Optional[LazyBuffer], Optional[LazyBuffer]]:
     return None, \
       self.x.e(TernaryOps.WHERE, grad_output, grad_output.const(0)) if self.needs_input_grad[1] else None, \
       self.x.e(TernaryOps.WHERE, grad_output.const(0), grad_output) if self.needs_input_grad[2] else None
@@ -152,14 +153,14 @@ class Where(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, axis:tuple[int, ...]) -> LazyBuffer:
     self.input_shape = x.shape
     return x.r(ReduceOps.SUM, axis)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
 
 class Max(Function):
-  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, axis:tuple[int, ...]) -> LazyBuffer:
     self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
     return self.ret
 
@@ -174,7 +175,7 @@ class Max(Function):
 
 # NOTE: this is sum in reverse
 class Expand(Function):
-  def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, shape:tuple[int, ...]) -> LazyBuffer:
     self.expanded_axis = tuple(i for i, (si, so) in enumerate(zip(x.shape, shape)) if si != so)
     return x.expand(shape)
 
@@ -182,35 +183,35 @@ class Expand(Function):
     return grad_output.cast(sum_acc_dtype(grad_output.dtype)).r(ReduceOps.SUM, self.expanded_axis).cast(grad_output.dtype)
 
 class Reshape(Function):
-  def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, shape:tuple[int, ...]) -> LazyBuffer:
     self.input_shape = x.shape
     return x.reshape(shape)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.reshape(self.input_shape)
 
 class Permute(Function):
-  def forward(self, x:LazyBuffer, order:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, order:tuple[int, ...]) -> LazyBuffer:
     self.input_order = order
     return x.permute(order)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.permute(argsort(self.input_order))
 
 class Pad(Function):
-  def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, arg:tuple[tuple[int, int], ...]) -> LazyBuffer:
     self.narg = tuple([(p[0], s+p[0]) for s,p in zip(x.shape, arg)])
     return x.pad(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.shrink(self.narg)
 
 class Shrink(Function):
-  def forward(self, x:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, arg:tuple[tuple[sint, sint], ...]) -> LazyBuffer:
     self.narg = tuple([(p[0], s-p[1]) for s,p in zip(x.shape, arg)])
     return x.shrink(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.pad(self.narg)
 
 class Flip(Function):
-  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, axis:tuple[int, ...]) -> LazyBuffer:
     self.arg = tuple([-1 if i in axis else 1 for i in range(len(x.shape))])
     return x.stride(self.arg)
 

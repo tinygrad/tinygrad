@@ -1,4 +1,5 @@
-from typing import Dict, List, Optional, Tuple, Union, DefaultDict, cast, Literal, Callable
+from __future__ import annotations
+from typing import Optional, Union, cast, Literal, Callable
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
@@ -16,13 +17,13 @@ class CStyleLanguage(Renderer):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
-  code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
-  extra_args: List[str] = []
+  code_for_workitem: dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
+  extra_args: list[str] = []
   float4: Optional[str] = None
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
-  type_map: Dict[DType, str] = {}
-  code_for_op: Dict = {
+  type_map: dict[DType, str] = {}
+  code_for_op: dict = {
     UnaryOps.NEG: lambda x,dtype: f"(!{x})" if dtype == dtypes.bool else f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
@@ -38,7 +39,7 @@ class CStyleLanguage(Renderer):
     return f"({self.render_dtype(var_dtype)})({x})"
 
   # returns a str expression of the vectorized xs with the given type
-  def render_vectorize(self, x:List[str], var_dtype:DType) -> str:
+  def render_vectorize(self, x:list[str], var_dtype:DType) -> str:
     assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
     return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
@@ -65,7 +66,7 @@ class CStyleLanguage(Renderer):
     return f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
 
   def get_kernel_modifier(self, uops:UOpGraph) -> str: return ""
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:UOpGraph, prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:UOpGraph, prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
                 ("" if mutable else "const ")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
@@ -92,12 +93,12 @@ class CStyleLanguage(Renderer):
 
   def render(self, name:str, uops:UOpGraph) -> str:
     kernel = []
-    bufs: List[Tuple[str, Tuple[DType, bool]]] = []
+    bufs: list[tuple[str, tuple[DType, bool]]] = []
     depth = 1
     def kk(s): kernel.append("  "*depth+s)
 
-    c: DefaultDict[str, int] = defaultdict(int)
-    r: Dict[UOp, str] = {}
+    c: defaultdict[str, int] = defaultdict(int)
+    r: dict[UOp, str] = {}
 
     def ssa(prefix:str, u:Optional[UOp]=None):
       nonlocal c, r

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from typing import Union, Optional, Any, Tuple, List
+from typing import Union, Optional, Any
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
@@ -10,7 +10,7 @@ from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
-def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
+def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0: op, arg, srcs, base = LoadOps.CONST, 0, (), None
   if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, Variable) else arg, True
@@ -25,7 +25,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
 view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
-               op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
+               op:Optional[Op]=None, arg:Any=None, srcs:tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None):
     self.device, self.st, self.dtype, self.shape, self.size = device, st, dtype, st.shape, st.size
     self._base: Optional[LazyBuffer] = None
@@ -40,7 +40,7 @@ class LazyBuffer:
       else:
         self.buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.buffer.ref(1)
-      self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
+      self.contiguous_child: Optional[tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:
       # properties on view
@@ -64,14 +64,14 @@ class LazyBuffer:
 
   # same API as multi
   @property
-  def lbs(self) -> List[LazyBuffer]: return [self]
+  def lbs(self) -> list[LazyBuffer]: return [self]
 
   @staticmethod
-  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
+  def loadop(op, shape:tuple[sint,...], dtype:DType, device:str, arg=None, src:tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
     assert isinstance(src, tuple)
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
-  def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
+  def const(self, val:ConstType, shape:Optional[tuple[sint,...]]=None) -> LazyBuffer:
     assert isinstance(val, (int,float,bool)), f"{val=} has {type(val)=}, not a ConstType"
     shape = self.shape if shape is None else shape
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
@@ -135,7 +135,7 @@ class LazyBuffer:
     return self.base._copy(device)._view(self.st)
 
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
-    srcs: List[LazyBuffer] = []
+    srcs: list[LazyBuffer] = []
     for s in (self,)+in_srcs:
       if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
         srcs.append(root._view(s.base.contiguous_child[1]))
@@ -167,14 +167,14 @@ class LazyBuffer:
 
   # *** reduce ops ***
 
-  def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
+  def _reduce_op(self, op:ReduceOps, axis:tuple[int, ...]) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
     axis = tuple(sorted([x for x in axis if self.shape[x] != 1]))
     if len(axis) == 0: return self
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, axis, (self,))
 
-  def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
+  def r(self, op:ReduceOps, axis:tuple[int, ...]) -> LazyBuffer:
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     # TODO: this logic should move to the scheduler
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
@@ -212,9 +212,9 @@ class LazyBuffer:
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
-  def reshape(self, arg:Tuple[sint, ...]): return self._view(self.st.reshape(arg))
-  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.pad(arg))
-  def expand(self, arg:Tuple[sint, ...]): return self._view(self.st.expand(arg))
-  def permute(self, arg:Tuple[int, ...]): return self._view(self.st.permute(arg))
-  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.shrink(arg))
-  def stride(self, arg:Tuple[int, ...]): return self._view(self.st.stride(arg))
+  def reshape(self, arg:tuple[sint, ...]): return self._view(self.st.reshape(arg))
+  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._view(self.st.pad(arg))
+  def expand(self, arg:tuple[sint, ...]): return self._view(self.st.expand(arg))
+  def permute(self, arg:tuple[int, ...]): return self._view(self.st.permute(arg))
+  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._view(self.st.shrink(arg))
+  def stride(self, arg:tuple[int, ...]): return self._view(self.st.stride(arg))

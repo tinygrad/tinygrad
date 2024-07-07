@@ -1,23 +1,23 @@
 from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast
+from typing import Optional, cast
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
 
 @functools.lru_cache(maxsize=None)
-def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
+def canonicalize_strides(shape:tuple[sint, ...], strides:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if s == 1 else st for s, st in zip(shape, strides))
 
 @functools.lru_cache(maxsize=None)
-def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
+def strides_for_shape(shape:tuple[sint, ...]) -> tuple[sint, ...]:
   if not shape: return ()
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
   return canonicalize_strides(shape, strides)
 
 @functools.lru_cache(maxsize=None)
-def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
-  # merge contiguous sub-parts or zero strided dims. ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
+def _merge_dims(shape:tuple[int, ...], strides:tuple[int, ...], mask:Optional[tuple[tuple[int, int], ...]]=None) -> tuple[tuple[int, int, int], ...]:
+  # merge contiguous sub-parts or zero strided dims. ret = tuple[(merged_size, stride, merged size w/o zero stride), ...]
   if not shape: return ()
   assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
   ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)]
@@ -35,10 +35,10 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
-def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]], bool]:
+def _reshape_mask(view: View, new_shape:tuple[sint, ...]) -> tuple[Optional[tuple[tuple[sint, sint], ...]], bool]:
   if view.mask is None: return view.mask, False
   if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in view.mask): return view.mask, True
-  new_mask: List[Tuple[int, int]] = []
+  new_mask: list[tuple[int, int]] = []
 
   r_masks, r_shape, r_new_shape = reversed(view.mask), reversed(view.shape), reversed(new_shape)
   curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
@@ -70,7 +70,7 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
 
   return tuple(reversed(new_mask)), False
 
-def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
+def un1d(shape:tuple[sint, ...], offs:sint) -> list[sint]:
   strides = strides_for_shape(shape)
   result = []
   for stride in strides:
@@ -81,10 +81,10 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
 
 @dataclass(frozen=True)
 class View:
-  shape:Tuple[sint, ...]
-  strides:Tuple[sint, ...]
+  shape:tuple[sint, ...]
+  strides:tuple[sint, ...]
   offset:sint
-  mask:Optional[Tuple[Tuple[sint, sint], ...]]
+  mask:Optional[tuple[tuple[sint, sint], ...]]
   contiguous:bool
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -96,7 +96,7 @@ class View:
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
-  def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
+  def create(shape:tuple[sint, ...], strides:Optional[tuple[sint, ...]]=None, offset:sint=0, mask:Optional[tuple[tuple[sint, sint], ...]]=None):
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize 0 in shape
     if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
@@ -114,12 +114,12 @@ class View:
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
-  def vars(self) -> Set[Variable]:
+  def vars(self) -> set[Variable]:
     flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
     return functools.reduce(operator.or_, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, Node)], set())
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
-  def unbind(self) -> Tuple[View, Dict[Variable, int]]:
+  def unbind(self) -> tuple[View, dict[Variable, int]]:
     var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.val is not None]
     unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
     new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape])
@@ -142,8 +142,8 @@ class View:
 
     # Project vm1's offset and strides on to vm2.
     origin = un1d(vm2.shape, vm1.offset)
-    terms: List[List[Tuple[int, sint]]] = [[] for _ in origin]
-    strides: List[sint] = [0] * len(vm1.shape)
+    terms: list[list[tuple[int, sint]]] = [[] for _ in origin]
+    strides: list[sint] = [0] * len(vm1.shape)
     for d1, st in enumerate(vm1.strides):
       if st == 0: continue
       for d2, (o, s1) in enumerate(zip(origin, un1d(vm2.shape, vm1.offset + st))):
@@ -153,9 +153,9 @@ class View:
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
-    idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
+    idxs: list[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
     merged_size, merged_term = 1, NumNode(0)
-    extents: List[Tuple[sint, Node]] = []
+    extents: list[tuple[sint, Node]] = []
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += Variable.sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
       merged_size *= s
@@ -196,7 +196,7 @@ class View:
     return View.create(vm1.shape, tuple(strides), sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def invert(self, out_shape:Tuple[sint, ...]) -> Optional[View]:
+  def invert(self, out_shape:tuple[sint, ...]) -> Optional[View]:
     ret = View.create(self.shape)
     if self.mask: ret = ret.shrink(self.mask)
     ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
@@ -207,7 +207,7 @@ class View:
     min_shape = tuple(x[0] for x in _merge_dims(self.shape, self.strides, self.mask))
     return nv if (nv := self.reshape(min_shape)) else self
 
-  def __unsafe_resize(self, arg: Tuple[Tuple[sint, sint], ...], mask=None) -> View:
+  def __unsafe_resize(self, arg: tuple[tuple[sint, sint], ...], mask=None) -> View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
     if self.mask:
       # move the old mask
@@ -219,7 +219,7 @@ class View:
     return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
+  def pad(self, arg: tuple[tuple[sint, sint], ...]) -> View:
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape), f"{self.shape=}, {arg=}"
     if any(b or e for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
@@ -228,12 +228,12 @@ class View:
     return self
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
+  def shrink(self, arg: tuple[tuple[sint, sint], ...]) -> View:
     assert all((0<=b<=e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape), f"invalid shrink {arg} for {self.shape}"
     return self.__unsafe_resize(arg)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def expand(self, new_shape: Tuple[sint, ...]) -> View:
+  def expand(self, new_shape: tuple[sint, ...]) -> View:
     if len(new_shape) != len(self.shape): raise ValueError(f"expand arg {new_shape=} must have same number of dimensions as shape {self.shape=}")
     if 0 in self.shape:
       assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
@@ -244,13 +244,13 @@ class View:
     return View.create(new_shape, self.strides, self.offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def permute(self, axis: Tuple[int, ...]) -> View:
+  def permute(self, axis: tuple[int, ...]) -> View:
     assert sorted(axis) == list(range(len(self.shape))), f"invalid permutation {axis} of len {len(self.shape)}"
     return View.create(tuple(self.shape[a] for a in axis), tuple(self.strides[a] for a in axis), self.offset,
                        tuple(self.mask[a] for a in axis) if self.mask is not None else None)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def stride(self, mul: Tuple[int, ...]) -> View:
+  def stride(self, mul: tuple[int, ...]) -> View:
     # except for the negative case, you can build this from the others. invertible in the negative case
     assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
     strides = tuple([z*m for z,m in zip(self.strides, mul)])
@@ -261,7 +261,7 @@ class View:
     return View.create(new_shape, strides, self.offset + offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def reshape(self, new_shape: Tuple[sint, ...]) -> Optional[View]:
+  def reshape(self, new_shape: tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
     assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"

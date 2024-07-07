@@ -1,4 +1,5 @@
-from typing import List, Dict, cast
+from __future__ import annotations
+from typing import cast
 import ctypes
 from tinygrad.helpers import dedup, cpu_time_execution, GraphException, DEBUG
 from tinygrad.engine.jit import GraphRunner
@@ -10,7 +11,7 @@ from tinygrad.renderer.cstyle import ClangRenderer
 render_dtype = ClangRenderer().render_dtype
 
 class ClangGraph(GraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
@@ -34,6 +35,6 @@ class ClangGraph(GraphRunner):
     assert compiler is not None
     self.clprg = ClangProgram("batched", compiler.compile(prgs+"\n"+"\n".join(code))) # no point in caching the pointers
 
-  def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False):
+  def __call__(self, rawbufs: list[Buffer], var_vals: dict[Variable, int], wait=False):
     return cpu_time_execution(
     lambda: self.clprg(*[x._buf for x in rawbufs], *[x[1] for x in sorted(var_vals.items(), key=lambda x: x[0].expr)]), enable=wait)

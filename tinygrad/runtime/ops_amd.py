@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any
+from typing import Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions
@@ -104,7 +104,7 @@ class HWPM4Queue(HWQueue):
     self._invalidate_cache()
     return self._mark_command_end()
 
-  def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
+  def exec(self, prg, kernargs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1)):
     self._invalidate_cache()
 
     user_data = [*data64_le(kernargs)]
@@ -351,7 +351,7 @@ class AMDProgram:
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
-  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if self.device.kernargs_ptr + self.kernargs_alloc_size > (self.device.kernargs.va_addr + self.device.kernargs.size):
       self.device.kernargs_ptr = self.device.kernargs.va_addr
 
@@ -408,8 +408,8 @@ class AMDDevice(HCQCompatCompiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signals_pool:List[hsa.amd_signal_t] = []
-  gpus:List[pathlib.Path] = []
+  signals_pool:list[hsa.amd_signal_t] = []
+  gpus:list[pathlib.Path] = []
 
   def _gpu_map(self, mem):
     mem = mem._base if hasattr(mem, '_base') else mem

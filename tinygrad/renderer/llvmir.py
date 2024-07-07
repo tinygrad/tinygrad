@@ -1,4 +1,5 @@
-from typing import Final, Dict, Callable, Any, List, Optional
+from __future__ import annotations
+from typing import Final, Callable, Any, Optional
 from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
@@ -9,7 +10,7 @@ MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but
 
 def is_bool_or_unsigned(dtype: DType): return dtype == dtypes.bool or dtypes.is_unsigned(dtype)
 
-code_for_op: Final[Dict[Op, Callable]] = {
+code_for_op: Final[dict[Op, Callable]] = {
   UnaryOps.NEG: lambda builder, x, dtype: builder.neg(x) if dtypes.is_int(dtype) else \
     (builder.not_(x) if dtype == dtypes.bool else builder.fneg(x, flags=MFLAGS)),
   UnaryOps.EXP2: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.exp2', [x.type]), [x], fastmath=MFLAGS),
@@ -87,10 +88,10 @@ class LLVMRenderer(Renderer):
       if a.type.is_pointer: a.add_attribute("noalias")
 
     bb = [ir.IRBuilder(func.append_basic_block("entry"))]
-    loop_blocks: List = []
-    reduce_phis: List = []
+    loop_blocks: list = []
+    reduce_phis: list = []
     # TODO: newvar probably shouldn't be optional
-    lvars: Dict[Optional[UOp], Any] = {}  # this Any is an llvm type
+    lvars: dict[Optional[UOp], Any] = {}  # this Any is an llvm type
 
     for bufname,dtype in buf_to_dtype.items():
       if not isinstance(dtype, PtrDType) and dtype == dtypes.int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))

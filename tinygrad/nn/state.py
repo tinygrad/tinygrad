@@ -1,5 +1,6 @@
+from __future__ import annotations
 import os, json, pathlib, zipfile, pickle, tarfile, struct
-from typing import Dict, Union, List, Optional, Any, Tuple
+from typing import Union, Optional, Any
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
@@ -10,7 +11,7 @@ safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dt
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
-def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
+def safe_load_metadata(fn:Union[Tensor,str]) -> tuple[Tensor, int, Any]:
   """
   Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
   """
@@ -18,7 +19,7 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   json_len = t[0:8].bitcast(dtypes.int64).item()
   return t, json_len, json.loads(t[8:8+json_len].numpy().tobytes())
 
-def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
+def safe_load(fn:Union[Tensor,str]) -> dict[str, Tensor]:
   """
   Loads a .safetensor file from disk, returning the state_dict.
 
@@ -35,7 +36,7 @@ def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
     ret[k] = t[8+json_len+v['data_offsets'][0]:8+json_len+v['data_offsets'][0]+sz].bitcast(dtype).reshape(v['shape'])
   return ret
 
-def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
+def safe_save(tensors:dict[str, Tensor], fn:str, metadata:Optional[dict[str, Any]]=None):
   """
   Saves a state_dict to disk in a .safetensor file with optional metadata.
 
@@ -60,7 +61,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
 # state dict
 
 from collections import OrderedDict
-def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
+def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> dict[str, Tensor]:
   """
   Returns a state_dict of the object, with optional prefix.
 
@@ -84,7 +85,7 @@ def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
   elif isinstance(obj, dict):
     for k,v in obj.items(): state_dict.update(get_state_dict(v, f"{prefix}{str(k)}.", tensor_type))
   return state_dict
-def get_parameters(obj) -> List[Tensor]:
+def get_parameters(obj) -> list[Tensor]:
   """
   ```python exec="true" source="above" session="tensor" result="python"
   class Net:
@@ -98,7 +99,7 @@ def get_parameters(obj) -> List[Tensor]:
   """
   return list(get_state_dict(obj).values())
 
-def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=True, consume=False) -> None:
+def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=True, consume=False) -> None:
   """
   Loads a state_dict into a model.
 
@@ -131,7 +132,7 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
 
 # torch support!
 
-def torch_load(fn:str) -> Dict[str, Tensor]:
+def torch_load(fn:str) -> dict[str, Tensor]:
   """
   Loads a torch .pth file from disk.
 
@@ -141,8 +142,8 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
   """
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
 
-  offsets: Dict[Union[str, int], int] = {}
-  lens: Dict[Union[str, int], int] = {}
+  offsets: dict[Union[str, int], int] = {}
+  lens: dict[Union[str, int], int] = {}
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
@@ -167,7 +168,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
   class Parameter:
     def __setstate__(self, state): self.tensor = state[0]
 
-  deserialized_objects: Dict[str, Any] = {}
+  deserialized_objects: dict[str, Any] = {}
   intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16, "IntStorage": dtypes.int32,
                "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2, "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed

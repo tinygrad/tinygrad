@@ -1,5 +1,6 @@
+from __future__ import annotations
 import ctypes
-from typing import Any, Optional, Tuple, Dict, List, cast
+from typing import Any, Optional, cast
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, GraphException, dedup
 from tinygrad.device import Buffer, Device
@@ -9,14 +10,14 @@ from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
 class CUDAGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     # Check all jit items are compatible.
     if not all(isinstance(ji.prg, (CompiledRunner, BufferXfer)) for ji in jit_cache): raise GraphException
 
     self.jc_idx_with_updatable_rawbufs = dedup([x[0] for x in self.input_replace.keys()])
-    self.updatable_nodes: Dict[int, Tuple[Any, Any, Any, bool]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
+    self.updatable_nodes: dict[int, tuple[Any, Any, Any, bool]] = {} # dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
 
     self.graph = init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
 
@@ -49,7 +50,7 @@ class CUDAGraph(MultiGraphRunner):
 
     self.instance = init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], wait=False) -> Optional[float]:
     # Update rawbuffers in the c_args struct.
     for (j,i),input_idx in self.input_replace.items():
       if not self.updatable_nodes[j][3]: setattr(self.updatable_nodes[j][2], f'f{i}', input_rawbuffers[input_idx]._buf)
@@ -77,5 +78,5 @@ class CUDAGraph(MultiGraphRunner):
     if hasattr(self, 'graph'): check(cuda.cuGraphDestroy(self.graph))
     if hasattr(self, 'instance'): check(cuda.cuGraphExecDestroy(self.instance))
 
-  def set_kernel_node_launch_dims(self, node, global_size: Tuple[int, int, int], local_size: Tuple[int, int, int]):
+  def set_kernel_node_launch_dims(self, node, global_size: tuple[int, int, int], local_size: tuple[int, int, int]):
     node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size

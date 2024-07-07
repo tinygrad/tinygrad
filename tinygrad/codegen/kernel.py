@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 import itertools
-from typing import DefaultDict, Optional, List, Tuple, cast, Dict, Union
+from typing import Optional, cast, Union, List
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
@@ -37,9 +37,9 @@ class Opt:
 
 @dataclass
 class TensorCoreOptions:
-  axes: Tuple[int, ...] # the location of the original N and M axes if still in the shape
-  axes_exist: Tuple[bool, ...] # true if the original N and M axes are still in the shape
-  axis_pads: Tuple[Tuple[int, int], ...]
+  axes: tuple[int, ...] # the location of the original N and M axes if still in the shape
+  axes_exist: tuple[bool, ...] # true if the original N and M axes are still in the shape
+  axis_pads: tuple[tuple[int, int], ...]
   def fix_axes(self, removed_axis:int): # adjust the TC axes if necesssary when a dimension is removed
     axes, axes_exist = list(self.axes), list(self.axes_exist)
     for tc_dim in [i for i in range(2) if axes_exist[i]]:
@@ -62,7 +62,7 @@ class Kernel:
     self.ast = ast
     self.lazyops = flatten([op.lazyops for op in self.ast])
 
-    cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
+    cached_ordered_lazyops: dict[LazyOp, list[LazyOp]] = {}
     def ordered_lazyops(op):
       if op not in cached_ordered_lazyops: cached_ordered_lazyops[op] = dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
       return cached_ordered_lazyops[op]
@@ -70,14 +70,14 @@ class Kernel:
 
     self.outbufs, self.vars = [x.arg for x in self.ast], flatten([x.vars() for x in self.ast])
     loadops = [BufferOps.LOAD, BufferOps.CONST]
-    self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = self.outbufs + dedup([x.arg for x in self.lazyops if x.op in loadops])
+    self.bufs: list[Union[MemBuffer, ConstBuffer, LocalBuffer]] = self.outbufs + dedup([x.arg for x in self.lazyops if x.op in loadops])
 
     # get earlybufs, before any reduceops
     self.earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.st for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs)]
+    self.sts: list[ShapeTracker] = [x.st for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs)]
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
@@ -85,15 +85,15 @@ class Kernel:
     self.reshape_and_permute(None, permute)
 
     # parameters for optimization
-    self.applied_opts: List[Opt] = []
+    self.applied_opts: list[Opt] = []
     self.group_for_reduces: int = 0
     self.upcasted: int = 0
     self.local_dims: int = 0
-    self.local_alias: DefaultDict[LazyOp, Dict[int, LocalBuffer]] = defaultdict(dict)
+    self.local_alias: defaultdict[LazyOp, dict[int, LocalBuffer]] = defaultdict(dict)
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     # the local aliased buffers for A and B
-    self.bufs_for_tensor_core: Dict[LazyOp, Tuple[int, int]] = {}
+    self.bufs_for_tensor_core: dict[LazyOp, tuple[int, int]] = {}
     self.dont_use_locals: bool = False
 
     # group simplifies
@@ -101,7 +101,7 @@ class Kernel:
     self.simplify_merge_adjacent()
 
     # cache
-    self.applied_opts_cache: Optional[List[Opt]] = None
+    self.applied_opts_cache: Optional[list[Opt]] = None
 
   def copy(self):
     ret = type(self).__new__(type(self))
@@ -126,26 +126,26 @@ class Kernel:
     return ret
 
   @property
-  def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
+  def membufs(self) -> list[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
 
   # TODO: these need more tests or it might silently be no-op
   def shape_offsets(self, i:int): return itertools.product(*[list(range(cast(int, s))) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]  # noqa: E501
   def float4_axis(self, i:int): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
-  def upcasted_axis(self, i:int) -> List[Tuple[int, Optional[sint], bool]]:
+  def upcasted_axis(self, i:int) -> list[tuple[int, Optional[sint], bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.shape_len-self.upcasted:], self.sts[i].real_strides()[self.shape_len-self.upcasted:]
     assert all_int(upcasted_shape), f"cannot upcast a symbolic amount {upcasted_shape=}"
     return list(zip(upcasted_shape, upcasted_stride,
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
 
   # TODO: is there a better way to write this?
-  def acc_offsets(self, i:int) -> List[int]:
+  def acc_offsets(self, i:int) -> list[int]:
     if self.upcasted == 0: return [0]
     upcasted_i = self.upcasted_axis(i)
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
-  def get_float4_upcast_dim(self, i:int) -> List[int]:
+  def get_float4_upcast_dim(self, i:int) -> list[int]:
     should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in (dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1] if should_upcast else []
 
@@ -157,19 +157,19 @@ class Kernel:
   def reduceop(self) -> Optional[LazyOp]: return self.reduceops[0] if len(self.reduceops) > 0 else None
 
   @property
-  def output_shape(self) -> Tuple[sint, ...]: return self.sts[0].shape
+  def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
 
   @property
-  def full_shape(self) -> Tuple[sint, ...]: return self.sts[self.full_buf_index].shape
+  def full_shape(self) -> tuple[sint, ...]: return self.sts[self.full_buf_index].shape
 
   @property
-  def full_unupcasted_shape(self) -> Tuple[sint, ...]: return self.full_shape[:self.shape_len-self.upcasted]
+  def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.shape_len-self.upcasted]
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
-  def upcast_in_mid_reduce_axes(self) -> List[int]:
+  def upcast_in_mid_reduce_axes(self) -> list[int]:
     return [j for j in range(self.first_reduce, self.first_reduce+self.group_for_reduces) if self.full_shape[j] == self.sts[0].shape[j]]
 
   @property
@@ -185,7 +185,7 @@ class Kernel:
   #  *** self.upcasted
   # purple -- reduce upcasted
   # yellow -- normal upcasted dimensions
-  def colors(self) -> List[str]:
+  def colors(self) -> list[str]:
     # first non local non reduce dims are global (blue)
     colors = ["blue"] * self.global_dims if not self.dont_use_locals else ["BLUE"] * self.global_dims
     # after global are local_dims; warp ones used in tensor cores must be closest to first_reduce (cyan)
@@ -252,7 +252,7 @@ class Kernel:
     if isinstance(self.bufs[0].dtype, ImageDType):
       base_shape = self.bufs[0].dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
-        special_strides: Tuple[sint, ...] = tuple()
+        special_strides: tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
           shape_piece = tuple(self.output_shape[x] for x in g)
           assert prod(shape_piece) == base_shape[i], f"get_contraction was wrong? {shape_piece} != {base_shape[i]}"
@@ -283,7 +283,7 @@ class Kernel:
 
   # ******************** helpers ********************
 
-  def alias_buffer(self, op:LazyOp, i:int, pattern:List[int]) -> None:
+  def alias_buffer(self, op:LazyOp, i:int, pattern:list[int]) -> None:
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
 
     bst = 1
@@ -358,7 +358,7 @@ class Kernel:
         return True
     return False
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None, axis:int=0, tc_opt:Optional[int]=None) -> bool:
+  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[list[Opt]]=None, axis:int=0, tc_opt:Optional[int]=None) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel.  If one exists and applies properly, return true, otherwise return false.
     Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
 
@@ -554,7 +554,7 @@ class Kernel:
     # expression and run test/test_ops.py with IMAGE=2
     # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
     # this can be made much smarter
-    to_upcast: List[int] = []
+    to_upcast: list[int] = []
     # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
     for axis in range(self.first_reduce):
       # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
@@ -607,7 +607,7 @@ class Kernel:
       else:
         # prioritize making expand axes local
         local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]  # noqa: E501
-        to_local: List[Tuple[int, int]] = []
+        to_local: list[tuple[int, int]] = []
         for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
           local_size = prod(sz for _, sz in to_local)
           local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)  # noqa: E501

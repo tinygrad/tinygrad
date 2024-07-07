@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
+from typing import Iterator, Optional, Any, Callable, Union, cast, TypeVar
 import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -31,7 +31,7 @@ def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstanc
 class UOp:
   op: UOps
   dtype: Optional[DType] = None
-  src: Tuple[UOp, ...] = tuple()
+  src: tuple[UOp, ...] = tuple()
   arg: Any = None
   def commutative(self) -> bool:
     return self.op is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
@@ -76,10 +76,10 @@ class UOp:
   @staticmethod
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return UOp(UOps.CONST, dtype=dtype).name(name)
   @functools.cached_property
-  def parents(self) -> Set[UOp]: return set.union(set(self.src), *[x.parents for x in self.src])
+  def parents(self) -> set[UOp]: return set.union(set(self.src), *[x.parents for x in self.src])
   @property  # parents with self
-  def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
-  def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.op is UOps.DEFINE_VAR])
+  def sparents(self) -> set[UOp]: return set([self]).union(self.parents)
+  def vars(self) -> set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.op is UOps.DEFINE_VAR])
   def divides(self, v):
     if self.op is UOps.CONST:
       return self.arg%v == 0
@@ -137,12 +137,12 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 @dataclass(frozen=True)
 class UPat:
-  op: Optional[Union[UOps, Set[UOps]]] = None
+  op: Optional[Union[UOps, set[UOps]]] = None
   arg: Any = None
-  src: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
+  src: Optional[Union[tuple[UPat, ...], list[UPat], UPat]] = None
   name: Optional[str] = None
-  dtype: Optional[Union[DType, Set[DType]]] = None
-  allow_len: Set[int] = field(default_factory=set)
+  dtype: Optional[Union[DType, set[DType]]] = None
+  allow_len: set[int] = field(default_factory=set)
   allow_any_len: bool = False
 
   @staticmethod
@@ -152,9 +152,9 @@ class UPat:
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
 T = TypeVar("T")
-def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
+def __unmatch(m1:Union[T, set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
 
-def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
+def _match(uop:UOp, pat:UPat, store:dict[str, UOp]) -> bool:
   if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return False
   if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
@@ -172,9 +172,9 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   return False
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
+  def __init__(self, patterns:list[tuple[Union[UPat, UOp], Callable]]):
     self.patterns = patterns
-    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
+    self.pdict: defaultdict[tuple[UOps, Any], list[tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       if isinstance(p, UOp): p = UPat.compile(p)
@@ -186,7 +186,7 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      store: Dict[str, UOp] = {}
+      store: dict[str, UOp] = {}
       if _match(uop, p, store) and (ret:=fxn(**store)) is not None: return ret  # NOTE: if it returns None, we keep trying to match
     return None
 
@@ -336,7 +336,7 @@ constant_folder = PatternMatcher([
 
 # *** uop graph ***
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
+def get_children_dfs(u:UOp, children:dict[UOp, list[UOp]], in_degree:dict[UOp, int]):
   if u in children: return
   children[u] = []
   for x in u.src:
@@ -345,8 +345,8 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, i
   in_degree[u] = len(u.src)
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  nodes: Dict[Tuple, UOp] = {}
-  replace: Dict[UOp, UOp] = {}
+  nodes: dict[tuple, UOp] = {}
+  replace: dict[UOp, UOp] = {}
   def __inner_rewrite(n:UOp) -> UOp:
     if n in replace: return replace[n]
     replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
@@ -356,16 +356,16 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   return __inner_rewrite(sink)
 
 class UOpGraph:
-  def __init__(self, sinks:List[UOp]):
-    self.sinks: List[UOp] = sinks
+  def __init__(self, sinks:list[UOp]):
+    self.sinks: list[UOp] = sinks
     # used by linearizer
-    self._uops: Optional[List[UOp]] = None
+    self._uops: Optional[list[UOp]] = None
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
-  def vars(self) -> List[Variable]: return sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR], key=lambda v: v.expr)
-  def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
+  def vars(self) -> list[Variable]: return sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR], key=lambda v: v.expr)
+  def globals(self) -> list[tuple[int, bool]]: return [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
 
   @property
   def uops(self):
@@ -402,12 +402,12 @@ class UOpGraph:
 
     # filter nodes that don't link to a sink
     # BFS toposort
-    children: Dict[UOp, List[UOp]] = {}
-    in_degree: Dict[UOp, int] = {}
+    children: dict[UOp, list[UOp]] = {}
+    in_degree: dict[UOp, int] = {}
     get_children_dfs(sink, children, in_degree)
 
     @functools.lru_cache(None)
-    def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
+    def get_recursive_children(x:UOp, end:UOps, include_self=False) -> set[UOp]:
       if x.op is UOps.SINK: return set()
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
 
@@ -415,7 +415,7 @@ class UOpGraph:
     end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
     scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in reversed(in_degree) if p.op in end_for_uop}
 
-    queue:List[Tuple[int, UOp]] = []
+    queue:list[tuple[int, UOp]] = []
     def push(u:UOp):
       priority = 0
       # prefer uops that are loop children
@@ -454,12 +454,12 @@ class UOpGraph:
 
   # *** checker functions ***
 
-  def flops_mem(self, ignore_indexing=False) -> Tuple[sint, sint]:
+  def flops_mem(self, ignore_indexing=False) -> tuple[sint, sint]:
     flops: sint = 0
     mem: sint = 0
     mults: sint = 1
     mult_stack = []
-    dont_count: Set[UOp] = set()
+    dont_count: set[UOp] = set()
     if ignore_indexing:
       for u in self.uops:
         if u.op is UOps.LOAD:

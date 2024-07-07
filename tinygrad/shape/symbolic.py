@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools
 from math import gcd
 from tinygrad.helpers import partition
-from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Set, Mapping
+from typing import Callable, Type, Union, Optional, Any, Mapping
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -15,10 +15,10 @@ class Node:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
-  def vars(self) -> Set[Variable]: return set()
+  def vars(self) -> set[Variable]: return set()
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: raise RuntimeError(self.__class__.__name__)
-  def unbind(self) -> Tuple[Node, Optional[int]]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
+  def unbind(self) -> tuple[Node, Optional[int]]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
 
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
@@ -80,12 +80,12 @@ class Node:
     return create_node(ModNode(self, b))
 
   @staticmethod
-  def sum(nodes:List[Node]) -> Node:
+  def sum(nodes:list[Node]) -> Node:
     nodes = [x for x in nodes if x.max or x.min]
     if not nodes: return NumNode(0)
     if len(nodes) == 1: return nodes[0]
 
-    mul_groups: Dict[Node, int] = {}
+    mul_groups: dict[Node, int] = {}
     num_node_sum = 0
     for node in SumNode(nodes).flat_components:
       if node.__class__ is NumNode: num_node_sum += node.b
@@ -96,7 +96,7 @@ class Node:
     return create_node(SumNode(new_nodes)) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
 
   @staticmethod
-  def ands(nodes:List[Node]) -> Node:
+  def ands(nodes:list[Node]) -> Node:
     if not nodes: return NumNode(1)
     if len(nodes) == 1: return nodes[0]
     if any(not x for x in nodes): return NumNode(0)
@@ -127,7 +127,7 @@ class Variable(Node):
     assert self._val is None and self.min<=val<=self.max, f"cannot bind {val} to {self}"
     self._val = val
     return self
-  def unbind(self) -> Tuple[Variable, int]:
+  def unbind(self) -> tuple[Variable, int]:
     assert self.val is not None, f"cannot unbind {self}"
     return Variable(self.expr, self.min, self.max), self.val
   def vars(self): return {self}
@@ -184,10 +184,10 @@ class OpNode(Node):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
   def vars(self): return self.a.vars() | (self.b.vars() if isinstance(self.b, Node) else set())
-  def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
+  def get_bounds(self) -> tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class LtNode(OpNode):
-  def get_bounds(self) -> Tuple[int, int]:
+  def get_bounds(self) -> tuple[int, int]:
     if self.a == self.b: return (0, 0)
     if isinstance(self.b, int): return (1, 1) if self.a.max < self.b else (0, 0) if self.a.min >= self.b else (0, 1)
     return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min >= self.b.max else (0, 1)
@@ -201,7 +201,7 @@ class MulNode(OpNode):
     if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
     return Node.__floordiv__(self, b, factoring_allowed)
   def __mod__(self, b: Union[Node, int]): return Node.__mod__(self.a * (self.b%b), b)
-  def get_bounds(self) -> Tuple[int, sint]:
+  def get_bounds(self) -> tuple[int, sint]:
     assert self.a.min >= 0
     if isinstance(self.b, int): return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
     return (self.a.min*self.b.min, self.a.max*self.b.max) if self.b.min >= 0 else (self.a.max*self.b.min, self.a.min*self.b.max)
@@ -210,7 +210,7 @@ class MulNode(OpNode):
 
 class DivNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
-  def get_bounds(self) -> Tuple[int, sint]:
+  def get_bounds(self) -> tuple[int, sint]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) // self.b
@@ -221,28 +221,28 @@ class ModNode(OpNode):
     return Node.__mod__(self, b)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
-  def get_bounds(self) -> Tuple[int, sint]:
+  def get_bounds(self) -> tuple[int, sint]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b): return (0, self.b-1)
     return (self.a.min%self.b, self.a.max%self.b)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) % self.b
 
 class RedNode(Node):
-  def __init__(self, nodes:List[Node]):
+  def __init__(self, nodes:list[Node]):
     self.nodes = nodes
     self.min, self.max = self.get_bounds()
-  def vars(self) -> Set[Variable]: return set.union(*[x.vars() for x in self.nodes], set())
-  def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
+  def vars(self) -> set[Variable]: return set.union(*[x.vars() for x in self.nodes], set())
+  def get_bounds(self) -> tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class SumNode(RedNode):
-  def get_bounds(self) -> Tuple[int, sint]: return sum([x.min for x in self.nodes]), sum([x.max for x in self.nodes])
+  def get_bounds(self) -> tuple[int, sint]: return sum([x.min for x in self.nodes]), sum([x.max for x in self.nodes])
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __floordiv__(self, b: Union[Node, sint], factoring_allowed=True):
     if self == b: return NumNode(1)
-    fully_divided: List[Node] = []
-    rest: List[Node] = []
+    fully_divided: list[Node] = []
+    rest: list[Node] = []
     if isinstance(b, Node):
       for x in self.flat_components:
         if x % b == 0: fully_divided.append(x // b)
@@ -289,7 +289,7 @@ class SumNode(RedNode):
   def flat_components(self): return [y for x in self.nodes for y in (x.flat_components if isinstance(x, SumNode) else [x])]
 
 class AndNode(RedNode):
-  def get_bounds(self) -> Tuple[int, sint]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
+  def get_bounds(self) -> tuple[int, sint]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     subed = []
     for node in self.nodes:
@@ -298,7 +298,7 @@ class AndNode(RedNode):
     return Node.ands(subed)
 
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
-def sym_infer(a: Union[Node, int], var_vals: Optional[Dict[Variable, int]]) -> int:
+def sym_infer(a: Union[Node, int], var_vals: Optional[dict[Variable, int]]) -> int:
   if isinstance(a, (int, float)): return a
   ret = a.substitute({k:NumNode(v) for k, v in var_vals.items()}) if var_vals is not None else a
   assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
@@ -313,7 +313,7 @@ def render_mulnode(node:MulNode, ops, ctx):
     return f"({sym_render(node.b,ops,ctx)}*{node.a.render(ops,ctx)})"
   return f"({node.a.render(ops,ctx)}*{sym_render(node.b,ops,ctx)})"
 
-render_python: Dict[Type, Callable[..., str]] = {
+render_python: dict[Type, Callable[..., str]] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" \
     else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" \
     else f"{self.expr}"),

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, Optional, List, cast
+from typing import Optional, cast
 import ctypes, functools, hashlib
 import tinygrad.runtime.autogen.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
@@ -43,10 +43,10 @@ class CLProgram:
     if hasattr(self, 'kernel'): check(cl.clReleaseKernel(self.kernel))
     if hasattr(self, 'program'): check(cl.clReleaseProgram(self.program))
 
-  def __call__(self, *bufs:ctypes._CData, global_size:Tuple[int,int,int]=(1,1,1), local_size:Optional[Tuple[int,int,int]]=None, vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
+  def __call__(self, *bufs:ctypes._CData, global_size:tuple[int,int,int]=(1,1,1), local_size:Optional[tuple[int,int,int]]=None, vals:tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
     for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))
     for i,v in enumerate(vals,start=len(bufs)): cl.clSetKernelArg(self.kernel, i, 4, ctypes.byref(ctypes.c_int32(v)))
-    if local_size is not None: global_size = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
+    if local_size is not None: global_size = cast(tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
     event = cl.cl_event() if wait else None
     check(cl.clEnqueueNDRangeKernel(self.device.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size), (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, event))  # noqa: E501
     if wait:
@@ -92,7 +92,7 @@ class CLDevice(Compiled):
     self.driver_version = (cl.clGetDeviceInfo(self.device_id, cl.CL_DRIVER_VERSION, 256, buf := ctypes.create_string_buffer(256), None), buf.value.decode())[1]  # noqa: E501
     self.context = checked(cl.clCreateContext(None, 1, self.device_id, cl.clCreateContext.argtypes[3](), None, status := ctypes.c_int32()), status)
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, status), status)
-    self.pending_copyin: List[memoryview] = []
+    self.pending_copyin: list[memoryview] = []
 
     compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
     super().__init__(device, CLAllocator(self), OpenCLRenderer(), CLCompiler(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))

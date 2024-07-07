@@ -2,7 +2,7 @@ from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol
+from typing import Optional, Any, cast, Protocol
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib
 from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
 from tinygrad.dtype import DType, ImageDType
@@ -11,7 +11,7 @@ from tinygrad.renderer import Renderer
 # **************** Device ****************
 
 class _Device:
-  def __init__(self) -> None: self._devices: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]  # noqa: E501
+  def __init__(self) -> None: self._devices: list[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]  # noqa: E501
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")   # noqa: E501
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
@@ -140,7 +140,7 @@ class Allocator:
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
+  def __init__(self): self.cache: dict[tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
   def alloc(self, size:int, options:Optional[BufferOptions]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
@@ -200,8 +200,8 @@ class HCQCompatCompiled(Compiled):
     self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
     self.timeline_value: int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
-    self.sig_prof_records: List[Tuple[Any, Any, str, bool]] = []
-    self.raw_prof_records: List[Tuple[int, int, str, bool]] = []
+    self.sig_prof_records: list[tuple[Any, Any, str, bool]] = []
+    self.raw_prof_records: list[tuple[int, int, str, bool]] = []
     if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph

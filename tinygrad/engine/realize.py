@@ -1,4 +1,5 @@
-from typing import List, Dict, Optional, cast, Generator, Tuple
+from __future__ import annotations
+from typing import Optional, cast, Generator
 import time
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING
@@ -12,7 +13,7 @@ from tinygrad.engine.schedule import ScheduleItem
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
+def get_linearizer(renderer:Renderer, ast:tuple[LazyOp, ...]) -> Linearizer:
   if DEBUG >= 3:
     from tinygrad.engine.graph import print_tree
     for op in ast: print_tree(op)
@@ -28,7 +29,7 @@ def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
       k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
       if getenv("BEAM_COMPARE", 1):
         # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
-        lins: List[Tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
+        lins: list[tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
         if used_tensor_cores:
           lins.append(("hc", Linearizer(*ast, opts=renderer)))
           lins[-1][1].hand_coded_optimizations()
@@ -48,9 +49,9 @@ class Runner:
     self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
   @property
   def device(self): return Device[self.dname]
-  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
+  def exec(self, rawbufs:list[Buffer], var_vals:Optional[dict[Variable, int]]=None) -> Optional[float]:
     return self(rawbufs, {} if var_vals is None else var_vals)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
 class CompiledRunner(Runner):
@@ -63,7 +64,7 @@ class CompiledRunner(Runner):
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> Optional[float]:
     global_size, local_size = self.p.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -84,15 +85,15 @@ class CustomOp(Runner):
   def __init__(self, fxn):
     self.fxn = fxn
     super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False): self.fxn(*rawbufs)
 
 class EmptyOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False): pass
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False):
     assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1].base, f"must be base {rawbufs}"
 
 class BufferCopy(Runner):
@@ -109,7 +110,7 @@ class BufferCopy(Runner):
       src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
     else:
       dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
@@ -127,8 +128,8 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
-def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
+method_cache: dict[tuple[str, tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
+def get_runner(dname:str, ast:tuple[LazyOp, ...]) -> CompiledRunner:
   ckey = (dname, ast, BEAM.value, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (dname.split(":")[0], ast, BEAM.value, True)
@@ -147,8 +148,8 @@ def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
 @dataclass(frozen=True)
 class ExecItem:
   prg: Runner
-  bufs: List[Optional[Buffer]]
-  def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+  bufs: list[Optional[Buffer]]
+  def run(self, var_vals:Optional[dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
     if do_update_stats:
@@ -179,14 +180,14 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   if ast.op is LoadOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {ast}")
 
-def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
+def lower_schedule(schedule:list[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule): yield lower_schedule_item(schedule.pop(0))
 
 # **************** main run function ****************
 
-capturing: List = []  # put classes with an add method in here
+capturing: list = []  # put classes with an add method in here
 
-def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None, do_update_stats=True):
+def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, int]]=None, do_update_stats=True):
   for ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
     ei.run(var_vals, do_update_stats=do_update_stats)

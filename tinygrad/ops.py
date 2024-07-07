@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Tuple, Any, List, Dict, Callable
+from typing import Union, Any, Callable
 import functools, hashlib, math, operator, ctypes, struct
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -48,7 +48,7 @@ class ConstBuffer:
 @dataclass(frozen=True, eq=False)
 class LazyOp:
   op: Op
-  src: Tuple[LazyOp, ...] = ()
+  src: tuple[LazyOp, ...] = ()
   arg: Any = None
   def cached_compare(self, x, context):
     if id(self) == id(x): return True
@@ -71,8 +71,8 @@ class LazyOp:
   def hash(self): return hash((self.op, self.src, self.arg))
   def __hash__(self): return self.hash
   @functools.cached_property
-  def lazyops(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
-  def vars(self) -> List[Variable]:
+  def lazyops(self) -> list[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
+  def vars(self) -> list[Variable]:
     extract_vars = [x.arg.st.vars() for x in self.lazyops if x.op in BufferOps]
     const_vars = [x.arg.val for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
     return sorted(set.union(*extract_vars, set(const_vars)), key=lambda v: v.expr)
@@ -81,16 +81,16 @@ class LazyOp:
 
 @dataclass
 class FlopCounter:
-  shape: Tuple[int, ...]
+  shape: tuple[int, ...]
   flops: sint
-  mem: Dict[int, int]
+  mem: dict[int, int]
   @property
   def mem_estimate(self): return sum(self.mem.values())
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
 
-InterpretedFlopCounter: Dict[Op, Callable] = {
+InterpretedFlopCounter: dict[Op, Callable] = {
   BufferOps.LOAD: lambda arg: FlopCounter(arg.st.shape, 0, {arg.idx: arg.dtype.itemsize * arg.st.real_size()}),
   BufferOps.CONST: lambda arg: FlopCounter(arg.st.shape, 0, {}),
   BufferOps.STORE: lambda self,arg: FlopCounter(arg.st.shape, self.consume_flops(), {**self.mem, arg.idx: arg.dtype.itemsize * arg.st.real_size()}),
@@ -136,7 +136,7 @@ def truncate_fp16(x):
     return x
   except OverflowError: return math.copysign(math.inf, x)
 
-truncate: Dict[DType, Callable] = {dtypes.bool: bool,
+truncate: dict[DType, Callable] = {dtypes.bool: bool,
   # TODO: bfloat16
   dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
@@ -148,7 +148,7 @@ def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x:
 
 # the living definition of LazyOps
 def verify_lazyop(*ast:LazyOp):
-  sts: Dict[LazyOp, ShapeTracker] = {}
+  sts: dict[LazyOp, ShapeTracker] = {}
   def dfs(op:LazyOp, st:ShapeTracker):
     if op in sts: return
     for x in op.src: dfs(x, st)

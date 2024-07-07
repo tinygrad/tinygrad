@@ -1,4 +1,5 @@
-from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
+from __future__ import annotations
+from typing import Union, Optional, cast, Callable
 import struct, math
 from collections import defaultdict
 from tinygrad.helpers import DEBUG
@@ -32,7 +33,7 @@ class PTXRenderer(Renderer):
   gid = [f'%ctaid.{chr(120+i)}' for i in range(3)]
   gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
   lid = [f'%tid.{chr(120+i)}' for i in range(3)]
-  asm_for_op: Dict[Op, Callable] = {
+  asm_for_op: dict[Op, Callable] = {
     UnaryOps.NEG: lambda d,a,dt,name: f"not.pred {d}, {a};" if name == "pred" else f"sub.{name} {d}, 0, {a};" if dtypes.is_unsigned(dt) \
       else f"neg.{name} {d}, {a};",
     UnaryOps.RECIP: lambda d,a,dt,name: f"rcp{'.approx' if dtypes.is_float(dt) else ''}.{name} {d}, {a};",
@@ -52,39 +53,39 @@ class PTXRenderer(Renderer):
     TernaryOps.WHERE: lambda d,a,b,c,dt,name:
       f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
   }
-  supports_half: List[Op] = [UnaryOps.NEG, UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT,
+  supports_half: list[Op] = [UnaryOps.NEG, UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT,
                              TernaryOps.WHERE]
   # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
-  types: Dict[DType, str] = { dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
+  types: dict[DType, str] = { dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
                               dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
                               dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "pred" }
 
-  mem_types: Dict[DType, str] =  types.copy()
+  mem_types: dict[DType, str] =  types.copy()
   mem_types.update({dtypes.int8: "s8", dtypes.uint8: "u8", dtypes.bool: "u8", dtypes.float16: "b16"})
 
-  const_requires_mov: List[DType] = [dtypes.half, dtypes.bool]
+  const_requires_mov: list[DType] = [dtypes.half, dtypes.bool]
 
-  def render_const(self, x:ConstType, dtype:DType, mov=None) -> Union[List[str], str]:
+  def render_const(self, x:ConstType, dtype:DType, mov=None) -> Union[list[str], str]:
     val = render_val(x, dtype)
     if dtype == dtypes.bool: return [f"setp.ne.s16 {mov}, {val}, 0;"]
     return [f"mov.b{self.types[dtype][1:]} {mov}, {val};"] if mov else val
 
-  def render_local(self, dest, name, size, dtype) -> List[str]:
+  def render_local(self, dest, name, size, dtype) -> list[str]:
     return [f".shared .align 4 .b8 {name}[{size*dtype.itemsize}];", f"mov.u64 {dest}, {name}[0];"]
 
-  def render_loop(self, idx, start, label, acc=None) -> List[str]: return [f"mov.u32 {idx}, {start};", f"{label}:"]
+  def render_loop(self, idx, start, label, acc=None) -> list[str]: return [f"mov.u32 {idx}, {start};", f"{label}:"]
 
-  def render_bra(self, b1, pred=None) -> List[str]: return [f"@{pred} bra {b1};"] if pred else [f"bra {b1};"]
+  def render_bra(self, b1, pred=None) -> list[str]: return [f"@{pred} bra {b1};"] if pred else [f"bra {b1};"]
 
-  def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]:
+  def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> list[str]:
     assert dtype != dtypes.bool
     if gate: return [f"@{gate} ld{ss}.{self.mem_types[dtype]} {dest}, [{loc}+{offset}];", f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"]
     return [f"ld{ss}.{self.mem_types[dtype]} {dest}, [{loc}+{offset}];"]
 
-  def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> List[str]:
+  def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> list[str]:
     return [(f"@{gate} " if gate else "") + f"st{ss}.{self.mem_types[dtype]} [{loc}+{offset}], {val};"]
 
-  def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False, pred=False) -> List[str]:
+  def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False, pred=False) -> list[str]:
     if bitcast: return [f"mov.b{self.types[dtype][1:]} {d}, {a};"]
     if atype == dtypes.bool: return[f"selp.b{self.types[dtype][1:]} {d}, {render_val(1, dtype)}, {render_val(0, dtype)}, {a};"]
     if dtype == dtypes.bool: return [f"setp.ne.b{self.types[atype][1:]} {d}, {a}, {self.render_const(0, atype)};"]
@@ -101,7 +102,7 @@ class PTXRenderer(Renderer):
             "\n}")
 
   def render(self, name:str, uops:UOpGraph) -> str:
-    kernel:List[str] = []
+    kernel:list[str] = []
     bufs = []
 
     uops.linearize(ptx_matcher)
@@ -109,8 +110,8 @@ class PTXRenderer(Renderer):
 
     def kk(*s: str): kernel.append("\n".join(s))
 
-    c: DefaultDict[str, int] = defaultdict(int)
-    r: Dict[UOp, Union[List[str], str]] = {}
+    c: defaultdict[str, int] = defaultdict(int)
+    r: dict[UOp, Union[list[str], str]] = {}
     def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[str]=None) -> str:
       nonlocal c, r
       prefix += f"_{dtype if dtype is not None else self.types[cast(DType, cast(UOp, u).dtype)]}_"
@@ -135,14 +136,14 @@ class PTXRenderer(Renderer):
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.IF:
         assert src[0].dtype is not None
-        kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{cast(List, uops._uops).index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
+        kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{cast(list, uops._uops).index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
         kk(self.asm_for_op[BinaryOps.ADD](r[src[0]], r[src[0]], "1", dtypes.int, self.types[dtypes.int]),
             self.asm_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[src[0]], r[src[0].src[1]], dtypes.int, self.types[dtypes.int]))
         kk(*self.render_bra(f"LOOP_{r[src[0]][1:]}", pred))
       elif uop is UOps.ENDIF:
-        kk(f"IF_{r[src[0].src[0]][1:]}_{cast(List, uops._uops).index(src[0])}:")
+        kk(f"IF_{r[src[0].src[0]][1:]}_{cast(list, uops._uops).index(src[0])}:")
       elif uop is UOps.STORE:
         assert src[0].dtype is not None and src[2].dtype is not None
         assert src[0].dtype == dtypes.int64, "store isn't int64"

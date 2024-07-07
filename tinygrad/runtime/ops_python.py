@@ -2,7 +2,8 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any, Dict
+from __future__ import annotations
+from typing import Any, Optional
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
@@ -26,18 +27,18 @@ def _store(m, i, v):
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
-    self.uops: List[Tuple[UOps, Optional[DType], List[int], Any]] = pickle.loads(lib)
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    self.uops: list[tuple[UOps, Optional[DType], list[int], Any]] = pickle.loads(lib)
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
-      ul: Dict[int, Any] = {}
-      dl: Dict[int, DType] = {}
-      pbufs: List[memoryview] = list(bufs)
-      pvals: List[int] = list(vals)
+      ul: dict[int, Any] = {}
+      dl: dict[int, DType] = {}
+      pbufs: list[memoryview] = list(bufs)
+      pvals: list[int] = list(vals)
       i = 0
-      loop_ends: Dict[int, int] = {}
+      loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {UOps.STORE, UOps.ENDRANGE, UOps.BARRIER, UOps.IF, UOps.ENDIF}

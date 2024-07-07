@@ -1,7 +1,8 @@
+from __future__ import annotations
 import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
+from typing import Optional, Union, get_args
 from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv
@@ -21,21 +22,21 @@ logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 
 @dataclass(frozen=True)
 class ScheduleItem:
-  ast: Tuple[LazyOp, ...]
-  bufs: Tuple[Buffer, ...]
+  ast: tuple[LazyOp, ...]
+  bufs: tuple[Buffer, ...]
   @property
-  def outputs(self) -> Tuple[Buffer, ...]:
+  def outputs(self) -> tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
     return self.bufs[:len(self.ast)]
   @property
-  def inputs(self) -> Tuple[Buffer, ...]:
+  def inputs(self) -> tuple[Buffer, ...]:
     """Read only buffers in the schedule."""
     return self.bufs[len(self.ast):]
 
-# *** DAG transformation: List[LazyBuffer] -> ScheduleItem ***
+# *** DAG transformation: list[LazyBuffer] -> ScheduleItem ***
 
-def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
-                      realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer], cache) -> LazyOp:
+def _recursive_lazyop(buf:LazyBuffer, inputs:list[LazyBuffer], outputs:tuple[LazyBuffer, ...], var_vals:dict[Variable, int], st:ShapeTracker,
+                      realizes:dict[LazyBuffer, None], assign_targets:dict[LazyBuffer, LazyBuffer], cache) -> LazyOp:
   """recursively create a lazyop"""
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
@@ -92,16 +93,16 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, cache) for x in buf.srcs), buf.arg)
   return ret
 
-def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer]):
+def _lower_lazybuffer(outs:list[LazyBuffer], realizes:dict[LazyBuffer, None], reduce_for_op:dict[LazyBuffer, LazyBuffer]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
   if (out:=outs[0]).op is LoadOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
     rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((out.arg,))))
     return (LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st)), ), [x.base for x in out.srcs], {}
   if out.op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}: return (LazyOp(out.op, (), out.arg), ), [x.base for x in out.srcs], {}
-  var_vals: Dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
+  var_vals: dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
   assign_targets = {x.srcs[1]:x for x in outs if x.op is LoadOps.ASSIGN}
-  ast: List[LazyOp] = []
-  inputs: List[LazyBuffer] = []
+  ast: list[LazyOp] = []
+  inputs: list[LazyBuffer] = []
   for i, out in enumerate(outs):
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     output_view = out.arg[0] if out.op is LoadOps.ASSIGN and out.arg else output_st
@@ -113,8 +114,8 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], re
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
-def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None],
-                simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
+def _recurse_lb(buf:LazyBuffer, realizes:dict[LazyBuffer, None], allbufs:dict[LazyBuffer, None],
+                simple_pads:set[LazyBuffer], children:defaultdict[LazyBuffer, dict[LazyBuffer, None]], scheduled=False):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.realized is not None: return
   if GRAPH: log_lazybuffer(buf, scheduled)
@@ -145,14 +146,14 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     if x.base.realized is None: children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children)
 
-def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
+def _is_padding_okay(buf:LazyBuffer, realizes:dict[LazyBuffer, None]) -> bool:
   if buf in realizes or buf.realized is not None: return True
   # NOTE: this broke to_image_idx and coder with JIT
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
-def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
-                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer], cache:Set):
+def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:defaultdict[LazyBuffer, dict[LazyBuffer, None]],
+                     realizes:dict[LazyBuffer, None], reduce_for_op:dict[LazyBuffer, LazyBuffer], group:set[LazyBuffer], cache:set):
   """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
   if (tr, st) in cache: return
   cache.add((tr, st))
@@ -168,13 +169,13 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
-def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
+def _graph_schedule(outs:list[LazyBuffer], seen:set[LazyBuffer]):
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
-  realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
-  allbufs: Dict[LazyBuffer, None] = {}
-  simple_pads: Set[LazyBuffer] = set()
-  children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
+  realizes: dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
+  allbufs: dict[LazyBuffer, None] = {}
+  simple_pads: set[LazyBuffer] = set()
+  children: defaultdict[LazyBuffer, dict[LazyBuffer, None]] = defaultdict(dict)
   for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, scheduled=True)
   assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
 
@@ -184,11 +185,11 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
       realizes[p] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
-  reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
+  reduce_for_op: dict[LazyBuffer, LazyBuffer] = {}
   for r in allbufs:
     if r.op not in ReduceOps or r in realizes: continue
 
-    group: Set[LazyBuffer] = set()
+    group: set[LazyBuffer] = set()
     _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache=set())
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
@@ -196,7 +197,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     forced_realize = r in group
     if not forced_realize and len(group) > 1:
       # create a multi output kernel if the LazyBufferss can cleanly group
-      cache: Set[LazyBuffer] = set()
+      cache: set[LazyBuffer] = set()
       rc_parents, rc_children = deque(group), deque(group)
       while rc_parents:
         if (p:=rc_parents.pop()) in cache: continue
@@ -208,7 +209,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
       # search descendants of the reduceop that can cleanly group
       cache.clear()
-      realized_descendants: Set[LazyBuffer] = set()
+      realized_descendants: set[LazyBuffer] = set()
       while rc_children and not forced_realize:
         if (c:=rc_children.pop()) in cache: continue
         cache.add(c)
@@ -246,7 +247,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
       realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
 
-  output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
+  output_groups: defaultdict[LazyBuffer, list[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
     if buf.realized is not None or buf.op is LoadOps.CONST or buf in seen: continue
     output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
@@ -266,8 +267,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   prescheduled = {group[0]:(group, *_lower_lazybuffer(group, realizes, reduce_for_op)) for group in output_groups.values()}
   schedule_targets = {out:ps for ps in prescheduled.values() for out in ps[0]}
 
-  graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
-  in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
+  graph: defaultdict[LazyBuffer, list[LazyBuffer]] = defaultdict(list)
+  in_degree: defaultdict[LazyBuffer, int] = defaultdict(int)
   for key, lsi in prescheduled.items():
     if key not in in_degree: in_degree[key] = 0
     # realize outputs after all parents are realized
@@ -285,13 +286,13 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
 
 # *** DAG ordering: breadth first search ***
 
-SCHEDULES: List = []
-def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+SCHEDULES: list = []
+def create_schedule_with_vars(outs:list[LazyBuffer], seen:Optional[set[LazyBuffer]]=None) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   if seen is None: seen = set()
   graph, in_degree, prescheduled = _graph_schedule(outs, seen)
   queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
-  schedule: List[ScheduleItem] = []
-  var_vals: Dict[Variable, int] = {}
+  schedule: list[ScheduleItem] = []
+  var_vals: dict[Variable, int] = {}
   kernel_number = GlobalCounters.kernel_count
   while queue:
     ps = queue.popleft()
@@ -319,14 +320,14 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, var_vals
 
-def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
+def create_schedule(outs:list[LazyBuffer], seen:Optional[set[LazyBuffer]]=None) -> list[ScheduleItem]:
   schedule, var_vals = create_schedule_with_vars(outs, seen)
   assert len(var_vals) == 0
   return schedule
 
 # *** memory planning ***
 
-def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], noopt_buffers=None, debug_prefix="") -> Dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:list[Union[list[Buffer], tuple[Buffer, ...]]], noopt_buffers=None, debug_prefix="") -> dict[Buffer, Buffer]:
   if getenv("NO_MEMORY_PLANNER"): return {}
   first_appearance, last_appearance = {}, {}
   for i,u in enumerate(buffers):
@@ -337,7 +338,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 
   # Sort buffers by size in descending order, prioritizing largest buffers for allocation first.
   # Track free segments, each containing (start, stop, and buffer that could be reused on this segment).
-  free_segs: Dict[Tuple, List[Tuple[int, int, Buffer]]] = defaultdict(list) # Dict[buffer key, Tuple[start, end, buffer to reuse on the seg]]
+  free_segs: dict[tuple, list[tuple[int, int, Buffer]]] = defaultdict(list) # dict[buffer key, tuple[start, end, buffer to reuse on the seg]]
   def find_replace_buffer(buf, st, en):
     key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())
 
@@ -363,7 +364,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
           f"{len(ak)} -> {len(av)} bufs")
   return assigned
 
-def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+def memory_planner(schedule:list[ScheduleItem]) -> list[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
   assigned = _internal_memory_planner([si.bufs for si in schedule], noopt_buffers={b for si in schedule if si.ast[0].op in LoadOps for b in si.bufs})
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]

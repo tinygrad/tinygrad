@@ -1,4 +1,4 @@
-from typing import Tuple
+from __future__ import annotations
 import time
 from tinygrad import Tensor, TinyJit, nn
 import gymnasium as gym
@@ -32,7 +32,7 @@ class ActorCritic:
     self.c1 = nn.Linear(in_features, hidden_state)
     self.c2 = nn.Linear(hidden_state, 1)
 
-  def __call__(self, obs:Tensor) -> Tuple[Tensor, Tensor]:
+  def __call__(self, obs:Tensor) -> tuple[Tensor, Tensor]:
     x = self.l1(obs).tanh()
     act = self.l2(x).log_softmax()
     x = self.c1(obs).relu()
@@ -54,7 +54,7 @@ if __name__ == "__main__":
   opt = nn.optim.Adam(nn.state.get_parameters(model), lr=LEARNING_RATE)
 
   @TinyJit
-  def train_step(x:Tensor, selected_action:Tensor, reward:Tensor, old_log_dist:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+  def train_step(x:Tensor, selected_action:Tensor, reward:Tensor, old_log_dist:Tensor) -> tuple[Tensor, Tensor, Tensor]:
     with Tensor.train():
       log_dist, value = model(x)
       action_mask = (selected_action.reshape(-1, 1) == Tensor.arange(log_dist.shape[1]).reshape(1, -1).expand(selected_action.shape[0], -1)).float()

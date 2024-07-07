@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
+from typing import TypeVar, Generic, Callable, Union, cast, Optional, Any
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
@@ -13,12 +13,12 @@ from tinygrad.engine.schedule import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from weakref import WeakKeyDictionary
 
-def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[ExecItem]:
+def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]) -> list[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
   max_batch_size = getenv("JIT_BATCH_SIZE", 32)
-  graphed_jit_cache: List[ExecItem] = []
-  current_batch: List[ExecItem] = []
+  graphed_jit_cache: list[ExecItem] = []
+  current_batch: list[ExecItem] = []
   current_device: Optional[Compiled] = None
 
   def flush_batch():
@@ -28,7 +28,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
       graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
-      graphed_jit_cache.append(ExecItem(graph_runner, cast(List[Optional[Buffer]], input_rawbuffers)))
+      graphed_jit_cache.append(ExecItem(graph_runner, cast(list[Optional[Buffer]], input_rawbuffers)))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
@@ -59,8 +59,8 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
 
-def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
-  input_replace: Dict[Tuple[int, int], int] = {}
+def get_input_replace(jit_cache: list[ExecItem], input_rawbuffers:list[Buffer]) -> dict[tuple[int, int], int]:
+  input_replace: dict[tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.bufs):
       if a in input_rawbuffers:
@@ -68,7 +68,7 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
   return input_replace
 
 class GraphRunner(Runner):  # pylint: disable=abstract-method
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.jc_idx_with_updatable_launch_dims = []
@@ -86,9 +86,9 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    self.w_dependency_map: Dict[Any, Any] = {}
-    self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
+    self.w_dependency_map: dict[Any, Any] = {}
+    self.r_dependency_map: dict[Any, list[Any]] = collections.defaultdict(list)
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
   def _access_resources(self, read, write, new_dependency:Any):
@@ -124,24 +124,24 @@ class TinyJit(Generic[ReturnType]):
     self.jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None]))
 
   def reset(self):
-    self.jit_cache: List[ExecItem] = []
-    self.input_replace: Dict[Tuple[int, int], int] = {}
-    self.extra_view_inputs: List[Tuple[int, int, str, int, DType]] = []
+    self.jit_cache: list[ExecItem] = []
+    self.input_replace: dict[tuple[int, int], int] = {}
+    self.extra_view_inputs: list[tuple[int, int, str, int, DType]] = []
     self.buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
     self.cnt: int = 0
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
   def __call__(self, *args, **kwargs) -> ReturnType:
-    input_tensors: List[Tuple[Union[int, str], Tensor]] = \
+    input_tensors: list[tuple[Union[int, str], Tensor]] = \
       [(cast(Union[int, str], name),t) for name,t in itertools.chain(enumerate(args), sorted(kwargs.items())) if t.__class__ is Tensor]
     if input_tensors: Tensor.realize(*[t for _,t in input_tensors])
-    names: List[Union[int, str]] = [name for name,_ in input_tensors]
-    lbs: List[LazyBuffer] = flatten([t.lazydata.lbs for _,t in input_tensors])
+    names: list[Union[int, str]] = [name for name,_ in input_tensors]
+    lbs: list[LazyBuffer] = flatten([t.lazydata.lbs for _,t in input_tensors])
     st_varvals_dtype_device = [(*lb.st.unbind(), lb.dtype, lb.device) for lb in lbs]
-    input_buffers: List[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
+    input_buffers: list[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
     assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
-    var_vals: Dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
+    var_vals: dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
                                                 [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
     st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
     if not JIT or self.cnt == 0:
@@ -151,8 +151,8 @@ class TinyJit(Generic[ReturnType]):
         if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
     elif self.cnt == 1:
       # jit capture
-      self.expected_names: List[Union[int, str]] = names
-      self.expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = st_vars_dtype_device
+      self.expected_names: list[Union[int, str]] = names
+      self.expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]] = st_vars_dtype_device
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
@@ -175,7 +175,7 @@ class TinyJit(Generic[ReturnType]):
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.
       noopt_buffers = {b for ji in self.jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
-      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in self.jit_cache], noopt_buffers, debug_prefix="JIT ")
+      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in self.jit_cache], noopt_buffers, debug_prefix="JIT ")
       self.jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in self.jit_cache]
 
       # Condense the items into a graph executor.

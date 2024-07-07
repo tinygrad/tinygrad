@@ -1,5 +1,6 @@
+from __future__ import annotations
 import math
-from typing import Optional, Union, Tuple, cast
+from typing import Optional, Union, cast
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
 from tinygrad.nn import optim, state, datasets  # noqa: F401
@@ -252,7 +253,7 @@ class LayerNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps:float=1e-5, elementwise_affine:bool=True):
+  def __init__(self, normalized_shape:Union[int, tuple[int, ...]], eps:float=1e-5, elementwise_affine:bool=True):
     self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
     self.weight, self.bias = (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape)) if elementwise_affine else (None, None)

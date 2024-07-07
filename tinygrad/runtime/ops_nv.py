@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
-from typing import Tuple, List, Any
+from typing import Any
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions
 from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod, PROFILE
@@ -323,7 +323,7 @@ class NVProgram:
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_sz)
 
-  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError("Invalid global/local dims")
@@ -379,10 +379,10 @@ class NVDevice(HCQCompatCompiled):
   fd_uvm: int = -1
   gpus_info = None
   signals_page:Any = None
-  signals_pool: List[Any] = []
+  signals_pool: list[Any] = []
   uvm_vaddr: int = 0x1000000000
   host_object_enumerator: int = 0x1000
-  devices: List[NVDevice] = []
+  devices: list[NVDevice] = []
 
   def _new_gpu_fd(self):
     fd_dev = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
@@ -483,7 +483,7 @@ class NVDevice(HCQCompatCompiled):
       NVDevice.gpus_info = (nv_gpu.nv_ioctl_card_info_t*64)()
       nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, NVDevice.gpus_info)
 
-    # TODO: Get classes from NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2
+    # TODO: Get classes from NV0080_CTRL_CMD_GPU_GET_CLASSlist_V2
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.fd_dev = self._new_gpu_fd()
 
@@ -617,7 +617,7 @@ class NVDevice(HCQCompatCompiled):
     bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
     self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True).va_addr
 
-    # Set windows addresses to not collide with other allocated buffers.
+    # set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window = 0xfe000000, 0xff000000
 
     queue = HWComputeQueue()
