@@ -150,10 +150,10 @@ def payne_hanek_reduction(d:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   a2 = _take(i.const(0).cast(dtypes.uint32), 1)
   a3 = _take(i.const(0).cast(dtypes.uint32), 2)
   a4 = _take(i.const(0).cast(dtypes.uint32), 3)
-  # Note: e >= 1 for all numbers d >= 1.0. _eq(e, 0) can be removed.
-  hi = _eq(e, 0).e(TernaryOps.WHERE, _shl_lazy(a1, e).e(BinaryOps.OR, _shr_lazy(a2, offset)), a1)
-  mi = _eq(e, 0).e(TernaryOps.WHERE, _shl_lazy(a2, e).e(BinaryOps.OR, _shr_lazy(a3, offset)), a2)
-  lo = _eq(e, 0).e(TernaryOps.WHERE, _shl_lazy(a3, e).e(BinaryOps.OR, _shr_lazy(a4, offset)), a3)
+  # Note: e >= 1 for all numbers d >= 1.0. assume e != 0
+  hi = _shl_lazy(a1, e).e(BinaryOps.OR, _shr_lazy(a2, offset))
+  mi = _shl_lazy(a2, e).e(BinaryOps.OR, _shr_lazy(a3, offset))
+  lo = _shl_lazy(a3, e).e(BinaryOps.OR, _shr_lazy(a4, offset))
 
   def _hp_mul(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.cast(dtypes.uint64).e(BinaryOps.MUL, y.cast(dtypes.uint64))
   p = _hp_mul(ia, lo)
