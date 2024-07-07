@@ -177,7 +177,9 @@ class LazyBuffer:
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     # TODO: this logic should move to the scheduler
-    if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
+    if self.size == 0 and 0 not in new_shape:
+      # TODO: move base case const to dtype
+      return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf if self.dtype != dtypes.bool else False}[op], new_shape)
 
     # const folding
     # TODO: fold this for symbolic?
