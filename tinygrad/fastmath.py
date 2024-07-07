@@ -194,6 +194,9 @@ def cody_waite_reduction(d:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
       d = mla(qdh, x.const(-1.2246467864107188502e-16), d)
       d = mla(q, x.const(-1.2246467864107188502e-16), d)
       d = mla(qdh.e(BinaryOps.ADD, q), x.const(-1.2736634327021899816e-24), d)
+    elif x.dtype == dtypes.float16:
+      # when reducing `d`, FP16 needs FP32 precision to achieve 1.0 ULP precision.
+      d = _reduce_d(x.cast(dtypes.float32), q.cast(dtypes.float32)).cast(dtypes.float16)
     else:
       d = mla(q, x.const(-3.1414794921875), x)
       d = mla(q, x.const(-0.00011315941810607910156), d)
