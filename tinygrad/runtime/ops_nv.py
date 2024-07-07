@@ -629,7 +629,7 @@ class NVDevice(HCQCompatCompiled):
     if self.slm_per_thread >= required: return
 
     self.synchronize()
-    if hasattr(self, 'shader_local_mem'): self._gpu_free(self.shader_local_mem) # type: ignore
+    if hasattr(self, 'shader_local_mem'): self._gpu_free(self.shader_local_mem) # pylint: disable=access-member-before-definition
 
     self.slm_per_thread = round_up(required, 32)
     bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
