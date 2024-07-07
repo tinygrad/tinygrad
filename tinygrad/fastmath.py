@@ -142,9 +142,9 @@ def payne_hanek_reduction(d:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
     if count+offset <= len(two_over_pi_f[0:-2]):
       an = _eq(i, count).e(TernaryOps.WHERE, _take(an, offset, count=count+1), an.const(two_over_pi_f[count+offset]))
     return an
-  def _exact_pow2if(x): return ldexp3k(x.const(1), x).cast(acc_dtype)
-  def _shl_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.MUL, _exact_pow2if(y.cast(d.dtype))).cast(dtypes.uint32)
-  def _shr_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.IDIV, _exact_pow2if(y.cast(d.dtype))).cast(dtypes.uint32)
+  def _exact_pow2if(x): return pow2if(x, d.dtype).cast(acc_dtype)
+  def _shl_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.MUL, _exact_pow2if(y)).cast(dtypes.uint32)
+  def _shr_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.IDIV, _exact_pow2if(y)).cast(dtypes.uint32)
   # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
   a1 = _take(i.const(0).cast(dtypes.uint32), 0)
   a2 = _take(i.const(0).cast(dtypes.uint32), 1)
