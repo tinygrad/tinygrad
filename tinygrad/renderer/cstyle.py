@@ -62,8 +62,8 @@ class CStyleLanguage(Renderer):
       return f"vload_half{'' if output_dtype.count == 1 else str(output_dtype.count)}(0, {buf_name}+{idx})"
     if output_dtype.count > 1:
       out_val = f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{self.render_dtype(buf_dtype)}{output_dtype.count}*)({buf_name}+{idx}))"  # noqa: E501
-      return self.render_cast(out_val, output_dtype) if output_dtype != buf_dtype else out_val
-    out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
+    else:
+      out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
     return self.render_cast(out_val, output_dtype) if output_dtype != buf_dtype else out_val
 
   def get_kernel_modifier(self, uops:UOpGraph) -> str: return ""
