@@ -237,7 +237,7 @@ class MetalRenderer(CStyleLanguage):
     UnaryOps.LOG2: lambda x,dtype: f"(bfloat)log2({x})" if dtype == dtypes.bfloat16 else f"log2({x})",
     UnaryOps.SIN: lambda x,dtype: f"(bfloat)precise::sin({x})" if dtype == dtypes.bfloat16 else f"precise::sin({x})",}
 
-  def render_cast(self, x: str, var_dtype: DType, bitcast=False) -> str:
+  def render_cast(self, x:str, var_dtype:DType, bitcast=False) -> str:
     return f"as_type<{self.render_dtype(var_dtype)}>({x})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):

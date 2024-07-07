@@ -205,8 +205,7 @@ class Linearizer(Kernel):
       idx, valid = self.sts[i].expr_idxs(_idx)
       if isinstance(buf.dtype, ImageDType):
         image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-        rendered_idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), \
-                      tuple(x.render(render_ops, self.loop_uops) for x in image_idx))
+        rendered_idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), tuple(x.render(render_ops, self.loop_uops) for x in image_idx))
       else:
         rendered_idx = idx.render(render_ops, self.loop_uops)
       if self.late_gate is not None: valid *= self.late_gate
