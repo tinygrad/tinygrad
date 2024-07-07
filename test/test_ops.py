@@ -1866,6 +1866,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))
     helper_test_op([(32,10)], lambda x: x.masked_fill((x<0.1).detach(), -math.inf))
 
+  def test_cast(self):
+    helper_test_op([(3, 3)], lambda x: x.float())
+    helper_test_op(None, lambda x: x.float(), vals=[[0, 1, 2, 3]], forward_only=True)
+    helper_test_op(None, lambda x: x.float(), vals=[[True, False]], forward_only=True)
+    helper_test_op([(3, 3)], lambda x: x.int(), forward_only=True)
+    helper_test_op([(3, 3)], lambda x: x.bool(), forward_only=True)
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)

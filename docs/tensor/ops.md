@@ -106,3 +106,5 @@
 ::: tinygrad.Tensor.bitcast
 ::: tinygrad.Tensor.float
 ::: tinygrad.Tensor.half
+::: tinygrad.Tensor.int
+::: tinygrad.Tensor.bool
