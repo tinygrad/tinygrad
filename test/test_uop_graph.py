@@ -119,14 +119,14 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
-  def test_const_vectorize(self):
-    bf = UOp(UOps.CONST, dtypes.bool, arg=False)
-    out = UOp(UOps.VECTORIZE, dtypes.int, (bf,))
+  def test_const_vectorize_fold(self):
+    c0 = UOp(UOps.CONST, dtypes.half, arg=0.0)
+    out = UOp(UOps.VECTORIZE, dtypes.half.vec(2), (c0, c0))
     g = UOpGraph([out])
     self.assertEqual(len(g.uops), 1)
     out = g.uops[-1]
     self.assertEqual(out.op, UOps.CONST)
-    self.assertEqual(out.arg, 0)
+    self.assertEqual(out.arg, 0.0)
 
   def test_cast_vectorized_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
