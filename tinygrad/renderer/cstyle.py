@@ -45,13 +45,11 @@ class CStyleLanguage(Renderer):
 
   # returns a str expression of the const with the given type
   def render_const(self, x:ConstType, dtype:DType) -> str:
-    if math.isnan(x): val = "NAN"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    elif dtype.scalar() == dtypes.bool: val = "1" if x else "0"
-    elif dtype.scalar() == dtypes.float: val = f"{x}f"
-    else: val = str(x)
-    if dtype.count > 1: return self.render_vectorize([val] * dtype.count, dtype)
-    return (self.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
+    if math.isnan(x): return self.render_cast("NAN", dtype)
+    if math.isinf(x): return self.render_cast(("-" if x < 0 else "") + "INFINITY", dtype)
+    if dtype.scalar() == dtypes.bool: return "1" if x else "0"
+    if dtype.scalar() == dtypes.float: return f"{x}f"
+    return str(x)
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
