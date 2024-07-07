@@ -221,7 +221,7 @@ class NVProgram:
         print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.rel_info, self.global_init, self.shmem_usage, self.local_mem_usage = None, None, 0, 0
+    self.rel_info, self.global_init, self.shmem_usage = None, None, 0
     constant_buffers_data = {}
 
     if MOCKGPU:
@@ -244,9 +244,7 @@ class NVProgram:
         elif section_name == ".nv.info":
           section_data = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
           for i in range(sh_size // 12):
-            if section_data[i * 3 + 0] & 0xffff == 0x1204: self.local_mem_usage = section_data[i * 3 + 2] + 0x240
-
-    self.device._ensure_has_local_memory(self.local_mem_usage)
+            if section_data[i * 3 + 0] & 0xffff == 0x1204: self.device._ensure_has_local_memory(section_data[i * 3 + 2] + 0x240)
 
     # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
     self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
@@ -629,12 +627,12 @@ class NVDevice(HCQCompatCompiled):
     if self.slm_per_thread >= required: return
 
     self.synchronize()
-    if hasattr(self, 'shader_local_mem'): self._gpu_free(self.shader_local_mem) # pylint: disable=access-member-before-definition
+    if hasattr(self, 'shader_local_mem'): self._gpu_free(self.shader_local_mem) # type: ignore # pylint: disable=access-member-before-definition
 
     self.slm_per_thread = round_up(required, 32)
     bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
     bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
-    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True) # type: ignore
+    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True)
 
     queue = HWComputeQueue()
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(self.shader_local_mem.va_addr)]
