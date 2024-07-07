@@ -8,7 +8,7 @@ from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.linearizer import Linearizer, expand_node, expand_idxs, get_grouped_dims
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Device, Buffer
-from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
+from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps, verify_lazyop
 from tinygrad.renderer import TensorCore
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -202,6 +202,92 @@ class TestLinearizer(unittest.TestCase):
     self.assertLess(k.uops.uops.index(barriers[1]), k.uops.uops.index(ifs[1]))
     x = Tensor.randn(3,27,32).realize()
     helper_linearizer_ast(ast, [x], wanna_output=[x.numpy().std(axis=2, ddof=0).reshape(-1)])
+
+  def test_verify_lazyop_sequential(self):
+    ast = LazyOp(op=BufferOps.STORE, src=(
+      LazyOp(op=ReduceOps.SUM, src=(
+        LazyOp(op=BinaryOps.ADD, src=(
+          LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32,1), strides=(32, 1, 0), offset=0, mask=None, contiguous=False),)))),
+          LazyOp(op=ReduceOps.SUM, src=(
+            LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32,32), strides=(32, 0, 1), offset=0, mask=None, contiguous=False),)))),
+          ), arg=(2,)),
+        )),
+      ), arg=(1,)),
+    ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,1,1), strides=(1,0,0), offset=0, mask=None, contiguous=False),))))
+    verify_lazyop(ast)
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4,32).realize()
+    helper_linearizer_ast((ast,), [x], wanna_output=[(x.numpy()+x.numpy().sum(axis=-1, keepdims=True)).sum(axis=-1)])
+
+  def test_verify_lazyop_parallel(self):
+    ast = LazyOp(op=BufferOps.STORE, src=(
+      LazyOp(op=BinaryOps.ADD, src=(
+        LazyOp(op=ReduceOps.SUM, src=(
+          LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32), strides=(32, 1), offset=0, mask=None, contiguous=True),)))),
+        ), arg=(1,)),
+        LazyOp(op=ReduceOps.SUM, src=(
+          LazyOp(op=UnaryOps.LOG2, src=(
+            LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32), strides=(32, 1), offset=0, mask=None, contiguous=True),)))),
+          )),
+        ), arg=(1,)),
+      )),
+    ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,1), strides=(1,0), offset=0, mask=None, contiguous=False),))))
+    verify_lazyop(ast)
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4,32).realize()
+    helper_linearizer_ast((ast,), [x], wanna_output=[np.log2(x.numpy()).sum(axis=-1)+x.numpy().sum(axis=-1)])
+
+  def test_verify_lazyop_sequential_and_parallel(self):
+    ast = LazyOp(op=BufferOps.STORE, src=(
+      LazyOp(op=BinaryOps.ADD, src=(
+        LazyOp(op=ReduceOps.SUM, src=(
+          LazyOp(op=BinaryOps.ADD, src=(
+            LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32,1), strides=(32, 1, 0), offset=0, mask=None, contiguous=True),)))),
+            LazyOp(op=UnaryOps.NEG, src=(
+              LazyOp(op=ReduceOps.SUM, src=(
+                LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32,32), strides=(32, 0, 1), offset=0, mask=None, contiguous=True),)))),
+              ), arg=(2,)),
+            )),
+          )),
+        ), arg=(1,)),
+        LazyOp(op=ReduceOps.SUM, src=(
+          LazyOp(op=UnaryOps.LOG2, src=(
+            LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32,1), strides=(32, 1, 0), offset=0, mask=None, contiguous=True),)))),
+          )),
+        ), arg=(1,)),
+      )),
+    ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,1,1), strides=(1,0,0), offset=0, mask=None, contiguous=False),))))
+    verify_lazyop(ast)
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4,32).realize()
+    helper_linearizer_ast((ast,), [x], wanna_output=[np.log2(x.numpy()).sum(axis=-1)+(x.numpy()-x.numpy().sum(axis=-1, keepdims=True)).sum(axis=-1)])
+
+  def test_verify_lazyop_reduceop_reuse(self):
+    # s1 = x.sum(-1)
+    # s2 = (x+s1).sum()
+    # y = s1+s2 ; kernel should only generate two sums (it should NOT recompute s1 for the s2 calculation)
+    ast = LazyOp(op=BufferOps.STORE, src=(
+      LazyOp(op=BinaryOps.ADD, src=(
+        LazyOp(op=ReduceOps.SUM, src=(
+          LazyOp(op=BinaryOps.ADD, src=(
+            LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32,1), strides=(32, 1, 0), offset=0, mask=None, contiguous=True),)))),
+            LazyOp(op=UnaryOps.NEG, src=(
+              LazyOp(op=ReduceOps.SUM, src=(
+                LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32,32), strides=(32, 0, 1), offset=0, mask=None, contiguous=True),)))),
+              ), arg=(2,)),
+            )),
+          )),
+        ), arg=(1,)),
+        LazyOp(op=ReduceOps.SUM, src=(
+          LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32,1), strides=(32, 1, 0), offset=0, mask=None, contiguous=True),)))),
+        ), arg=(1,)),
+      )),
+    ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,1,1), strides=(1,0,0), offset=0, mask=None, contiguous=False),))))
+    verify_lazyop(ast)
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4,32).realize()
+    lns = helper_linearizer_ast((ast,), [x], wanna_output=[x.numpy().sum(axis=-1)+(x.numpy()-x.numpy().sum(axis=-1, keepdims=True)).sum(axis=-1)])
+    assert (num_ranges:=len([u for u in lns[0].uops if u.op is UOps.RANGE])) == 2, f"Kernel should only generate 2 reduces, got {num_ranges}"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skip("AST has implicit movement ops")
