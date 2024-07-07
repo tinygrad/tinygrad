@@ -1698,7 +1698,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.clip(10, 100))
     helper_test_op([(45,65)], lambda x: x.clip(0, 0.1))
     helper_test_op([(45,65)], lambda x: x.clip(-0.3, -0.2))
-    helper_test_op([(45,65)], lambda x: x.clip(3, 0))
+    helper_test_op([(45,65)], lambda x: x.clip(3, 0))  # min > max
+    helper_test_op([(45,65)], lambda x: x.clip(None, 0))
+    helper_test_op([(45,65)], lambda x: x.clip(0, None))
+    self.helper_test_exception([(45,65)], lambda x: x.clip(None, None), lambda x: x.clip(None, None), RuntimeError)
 
   def test_matvecmat(self):
     helper_test_op([(1,128), (128,128), (128,128)], lambda x,y,z: (x@y).relu()@z)
