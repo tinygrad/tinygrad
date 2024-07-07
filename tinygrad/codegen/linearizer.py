@@ -474,6 +474,7 @@ class Linearizer(Kernel):
 
     if len(reduceops) != 0:
       # TODO: delete render_reduceop and move the logic for group_for_reduces to Block
+      reduce_idxs = [x if i < len(reduceops[0].arg) else NumNode(0) for i,x in enumerate(reduce_idxs)]
       nlidx, nuidx = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,\
                                           global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,fake_reduce_idxs,alias_buf_idxs[r])
 
