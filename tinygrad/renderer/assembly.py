@@ -21,7 +21,7 @@ class PTXRenderer(Renderer):
   local_max = (1024, 1024, 64)
   shared_max = 49152
   tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], thread_local_aliases=[ [[0],[0],[5],[-2],[0],[-1,1,2,-3],[3,4]], [[3],[4],[0],[0],[5],[-1,1,2,-2],[0]], [[-1],[1],[5],[-2],[2],[0],[3,4]] ], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float)])] # noqa: E501
-  def __init__(self, arch:str): self.tensor_cores = PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else []
+  def __init__(self, arch:str, device="CUDA"): self.device, self.tensor_cores = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
   kernel_prefix = """.version VERSION
@@ -42,6 +42,8 @@ class PTXRenderer(Renderer):
     BinaryOps.ADD: lambda d,a,b,dt,name: f"{'or' if name == 'pred' else 'add'}.{name} {d}, {a}, {b};",
     BinaryOps.MUL: lambda d,a,b,dt,name: ('and' if dt == dtypes.bool else 'mul') + f"{'.lo' if dtypes.is_int(dt) else ''}.{name} {d}, {a}, {b};",
     BinaryOps.XOR: lambda d,a,b,dt,name: f"xor.pred {d}, {a}, {b};" if name == "pred" else f"xor.b{name[1:]} {d}, {a}, {b};",
+    BinaryOps.AND: lambda d, a, b, dt, name: f"and.pred {d}, {a}, {b};" if name == "pred" else f"and.b{name[1:]} {d}, {a}, {b};",
+    BinaryOps.OR: lambda d, a, b, dt, name: f"or.pred {d}, {a}, {b};" if name == "pred" else f"or.b{name[1:]} {d}, {a}, {b};",
     BinaryOps.IDIV: lambda d,a,b,dt,name: f"div.{name} {d}, {a}, {b};",
     BinaryOps.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", BinaryOps.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
     BinaryOps.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};",
@@ -179,25 +181,28 @@ class PTXRenderer(Renderer):
           assert src[0].dtype == dtypes.int64, "load isn't int64"
           assert src[1].op is UOps.CONST, f"load isn't const {u}"
           mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
+          has_gate = len(src) > 3 and src[2].op is UOps.ALU
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-            if(len(src)>3):
+            if has_gate:
               for v in r[u]: kk(f"mov.{self.mem_types[dtype.scalar()]} {v}, {render_val(0, dtype.scalar())};")
-            kk((f"@{r[src[2]]}"if len(src) > 3 else "")
+            kk((f"@{r[src[2]]}"if has_gate else "")
               + f" ld{mem_type}.v{dtype.count}.{self.mem_types[dtype.scalar()]} {{{', '.join(r[u])}}}, [{r[src[0]]}+{src[1].arg}];")
           else:
-            kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[2]] if len(src) > 3 else None,
-                                alt=r[src[3]] if len(src) > 3 else None, ss=mem_type, offset=src[1].arg))
+            kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[2]] if has_gate else None,
+                                alt=r[src[3]] if has_gate else None, ss=mem_type, offset=src[1].arg))
         elif uop is UOps.PHI:
           if dtype.count > 1:
             for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
           else:
             kk(f"mov.b{self.types[dtype][1:]} {r[src[0]]}, {r[src[1]]};")
           r[u] = r[src[0]]
+        elif uop in {UOps.VECTORIZE}:
+          assert src[0].dtype is not None and dtype.count > 1
+          r[u] = [r[x] for x in src] # type: ignore
         elif uop in {UOps.CAST, UOps.BITCAST}:
-          assert src[0].dtype is not None
-          if dtype.count>1: r[u] = [r[x] for x in src] # type: ignore
-          else: _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
+          assert src[0].dtype is not None and dtype.count == 1
+          _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
         elif uop is UOps.DEFINE_LOCAL:
           # TODO: we should sum these, and fetch 0xC000 from somewhere
           assert args[1]*dtype.itemsize <= 0xC000, "too large local"
@@ -227,10 +232,10 @@ class PTXRenderer(Renderer):
 ptx_matcher = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.MUL, name="root", dtype=set([dt for dt in dtypes.fields().values() if dtypes.is_int(dt)]),
       src=[UPat(UOps.CONST, set([2**i for i in range(64)]), name="const"), UPat(name="mul")]),
-    lambda root, mul, const: UOp(UOps.ALU, root.dtype, (mul, UOp.const(root.dtype, int(math.log2(const.arg)))), BinaryOps.SHL)),
+    lambda root, mul, const: UOp(UOps.ALU, root.dtype, (mul, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHL)),
   (UPat(UOps.ALU, BinaryOps.IDIV, name="root", dtype=set([dt for dt in dtypes.fields().values() if dtypes.is_int(dt)]),
       src=[UPat(UOps.CONST, set([2**i for i in range(64)]), name="const"), UPat(name="div")]),
-    lambda root, div, const: UOp(UOps.ALU, root.dtype, (div, UOp.const(root.dtype, int(math.log2(const.arg)))), BinaryOps.SHR)),
+    lambda root, div, const: UOp(UOps.ALU, root.dtype, (div, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHR)),
   (UPat(UOps.ALU, BinaryOps.CMPNE, (UPat(dtype=dtypes.bool),UPat()), "root"), lambda root: UOp(root.op, root.dtype, root.src, BinaryOps.XOR)),
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(name="x", dtype=dtypes.bool),UPat(name="y")), "root"),
     lambda root,x,y: UOp(root.op, root.dtype, (UOp(UOps.ALU, dtypes.bool, (x,), UnaryOps.NEG), y), BinaryOps.MUL)),

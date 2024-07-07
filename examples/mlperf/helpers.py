@@ -2,7 +2,7 @@ from collections import OrderedDict
 import unicodedata
 import numpy as np
 from tinygrad.nn import state
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, dtypes
 from tinygrad.helpers import getenv
 
 #
@@ -207,7 +207,7 @@ def get_mlperf_bert_config():
     "vocab_size": 30522
   }
 
-def get_mlperf_bert_model(checkpoint_path:str):
+def get_mlperf_bert_model(checkpoint_path:str=""):
   from extra.models import bert
   from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert
 
@@ -219,9 +219,22 @@ def get_mlperf_bert_model(checkpoint_path:str):
   config = get_mlperf_bert_config()
   if getenv("DISABLE_DROPOUT", 0):
     config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
-  return BertForPretraining(**config).load_from_pretrained(checkpoint_path)
+  model = BertForPretraining(**config)
+  if checkpoint_path: model.load_from_pretrained(checkpoint_path)
+  return model
 
 def get_data_bert(GPUS:list[str], it):
   data: dict[str, Tensor] = next(it)
   for key in data.keys(): data[key].shard_(GPUS, axis=0)
   return data
+
+def get_fake_data_bert(GPUS:list[str], BS:int):
+  return {
+    "input_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "input_mask": Tensor.zeros((BS, 512), dtype=dtypes.default_float).contiguous().shard_(GPUS, axis=0),
+    "segment_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "masked_lm_positions": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "masked_lm_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "masked_lm_weights": Tensor.zeros((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "next_sentence_labels": Tensor.zeros((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+  }

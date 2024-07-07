@@ -19,7 +19,7 @@ class TinygradModel(BackendRep):
     self.input_names = input_names
 
   def run(self, inputs: Any, **kwargs: Any) -> Tuple[Any, ...]:
-    real_inputs = {k:v for k,v in zip(self.input_names, inputs)}
+    real_inputs = dict(zip(self.input_names, inputs))
     ret = self.fxn(real_inputs, debug=True)
     return tuple(x.numpy() if isinstance(x, Tensor) else [i.numpy() for i in x] if isinstance(x, list) else np.array(x) for x in ret.values())
 
@@ -170,17 +170,6 @@ if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
   # numerical inaccuracy
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')
-
-# TODO: llvm has problems with inf
-if Device.DEFAULT in ['LLVM']:
-  backend_test.exclude('test_isinf_cpu')
-  backend_test.exclude('test_isinf_negative_cpu')
-  backend_test.exclude('test_isinf_positive_cpu')
-
-# # TODO: problems with nan
-if Device.DEFAULT in ['LLVM']:
-  backend_test.exclude('test_isnan_float16_cpu')
-  backend_test.exclude('test_isnan_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):

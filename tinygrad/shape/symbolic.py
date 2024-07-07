@@ -22,11 +22,9 @@ class Node:
 
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
-  @functools.cached_property
-  def hash(self) -> int: return hash(self.key)
   def __repr__(self): return self.render(ctx="REPR")
   def __str__(self): return "<"+self.key+">"
-  def __hash__(self): return self.hash
+  def __hash__(self): return hash(self.key)
   def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented

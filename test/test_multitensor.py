@@ -135,6 +135,15 @@ class TestMultiTensor(unittest.TestCase):
     O = X + W
     np.testing.assert_allclose(O.numpy(), 2)
 
+  def test_elementwise_dtype(self):
+    Tensor.manual_seed(0)
+    X = Tensor.randn(8, 8).realize()
+    W = Tensor.randn(8, 8).realize()
+    X.shard_(devices_4, 0)
+    W.shard_(devices_4, 0)
+    O = X.shrink(((0, 2), None)) * W.shrink(((0, 2), None)) < 2
+    np.testing.assert_allclose(O.numpy(), X.numpy()[0:2]*W.numpy()[0:2] < 2)
+
   @given(strat.sampled_from((4, 5)), strat.sampled_from((devices_2, devices_3)), strat.sampled_from((ReduceOps.SUM, ReduceOps.MAX)),
          strat.sampled_from((None, 0, 1)), strat.sampled_from((None, 0, 1)), strat.sampled_from((1, 0, -1)))
   def test_simple_reduce(self, N, devices, rop, shard_axis, reduce_axis, sign):
@@ -282,26 +291,25 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_rmsnorm(self):
-    from extra.models.llama import RMSNorm
     B, T, embed_size = 4, 10, 20
 
-    layer_norm = RMSNorm(embed_size)
+    norm = nn.RMSNorm(embed_size)
     x = Tensor.rand((B, T, embed_size)).contiguous().realize()
-    y = layer_norm(x)
+    y = norm(x)
 
     # for norm layers, the correct way to shard weights is duplication
-    layer_norm_sharded = RMSNorm(embed_size)
-    layer_norm_sharded.weight.shard_(devices_2, axis=None).realize()
+    norm_sharded = nn.RMSNorm(embed_size)
+    norm_sharded.weight.shard_(devices_2, axis=None).realize()
 
     # if x is being sharded, then all-reduce is involved
     x_sharded = x.shard(devices_2, axis=2).realize()
-    y_shard = layer_norm_sharded(x_sharded).realize()
+    y_shard = norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
     # if x is being duplicated, then the operations remain inside each GPU
     # which is the common case
     x_sharded = x.shard(devices_2, axis=None).realize()
-    y_shard = layer_norm_sharded(x_sharded).realize()
+    y_shard = norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
@@ -541,6 +549,12 @@ class TestMultiTensor(unittest.TestCase):
         assert ast.src[0].op is BinaryOps.ADD
         assert ast.src[0].src[0].op is BufferOps.LOAD
         assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 3
+
+  def test_shard_memory(self):
+    devices = (d0, d1, d2, d3)
+    t = Tensor.zeros(16, 16).contiguous()
+    t.shard_(devices, axis=0)
+    assert all([lb is lb.base and lb.buffer.base.size == 4 * 16 for lb in t.lazydata.lbs])
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestHandleData(unittest.TestCase):
@@ -823,9 +837,9 @@ class TestBatchNorm(unittest.TestCase):
           p.to_(devices)
 
       synced_out = synced_bn(x)
-      synced_si = [si for si in create_schedule(synced_out.lazydata.lbs)]
+      synced_si = list(create_schedule(synced_out.lazydata.lbs))
       unsynced_out = unsynced_bn(x)
-      unsynced_si = [si for si in create_schedule(unsynced_out.lazydata.lbs)]
+      unsynced_si = list(create_schedule(unsynced_out.lazydata.lbs))
 
     # TODO: test synced / unsynced batchnorm cross device kernel and copies
     assert synced_si

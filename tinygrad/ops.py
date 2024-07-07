@@ -1,6 +1,5 @@
 from __future__ import annotations
-from collections import defaultdict, deque
-from typing import DefaultDict, Union, Tuple, Any, List, Dict, Callable
+from typing import Union, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes, struct
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -19,7 +18,7 @@ class UnaryOps(Enum):
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHR = auto(); SHL = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto() # noqa: E702
 class TernaryOps(Enum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -126,6 +125,7 @@ python_alu = {
   BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
   BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
+  BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
@@ -148,28 +148,22 @@ def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x:
 
 # the living definition of LazyOps
 def verify_lazyop(*ast:LazyOp):
-  children: DefaultDict[LazyOp, Dict[LazyOp, None]] = defaultdict(dict)
-  in_degree: DefaultDict[LazyOp, int] = defaultdict(int)
+  sts: Dict[LazyOp, ShapeTracker] = {}
+  def dfs(op:LazyOp, st:ShapeTracker):
+    if op in sts: return
+    for x in op.src: dfs(x, st)
+    # only reduceop is allowed to change shape, limited to turning n to 1
+    if op.op in ReduceOps:
+      assert isinstance(op.arg, tuple)
+      st = ShapeTracker.from_shape(tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape)))
+    else:
+      # movementops are pushed to the edges with LOAD
+      if op.op in BufferOps: st = op.arg.st
+      else: st = sts[op.src[0]]
+      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
+    sts[op] = st
   for i, out in enumerate(ast):
     assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
     assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
     assert out.arg.st.size == ast[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
-    for op in out.lazyops:
-      for s in op.src:
-        children[s][op] = None
-        in_degree[op] += 1
-  q = deque((op, op.arg.st) for out in ast for op in out.lazyops if in_degree[op] == 0)
-  sts: Dict[LazyOp, ShapeTracker] = {}
-  while q:
-    op, st = q.popleft()
-    if op.op not in ReduceOps:
-      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {sts[x].shape} != {st.shape}"
-    sts[op] = st
-    for x in children[op]:
-      in_degree[x] -= 1
-      if in_degree[x] == 0:
-        if x.op in ReduceOps:
-          new_shape = tuple(1 if i in x.arg else s for i,s in enumerate(st.shape))
-          st = ShapeTracker.from_shape(new_shape)
-        elif x.op in BufferOps: st = x.arg.st
-        q.append((x, st))
+    dfs(out, out.arg.st)

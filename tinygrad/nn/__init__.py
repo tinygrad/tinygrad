@@ -60,7 +60,6 @@ class BatchNorm2d:
 
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
 
-# TODO: these Conv lines are terrible
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
   """
   Applies a 1D convolution over an input signal composed of several input planes.
@@ -281,6 +280,28 @@ class LayerNorm2d(LayerNorm):
   ```
   """
   def __call__(self, x): return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+
+class RMSNorm:
+  """
+  Applies Root Mean Square Normalization to input.
+
+  - Described: https://paperswithcode.com/method/rmsnorm
+  - Paper: https://arxiv.org/abs/1910.07467
+
+  ```python exec="true" source="above" session="tensor" result="python"
+  norm = nn.RMSNorm(4)
+  t = Tensor.arange(12, dtype=dtypes.float).reshape(3, 4)
+  print(t.numpy())
+  ```
+  ```python exec="true" source="above" session="tensor" result="python"
+  print(norm(t).numpy())
+  ```
+  """
+  def __init__(self, dim, eps=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
+
+  def _norm(self, x:Tensor): return x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()
+
+  def __call__(self, x:Tensor) -> Tensor: return self._norm(x.float()).cast(x.dtype) * self.weight
 
 class Embedding:
   """

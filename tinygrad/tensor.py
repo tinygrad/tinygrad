@@ -85,7 +85,7 @@ def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
   max_dim = max(len(shape) for shape in shapes)
   return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
-  return tuple(0 if any(size == 0 for size in nth_dim_sizes) else max(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
+  return tuple(0 if 0 in nth_dim_sizes else max(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
 
 class Tensor:
   """
@@ -770,7 +770,7 @@ class Tensor:
     new_shape = tuple([s if s is not None else self.shape[i] for i,s in enumerate(argfix(shape, *args))])
     # resolve -1
     if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
-    elif c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
+    if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
 
   def expand(self, shape, *args) -> Tensor:
@@ -1079,6 +1079,19 @@ class Tensor:
     # checks for shapes and number of dimensions delegated to cat
     return self.unsqueeze(dim).cat(*[t.unsqueeze(dim) for t in args], dim=dim)
 
+  def repeat_interleave(self, repeats:int, dim:Optional[int]=None) -> Tensor:
+    """
+    Repeat elements of a tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.repeat_interleave(2).numpy())
+    ```
+    """
+    x, dim = (self.flatten(), 0) if dim is None else (self, dim)
+    shp = x.shape
+    return x.reshape(*shp[:dim+1], 1, *shp[dim+1:]).expand(*shp[:dim+1], repeats, *shp[dim+1:]).reshape(*shp[:dim], shp[dim]*repeats, *shp[dim+1:])
+
   def repeat(self, repeats, *args) -> Tensor:
     """
     Repeats tensor number of times along each dimension specified by `repeats`.
@@ -1343,6 +1356,50 @@ class Tensor:
     """
     return -((-self).max(axis=axis, keepdim=keepdim))
 
+  def any(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
+    """
+    Tests if any element evaluates to `True` along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the reduce axis and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[True, True], [True, False], [False, False]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.any().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.any(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.any(axis=1, keepdim=True).numpy())
+    ```
+    """
+    return self.bool().max(axis, keepdim)
+
+  def all(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
+    """
+    Tests if all element evaluates to `True` along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the reduce axis and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[True, True], [True, False], [False, False]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.all().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.all(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.all(axis=1, keepdim=True).numpy())
+    ```
+    """
+    return self.logical_not().any(axis, keepdim).logical_not()
+
   def mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
     Returns the mean value of the tensor along the specified axis or axes.
@@ -1564,11 +1621,11 @@ class Tensor:
     formula = formula.replace(" ", "")
     inputs_str, output = formula.split("->") if "->" in formula else (formula, \
                                                                        ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
-    inputs = [x for x in inputs_str.split(',')]
+    inputs = inputs_str.split(',')
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
 
     # map the value of each letter in the formula
-    letter_val = sorted(merge_dicts([{letter:dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(inputs, xs)]).items())
+    letter_val = sorted(merge_dicts([dict(zip(letters, tensor.shape)) for letters, tensor in zip(inputs, xs)]).items())
 
     xs_:List[Tensor] = []
     lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in inputs]
@@ -1999,7 +2056,7 @@ class Tensor:
     Truncates the tensor element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.9, -2.1, -1.5, 0.5, 1.5, 2.1, 3.9]).trunc().numpy())
+    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).trunc().numpy())
     ```
     """
     return self.cast(dtypes.int32).cast(self.dtype)
@@ -2008,7 +2065,7 @@ class Tensor:
     Rounds the tensor element-wise towards positive infinity.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.9, -2.1, -1.5, 0.5, 1.5, 2.1, 3.9]).ceil().numpy())
+    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).ceil().numpy())
     ```
     """
     return (self > (b := self.trunc())).where(b+1, b)
@@ -2017,19 +2074,20 @@ class Tensor:
     Rounds the tensor element-wise towards negative infinity.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.9, -2.1, -1.5, 0.5, 1.5, 2.1, 3.9]).floor().numpy())
+    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).floor().numpy())
     ```
     """
     return (self < (b := self.trunc())).where(b-1, b)
   def round(self: Tensor) -> Tensor:
     """
-    Rounds the tensor element-wise.
+    Rounds the tensor element-wise with rounding half to even.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.9, -2.1, -1.5, 0.5, 1.5, 2.1, 3.9]).round().numpy())
+    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).round().numpy())
     ```
     """
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
+
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
     """
     Linearly interpolates between `self` and `end` by `weight`.
@@ -2049,15 +2107,18 @@ class Tensor:
     ```
     """
     return self*self
-  def clip(self, min_, max_):
+  def clip(self, min_=None, max_=None):
     """
     Clips (clamps) the values in the tensor between `min_` and `max_` element-wise.
+    If `min_` is `None`, there is no lower bound. If `max_` is None, there is no upper bound.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).clip(-1, 1).numpy())
     ```
     """
-    return self.maximum(min_).minimum(max_)
+    if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
+    ret = self.maximum(min_) if min_ is not None else self
+    return ret.minimum(max_) if max_ is not None else ret
   def sign(self):
     """
     Returns the sign of the tensor element-wise.
@@ -2340,7 +2401,7 @@ class Tensor:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
-      assert isinstance(y, (float, int, bool, Node)), f"{type(y)=}, {y=}"
+      assert isinstance(y, (*get_args(ConstType), Node)), f"{type(y)=}, {y=}"
       if isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       elif not isinstance(y, Node): y_dtype = dtypes.from_py(y)
       if isinstance(y, Node): y = Tensor.from_node(y, device=x.device)
@@ -2461,6 +2522,36 @@ class Tensor:
     ```
     """
     return F.Xor.apply(*self._broadcasted(x, reverse))
+
+  def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Compute the bit-wise AND of `self` and `x`.
+    Equivalent to `self & x`.
+    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([2, 5, 255]).bitwise_and(Tensor([3, 14, 16])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
+    ```
+    """
+    assert dtypes.is_int(self.dtype)
+    return F.BitwiseAnd.apply(*self._broadcasted(x, reverse))
+
+  def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Compute the bit-wise OR of `self` and `x`.
+    Equivalent to `self | x`.
+    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([2, 5, 255]).bitwise_or(Tensor([4, 4, 4])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
+    ```
+    """
+    assert dtypes.is_int(self.dtype)
+    return F.BitwiseOr.apply(*self._broadcasted(x, reverse))
 
   def lshift(self, x:int):
     """
@@ -2586,6 +2677,8 @@ class Tensor:
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __truediv__(self, x) -> Tensor: return self.div(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
+  def __and__(self, x) -> Tensor: return self.bitwise_and(x)
+  def __or__(self, x) -> Tensor: return self.bitwise_or(x)
   def __xor__(self, x) -> Tensor: return self.xor(x)
   def __lshift__(self, x) -> Tensor: return self.lshift(x)
   def __rshift__(self, x) -> Tensor: return self.rshift(x)
@@ -2596,6 +2689,8 @@ class Tensor:
   def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rtruediv__(self, x) -> Tensor: return self.div(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
+  def __rand__(self, x) -> Tensor: return self.bitwise_and(x, True)
+  def __ror__(self, x) -> Tensor: return self.bitwise_or(x, True)
   def __rxor__(self, x) -> Tensor: return self.xor(x, True)
 
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
@@ -2604,6 +2699,8 @@ class Tensor:
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
+  def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x))
+  def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x))
   def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
@@ -2788,12 +2885,23 @@ class Tensor:
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask).sum()
     return -((1 - label_smoothing) * (log_probs * y).sum() + smoothing) / loss_mask.sum()
 
+  # ***** convenience stuff *****
+
+  @property
+  def ndim(self) -> int: return len(self.shape)
+  def numel(self) -> sint: return prod(self.shape)
+  def element_size(self) -> int: return self.dtype.itemsize
+  def nbytes(self) -> int: return self.numel() * self.element_size()
+  def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
+  def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]: return self.shape if dim is None else self.shape[dim]
+
   # ***** cast ops *****
 
   def llvm_bf16_cast(self, dtype:DType):
     # hack for devices that don't support bfloat16
     assert self.dtype == dtypes.bfloat16
     return self.to("LLVM").bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).cast(dtype)
+
   def cast(self, dtype:DType) -> Tensor:
     """
     Casts `self` to the given `dtype`.
@@ -2808,6 +2916,7 @@ class Tensor:
     ```
     """
     return self if self.dtype == dtype else F.Cast.apply(self, dtype=dtype)
+
   def bitcast(self, dtype:DType) -> Tensor:
     """
     Bitcasts `self` to the given `dtype` of the same itemsize.
@@ -2825,6 +2934,7 @@ class Tensor:
     """
     if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
     return F.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
+
   def float(self) -> Tensor:
     """
     Convenience method to cast `self` to a `float32` Tensor.
@@ -2839,6 +2949,7 @@ class Tensor:
     ```
     """
     return self.cast(dtypes.float32)
+
   def half(self) -> Tensor:
     """
     Convenience method to cast `self` to a `float16` Tensor.
@@ -2854,15 +2965,35 @@ class Tensor:
     """
     return self.cast(dtypes.float16)
 
-  # ***** convenience stuff *****
+  def int(self) -> Tensor:
+    """
+    Convenience method to cast `self` to a `int32` Tensor.
 
-  @property
-  def ndim(self) -> int: return len(self.shape)
-  def numel(self) -> sint: return prod(self.shape)
-  def element_size(self) -> int: return self.dtype.itemsize
-  def nbytes(self) -> int: return self.numel() * self.element_size()
-  def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
-  def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]: return self.shape if dim is None else self.shape[dim]
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1.5, -0.5, 0.0, 0.5, 1.5])
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.int()
+    print(t.dtype, t.numpy())
+    ```
+    """
+    return self.cast(dtypes.int32)
+
+  def bool(self) -> Tensor:
+    """
+    Convenience method to cast `self` to a `bool` Tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 0, 1])
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.bool()
+    print(t.dtype, t.numpy())
+    ```
+    """
+    return self.cast(dtypes.bool)
 
   # *** image Tensor function replacements ***
 

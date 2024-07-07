@@ -3,8 +3,9 @@ import subprocess, hashlib, tempfile, ctypes, ctypes.util, functools, re
 from pathlib import Path
 from typing import Tuple, Optional, List
 import tinygrad.runtime.autogen.cuda as cuda
-from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, init_c_struct_t, colored, cpu_time_execution
-from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator, MallocAllocator
+import tinygrad.runtime.autogen.nvrtc as nvrtc
+from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, init_c_struct_t, colored
+from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.assembly import PTXRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
@@ -19,11 +20,7 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
 
-CUDACPU = getenv("CUDACPU") == 1
-if CUDACPU:
-  gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
-  gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]  # noqa: E501
-  cuda.cuLaunchKernel = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, unused_extra, args: gpuocelot_lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)  # type: ignore  # noqa: E501
+PTX = getenv("PTX")
 
 def check(status):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()}")  # noqa: E501
@@ -36,7 +33,6 @@ def encode_args(args, vals) -> Tuple[ctypes.Structure, ctypes.Array]:
   return c_args, vargs
 
 def cu_time_execution(cb, enable=False) -> Optional[float]:
-  if CUDACPU: return cpu_time_execution(cb, enable=enable)
   if not enable: return cb()
   evs = [init_c_var(cuda.CUevent(), lambda x: cuda.cuEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
   cuda.cuEventRecord(evs[0], None)
@@ -61,16 +57,16 @@ class PTXCompiler(Compiler):
 class CUDACompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
-    check(cuda.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
+    check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_cuda_{self.arch}")
   def compile(self, src:str) -> bytes:
-    check(cuda.nvrtcCreateProgram(ctypes.byref(prog := cuda.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
-    status = cuda.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
+    check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
+    status = nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
 
-    if status != 0: raise CompileError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check).decode()}")
-    return _get_bytes(prog, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, check)
+    if status != 0: raise CompileError(f"compile failed: {_get_bytes(prog, nvrtc.nvrtcGetProgramLog, nvrtc.nvrtcGetProgramLogSize, check).decode()}")
+    return _get_bytes(prog, nvrtc.nvrtcGetPTX, nvrtc.nvrtcGetPTXSize, check)
 
 def cuda_disassemble(lib, arch):
   try:
@@ -86,30 +82,26 @@ class CUDAProgram:
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
     if DEBUG >= 6: cuda_disassemble(lib, device.arch)
 
-    if CUDACPU: self.prg = lib
-    else:
-      check(cuda.cuCtxSetCurrent(self.device.context))
-      self.module = cuda.CUmodule()
-      status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
-      if status != 0:
-        del self.module
-        cuda_disassemble(lib, device.arch)
-        raise RuntimeError(f"module load failed with status code {status}: {cuda.cudaError_enum__enumvalues[status]}")
-      check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
-      self.prg = prg #type: ignore
+    check(cuda.cuCtxSetCurrent(self.device.context))
+    self.module = cuda.CUmodule()
+    status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
+    if status != 0:
+      del self.module
+      cuda_disassemble(lib, device.arch)
+      raise RuntimeError(f"module load failed with status code {status}: {cuda.cudaError_enum__enumvalues[status]}")
+    check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
+    self.prg = prg #type: ignore
 
   def __del__(self):
     if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if CUDACPU: self.vargs = args+tuple(vals)
+    check(cuda.cuCtxSetCurrent(self.device.context))
+    if not hasattr(self, "vargs"):
+      self.c_args, self.vargs = encode_args(args, vals) #type: ignore
     else:
-      check(cuda.cuCtxSetCurrent(self.device.context))
-      if not hasattr(self, "vargs"):
-        self.c_args, self.vargs = encode_args(args, vals) #type: ignore
-      else:
-        for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
-        for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
+      for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
+      for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, self.vargs)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
@@ -148,33 +140,29 @@ class CUDADevice(Compiled):
 
   def __init__(self, device:str):
     device_id = int(device.split(":")[1]) if ":" in device else 0
-    if not CUDACPU:
-      check(cuda.cuInit(0))
-      self.cu_device = init_c_var(cuda.CUdevice(), lambda x: check(cuda.cuDeviceGet(ctypes.byref(x), device_id)))
-      self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
-      check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
+    check(cuda.cuInit(0))
+    self.cu_device = init_c_var(cuda.CUdevice(), lambda x: check(cuda.cuDeviceGet(ctypes.byref(x), device_id)))
+    self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
+    check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
 
-      for dev in CUDADevice.devices:
-        check(cuda.cuDeviceCanAccessPeer(ctypes.byref(val := ctypes.c_int()), self.cu_device, dev.cu_device))
-        if val.value != 1: continue
-        check(cuda.cuCtxSetCurrent(dev.context))
-        check(cuda.cuCtxEnablePeerAccess(self.context, 0))
-        check(cuda.cuCtxSetCurrent(self.context))
-        check(cuda.cuCtxEnablePeerAccess(dev.context, 0))
-        CUDADevice.peer_access = True
+    for dev in CUDADevice.devices:
+      check(cuda.cuDeviceCanAccessPeer(ctypes.byref(val := ctypes.c_int()), self.cu_device, dev.cu_device))
+      if val.value != 1: continue
+      check(cuda.cuCtxSetCurrent(dev.context))
+      check(cuda.cuCtxEnablePeerAccess(self.context, 0))
+      check(cuda.cuCtxSetCurrent(self.context))
+      check(cuda.cuCtxEnablePeerAccess(dev.context, 0))
+      CUDADevice.peer_access = True
 
-    self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
+    self.arch = f"sm_{major.value}{minor.value}"
     self.pending_copyin: List[Tuple[int, int, Optional[BufferOptions]]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator,
-                     PTXRenderer(self.arch) if getenv("PTX") else CUDARenderer(self.arch),
-                     PTXCompiler(self.arch) if getenv("PTX") else CUDACompiler(self.arch),
-                     functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
+    super().__init__(device, CUDAAllocator(self), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
+                     PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch), functools.partial(CUDAProgram, self), graph=CUDAGraph)
 
   def synchronize(self):
-    if CUDACPU: return
     check(cuda.cuCtxSetCurrent(self.context))
     check(cuda.cuCtxSynchronize())
     for opaque,sz,options in self.pending_copyin: self.allocator.free(opaque, sz, options)
