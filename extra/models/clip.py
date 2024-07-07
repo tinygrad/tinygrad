@@ -323,11 +323,12 @@ class Open:
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L396
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L498
 class FrozenOpenClipEmbedder(Embedder):
-  def __init__(self, dims:int, n_heads:int, layers:int, return_pooled:bool):
+  def __init__(self, dims:int, n_heads:int, layers:int, return_pooled:bool, ln_penultimate:bool=False):
     self.tokenizer = Tokenizer.ClipTokenizer()
     self.model = Open.ClipTextTransformer(dims, n_heads, layers)
     self.return_pooled = return_pooled
     self.input_key = "txt"
+    self.ln_penultimate = ln_penultimate
 
   def text_transformer_forward(self, x:Tensor, attn_mask:Optional[Tensor]=None):
     for r in self.model.transformer.resblocks:
@@ -339,6 +340,9 @@ class FrozenOpenClipEmbedder(Embedder):
 
     x = self.model.token_embedding(tokens).add(self.model.positional_embedding).permute(1,0,2)
     x, penultimate = self.text_transformer_forward(x, attn_mask=self.model.attn_mask)
+
+    if self.ln_penultimate:
+      penultimate = self.model.ln_final(penultimate)
 
     if self.return_pooled:
       x = self.model.ln_final(x)

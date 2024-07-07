@@ -146,8 +146,8 @@ class HWQueue:
 
 class HWComputeQueue(HWQueue):
   def __init__(self):
-    super().__init__()
     self.cmd_idx_to_qmd, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}
+    super().__init__()
 
   def copy_from_cpu(self, gpuaddr, data):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_OFFSET_OUT_UPPER, 2), *nvdata64(gpuaddr)]
@@ -156,7 +156,7 @@ class HWComputeQueue(HWQueue):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + list(data)
     return self._mark_command_end()
 
-  def exec(self, prg, kernargs, global_size=(1,1,1), local_size=(1,1,1), signal=None, signal_value=0):
+  def exec(self, prg, kernargs, global_size=(1,1,1), local_size=(1,1,1)):
     ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     self.cmd_idx_to_qmd[len(self)] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[len(self)] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
@@ -164,14 +164,7 @@ class HWComputeQueue(HWQueue):
 
     qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
     qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
-    qmd.constant_buffer_addr_lower_0 = kernargs & 0xffffffff
-    qmd.constant_buffer_addr_upper_0 = kernargs >> 32
-    if signal is not None:
-      qmd.release0_address_lower = ctypes.addressof(from_mv(signal)) & 0xffffffff
-      qmd.release0_address_upper = ctypes.addressof(from_mv(signal)) >> 32
-      qmd.release0_payload_lower = signal_value & 0xffffffff
-      qmd.release0_payload_upper = signal_value >> 32
-      qmd.release0_enable = 1
+    qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = nvdata64(kernargs)
 
     if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 1)) is None:
       self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
@@ -188,6 +181,20 @@ class HWComputeQueue(HWQueue):
     # Patch the exec cmd with new launch dims
     self.cmd_idx_to_global_dims[cmd_idx][:] = array.array('I', global_size)
     self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
+
+  def signal(self, signal, value=0):
+    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 1)) is None or prev_qmd.release0_enable == 1: return super().signal(signal, value)
+    prev_qmd.release0_address_upper, prev_qmd.release0_address_lower = nvdata64(ctypes.addressof(from_mv(signal)))
+    prev_qmd.release0_payload_upper, prev_qmd.release0_payload_lower = nvdata64(value)
+    prev_qmd.release0_enable = 1
+    self.cmd_idx_to_qmd[len(self)] = prev_qmd # this command is embedded into qmd.
+    return self._mark_command_end()
+
+  def update_signal(self, cmd_idx, signal=None, value=None):
+    if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super().update_signal(cmd_idx, signal, value)
+    if signal is not None: qmd.release0_address_upper, qmd.release0_address_lower = nvdata64(ctypes.addressof(from_mv(signal)))
+    if value is not None: qmd.release0_payload_upper, qmd.release0_payload_lower = nvdata64(value)
+    return self
 
   def submit(self, dev:NVDevice): self._submit(dev, dev.compute_gpfifo)
 
@@ -454,6 +461,7 @@ class NVDevice(HCQCompatCompiled):
                                        gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size)
 
   def _gpu_map(self, mem):
+    mem = mem._base if hasattr(mem, '_base') else mem
     if self.gpu_uuid in getattr(mem, "mapped_gpu_ids", []): return
     mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_uuid])
     return self._gpu_uvm_map(mem.va_addr, mem.size, mem.hMemory, create_range=False)
