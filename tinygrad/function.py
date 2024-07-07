@@ -37,7 +37,6 @@ class Reciprocal(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
-# ************* unary ops *************
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
