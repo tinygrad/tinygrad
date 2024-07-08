@@ -92,6 +92,8 @@ def type_verify(uops):
   for u in uops:
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
     if uop in {UOps.CONST, UOps.DEFINE_ACC}:
+      if uop is UOps.CONST:
+        assert dtype == dtype.scalar(), f"consts should be scalar, got {dtype}"
       if uop is UOps.DEFINE_ACC:
         assert dtype is not None and src[0].dtype == dtype.scalar(), f"type of {src[0].dtype=} must be a scalar {dtype.scalar()}"
         arg = src[0].arg
