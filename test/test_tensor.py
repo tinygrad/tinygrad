@@ -630,7 +630,6 @@ class TestTensorMetadata(unittest.TestCase):
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)
     out = x.relu() * y.sigmoid()
-    print(out.lazydata)
     assert out.lazydata.metadata.name == "__mul__"
     assert out.lazydata.srcs[0].metadata.name == "relu"
     assert out.lazydata.srcs[1].metadata.name == "sigmoid"
