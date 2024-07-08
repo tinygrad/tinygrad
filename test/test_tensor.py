@@ -607,8 +607,8 @@ class TestInferenceMode(unittest.TestCase):
 
 class TestTensorMetadata(unittest.TestCase):
   def test_matmul(self):
-    x = Tensor(x_init, requires_grad=True)
-    W = Tensor(W_init, requires_grad=True)
+    x = Tensor.rand(3, requires_grad=True)
+    W = Tensor.rand(3, 3, requires_grad=True)
     out = x.matmul(W)
     assert out.lazydata.metadata.name == "matmul"
     s = create_schedule([out.lazydata])
@@ -616,7 +616,7 @@ class TestTensorMetadata(unittest.TestCase):
     assert s[-1].metadata[0].name == "matmul"
 
   def test_relu(self):
-    x = Tensor(x_init, requires_grad=True)
+    x = Tensor.rand(3, requires_grad=True)
     out = x.relu()
     assert out.lazydata.metadata.name == "relu"
     s = create_schedule([out.lazydata])
