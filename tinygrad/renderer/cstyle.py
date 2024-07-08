@@ -47,8 +47,8 @@ class CStyleLanguage(Renderer):
   def render_const(self, x:ConstType, dtype:DType) -> str:
     if math.isnan(x): return self.render_cast("NAN", dtype)
     if math.isinf(x): return self.render_cast(("-" if x < 0 else "") + "INFINITY", dtype)
-    if dtype.scalar() == dtypes.bool: return "1" if x else "0"
-    if dtype.scalar() == dtypes.float: return f"{x}f"
+    if dtype == dtypes.bool: return "1" if x else "0"
+    if dtype == dtypes.float: return f"{x}f"
     return str(x)
 
   # returns a str expression of the loaded value with the output type
