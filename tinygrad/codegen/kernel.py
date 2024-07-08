@@ -265,6 +265,9 @@ class Kernel:
     # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
+    print("zip(shapes, strides)=")
+    for s,st in zip(shapes, strides):
+      print("  ",s,st)
     rets = [[(s[0], st[0])] for s,st in zip(shapes, strides)]
     for i in range(1, len(shapes[0])):
       can_merge = []
@@ -273,7 +276,8 @@ class Kernel:
         si, sti, last_st = s[i], st[i], ret[-1][1]
         can_merge.append((sti is not None) and ((sti != 0 and last_st == si*sti) or (sti == 0 and last_st == 0)))
       # more can merge than this
-      mergeable = all(can_merge) and i != self.first_reduce
+      mergeable = all(can_merge)
+      print(f"{i} is mergeable?", mergeable, can_merge)
       for j,(s,st) in enumerate(zip(shapes, strides)):
         if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])
         else: rets[j].append((s[i], st[i]))
@@ -522,7 +526,8 @@ class Kernel:
         for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
             try: # may fail due to excessive smem usage
-              self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+              for i in range(len(set(r.arg for r in self.reduceops))):
+                self.apply_opt(Opt(OptOps.GROUPTOP, i, sz))
               break
             except KernelOptError: pass
 

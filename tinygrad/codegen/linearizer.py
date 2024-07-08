@@ -171,7 +171,9 @@ class Linearizer(Kernel):
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
+          print("idx=",idx)
           rendered_idx = idx.render(render_ops, self.loop_uops)
+          print("rendered_idx=",rendered_idx)
           valid_tuple = (valid_uop, UOp.const(localtype, invalid_value)) if valid.min == 0 else tuple()
           self.load_cache[key] = UOp(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + barrier)
       ret.append(UOp(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
@@ -266,12 +268,21 @@ class Linearizer(Kernel):
   def render_reduceop(self, reduceop:LazyOp, accs:Dict[LazyOp, List[UOp]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]],
                       global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, fake_reduce_idxs,
                       alias_buf_idxs:List[Tuple[int, int, List]]) -> Tuple[List[NumNode|Variable], List[NumNode|Variable]]:
+    self.late_gate = None # reset late_gate
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs, (i:=self.reduceops.index(reduceop))*2+2, True)
+    depth = sum([1 if reduceop in r.lazyops else 0 for r in self.lazyops if r.op in ReduceOps])
+    reduce_idxs = [x if (i//len(reduceop.arg))+1 == depth else 0*x for i,x in enumerate(reduce_idxs)]
+    print("rendering reduceop")
+    print("  depth=",depth)
+    print("  reduceop=",reduceop)
+    print("  reduce_idxs=",reduce_idxs)
+    print("  self.full_shape=",self.full_shape)
+    # loop_ctx = self.render_loop(reduce_idxs, (i:=self.reduceops.index(reduceop))*2+2, True)
+    loop_ctx = self.render_loop([x for x in reduce_idxs if x != 0], (i:=self.reduceops.index(reduceop))*2+2, True)
 
     # define accumulator - modify idxs if necessary for TC
     out_buf = -len(self.reduceops)+i if self.group_for_reduces else 0
-    accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
+    accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=[x if i < len(reduceop.arg) else x*0 for i,x in enumerate(loop_ctx)])
 
     # store local aliases
     locals_to_store = [(localbuf_idx, buf_idxs, self.global_load(i, buf_idxs)) for i, localbuf_idx, buf_idxs in alias_buf_idxs]
@@ -328,8 +339,19 @@ class Linearizer(Kernel):
         self.late_gate = create_lt_node(self.sts[-1].expr_idxs(fake_idxs)[0], 1)
 
       # create new late reduce local loops and replace local_idxs that have been used
+      print("rendering grouped reduce with depth=",depth)
+      print("  self.local_dims=",self.local_dims)
       end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+self.group_for_reduces)]  # noqa: E501
+      print("  end_local_idxs=", end_local_idxs)
+      end_local_idxs = [x if ((i-self.first_reduce)//len(reduceop.arg))+1 == depth else 0*x for i,x in enumerate(end_local_idxs)]
+      # end_local_idxs = [x if i <= self.local_dims or i-self.local_dims == depth else 0*x for i,x in enumerate(end_local_idxs)]
+      print("  end_local_idxs2=",end_local_idxs)
+      print("  local_idxs=", local_idxs)
       local_idxs = local_idxs[:self.local_dims] + end_local_idxs[self.global_dims + self.local_dims:]
+      print("  local_idxs2=", local_idxs)
+      local_idxs = [x if i <= self.local_dims or ((i-self.local_dims)//len(reduceop.arg))+1 == depth else 0*x for i,x in enumerate(local_idxs)]
+      print("  local_idxs3=", local_idxs)
+      
 
       # if any group_for_reduce items aren't reduces, upcast them here
       for j in self.upcast_in_mid_reduce_axes:
@@ -344,6 +366,8 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # late reduce loop
+      
+      print("  end_local_idxs3=",end_local_idxs)
       loop_ctx = self.render_loop(end_local_idxs, i*2+3, True)
 
       # define late accumulator
@@ -454,7 +478,7 @@ class Linearizer(Kernel):
     self.uops:UOpGraph = UOpGraph(flatten(stores))
 
     # maybe graph the uops
-    if DEBUG >= 5: self.uops.print()
+    if True or DEBUG >= 5: self.uops.print()
     if getenv("GRAPHUOPS"): self.uops.graph()
 
     # restore backups
@@ -470,11 +494,12 @@ class Linearizer(Kernel):
     reduceops = dedup(x for x in outputs if x.op in ReduceOps)
     assert len(reduceops) <= 1, "max one reduceop per block"
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
+    print("reduce_idxs=",reduce_idxs)
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
     if len(reduceops) != 0:
       # TODO: delete render_reduceop and move the logic for group_for_reduces to Block
-      reduce_idxs = [x if i < len(reduceops[0].arg) else NumNode(0) for i,x in enumerate(reduce_idxs)]
+      # reduce_idxs = [x if i < len(reduceops[0].arg) else x*0 for i,x in enumerate(reduce_idxs)]
       nlidx, nuidx = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,\
                                           global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,fake_reduce_idxs,alias_buf_idxs[r])
 
