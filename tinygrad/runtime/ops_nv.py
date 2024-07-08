@@ -491,7 +491,6 @@ class NVDevice(HCQCompatCompiled):
       NVDevice.gpus_info = (nv_gpu.nv_ioctl_card_info_t*64)()
       nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, NVDevice.gpus_info)
 
-    # TODO: Get classes from NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.fd_dev = self._new_gpu_fd()
 
