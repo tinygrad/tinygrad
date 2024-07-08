@@ -1,13 +1,24 @@
 """This is where the forwards and backwards passes live."""
 import math
 from typing import Tuple, Optional
-from tinygrad.helpers import argsort
+from tinygrad.helpers import argsort, getenv
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
-from tinygrad.transcendental import xsin, xlog2, xexp2
+from tinygrad.transcendental import xsin, xlog2, xexp2, is_dtype_transcendental_supported
+
+transcendental_supported_devices = ["CLANG", "LLVM"]
+def use_transcendental(d:LazyBuffer) -> bool:
+  # TRANSCENDENTAL=0 to always ignore.
+  # TRANSCENDENTAL=1 to run only in CLANG/LLVM (default).
+  # TRANSCENDENTAL=2 to always run it.
+  lv = getenv("TRANSCENDENTAL", 1)
+  if lv == 0: return False
+  if lv == 2: return True
+  return (is_dtype_transcendental_supported(d.dtype) and
+          d.device in transcendental_supported_devices)
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -40,10 +51,11 @@ class Reciprocal(Function):
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return xsin(x)
+    return xsin(x) if use_transcendental(x) else x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return xsin(self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG))).e(BinaryOps.MUL, grad_output)
+    def _xsin(x): return xsin(x) if use_transcendental(x) else x.e(UnaryOps.SIN)
+    return _xsin(self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG))).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
@@ -57,13 +69,15 @@ class Relu(Function):
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return xlog2(x).e(BinaryOps.MUL, x.const(math.log(2)))
+    def _xlog2(x): return xlog2(x) if use_transcendental(x) else x.e(UnaryOps.LOG2)
+    return _xlog2(x).e(BinaryOps.MUL, x.const(math.log(2)))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.MUL, self.x.e(UnaryOps.RECIP))
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = xexp2(x.e(BinaryOps.MUL, x.const(1/math.log(2))))
+    def _xexp2(x): return xexp2(x) if use_transcendental(x) else x.e(UnaryOps.EXP2)
+    self.ret = _xexp2(x.e(BinaryOps.MUL, x.const(1/math.log(2))))
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
@@ -81,7 +95,8 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.const(1).e(BinaryOps.ADD, xexp2(x.e(BinaryOps.MUL, x.const(-1/math.log(2))))).e(UnaryOps.RECIP)
+    def _xexp2(x): return xexp2(x) if use_transcendental(x) else x.e(UnaryOps.EXP2)
+    self.ret = x.const(1).e(BinaryOps.ADD, _xexp2(x.e(BinaryOps.MUL, x.const(-1/math.log(2))))).e(UnaryOps.RECIP)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
