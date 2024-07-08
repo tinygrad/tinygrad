@@ -96,13 +96,16 @@ def frexp(v:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x800FFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3C00}[v.dtype]
+  bias = {dtypes.float64: 1022, dtypes.float32: 126, dtypes.float16: 15}[v.dtype]
   bits = float_to_bits(v)
   exponent = shr(bits, significand_bits(v.dtype)).e(BinaryOps.AND, bits.const(exponent_mask(v.dtype)))
   exponent_zero = exponent.e(BinaryOps.CMPNE, exponent.const(0.0))
   result_f = bits_to_float(bits.e(BinaryOps.AND, bits.const(m1)).e(BinaryOps.OR, bits.const(m2)), v.dtype)
   value = exponent_zero.e(TernaryOps.WHERE, result_f, v)
-  exp = exponent.e(BinaryOps.ADD, exponent.const(-exponent_bias(v.dtype)))
+  exp = exponent.e(BinaryOps.ADD, exponent.const(-bias))
   exp = exponent_zero.e(TernaryOps.WHERE, exp, exp.const(0))
+  if v.dtype == dtypes.float16:
+    exp = exp.cast(dtypes.int16, True, allow_buffer_view=True)
   return value, exp
 
 def mla(x:LazyBuffer, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer:
@@ -242,7 +245,7 @@ def xsin(d:LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffer
     return d.e(UnaryOps.SIN)
   if 0 in d.shape: return d
   if d.dtype == dtypes.float16:
-    fast = True  # confirmed xsin(max(Float16)) works
+    switch_over = 9500.0
   reduction_algo = cody_waite_reduction if fast else payne_hanek_reduction
   # mask +-inf/nan as zero
   x = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
