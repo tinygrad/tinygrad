@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import getenv, temp, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
@@ -603,6 +604,24 @@ class TestInferenceMode(unittest.TestCase):
       assert mm.grad is None
       assert W.grad is None
     f(x, m, W)
+
+class TestTensorMetadata(unittest.TestCase):
+  def test_matmul(self):
+    x = Tensor(x_init, requires_grad=True)
+    W = Tensor(W_init, requires_grad=True)
+    out = x.matmul(W)
+    assert out.lazydata.metadata.name == "matmul"
+    s = create_schedule([out.lazydata])
+    assert len(s[-1].metadata) == 1
+    assert s[-1].metadata[0].name == "matmul"
+
+  def test_relu(self):
+    x = Tensor(x_init, requires_grad=True)
+    out = x.relu()
+    assert out.lazydata.metadata.name == "relu"
+    s = create_schedule([out.lazydata])
+    assert len(s[-1].metadata) == 1
+    assert s[-1].metadata[0].name == "relu"
 
 if __name__ == '__main__':
   unittest.main()
