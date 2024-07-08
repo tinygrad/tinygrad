@@ -197,10 +197,12 @@ class PTXRenderer(Renderer):
           else:
             kk(f"mov.b{self.types[dtype][1:]} {r[src[0]]}, {r[src[1]]};")
           r[u] = r[src[0]]
+        elif uop in {UOps.VECTORIZE}:
+          assert src[0].dtype is not None and dtype.count > 1
+          r[u] = [r[x] for x in src] # type: ignore
         elif uop in {UOps.CAST, UOps.BITCAST}:
-          assert src[0].dtype is not None
-          if dtype.count>1: r[u] = [r[x] for x in src] # type: ignore
-          else: _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
+          assert src[0].dtype is not None and dtype.count == 1
+          _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
         elif uop is UOps.DEFINE_LOCAL:
           # TODO: we should sum these, and fetch 0xC000 from somewhere
           assert args[1]*dtype.itemsize <= 0xC000, "too large local"
