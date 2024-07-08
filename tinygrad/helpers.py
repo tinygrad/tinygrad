@@ -112,9 +112,8 @@ class Metadata:
   backward: bool = False
   caller: Optional[str] = None
   def __hash__(self): return hash(self.name)
-  def __repr__(self): return self.name + (" bw" if self.backward else "") + (f" - {self.caller}" if self.caller else "")
+  def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
   def __str__(self): return self.name + (" bw" if self.backward else "")
-
 _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
 
 # **************** global state Counters ****************
