@@ -7,7 +7,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
-from tinygrad.fastmath import xsin, xlog2, xexp2, is_dtype_fastmath_supported
+from tinygrad.fastmath import xsin, xlog2, xexp2
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -40,15 +40,10 @@ class Reciprocal(Function):
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    self.fast_approx = is_dtype_fastmath_supported(x.dtype)
-    if self.fast_approx:
-      return xsin(x)
-    return x.e(UnaryOps.SIN)
+    return xsin(x)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    k = self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG))
-    k = xsin(k) if self.fast_approx else k.e(UnaryOps.SIN)
-    return k.e(BinaryOps.MUL, grad_output)
+    return xsin(self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG))).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
@@ -62,19 +57,13 @@ class Relu(Function):
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    fast_approx = is_dtype_fastmath_supported(x.dtype)
-    x = xlog2(x) if fast_approx else x.e(UnaryOps.LOG2)
-    return x.e(BinaryOps.MUL, x.const(math.log(2)))
+    return xlog2(x).e(BinaryOps.MUL, x.const(math.log(2)))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.MUL, self.x.e(UnaryOps.RECIP))
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    fast_approx = is_dtype_fastmath_supported(x.dtype)
-    if self.device == "AMD":
-      fast_approx=False
-    self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2)))
-    self.ret = xexp2(self.ret) if fast_approx else self.ret.e(UnaryOps.EXP2)
+    self.ret = xexp2(x.e(BinaryOps.MUL, x.const(1/math.log(2))))
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
@@ -92,7 +81,7 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(-1/math.log(2))).e(UnaryOps.EXP2)).e(UnaryOps.RECIP)
+    self.ret = x.const(1).e(BinaryOps.ADD, xexp2(x.e(BinaryOps.MUL, x.const(-1/math.log(2))))).e(UnaryOps.RECIP)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
