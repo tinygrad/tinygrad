@@ -550,7 +550,10 @@ class NVDevice(HCQCompatCompiled):
     self.kernargs_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x4000000, map_to_cpu=True)
     self.kernargs_ptr: int = self.kernargs_page.va_addr
 
-    self.arch: str = "sm_89" if not MOCKGPU else "sm_35" # TODO: fix
+    gr_info_entry = nv_gpu.NV2080_CTRL_GR_INFO(index=nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION)
+    gr_info = nv_gpu.NV2080_CTRL_GR_GET_INFO_PARAMS(grInfoListSize=1, grInfoList=ctypes.addressof(gr_info_entry))
+    rm_control(self.fd_ctl, nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO, self.root, self.subdevice, gr_info)
+    self.arch: str = f"sm_{(gr_info_entry.data >> 8)&0xff}{gr_info_entry.data&0xff}"
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
