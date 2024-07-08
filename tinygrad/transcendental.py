@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.lazy import LazyBuffer
 
-def is_dtype_fastmath_supported(d:DType):
+def is_dtype_transcendental_supported(d:DType):
   return d in [dtypes.float16, dtypes.float32, dtypes.float64]
 
 def _lazy_map_numbers(x:LazyBuffer, inf:LazyBuffer, _inf:LazyBuffer, nan:LazyBuffer, ratio:LazyBuffer):
@@ -31,19 +31,19 @@ def dfdiv2_f2_f2_f2(nx:LazyBuffer, ny:LazyBuffer, dx:LazyBuffer, dy:LazyBuffer) 
   return qx, qy
 # *** helper functions for bit manipulation ***
 def significand_bits(d:DType) -> int:
-  assert is_dtype_fastmath_supported(d)
+  assert is_dtype_transcendental_supported(d)
   return {dtypes.float64: 52, dtypes.float32: 23, dtypes.float16: 10}[d]
 
 def exponent_bias(d:DType) -> int:
-  assert is_dtype_fastmath_supported(d)
+  assert is_dtype_transcendental_supported(d)
   return {dtypes.float64: 1022, dtypes.float32: 126, dtypes.float16: 14}[d]
 
 def exponent_mask(d:DType) -> int:
-  assert is_dtype_fastmath_supported(d)
+  assert is_dtype_transcendental_supported(d)
   return {dtypes.float64: 0x7FF, dtypes.float32: 0xFF, dtypes.float16: 0x1F}[d]
 
 def float_to_bits(d:LazyBuffer) -> LazyBuffer:
-  assert is_dtype_fastmath_supported(d.dtype)
+  assert is_dtype_transcendental_supported(d.dtype)
   cast_to = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[d.dtype]
   return d.cast(cast_to, True, allow_buffer_view=False)
 
@@ -57,7 +57,7 @@ def shl(x:LazyBuffer, y:int) -> LazyBuffer: return x.e(BinaryOps.MUL, x.const(2*
 
 def rintk(d:LazyBuffer) -> LazyBuffer:
   """ceiling(d:float) -> int"""
-  assert is_dtype_fastmath_supported(d.dtype)
+  assert is_dtype_transcendental_supported(d.dtype)
   return_t = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype]
   return d.e(BinaryOps.ADD, d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.const(-0.5), d.const(0.5))).cast(return_t)
 
@@ -69,7 +69,7 @@ def pow2if(q:LazyBuffer, float_dtype:DType):
 
 def ilogb2k(d:LazyBuffer) -> LazyBuffer:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
-  assert is_dtype_fastmath_supported(d.dtype)
+  assert is_dtype_transcendental_supported(d.dtype)
   dint = d.cast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype], True, allow_buffer_view=False)
   # -1 <= ilog2bk(d) <= 128
   # ((float_to_bits(d) >> significand_bits(dtype)) & exponent_mask(dtype)) - exponent_bias(dtype)
@@ -77,7 +77,7 @@ def ilogb2k(d:LazyBuffer) -> LazyBuffer:
 
 def ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
-  assert is_dtype_fastmath_supported(d.dtype) and is_dtype_fastmath_supported(e.dtype)
+  assert is_dtype_transcendental_supported(d.dtype) and is_dtype_transcendental_supported(e.dtype)
   dtype = d.dtype
   cast_map = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
   e = e.cast(cast_map[d.dtype])
@@ -87,12 +87,12 @@ def ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
 
 def ldexp2k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   """d*2^e. much faster than ldexp3k but risky. d > 0 and d is not denormal."""
-  assert is_dtype_fastmath_supported(d.dtype) and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
+  assert is_dtype_transcendental_supported(d.dtype) and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
   return d.e(BinaryOps.MUL, pow2if(shr(e, 1), d.dtype)).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.ADD, shr(e, 1).e(UnaryOps.NEG)), d.dtype)) # noqa: E501
 
 def frexp(v:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   """frexp(v) -> (mantissa, exponent)"""
-  assert is_dtype_fastmath_supported(v.dtype)
+  assert is_dtype_transcendental_supported(v.dtype)
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x800FFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3C00}[v.dtype]
@@ -126,7 +126,7 @@ def payne_hanek_reduction(d:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
     ensuring that `r` is in the range of [0, pi/2).
   - `q`[int32] is an integer taking values 0,1,2 or 3, corresponding to the quadrant of the original angle `d`.
   """
-  assert is_dtype_fastmath_supported(d.dtype)
+  assert is_dtype_transcendental_supported(d.dtype)
   two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410]
 
   input_dtype: DType = d.dtype
@@ -241,7 +241,7 @@ def xsin(d:LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffer
   - fast=True assumes x <= switch_over.
   - switch_over is the threshold for switching to payne_hanek_reduction.
   """
-  if not is_dtype_fastmath_supported(d.dtype):
+  if not is_dtype_transcendental_supported(d.dtype):
     return d.e(UnaryOps.SIN)
   if 0 in d.shape: return d
   if d.dtype == dtypes.float16:
@@ -271,7 +271,7 @@ def xexp2(x:LazyBuffer) -> LazyBuffer:
   Implements a 1.0 ULP approximation for UnaryOps.EXP2
   - Paper: https://arxiv.org/pdf/2001.09258
   """
-  if not is_dtype_fastmath_supported(x.dtype):
+  if not is_dtype_transcendental_supported(x.dtype):
     return x.e(UnaryOps.EXP2)
   if 0 in x.shape: return x
   fp64_p = x.dtype == dtypes.float64
@@ -303,7 +303,7 @@ def xlog2(d:LazyBuffer) -> LazyBuffer:
   Implements a 1.0 ULP approximation for UnaryOps.LOG2
   Paper: https://arxiv.org/pdf/2001.09258
   """
-  if not is_dtype_fastmath_supported(d.dtype):
+  if not is_dtype_transcendental_supported(d.dtype):
     return d.e(UnaryOps.LOG2)
   if 0 in d.shape: return d
   fp64_p = d.dtype == dtypes.float64

@@ -7,7 +7,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
-from tinygrad.fastmath import xsin, xlog2, xexp2
+from tinygrad.transcendental import xsin, xlog2, xexp2
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
