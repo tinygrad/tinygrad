@@ -281,8 +281,7 @@ class TestLinearizer(unittest.TestCase):
         LazyOp(op=ReduceOps.SUM, src=(
           LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,32,1), strides=(32, 1, 0), offset=0, mask=None, contiguous=True),)))),
         ), arg=(1,)),
-      )),
-    ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,1,1), strides=(1,0,0), offset=0, mask=None, contiguous=False),))))
+      )),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4,1,1), strides=(1,0,0), offset=0, mask=None, contiguous=False),))))
     verify_lazyop(ast)
     Tensor.manual_seed(0)
     x = Tensor.randn(4,32).realize()

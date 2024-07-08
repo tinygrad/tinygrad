@@ -274,7 +274,7 @@ class Linearizer(Kernel):
 
     # define accumulator - modify idxs if necessary for TC
     out_buf = -len(self.reduceops)+i if self.group_for_reduces else 0
-    accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=[x if i < len(reduceop.arg) else x*0 for i,x in enumerate(loop_ctx)])
+    accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
     # store local aliases
     locals_to_store = [(localbuf_idx, buf_idxs, self.global_load(i, buf_idxs)) for i, localbuf_idx, buf_idxs in alias_buf_idxs]
@@ -335,7 +335,6 @@ class Linearizer(Kernel):
       end_local_idxs = [x if ((i-self.first_reduce)//len(reduceop.arg)) == depth else 0*x for i,x in enumerate(end_local_idxs)]
       local_idxs = local_idxs[:self.local_dims] + end_local_idxs[self.global_dims + self.local_dims:]
       local_idxs = [x if i <= self.local_dims or ((i-self.local_dims)//len(reduceop.arg)) == depth else 0*x for i,x in enumerate(local_idxs)]
-      
 
       # if any group_for_reduce items aren't reduces, upcast them here
       for j in self.upcast_in_mid_reduce_axes:
