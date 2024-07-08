@@ -9,7 +9,6 @@ from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
 from tinygrad.helpers import CI, Context
 from tinygrad.dtype import dtypes
-
 from extra.models.unet import ResBlock
 
 def _simple_test(add, extract=lambda x: x, N=10):
@@ -23,6 +22,7 @@ def _simple_test(add, extract=lambda x: x, N=10):
 class TestJit(unittest.TestCase):
 
   @settings(deadline=2e4)
+  @unittest.skipUnless(Device.DEFAULT in ["LLVM", "CLANG"], f"no support on {Device.DEFAULT}")
   @given(strat.sampled_from([Tensor.exp2, Tensor.log2, Tensor.sin]))
   def test_approx_jit_timeout(self, op):
     model = [ResBlock(16, 24, 16) for _ in range(4)]
