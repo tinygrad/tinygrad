@@ -32,9 +32,9 @@ def rm_control(cmd, sttyp, fd, client, obj, **kwargs):
   return params
 
 def make_rmctrl_type():
-  f = {name[name.find("_CTRL_CMD_")+10:].lower(): functools.partial(rm_control, dt, getattr(nv_gpu, name.replace("_CTRL_CMD_", "_CTRL_")+"_PARAMS"))
-    for name,dt in nv_gpu.__dict__.items() if name.find("_CTRL_CMD_") != -1 and nv_gpu.__dict__.get(name.replace("_CTRL_CMD_", "_CTRL_")+"_PARAMS")}
-  return type("NVRMCTRL", (object,), f)
+  return type("NVRMCTRL", (object,), {name[name.find("_CTRL_CMD_")+10:].lower(): functools.partial(rm_control, dt, sttyp)
+    for name,dt in nv_gpu.__dict__.items() if name.find("_CTRL_CMD_")>=0 and
+      (sttyp:=getattr(nv_gpu, name.replace("_CTRL_CMD_", "_CTRL_")+"_PARAMS", getattr(nv_gpu, name+"_PARAMS", None)))})
 rmctrl = make_rmctrl_type()
 
 def uvm_ioctl(cmd, sttyp, fd, **kwargs):
