@@ -97,7 +97,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_lt_factors(self):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
-    self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
+    self.helper_test_variable(expr, 0, 1, "((FLOAT4_INDEX+(idx1*4))<512)")
 
   #def test_div_becomes_num(self):
   #  assert isinstance(Variable("a", 2, 3)//2, NumNode)
@@ -172,7 +172,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 8)%1, 0, 0, "0")
 
   def test_add_min_max(self):
-    self.helper_test_variable(Variable("a", 0, 8) * 2 + 12, 12, 16+12, "((a*2)+12)")
+    self.helper_test_variable(Variable("a", 0, 8) * 2 + 12, 12, 16+12, "(12+(a*2))")
 
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
@@ -249,7 +249,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
 
   def test_distribute_mul(self):
-    self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, {"((a*3)+(b*3))", "((a+b)*3)"})
+    self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, {"((a*3)+(b*3))", "(3*(a+b))"})
 
   @unittest.expectedFailure
   def test_mod_mul_sum(self):
