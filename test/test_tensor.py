@@ -3,7 +3,7 @@ import torch
 import unittest, copy, mmap, random, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.helpers import getenv, temp, CI
+from tinygrad.helpers import getenv, temp, CI, _METADATA
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from test.helpers import is_dtype_supported
@@ -607,6 +607,7 @@ class TestInferenceMode(unittest.TestCase):
 
 class TestTensorMetadata(unittest.TestCase):
   def test_matmul(self):
+    _METADATA.set(None)
     x = Tensor.rand(3, requires_grad=True)
     W = Tensor.rand(3, 3, requires_grad=True)
     out = x.matmul(W)
@@ -616,6 +617,7 @@ class TestTensorMetadata(unittest.TestCase):
     assert s[-1].metadata[0].name == "matmul"
 
   def test_relu(self):
+    _METADATA.set(None)
     x = Tensor.rand(3, requires_grad=True)
     out = x.relu()
     assert out.lazydata.metadata.name == "relu"
@@ -624,9 +626,11 @@ class TestTensorMetadata(unittest.TestCase):
     assert s[-1].metadata[0].name == "relu"
 
   def test_complex(self):
+    _METADATA.set(None)
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)
     out = x.relu() * y.sigmoid()
+    print(out.lazydata)
     assert out.lazydata.metadata.name == "__mul__"
     assert out.lazydata.srcs[0].metadata.name == "relu"
     assert out.lazydata.srcs[1].metadata.name == "sigmoid"
@@ -637,6 +641,7 @@ class TestTensorMetadata(unittest.TestCase):
     assert s[-1].metadata[2].name == "__mul__"
 
   def test_complex_backward(self):
+    _METADATA.set(None)
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)
     out = (x.relu() * y.sigmoid()).sum()
