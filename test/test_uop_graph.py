@@ -119,16 +119,25 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
-  def test_cast_vectorized_fold(self):
+  def test_const_vectorize_fold(self):
+    c0 = UOp(UOps.CONST, dtypes.half, arg=0.0)
+    out = UOp(UOps.VECTORIZE, dtypes.half.vec(2), (c0, c0))
+    g = UOpGraph([out])
+    self.assertEqual(len(g.uops), 1)
+    out = g.uops[-1]
+    self.assertEqual(out.op, UOps.CONST)
+    self.assertEqual(out.arg, 0.0)
+
+  def test_noop_vectorize_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.float.vec(2), (d0, idx))
-    cast = UOp(UOps.CAST, dtypes.float.vec(2), (ld,))
-    x = UOp(UOps.GEP, dtypes.float, (cast, ), arg=0)
+    vec = UOp(UOps.VECTORIZE, dtypes.float.vec(2), (ld,))
+    x = UOp(UOps.GEP, dtypes.float, (vec, ), arg=0)
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
     out = UOp(UOps.STORE, None, (d0, idx, alu))
     g = UOpGraph([out])
-    self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
+    self.assertEqual(len([x for x in g.uops if x.op is UOps.VECTORIZE]), 0)
 
   def test_cast_alu_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=(0, True))
