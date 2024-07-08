@@ -9,7 +9,7 @@ import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA, Metadata
+from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA, Metadata, TRACEMETA
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps, truncate
@@ -3126,6 +3126,7 @@ def _metadata_wrapper(fn):
     return ret
   return _wrapper
 
-for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-  if name in ["__class__", "__init__", "__repr__", "backward", "sequential"]: continue
-  setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+if TRACEMETA >= 1:
+  for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
+    if name in ["__class__", "__init__", "__repr__", "backward", "sequential"]: continue
+    setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
