@@ -3110,8 +3110,6 @@ def _metadata_wrapper(fn):
       caller_frame = sys._getframe(frame := frame + 1)
       caller_module = caller_frame.f_globals.get("__name__", None)
       if caller_module is None: return fn(*args, **kwargs)
-    caller_func = caller_frame.f_code.co_name
-    caller_lineno = caller_frame.f_lineno
 
     # if its called from a lambda in tinygrad we want to look two more frames up
     if caller_module.startswith("tinygrad") and caller_func == "<lambda>": caller_frame = sys._getframe(frame := frame + 2)
