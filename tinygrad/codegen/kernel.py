@@ -265,9 +265,6 @@ class Kernel:
     # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
-    print("zip(shapes, strides)=")
-    for s,st in zip(shapes, strides):
-      print("  ",s,st)
     rets = [[(s[0], st[0])] for s,st in zip(shapes, strides)]
     for i in range(1, len(shapes[0])):
       can_merge = []
@@ -277,7 +274,6 @@ class Kernel:
         can_merge.append((sti is not None) and ((sti != 0 and last_st == si*sti) or (sti == 0 and last_st == 0)))
       # more can merge than this
       mergeable = all(can_merge)
-      print(f"{i} is mergeable?", mergeable, can_merge)
       for j,(s,st) in enumerate(zip(shapes, strides)):
         if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])
         else: rets[j].append((s[i], st[i]))
