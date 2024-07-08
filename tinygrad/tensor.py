@@ -3105,13 +3105,16 @@ def _metadata_wrapper(fn):
     caller_func = caller_frame.f_code.co_name
     if caller_module is None: return fn(*args, **kwargs)
 
-    # if its called from a __ method in tinygrad we want to look one more frame up
-    if caller_module.startswith("tinygrad") and caller_func.startswith("__"): caller_frame = sys._getframe(frame := frame + 1)
-    caller_module = caller_frame.f_globals.get("__name__", None)
-    if caller_module is None: return fn(*args, **kwargs)
+    # if its called from nn we want to step up frames until we are out of nn
+    while caller_module.startswith("tinygrad.nn") and "optim" not in caller_module:
+      caller_frame = sys._getframe(frame := frame + 1)
+      caller_module = caller_frame.f_globals.get("__name__", None)
+      if caller_module is None: return fn(*args, **kwargs)
+    caller_func = caller_frame.f_code.co_name
+    caller_lineno = caller_frame.f_lineno
 
-    # if its a nn module we want to look one more frame up
-    if caller_module.startswith("tinygrad.nn"): caller_frame = sys._getframe(frame := frame + 1)
+    # if its called from a lambda in tinygrad we want to look two more frames up
+    if caller_module.startswith("tinygrad") and caller_func == "<lambda>": caller_frame = sys._getframe(frame := frame + 2)
     caller_module = caller_frame.f_globals.get("__name__", None)
     if caller_module is None: return fn(*args, **kwargs)
     caller_func = caller_frame.f_code.co_name
@@ -3123,6 +3126,7 @@ def _metadata_wrapper(fn):
     return ret
   return _wrapper
 
-for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-  if name in ["__class__", "__init__", "__repr__", "backward", "sequential"]: continue
-  setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+if DEBUG >= 2:
+  for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
+    if name in ["__class__", "__init__", "__repr__", "backward", "sequential"]: continue
+    setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
