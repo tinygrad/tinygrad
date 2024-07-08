@@ -281,6 +281,7 @@ class TestAssign(unittest.TestCase):
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
   def test_simple_assignment_multioutput(self):
+    Tensor.manual_seed(0)
     a = Tensor.randn(32, 32).realize()
     b = Tensor.full((32, ), 1.).contiguous().realize()
     c = Tensor.full((32, ), 2.).contiguous().realize()

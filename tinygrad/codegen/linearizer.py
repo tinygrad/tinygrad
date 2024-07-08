@@ -268,8 +268,8 @@ class Linearizer(Kernel):
                       alias_buf_idxs:List[Tuple[int, int, List]]) -> Tuple[List[NumNode|Variable], List[NumNode|Variable]]:
     self.late_gate = None # reset late_gate
     # reduce loop
-    depth = sum([1 if reduceop in r.lazyops else 0 for r in self.lazyops if r.op in ReduceOps])
-    reduce_idxs = [x if (i//len(reduceop.arg))+1 == depth else 0*x for i,x in enumerate(reduce_idxs)]
+    depth = len(set([r for r in self.lazyops if r.op in ReduceOps and r != reduceop and reduceop in r.lazyops]))
+    reduce_idxs = [x if (i//len(reduceop.arg)) == depth else 0*x for i,x in enumerate(reduce_idxs)]
     loop_ctx = self.render_loop([x for x in reduce_idxs if x != 0], (i:=self.reduceops.index(reduceop))*2+2, True)
 
     # define accumulator - modify idxs if necessary for TC
@@ -332,9 +332,9 @@ class Linearizer(Kernel):
 
       # create new late reduce local loops and replace local_idxs that have been used
       end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+self.group_for_reduces)]  # noqa: E501
-      end_local_idxs = [x if ((i-self.first_reduce)//len(reduceop.arg))+1 == depth else 0*x for i,x in enumerate(end_local_idxs)]
+      end_local_idxs = [x if ((i-self.first_reduce)//len(reduceop.arg)) == depth else 0*x for i,x in enumerate(end_local_idxs)]
       local_idxs = local_idxs[:self.local_dims] + end_local_idxs[self.global_dims + self.local_dims:]
-      local_idxs = [x if i <= self.local_dims or ((i-self.local_dims)//len(reduceop.arg))+1 == depth else 0*x for i,x in enumerate(local_idxs)]
+      local_idxs = [x if i <= self.local_dims or ((i-self.local_dims)//len(reduceop.arg)) == depth else 0*x for i,x in enumerate(local_idxs)]
       
 
       # if any group_for_reduce items aren't reduces, upcast them here
@@ -460,7 +460,7 @@ class Linearizer(Kernel):
     self.uops:UOpGraph = UOpGraph(flatten(stores))
 
     # maybe graph the uops
-    if True or DEBUG >= 5: self.uops.print()
+    if DEBUG >= 5: self.uops.print()
     if getenv("GRAPHUOPS"): self.uops.graph()
 
     # restore backups
