@@ -3,7 +3,7 @@ import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.helpers import prod, all_int, argsort
-from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
+from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer, create_lt_node, create_ge_node
 
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
@@ -309,3 +309,12 @@ class View:
         return View.create(new_shape, new_strides, self.offset + extra_offset, new_mask)
 
     return None
+
+  def expr(self, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[Node, Node]:
+    assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
+    iexpr: List[Node] = [NumNode(self.offset) if isinstance(self.offset, int) else self.offset]
+    vexpr: List[Node] = [valid] if valid is not None else []
+    for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
+      if sh != 1 and st != 0: iexpr.append(idx*st)
+      if m is not None: vexpr += [create_ge_node(idx, m[0]), create_lt_node(idx, m[1])]  # idx >= m[0], idx < m[1]
+    return Node.sum(iexpr), Node.ands(vexpr)
