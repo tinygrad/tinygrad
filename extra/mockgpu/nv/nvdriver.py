@@ -145,7 +145,7 @@ class NVDriver(VirtDriver):
                  51059, 51069, 51071, 51632, 51639, 51639, 51706, 52019, 222, 50287, 50273, 50031, 50017] # from ada102
       params.numClasses = len(classes)
       for i,c in enumerate(classes): params.classList[i] = c
-    elif struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2:
+    elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO:
       info = {nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION: nv_gpu.NV2080_CTRL_GR_INFO_SM_VERSION_3_5}
 
       params = nv_gpu.NV2080_CTRL_GR_GET_INFO_PARAMS.from_address(params_ptr)
