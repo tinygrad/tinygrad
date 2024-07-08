@@ -154,9 +154,8 @@ def verify_lazyop(*ast:LazyOp):
     for x in op.src: dfs(x, st)
     # only reduceop is allowed to change shape, limited to turning n to 1
     if op.op in ReduceOps:
-      expected_shape = tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape))
-      assert st.shape == expected_shape, f"unexpected reduceop shape {st.shape} != {expected_shape}"
-      st = ShapeTracker.from_shape(expected_shape)
+      assert isinstance(op.arg, tuple)
+      st = ShapeTracker.from_shape(tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape)))
     else:
       # movementops are pushed to the edges with LOAD
       if op.op in BufferOps: st = op.arg.st

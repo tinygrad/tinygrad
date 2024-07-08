@@ -115,7 +115,7 @@ class TinyJit(Generic[ReturnType]):
     if found:=self.buffer_replace.get(b, None): return found
     if b.is_allocated() or b.lb_refcount > 0: return b
     if b._base is not None:
-      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.buffer_replace.get(b._base, b._base), offset=b.offset)
+      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.add_buffer(b._base), offset=b.offset)
     else:
       self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
     return ret
@@ -173,7 +173,9 @@ class TinyJit(Generic[ReturnType]):
             self.extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 
       # memory planning (optional)
-      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in self.jit_cache], debug_prefix="JIT ")
+      # Exclude buffers involved in transfer ops to preserve parallelism.
+      noopt_buffers = {b for ji in self.jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
+      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in self.jit_cache], noopt_buffers, debug_prefix="JIT ")
       self.jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in self.jit_cache]
 
       # Condense the items into a graph executor.

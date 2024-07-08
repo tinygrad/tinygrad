@@ -20,7 +20,7 @@ class UOps(Enum):
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
   # math ops
-  CAST = auto(); BITCAST = auto() # noqa: E702
+  CAST = auto(); BITCAST = auto(); VECTORIZE = auto() # noqa: E702
   ALU = auto(); REDUCE = auto(); WMMA = auto() # noqa: E702
   # memory/assignment ops
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
@@ -42,7 +42,7 @@ class UOp:
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
-            (type(self.op), self.op.value), self.dtype, self.src)
+            self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
     return f"{str(self.op):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.op for x in self.src]):32s} {self.arg}"
@@ -94,20 +94,24 @@ class UOp:
 def type_verify(uops):
   for u in uops:
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
-    if uop in (UOps.CONST, UOps.DEFINE_ACC):
+    if uop in {UOps.CONST, UOps.DEFINE_ACC}:
       if uop is UOps.DEFINE_ACC:
         assert dtype is not None and src[0].dtype == dtype.scalar(), f"type of {src[0].dtype=} must be a scalar {dtype.scalar()}"
         arg = src[0].arg
       assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
-    if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
-    if uop is UOps.CAST and dtype is not None and dtype.count > 1: assert len(src) == dtype.count
-    if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU:
-      assert src[2].dtype == dtypes.bool and src[3].dtype == dtype, f"{src[2].dtype} != dtypes.bool OR {src[3].dtype} != {dtype}"
-    if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
+    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
+    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == dtype.count
+    if uop is UOps.VECTORIZE:
+      assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
+      assert dtype == src[0].dtype.vec(len(src)), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
+    if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU: assert src[2].dtype == dtypes.bool and src[3].dtype == dtype
+    if uop is UOps.STORE:
+      assert dtype is None, f"{uop} dtype must be None, got {dtype}"
+      if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
     if uop is UOps.ALU:
       if arg in UnaryOps:
         assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-      elif arg in (BinaryOps.CMPLT, BinaryOps.CMPNE):
+      elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
         assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
         assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
       elif arg is BinaryOps.IDIV:
@@ -459,6 +463,7 @@ constant_folder = PatternMatcher(tensor_core_pattern+[
   # const rules
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
+  (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST),)), UPat(name="x"))), lambda x: x),
@@ -528,18 +533,23 @@ constant_folder = PatternMatcher(tensor_core_pattern+[
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.alu(TernaryOps.WHERE, UOp.var("gate"), UOp.var("alt"), UOp.load(UOp.var("buf"), UOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
-  # store float4/float2 directly (remove CAST/GEP)
-  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, src=tuple(UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(4)))), UOp.store),
-  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, src=tuple(UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(2)))), UOp.store),
-  # CAST-PHI-GEP -> PHI-CAST
-  (UPat(UOps.CAST, name="root", src=tuple(UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
-    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
-  (UPat(UOps.CAST, name="root", src=tuple(UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(2))),
-    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
+  # store float4/float2 directly (remove VECTORIZE/GEP)
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
+    UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(4)))), UOp.store),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
+    UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(2)))), UOp.store),
+  # VECTORIZE-PHI-GEP -> PHI-VECTORIZE
+  (UPat(UOps.VECTORIZE, name="root", src=tuple(
+    UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
+    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1, v2, v3))))),
+  (UPat(UOps.VECTORIZE, name="root", src=tuple(
+    UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(2))),
+    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
   (UOp.lt(-UOp.var('x'), UOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(UOp.const(c.dtype, -c.arg), x)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
+  (UPat(UOps.VECTORIZE, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
   (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
   (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.cvar("var"), UOp.var("barrier")),
@@ -685,15 +695,13 @@ class UOpGraph:
       if x.op is UOps.DEFINE_ACC and len(x.src) > 1:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
-      else:
-        self._uops.append(x)
-      for u, ss in scope_children.items():
-        if x in ss:
-          ss.remove(x)
-          if len(ss) == 0: self._uops.append(UOp(end_for_uop[u.op][1], None, (u,)))
+      else: self._uops.append(x)
       for u in children[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
+
+    for u in (self._uops):
+      if u.op in end_for_uop: self._uops.insert(max([self._uops.index(l) for l in scope_children[u]])+1, UOp(end_for_uop[u.op][1], None, (u,)))
 
     assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]

@@ -135,6 +135,15 @@ class TestMultiTensor(unittest.TestCase):
     O = X + W
     np.testing.assert_allclose(O.numpy(), 2)
 
+  def test_elementwise_dtype(self):
+    Tensor.manual_seed(0)
+    X = Tensor.randn(8, 8).realize()
+    W = Tensor.randn(8, 8).realize()
+    X.shard_(devices_4, 0)
+    W.shard_(devices_4, 0)
+    O = X.shrink(((0, 2), None)) * W.shrink(((0, 2), None)) < 2
+    np.testing.assert_allclose(O.numpy(), X.numpy()[0:2]*W.numpy()[0:2] < 2)
+
   @given(strat.sampled_from((4, 5)), strat.sampled_from((devices_2, devices_3)), strat.sampled_from((ReduceOps.SUM, ReduceOps.MAX)),
          strat.sampled_from((None, 0, 1)), strat.sampled_from((None, 0, 1)), strat.sampled_from((1, 0, -1)))
   def test_simple_reduce(self, N, devices, rop, shard_axis, reduce_axis, sign):

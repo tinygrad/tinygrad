@@ -60,5 +60,21 @@ class TestVerifyLazyOp(unittest.TestCase):
     out = LazyOp(BufferOps.STORE, (r, ), MemBuffer(0, dtypes.int, ShapeTracker.from_shape((32, 1))))
     with self.assertRaises(InvalidLazyOpException): lower(out)
 
+  def test_reduce_add_store(self):
+    a = LazyOp(BufferOps.LOAD, arg=MemBuffer(1, dtypes.int, ShapeTracker.from_shape((32, 1))))
+    r = LazyOp(ReduceOps.SUM, (a, ), (0, ))
+    out = LazyOp(BufferOps.STORE, (r+a, ), MemBuffer(0, dtypes.int, ShapeTracker.from_shape((32, 1))))
+    with self.assertRaises(InvalidLazyOpException): lower(out)
+
+  def test_multi_reduce_simple(self):
+    early_st = ShapeTracker.from_shape((32, 32)).reshape((32, 1, 32)).expand((32, 32, 32))
+    early_x = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=early_st))
+    r0 = LazyOp(op=ReduceOps.SUM, src=(early_x, ), arg=(1, ))
+    late_st = ShapeTracker.from_shape((32, 32)).reshape((32, 1, 32))
+    late_x = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=late_st))
+    r1 = LazyOp(op=ReduceOps.SUM, src=(late_x + r0, ), arg=(0, 1, 2))
+    out = LazyOp(op=BufferOps.STORE, src=(r1, ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1, 1, 1))))
+    lower(out)
+
 if __name__ == '__main__':
   unittest.main()

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import math
 from typing import Union, Optional, Any, Tuple, List
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG
@@ -22,7 +21,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
-view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "DISK"}
+view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
@@ -92,7 +91,7 @@ class LazyBuffer:
     self.base.forced_realize = True
     return self
 
-  def cast(self, dtype:DType, bitcast:bool=False):
+  def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True):
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:
@@ -107,7 +106,7 @@ class LazyBuffer:
     elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       # TODO: applying this makes gpt2 slower
       return self.base.cast(dtype, bitcast)._view(self.st)
-    cast_op: Union[LoadOps, UnaryOps] = (LoadOps.VIEW if self.can_view() else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
+    cast_op: Union[LoadOps, UnaryOps] = (LoadOps.VIEW if self.can_view() and allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST and not isinstance(self.base.arg, Variable)
@@ -177,7 +176,7 @@ class LazyBuffer:
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     # TODO: this logic should move to the scheduler
-    if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
+    if 0 in self.shape and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: dtypes.min(self.dtype)}[op], new_shape)
 
     # const folding
     # TODO: fold this for symbolic?

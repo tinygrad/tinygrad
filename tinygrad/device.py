@@ -29,7 +29,7 @@ class _Device:
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
-    for device in ["METAL", "AMD", "CUDA", "GPU", "CLANG", "LLVM"]:
+    for device in ["METAL", "AMD", "NV", "CUDA", "GPU", "CLANG", "LLVM"]:
       try:
         if self[device]:
           os.environ[device] = "1"   # we set this in environment for spawned children
@@ -326,4 +326,4 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
 
   def offset(self, buf, size:int, offset:int) -> HCQCompatAllocRes:
     return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
-                     **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']})
+                     **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']}, _base=buf)
