@@ -30,9 +30,9 @@ if __name__ == "__main__":
   input_ids = Tensor.empty((BS, 512), dtype=dtypes.float32)
   segment_ids = Tensor.empty((BS, 512), dtype=dtypes.float32)
   attention_mask = Tensor.empty((BS, 512), dtype=dtypes.default_float)
-  masked_positions = Tensor.empty((BS, 512), dtype=dtypes.float32)
-  masked_lm_ids = Tensor.empty((BS, 512), dtype=dtypes.float32)
-  masked_lm_weights = Tensor.empty((BS, 512), dtype=dtypes.float32)
+  masked_positions = Tensor.empty((BS, 76), dtype=dtypes.float32)
+  masked_lm_ids = Tensor.empty((BS, 76), dtype=dtypes.float32)
+  masked_lm_weights = Tensor.empty((BS, 76), dtype=dtypes.float32)
   next_sentence_labels = Tensor.empty((BS, 1), dtype=dtypes.float32)
 
   # run model twice to get only what changes, these are the kernels of the model
