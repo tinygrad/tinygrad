@@ -105,7 +105,7 @@ def frexp(v:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
   exp = exponent.e(BinaryOps.ADD, exponent.const(-bias))
   exp = exponent_zero.e(TernaryOps.WHERE, exp, exp.const(0))
   if v.dtype == dtypes.float16:
-    exp = exp.cast(dtypes.int16, True, allow_buffer_view=True)
+    exp = exp.cast(dtypes.int16, True, allow_buffer_view=False)
   return value, exp
 
 def mla(x:LazyBuffer, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer:
@@ -131,7 +131,7 @@ def payne_hanek_reduction(d:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
 
   input_dtype: DType = d.dtype
   dtype_via = dtypes.float32 if d.dtype == dtypes.float16 else d.dtype
-  acc_dtype = dtypes.uint32 if input_dtype == dtypes.float16 else dtypes.uint64
+  acc_dtype = dtypes.uint64
 
   f, e = frexp(d)
   ia = (k := f.cast(dtype_via)).e(BinaryOps.MUL, k.const(4.294967296e9)).cast(dtypes.uint64)
