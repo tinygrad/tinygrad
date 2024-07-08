@@ -316,13 +316,13 @@ def replace_contract(root:UOp):
   assert all_same([root.arg[1]] + [len(x.src) for x in expands])
   ret = expand_nodes(parents, expands, root.src[0])
   if len(ret) == 1: ret = ret*root.arg[1]   # TODO: why is this needed?
-  return UOp(UOps.CAST, cast(DType, root.dtype).vec(root.arg[1]), tuple(ret))
+  return UOp(UOps.VECTORIZE, cast(DType, root.dtype).vec(root.arg[1]), tuple(ret))
 
 def cast_reduce(cst):
   if cst.dtype.scalar() == cst.dtype: return None  # not for normal CAST. TODO: the merging one shouldn't be CAST
   if not all_same([(x.arg, x.src[1:]) for x in cst.src]): return None
   fst_red = cst.src[0]
-  red = UOp(UOps.CAST, cst.dtype, tuple(x.src[0] for x in cst.src))
+  red = UOp(UOps.VECTORIZE, cst.dtype, tuple(x.src[0] for x in cst.src))
   return UOp(UOps.REDUCE, red.dtype, (red,) + fst_red.src[1:], fst_red.arg)
 
 contractor = PatternMatcher([
@@ -341,9 +341,9 @@ def fix_image_idx(ls:UOp):
   #if not idxy.divides(4): raise RuntimeError("image index must divide 4")
   base_shape = ls.src[0].dtype.shape
   idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
-  image_idx = UOp(UOps.CAST, cast(DType, idxy.dtype).vec(2), (idx, idy))
+  image_idx = UOp(UOps.VECTORIZE, cast(DType, idxy.dtype).vec(2), (idx, idy))
   if ls.op is UOps.LOAD and cast(DType, ls.dtype).count == 1:
-    cconst = (UOp(UOps.CAST, cast(DType, ls.dtype).vec(4), src=(ls.src[3], ls.src[3], ls.src[3], ls.src[3])),) if len(ls.src) >= 3 else ()
+    cconst = (UOp(UOps.VECTORIZE, cast(DType, ls.dtype).vec(4), src=(ls.src[3], ls.src[3], ls.src[3], ls.src[3])),) if len(ls.src) >= 3 else ()
     loaded = UOp(ls.op, cast(DType, ls.dtype).vec(4), (ls.src[0], image_idx) + ls.src[2:3] + cconst, ls.arg)
     subidx = idxy%4
     ret = UOp.const(ls.dtype, 0)
@@ -383,7 +383,7 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
 def no_float4_alu(alu):
   alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(),
                    tuple(UOp(UOps.GEP, alu.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
-  return UOp(UOps.CAST, alu.dtype, alus)
+  return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 float4_folding = PatternMatcher([
   (UOp(UOps.STORE, dtype=dtypes.float, src=(UOp.var("buf"), UOp.var("idx")+
@@ -407,7 +407,7 @@ float4_folding = PatternMatcher([
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   # no ALU on float4 (float4 constructor doesn't work in METAL/GPU)
   (UPat(UOps.ALU, dtype={dtypes.float.vec(2), dtypes.float.vec(4)}, name="alu"), no_float4_alu),
-  (UOp(UOps.GEP, src=(UOp(UOps.CAST).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
+  (UOp(UOps.GEP, src=(UOp(UOps.VECTORIZE).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
 ])
 
 # ***** tensor core handling *****
