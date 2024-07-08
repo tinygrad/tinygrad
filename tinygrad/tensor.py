@@ -2712,6 +2712,8 @@ class Tensor:
   def __ne__(self, x) -> Tensor: return F.Neq.apply(*self._broadcasted(x))  # type: ignore[override]
   def __eq__(self, x) -> Tensor: return (self!=x).logical_not()             # type: ignore[override]
 
+  def __invert__(self) -> Tensor: return self.logical_not()
+
   # ***** functional nn ops *****
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
