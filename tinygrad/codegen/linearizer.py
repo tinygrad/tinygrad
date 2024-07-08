@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Tuple, Optional, Type, cast, DefaultDict, Dict, Union, Final, Iterator, Sequence, Callable
-import itertools, math, functools
+import itertools, functools
 from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
@@ -108,10 +108,8 @@ render_ops: Dict[Type, Callable[..., UOp]]  = {
 
 class Linearizer(Kernel):
   def get_reduce_acc(self, reduceop:LazyOp):
-    if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(reduceop.dtype) else 0
-    if reduceop.op is ReduceOps.MAX:
-      if dtypes.is_int(reduceop.dtype): return 0 if dtypes.is_unsigned(reduceop.dtype) else -2**(reduceop.dtype.itemsize*8-1)
-      return -math.inf if dtypes.is_float(reduceop.dtype) else False
+    if reduceop.op is ReduceOps.SUM: return dtypes.as_const(0, reduceop.dtype)
+    if reduceop.op is ReduceOps.MAX: return dtypes.min(reduceop.dtype)
 
   # NOTE: once images are loaded, we uop them as their base float
   def get_base_dtype(self, dt:DType) -> DType: return dt.base if isinstance(dt, ImageDType) else dt
