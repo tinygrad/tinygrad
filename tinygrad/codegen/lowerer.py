@@ -32,14 +32,6 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
   ctx = dict(zip(fake_idxs, idxs))
   return idx.render(render_ops, ctx), valid.render(render_ops, ctx).cast(dtypes.bool)
 
-"""
-if isinstance(dtype, ImageDType):
-  idx_x, idx_y = (idx // 4) % dtype.shape[1], (idx // (4 * dtype.shape[1]))
-  ridx = UOp(UOps.CAST, dtypes.int.vec(2), tuple(x.render(render_ops, ctx) for x in (idx_x, idx_y)))
-  return ridx, valid.render(render_ops, ctx)
-else:
-"""
-
 # TODO: enable this once UOps is ready to replace symbolic
 """
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
@@ -122,6 +114,8 @@ class Lowerer(Kernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self) -> Lowerer:
+    sts_backup, bufs_backup = self.sts, self.bufs
+
     self.uop_cache: Dict[LazyOp, UOp] = {}
 
     # late alias the tensor core buffers
@@ -262,6 +256,8 @@ class Lowerer(Kernel):
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(self.full_shape[a])), (1000+a, True))
 
     self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast], self.opts)
+
+    self.sts, self.bufs = sts_backup, bufs_backup
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
