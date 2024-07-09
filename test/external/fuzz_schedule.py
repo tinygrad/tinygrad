@@ -10,6 +10,7 @@ from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor, _to_np_dtype
 
 ctx_vars = { MULTIOUTPUT: (0, 1) }
+FUZZ_SCHEDULE_MAX_PATHS = getenv("FUZZ_SCHEDULE_MAX_PATHS", 10)
 
 def fuzz_schedule(outs:List[LazyBuffer]):
   # find toposorts across all tunable params
@@ -85,7 +86,7 @@ def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:Union[DefaultDic
       path.append(v)
       visited.add(v)
       recurse_paths(path)
-      if len(ret) >= getenv("FUZZ_SCHEDULE_MAX_PATHS", 50): return
+      if len(ret) >= FUZZ_SCHEDULE_MAX_PATHS: return
       # backtrack
       for u in graph[v]: in_degree[u] += 1
       path.pop()

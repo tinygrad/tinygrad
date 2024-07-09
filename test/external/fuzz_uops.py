@@ -9,7 +9,7 @@ from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import _to_np_dtype
-from test.external.fuzz_schedule import find_all_toposorts
+from test.external.fuzz_schedule import FUZZ_SCHEDULE_MAX_PATHS, find_all_toposorts
 
 def fuzz_uops(uops:UOpGraph) -> List[Tuple[UOp, ...]]:
   blocks: List[List[UOp]] = [[]]
@@ -32,7 +32,7 @@ def fuzz_uops(uops:UOpGraph) -> List[Tuple[UOp, ...]]:
   paths: Dict[Tuple[UOp, ...], None] = {}
   for up in itertools.product(*paths_for_block.values()):
     paths[tuple(uop for path in up for uop in path)] = None
-    if len(paths) >= getenv("FUZZ_SCHEDULE_MAX_PATHS", 50): break
+    if len(paths) >= FUZZ_SCHEDULE_MAX_PATHS: break
   return list(paths)
 
 class UOpsFuzzerRunner(CompiledRunner):
