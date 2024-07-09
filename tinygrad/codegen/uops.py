@@ -163,12 +163,13 @@ def __match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   # only one if it's a tuple
   # try all permutations if it's a list
   # repeat if it's a UPat
+  res = []
   for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
     if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len) and not pat.allow_any_len: return []
     new_stores = [store.copy()]
     for uu, vv in zip(uop.src, vp): new_stores = [rstore for nstore in new_stores for rstore in __match(uu, vv, nstore)]
-    return new_stores
-  return []
+    res.extend(new_stores)
+  return res
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if len(res := __match(uop, pat, store)): store.update(res[0])
