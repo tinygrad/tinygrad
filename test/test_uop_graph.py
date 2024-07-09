@@ -77,7 +77,6 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.src[1].arg, 3.0)
 
 class TestUOpGraph(TestUOps):
-  # TODO: move to test.helpers
   def test_add_constant_fold(self):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
@@ -120,16 +119,45 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
-  def test_cast_vectorized_fold(self):
+  def test_const_vectorize_fold(self):
+    c0 = UOp(UOps.CONST, dtypes.half, arg=0.0)
+    out = UOp(UOps.VECTORIZE, dtypes.half.vec(2), (c0, c0))
+    g = UOpGraph([out])
+    self.assertEqual(len(g.uops), 1)
+    out = g.uops[-1]
+    self.assertEqual(out.op, UOps.CONST)
+    self.assertEqual(out.arg, 0.0)
+
+  def test_noop_vectorize_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
-    idx = UOp(UOps.CONST, dtypes.int, arg=0)
+    idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.float.vec(2), (d0, idx))
-    cast = UOp(UOps.CAST, dtypes.float.vec(2), (ld,))
-    x = UOp(UOps.GEP, dtypes.float, (cast, ), arg=0)
+    vec = UOp(UOps.VECTORIZE, dtypes.float.vec(2), (ld,))
+    x = UOp(UOps.GEP, dtypes.float, (vec, ), arg=0)
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
-    out = UOp(UOps.STORE, dtypes.float, (d0, idx, alu))
+    out = UOp(UOps.STORE, None, (d0, idx, alu))
+    g = UOpGraph([out])
+    self.assertEqual(len([x for x in g.uops if x.op is UOps.VECTORIZE]), 0)
+
+  def test_cast_alu_fold(self):
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=(0, True))
+    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(1, False))
+    idx = UOp.const(dtypes.int, 0)
+    ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
+    alu = ld.lt(1).cast(dtypes.bool)
+    out = UOp(UOps.STORE, None, (d0, idx, alu))
     g = UOpGraph([out])
     self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
+
+  def test_double_cast_fold(self):
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
+    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(1, False))
+    idx = UOp.const(dtypes.int, 0)
+    ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
+    alu = ld.cast(dtypes.float).cast(dtypes.float)
+    out = UOp(UOps.STORE, None, (d0, idx, alu))
+    g = UOpGraph([out])
+    self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 1)
 
   def test_depth_2_const_fold(self):
     v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('tmp', 0, 1))
@@ -192,6 +220,21 @@ class TestUOpGraph(TestUOps):
     bad_gate = UOp.const(dtypes.int, 1)
     uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
     with self.assertRaises(AssertionError): uops.linearize()
+
+  def test_switched_range_order(self):
+    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    c0 = UOp.const(dtypes.int, 0)
+    c2 = UOp.const(dtypes.int, 2)
+    cf = UOp.const(dtypes.float, 0.0)
+    r1 = UOp(UOps.RANGE, dtypes.int, (c0, c2), (1, 0, False))
+    r2 = UOp(UOps.RANGE, dtypes.int, (c0, c2), (1, 1, False))
+    alu = UOp(UOps.ALU, dtypes.int, (r2, r1), BinaryOps.MUL)
+    store = UOp(UOps.STORE, None, (glbl, alu, cf))
+    uops = UOpGraph([store]).uops
+    ranges = [x for x in uops if x.op is UOps.RANGE]
+    endranges = [x for x in uops if x.op is UOps.ENDRANGE]
+    # ranges are closed in the right order
+    self.assertEqual(endranges[-1].src[0], ranges[0])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

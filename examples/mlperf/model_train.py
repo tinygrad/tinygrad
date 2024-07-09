@@ -590,7 +590,7 @@ def train_bert():
 
       for j in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
         if INITMLPERF:
-          eval_data = get_fake_data_bert(GPUS, BS)
+          eval_data = get_fake_data_bert(GPUS, EVAL_BS)
         else:
           eval_data = get_data_bert(GPUS, eval_it)
         GlobalCounters.reset()
