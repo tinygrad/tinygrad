@@ -79,7 +79,7 @@ class NVCompiler(Compiler):
     return _get_bytes(prog, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize, cuda_check)
 
 def jitlink_check(status):
-  if status != 0: raise RuntimeError(f"NvJitLink Error {status}, {nvrtc.nvJitLinkResult__enumvalues.get(status, 'Unknown')}")
+  if status != 0: raise CompileError(f"NvJitLink Error {status}, {nvrtc.nvJitLinkResult__enumvalues.get(status, 'Unknown')}")
 
 class NVPTXCompiler(NVCompiler):
   def compile(self, src:str) -> bytes:
