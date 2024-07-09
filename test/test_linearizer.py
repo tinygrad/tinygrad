@@ -151,7 +151,7 @@ class TestLinearizer(unittest.TestCase):
     # LOAD -> RANGE -> LOAD -> PHI
     assert lin.uops[ranges[0]-2].op is UOps.LOAD
 
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
+  # TODO: this test is brittle
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
@@ -159,15 +159,15 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()[0]])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     if getenv("PTX"):
-    # LOAD -> RANGE -> 3xLOAD_INDEXING -> LOAD -> ALU -> RANGE -> PHI
+    # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> PHI
       assert lin.uops[ranges[0]-2].op is UOps.LOAD
-      assert ranges[1] == ranges[0]+5
-      assert [x.op for x in lin.uops[ranges[0]+3:ranges[0]+5]] == [UOps.LOAD, UOps.ALU]
+      assert ranges[1] == ranges[0]+6
+      assert [x.op for x in lin.uops[ranges[1]-2:ranges[1]]] == [UOps.LOAD, UOps.ALU]
     # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> PHI
     else:
       assert lin.uops[ranges[0]-2].op is UOps.LOAD
       assert ranges[1] == ranges[0]+3
-      assert [x.op for x in lin.uops[ranges[0]+1:ranges[0]+3]] == [UOps.LOAD, UOps.ALU]
+      assert [x.op for x in lin.uops[ranges[1]-2:ranges[1]]] == [UOps.LOAD, UOps.ALU]
 
   def test_range_outer_op_after_phi(self):
     a = Tensor.randn(4, 1).realize()
@@ -748,7 +748,6 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_grouped_store_locals_and_globals(self):
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     out = x@y
