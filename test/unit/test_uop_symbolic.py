@@ -24,13 +24,13 @@ def render(self) -> str:
   fxn = TestRenderer().render("", graph)
   return fxn.split("data0[0] = ")[1].split(";")[0]
 
-def NumNode(val): return UOp.const(dtypes.int, val)
+
 def Variable(expr, nmin, nmax):
   # TODO: fix DEFINE_VAR to not need this
   class TempVar:
     def __init__(self, x): self.expr = x
   #return UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)), TempVar(expr))
-  return UOp(UOps.DEFINE_VAR, dtypes.int, (NumNode(nmin), NumNode(nmax)), TempVar(expr))
+  return UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)), TempVar(expr))
 
 class Node:
   @staticmethod
@@ -98,10 +98,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
 
   #def test_div_becomes_num(self):
-  #  assert isinstance(Variable("a", 2, 3)//2, NumNode)
+  #  assert (Variable("a", 2, 3)//2).op == UOps.CONST
 
   #def test_var_becomes_num(self):
-  #  assert isinstance(Variable("a", 2, 2), NumNode)
+  #  assert Variable("a", 2, 2).op == UOps.CONST
 
   @unittest.expectedFailure
   def test_equality(self):
@@ -119,8 +119,8 @@ class TestSymbolic(unittest.TestCase):
     assert idx1*idx2 == idx2*idx1
 
   #def test_numnode_eq_int(self):
-  #  n1 = NumNode(1)
-  #  n2 = NumNode(2)
+  #  n1 = UOp.const(dtypes.int, 1)
+  #  n2 = UOp.const(dtypes.int, 2)
   #  assert n1 == 1
   #  assert n2 == 2
   #  assert n1 != n2
@@ -142,13 +142,13 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, {"(1+a)", "(a+1)"})
 
   def test_add_num_1(self):
-    self.helper_test_variable(Variable("a", 0, 8)+NumNode(1), 1, 9, {"(1+a)", "(a+1)"})
+    self.helper_test_variable(Variable("a", 0, 8)+UOp.const(dtypes.int, 1), 1, 9, {"(1+a)", "(a+1)"})
 
   def test_sub_1(self):
     self.helper_test_variable(Variable("a", 0, 8)-1, -1, 7, {"(-1+a)", "(a+(-1))"})
 
   def test_sub_num_1(self):
-    self.helper_test_variable(Variable("a", 0, 8)-NumNode(1), -1, 7, {"(-1+a)", "(a+(-1))"})
+    self.helper_test_variable(Variable("a", 0, 8)-UOp.const(dtypes.int, 1), -1, 7, {"(-1+a)", "(a+(-1))"})
 
   def test_mul_0(self):
     self.helper_test_variable(Variable("a", 0, 8)*0, 0, 0, "0")
@@ -194,7 +194,8 @@ class TestSymbolic(unittest.TestCase):
   @unittest.expectedFailure
   def test_sum_div_some_partial_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 0, 5, "(((a*3)+(b*3))//8)")
-    self.helper_test_variable(Node.sum([NumNode(16), Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 1, 6, "((((a*3)+(b*3))//8)+1)")
+    self.helper_test_variable(Node.sum([UOp.const(dtypes.int, 16), Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 1, 6,
+                              "((((a*3)+(b*3))//8)+1)")
 
   def test_sum_div_no_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
@@ -211,11 +212,11 @@ class TestSymbolic(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_sum_div_const(self):
-    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, UOp.const(dtypes.int, 3)]) // 4, 0, 7, "a")
 
   @unittest.expectedFailure
   def test_sum_div_const_big(self):
-    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 16, 0, 1, "(a//4)")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, UOp.const(dtypes.int, 3)]) // 16, 0, 1, "(a//4)")
 
   @unittest.expectedFailure
   def test_sum_lt_fold(self):
@@ -280,18 +281,18 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6) + 2, 3), 0, 1, "(a<1)")
 
   def test_and_fold(self):
-    self.helper_test_variable(Node.ands([NumNode(0), Variable("a", 0, 1)]), 0, 0, "0")
+    self.helper_test_variable(Node.ands([UOp.const(dtypes.int, 0), Variable("a", 0, 1)]), 0, 0, "0")
 
   def test_and_remove(self):
-    self.helper_test_variable(Node.ands([NumNode(1), Variable("a", 0, 1)]), 0, 1, "a")
+    self.helper_test_variable(Node.ands([UOp.const(dtypes.int, 1), Variable("a", 0, 1)]), 0, 1, "a")
 
   @unittest.expectedFailure
   def test_mod_factor_negative(self):
-    self.helper_test_variable(Node.sum([NumNode(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
-    self.helper_test_variable(Node.sum([NumNode(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
+    self.helper_test_variable(Node.sum([UOp.const(dtypes.int, -29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
+    self.helper_test_variable(Node.sum([UOp.const(dtypes.int, -29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
 
   def test_sum_combine_num(self):
-    self.helper_test_variable(Node.sum([NumNode(29), Variable("a", 0, 10), NumNode(-23)]), 6, 16, {"(6+a)", "(a+6)"})
+    self.helper_test_variable(Node.sum([UOp.const(dtypes.int, 29), Variable("a", 0, 10), UOp.const(dtypes.int, -23)]), 6, 16, {"(6+a)", "(a+6)"})
 
   @unittest.expectedFailure
   def test_sum_num_hoisted_and_factors_cancel_out(self):
@@ -299,7 +300,7 @@ class TestSymbolic(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_div_factor(self):
-    self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
+    self.helper_test_variable(Node.sum([UOp.const(dtypes.int, -40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
 
   # TODO: this one should already work!
   def test_mul_div(self):
@@ -333,7 +334,7 @@ class TestSymbolicNumeric(unittest.TestCase):
     MIN, MAX = 0, 10
     # one number
     for i in range(MIN, MAX):
-      v = f(NumNode(i))
+      v = f(UOp.const(dtypes.int, i))
       #print(i, f(i), v.min, v.max)
       self.assertEqual(v.min, v.max)
       self.assertEqual(v.min, f(i))
@@ -358,7 +359,7 @@ class TestSymbolicNumeric(unittest.TestCase):
 
 class TestSymbolicVars(unittest.TestCase):
   def test_simple(self):
-    z = NumNode(0)
+    z = UOp.const(dtypes.int, 0)
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
@@ -423,14 +424,14 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
   def test_node_divmod_node(self):
     i = Variable("i", 1, 10)
     idx0 = Variable("idx0", 0, i*3-1)
-    assert NumNode(0) // (Variable("i", 1, 10)*128) == 0
-    assert NumNode(0) % (Variable("i", 1, 10)*128) == 0
-    assert NumNode(127) // (Variable("i", 1, 10)*128) == 0
-    assert NumNode(127) % (Variable("i", 1, 10)*128) == 127
+    assert UOp.const(dtypes.int, 0) // (Variable("i", 1, 10)*128) == 0
+    assert UOp.const(dtypes.int, 0) % (Variable("i", 1, 10)*128) == 0
+    assert UOp.const(dtypes.int, 127) // (Variable("i", 1, 10)*128) == 0
+    assert UOp.const(dtypes.int, 127) % (Variable("i", 1, 10)*128) == 127
     assert 127 // (Variable("i", 1, 10)*128) == 0
     assert 127 % (Variable("i", 1, 10)*128) == 127
-    assert NumNode(128) // (Variable("i", 1, 10)*128 + 128) == 0
-    assert NumNode(128) % (Variable("i", 1, 10)*128 + 128) == 128
+    assert UOp.const(dtypes.int, 128) // (Variable("i", 1, 10)*128 + 128) == 0
+    assert UOp.const(dtypes.int, 128) % (Variable("i", 1, 10)*128 + 128) == 128
     assert 128 // (Variable("i", 1, 10)*128 + 128) == 0
     assert 128 % (Variable("i", 1, 10)*128 + 128) == 128
     assert 0 // (Variable("i", 1, 10)*128) == 0
@@ -439,10 +440,10 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert idx0 % (i*3) == idx0
     assert i // i == 1
     assert i % i == 0
-    assert 128 // NumNode(4) == 32
-    assert 128 % NumNode(4) == 0
-    assert NumNode(128) // NumNode(4) == 32
-    assert NumNode(128) % NumNode(4) == 0
+    assert 128 // UOp.const(dtypes.int, 4) == 32
+    assert 128 % UOp.const(dtypes.int, 4) == 0
+    assert UOp.const(dtypes.int, 128) // UOp.const(dtypes.int, 4) == 32
+    assert UOp.const(dtypes.int, 128) % UOp.const(dtypes.int, 4) == 0
 
   def test_mulnode_divmod_node(self):
     i = Variable("i", 1, 10)
@@ -470,9 +471,9 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
   def test_sumnode_div_numnode_no_factoring(self):
     gid = Variable("gid", 0, 1023)
     lid = Variable("lid", 0, 3)
-    expr_before_div = NumNode(-1019)-4*lid-gid
-    unfactored_expr = Node.__floordiv__(expr_before_div, NumNode(-16), False)
-    factored_expr = Node.__floordiv__(expr_before_div, NumNode(-16), True)
+    expr_before_div = UOp.const(dtypes.int, -1019)-4*lid-gid
+    unfactored_expr = Node.__floordiv__(expr_before_div, UOp.const(dtypes.int, -16), False)
+    factored_expr = Node.__floordiv__(expr_before_div, UOp.const(dtypes.int, -16), True)
     self.assertEqual(unfactored_expr.render(), "(((lid*4)+1019+gid)//16)")
     self.assertEqual(factored_expr.render(), "(((((3+gid)//4)+2+lid)//4)+63)")
 
@@ -496,11 +497,11 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = Variable("c", 1, 10)
     d = Variable("d", 5, 10)
     # if the comparison output is always the same, it folds to num
-    assert create_lt_node(a, b) == NumNode(1)
-    assert create_lt_node(b, a) == NumNode(0)
-    assert create_lt_node(d, a) == NumNode(0)
-    assert create_lt_node(a, a) == NumNode(0)
-    assert create_lt_node(a, a) == NumNode(0)
+    assert create_lt_node(a, b) == UOp.const(dtypes.int, 1)
+    assert create_lt_node(b, a) == UOp.const(dtypes.int, 0)
+    assert create_lt_node(d, a) == UOp.const(dtypes.int, 0)
+    assert create_lt_node(a, a) == UOp.const(dtypes.int, 0)
+    assert create_lt_node(a, a) == UOp.const(dtypes.int, 0)
     # if it remains as a LtNode, bool is always true and (min, max) == (0, 1)
     a_lt_c = create_lt_node(a, c)
     assert isinstance(a_lt_c, LtNode) and a_lt_c.min == 0 and a_lt_c.max == 1
@@ -525,21 +526,21 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
 
   def test_num_node_mul_node(self):
     a = Variable("a", 1, 5)
-    b = NumNode(2) * a
+    b = UOp.const(dtypes.int, 2) * a
     assert b == a * 2
     assert isinstance(b, MulNode)
-    b = NumNode(1) * a
+    b = UOp.const(dtypes.int, 1) * a
     assert b == a
     assert isinstance(b, Variable)
-    b = NumNode(0) * a
+    b = UOp.const(dtypes.int, 0) * a
     assert b == 0
     assert isinstance(b, NumNode)
 
   def test_substitute(self):
     a = Variable("idx0", 1, 3)
     b = a + 1
-    c = b.substitute({a: NumNode(1)})
-    assert c == NumNode(2)
+    c = b.substitute({a: UOp.const(dtypes.int, 1)})
+    assert c == UOp.const(dtypes.int, 2)
 """
 
 class TestSymbolicRealWorld(unittest.TestCase):
