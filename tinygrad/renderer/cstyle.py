@@ -7,6 +7,8 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 from tinygrad.renderer import Renderer, TensorCore
 
+def op_chain(op:str='', sep:str=','): return lambda *a: ''.join([f'{op}({x}{sep}' for x in a[:-2]]) +f'{a[-2]}' + ')'*(len(a)-2)
+
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
   buffer_prefix: str = ""
@@ -22,8 +24,6 @@ class CStyleLanguage(Renderer):
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
   type_map: Dict[DType, str] = {}
-  @staticmethod
-  def op_chain(op:str='', sep:str=','): return lambda *a: ''.join([f'{op}({x}{sep}' for x in a[:-2]]) +f'{a[-2]}' + ')'*(len(a)-2)
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x,dtype: f"(!{x})" if dtype == dtypes.bool else f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
