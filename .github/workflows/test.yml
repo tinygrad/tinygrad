@@ -133,6 +133,7 @@ jobs:
     - name: Test Docs
       run: |
         python docs/abstractions2.py
+        python docs/abstractions3.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test README
