@@ -145,7 +145,14 @@ class LLVMRenderer(Renderer):
           while backward.op is UOps.PHI: backward = backward.src[0]
           lvars[backward] = lvars[u]
         elif uop is UOps.ALU:
-          lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in src], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else src[0].dtype)
+          if args not in BinaryOps:
+            lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in src], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else src[0].dtype)
+          else:
+            code, dtype = code_for_op[args], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else src[0].dtype
+            var = lvars[src[0]]
+            sl = list(src[1:])
+            while sl: var = code(bb[-1], var, lvars[sl.pop()], dtype)
+            lvars[u] = var
         elif uop in {UOps.CAST, UOps.BITCAST}: lvars[u] = cast(bb, lvars[src[0]], src[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
         elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
         elif uop is UOps.CONST: lvars[u] = const(args, dtype)
