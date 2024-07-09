@@ -9,7 +9,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, BinaryOps, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
-from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod, flatten
+from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
 def variable_to_uop(x, ctx=None) -> UOp:
@@ -85,15 +85,17 @@ class Lowerer(Kernel):
           tc_in_size = 2
           tc_out_size = 2
           upcast_axis = self.shape_len-self.upcasted+1
+          upcast_axis_out = self.shape_len-self.upcasted+1
         else:
           tc_in_size = 16
           tc_out_size = 8
           upcast_axis = self.shape_len-self.upcasted
+          upcast_axis_out = self.shape_len-self.upcasted+1
         ret = UOp(UOps.WMMA, dtype=dtype.vec(tc_out_size), src=(
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(tc_in_size), src=(in_uops[0],), arg=(upcast_axis, tc_in_size)),
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(tc_in_size), src=(in_uops[1],), arg=(upcast_axis, tc_in_size)),
           UOp.const(dtype.vec(tc_out_size), 0.0)), arg=x.arg)
-        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(tc_out_size)), arg=upcast_axis)
+        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(tc_out_size)), arg=upcast_axis_out)
       src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
       return UOp(UOps.REDUCE, dtype, src, x.op)
     return UOp.alu(x.op, *in_uops)
@@ -128,48 +130,10 @@ class Lowerer(Kernel):
     # set the shapetrackers to the optimized ones, fixup reduceop
     # transformed to the final LazyOp
     @functools.lru_cache(None)
-    def fixup_ast(op:LazyOp) -> LazyOp:
+    def fixup_ast(op:LazyOp, apply_to_st=None) -> LazyOp:
       if op.op in BufferOps:
         idx = self.bufs.index(op.arg)
-        arg = replace(op.arg, st=self.sts[idx])
-        if tc:=self.tensor_core:
-          st1:ShapeTracker = arg.st
-          shape_szs = {i+1:k for i,(_,k) in enumerate(tc.threads)}
-          shape_szs[-1] = tc.thread_local_sizes[-1][0]
-
-          if op.op is BufferOps.STORE:
-            tla = tc.thread_local_aliases[2]
-          else:
-            for idx_this in self.bufs_for_tensor_core.values():
-              tc_buf_num = idx_this.index(idx)
-              tla = tc.thread_local_aliases[tc_buf_num]
-
-          # very hacky shapetracker fixup
-          new_shape = tuple(st1.shape[:self.shape_len-self.upcasted])
-          mtla = tla[len(tc.threads):]
-          for i,t in enumerate(mtla):
-            if len(t) == 1:
-              new_shape += (st1.shape[self.shape_len-self.upcasted+i],)
-            else:
-              new_shape += tuple(shape_szs[tt] for tt in t[::-1])
-          new_shape += tuple(st1.shape[self.shape_len-self.upcasted+len(mtla):])
-          permaxis = list(range(0, len(new_shape)))
-          fmtla = flatten([x[::-1] for x in mtla])
-
-          for i,a in enumerate(fmtla):
-            tidx = self.shape_len-self.upcasted+i
-            if a == -1: swap = self.shape_len-self.upcasted+len(fmtla)-1
-            elif a > 0: swap = self.global_dims+a-1
-            else: continue
-            permaxis[swap], permaxis[tidx] = permaxis[tidx], permaxis[swap]
-
-          old_shape = st1.shape
-          st1 = st1.reshape(new_shape)
-          st1 = st1.permute(tuple(permaxis))
-          st1 = st1.reshape(old_shape)
-
-          return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), MemBuffer(arg.idx, arg.dtype, st1))
-
+        arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
       elif op.op in ReduceOps:
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
@@ -179,7 +143,38 @@ class Lowerer(Kernel):
           wmma_sz = [prod(l) for l in tc.thread_local_sizes]
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device)
           reduce_axis = self.shape_len-self.upcasted
-          ret = LazyOp(ReduceOps.WMMA, tuple(fixup_ast(x) for x in rsrc.src), wmma_arg)
+          if self.opts.device == "AMD":
+            # input fixups for AMD
+            inp_1 = fixup_ast(rsrc.src[0], lambda st1: st1.reshape(st1.shape[0:-1] + (2,4)).permute((5,2,4,1,3,0)).reshape(st1.shape))
+            inp_2 = fixup_ast(rsrc.src[1], lambda st1: st1.permute((1,0,2,3,4)).reshape(st1.shape))
+          elif self.opts.device == "METAL":
+            def fix_st1(st1):
+              wd = self.global_dims
+              tcd = self.shape_len-self.upcasted
+              assert st1.shape[wd:wd+4] == (2,4,2,2), "metal warp wrong"
+              assert st1.shape[tcd:tcd+2] == (8,2), "metal tcd wrong" # METAL has 8(UNROLL) and 2(UPCAST)
+
+              new_shape = st1.shape[:tcd] + (2,2,2,2) + st1.shape[tcd+2:]  # expand the tcd
+              # globals, warp, locals, reduces, tcd, upcasts
+              permaxis = list(range(wd)) + [tcd+1, wd+1, tcd, wd+3] + list(range(wd+4, tcd)) + \
+                 [wd, wd+2, tcd+3, tcd+2] + list(range(tcd+4, self.shape_len+2))
+              return st1.reshape(new_shape).permute(tuple(permaxis)).reshape(st1.shape)
+
+            def fix_st2(st1):
+              wd = self.global_dims
+              tcd = self.shape_len-self.upcasted
+              assert st1.shape[wd:wd+4] == (2,4,2,2), "metal warp wrong"
+              assert st1.shape[tcd:tcd+2] == (8,2), "metal tcd wrong" # METAL has 8(UNROLL) and 2(UPCAST)
+
+              new_shape = st1.shape[:tcd] + (2,2,2,2) + st1.shape[tcd+2:]  # expand the tcd
+              # globals, warp, locals, reduces, tcd, upcasts
+              permaxis = list(range(wd)) + [wd, tcd+1, tcd+2, wd+2, tcd] + list(range(wd+4, tcd)) + \
+                [wd+1, wd+3, tcd+3] + list(range(tcd+4, self.shape_len+2))
+              return st1.reshape(new_shape).permute(tuple(permaxis)).reshape(st1.shape)
+
+            inp_1 = fixup_ast(rsrc.src[0], fix_st1)
+            inp_2 = fixup_ast(rsrc.src[1], fix_st2)
+          ret = LazyOp(ReduceOps.WMMA, (inp_1, inp_2), wmma_arg)
           return LazyOp(op.op, (ret,), tuple(i for i in arg if i != reduce_axis)) if len(arg) > 1 else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
