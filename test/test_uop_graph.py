@@ -136,7 +136,7 @@ class TestUOpGraph(TestUOps):
       UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(3))))
 
     uop_ = UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
-      UOp(UOps.GEP, arg=0, src=(UOp.var("val"),)) for i in range(4))))
+      UOp(UOps.GEP, arg=0, src=(UOp.var("val"),)) for _ in range(4))))
 
     self.assertEqual(constant_folder.rewrite(uop).op, UOps.STORE)
     self.assertEqual(constant_folder.rewrite(uop3).op, UOps.STORE)
