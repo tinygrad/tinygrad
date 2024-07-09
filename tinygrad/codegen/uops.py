@@ -26,6 +26,8 @@ class UOps(Enum):
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
+END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
+
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(frozen=True, eq=False)
 class UOp:
@@ -367,9 +369,9 @@ class UOpGraph:
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
 
   @property
-  def uops(self):
+  def uops(self) -> List[UOp]:
     if self._uops is None: self.linearize()
-    return self._uops
+    return cast(List[UOp], self._uops)
 
   def graph(self):
     from tinygrad.engine.graph import graph_uops
@@ -411,8 +413,7 @@ class UOpGraph:
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
 
     # scope children impact the toposort and END* insertion
-    end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
-    scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in reversed(in_degree) if p.op in end_for_uop}
+    scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
@@ -424,10 +425,6 @@ class UOpGraph:
 
     for u in children:
       if in_degree[u] == 0: push(u)
-
-    if getenv("FUZZ_UOPS", 0):
-      from test.external.fuzz_uops import fuzz_uops
-      self.fuzz_paths = fuzz_uops(children, in_degree.copy(), scope_children)
 
     self._uops = []
     while queue:
@@ -442,11 +439,14 @@ class UOpGraph:
         if in_degree[u] == 0: push(u)
 
     for u in (self._uops):
-      if u.op in end_for_uop: self._uops.insert(max([self._uops.index(l) for l in scope_children[u]])+1, UOp(end_for_uop[u.op][1], None, (u,)))
+      if u.op in END_FOR_UOP: self._uops.insert(max([self._uops.index(l) for l in scope_children[u]])+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
 
+    if getenv("FUZZ_UOPS"):
+      from test.external.fuzz_uops import fuzz_uops
+      self._fuzz_paths = fuzz_uops(self)
     if do_type_verify: type_verify(self.uops)
 
   # *** checker functions ***
