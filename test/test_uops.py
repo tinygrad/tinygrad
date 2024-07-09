@@ -293,7 +293,7 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, UOps.LOAD, dtypes.int32, (smem, ofs))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
-@unittest.skipUnless(Device.DEFAULT in {"CUDA"} and getenv("PTX"), "This only tests assembly backends")
+@unittest.skipUnless(getenv("PTX"), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
     g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
@@ -304,8 +304,8 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
     uops = UOpGraph([a1,a2])
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops.uops[-1].arg, BinaryOps.MUL)
-    self.assertEqual(uops.uops[-2].arg, BinaryOps.SHL)
+    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHL)
+    self.assertEqual(uops.uops[-2].arg, BinaryOps.MUL)
 
   def test_bitshift_right(self):
     g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
@@ -316,8 +316,8 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
     uops = UOpGraph([a1,a2])
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops.uops[-1].arg, BinaryOps.IDIV)
-    self.assertEqual(uops.uops[-2].arg, BinaryOps.SHR)
+    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHR)
+    self.assertEqual(uops.uops[-2].arg, BinaryOps.IDIV)
 
 class TestUOpCompare(unittest.TestCase):
   def test_alu_same_src_different_arg(self):
