@@ -49,7 +49,7 @@ class CStyleLanguage(Renderer):
     if math.isinf(x): return self.render_cast(("-" if x < 0 else "") + "INFINITY", dtype)
     if dtype == dtypes.bool: return "1" if x else "0"
     if dtype == dtypes.float: return f"{x}f"
-    return str(x)
+    return (self.render_cast(str(x), dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else str(x))
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
