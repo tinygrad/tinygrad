@@ -14,8 +14,8 @@ from test.external.fuzz_schedule import find_all_toposorts
 def fuzz_uops(uops:UOpGraph) -> List[Tuple[UOp, ...]]:
   blocks: List[List[UOp]] = [[]]
   for u in uops:
-    if u.op in END_FOR_UOP: blocks.append([])
-    if u.op in {x[1] for x in END_FOR_UOP.values()}: blocks.extend([[u], []])
+    if u.op in END_FOR_UOP: blocks.append([u])
+    elif u.op in {x[1] for x in END_FOR_UOP.values()}: blocks.extend([[u], []])
     else: blocks[-1].append(u)
 
   paths_for_block: Dict[int, List[Tuple[UOp, ...]]] = {}
@@ -32,7 +32,7 @@ def fuzz_uops(uops:UOpGraph) -> List[Tuple[UOp, ...]]:
   paths: Dict[Tuple[UOp, ...], None] = {}
   for up in itertools.product(*paths_for_block.values()):
     paths[tuple(uop for path in up for uop in path)] = None
-    if len(paths) >= getenv("FUZZ_SCHEDULE_MAX_PATHS", 10): break
+    if len(paths) >= getenv("FUZZ_SCHEDULE_MAX_PATHS", 50): break
   return list(paths)
 
 class UOpsFuzzerRunner(CompiledRunner):
@@ -49,7 +49,7 @@ class UOpsFuzzerRunner(CompiledRunner):
       # setup prg
       uops = UOpGraph([])
       uops._uops = list(path)
-      if DEBUG >= 6: uops.print()
+      if DEBUG >= 5: uops.print()
       self.p = replace(self.p, name=(name:=f"{init_name}fuzz{i}"), src=Device[self.p.dname].renderer.render(name, uops), uops=uops)
       if DEBUG >= 4: print(self.p.src)
       self.lib = Device[self.p.dname].compiler.compile_cached(self.p.src)
