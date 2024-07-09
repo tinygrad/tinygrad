@@ -14,7 +14,7 @@ seq_len = getenv("SEQ_LEN", 512)
 class BenchmarkBertTrain(unittest.TestCase):
   def _get_layer(self, layer_id):
     if not hasattr(self, "model"):
-      dropout_prob = 0.0 if getenv("DISABLE_DROPOUT", 1) else 0.1
+      dropout_prob = 0.0 if getenv("DISABLE_DROPOUT") else 0.1
       self.model = bert.BertForPretraining(attention_probs_dropout_prob=dropout_prob, hidden_dropout_prob=dropout_prob)
     hidden_size = self.model.bert.embeddings.word_embeddings.embed_sz
     intermediate_size = self.model.bert.encoder.layer[0].intermediate.dense.weight.shape[0]
