@@ -114,6 +114,10 @@ class TestFloatUOps(TestUOps):
   def test_where(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float, dtypes.float))
 
+  @unittest.skipUnless(getenv("PYTHON"), "only python supports MULACC")
+  def test_mulacc(self):
+    self._test_top_fxn(TernaryOps.MULACC, lambda a,b,c: a*b+c, (dtypes.float, dtypes.float, dtypes.float))
+
 class TestNonFloatUOps(TestUOps):
   def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, (dtypes.int32, ))
   def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
