@@ -159,16 +159,15 @@ class Lowerer(Kernel):
 
           if self.opts.device == "AMD":
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
-            fix_st2 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((0,1), (0,0), (0,2)), ((1,0), (1,1), (1,2)))
+            fix_st2 = None
           elif self.opts.device == "METAL":
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           else:
             raise RuntimeError("unsupported device for tensor cores")
 
-          inp_1 = fixup_ast(rsrc.src[0], fix_st1)
-          inp_2 = fixup_ast(rsrc.src[1], fix_st2)
-          ret = LazyOp(ReduceOps.WMMA, (inp_1, inp_2), wmma_arg)
+          assert apply_to_st is None, "double tensor core? not supported"
+          ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
           return LazyOp(op.op, (ret,), tuple(i for i in arg if i != reduce_axis)) if len(arg) > 1 else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
