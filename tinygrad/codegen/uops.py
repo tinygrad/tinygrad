@@ -389,6 +389,7 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
 
 def no_float4_alu(alu):
+  if alu.dtype.count == 1: return None
   alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(),
                    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
@@ -418,7 +419,7 @@ float4_folding = PatternMatcher([
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   # no ALU on float4 (float4 constructor doesn't work in METAL/GPU)
-  (UPat(UOps.ALU, dtype={dtypes.float.vec(2), dtypes.float.vec(4), dtypes.bool.vec(2), dtypes.bool.vec(4)}, name="alu"), no_float4_alu),
+  (UPat(UOps.ALU, name="alu"), no_float4_alu),
 ])
 
 # ***** tensor core handling *****
@@ -708,7 +709,7 @@ class UOpGraph:
         type_verify(self.uops)
       except AssertionError as e:
         self.print()
-        self.graph()
+        if getenv("GRAPHUOPS"): self.graph()
         raise e
 
   # *** checker functions ***
