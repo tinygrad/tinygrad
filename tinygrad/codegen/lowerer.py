@@ -149,7 +149,8 @@ class Lowerer(Kernel):
         # TODO: the strides of this can be controlled
         self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
         temp_dtype = cast(LazyOp, self.reduceop).dtype
-        self.bufs.append(LocalBuffer(f"temp{i if len(self.reduceops) > 1 else ''}", self.sts[-1].size, temp_dtype))
+        self.bufs.append(LocalBuffer(f"temp{i if len(self.reduceops) > 1 else ''}", self.sts[-1].size,
+                                     temp_dtype.base if isinstance(temp_dtype, ImageDType) else temp_dtype))
 
     #from tinygrad.engine.graph import print_tree
     #print_tree(self.ast[0])
