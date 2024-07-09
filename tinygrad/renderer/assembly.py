@@ -243,9 +243,8 @@ ptx_matcher = PatternMatcher([
     for op in PTXRenderer.asm_for_op.keys() if op not in PTXRenderer.supports_half],
   (UPat(UOps.ALU, name="x", dtype=dtypes.bool, arg=BinaryOps.MAX),
     lambda x: UOp(UOps.ALU, dtypes.uint8, tuple(s.cast(dtypes.uint8) for s in x.src), x.arg).cast(dtypes.bool)),
-  # TODO: this one looks sketchy, root.arg is applied to outer cast?
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat(name="x"),UPat(name="y"),UPat(name="z"),UPat(name="k"))),
-    lambda root,x,y,z,k: UOp(UOps.CAST, dtypes.bool, (UOp(root.op, dtypes.int8, (x,y,z,UOp(UOps.CAST, dtypes.uint8, (k,)))),), root.arg)),
+    lambda root,x,y,z,k: UOp(root.op, dtypes.uint8, (x,y,z,k.cast(dtypes.uint8))).cast(dtypes.bool)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat(),UPat())),
     lambda root: UOp(root.op, dtypes.uint8, root.src, root.arg).cast(dtypes.bool)),
   (UPat(UOps.STORE, name="root", src=(UPat(),UPat(),UPat(name="z",dtype=dtypes.bool), UPat())),
