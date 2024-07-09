@@ -306,13 +306,9 @@ constant_folder = PatternMatcher([
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.alu(TernaryOps.WHERE, UOp.var("gate"), UOp.var("alt"), UOp.load(UOp.var("buf"), UOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # store float4/float2 directly (remove VECTORIZE/GEP)
-  # (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
-  #   UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(4)))), UOp.store),
-  # (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
-  #   UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(2)))), UOp.store),
-  (UPat(UOps.STORE, src=(UOp.var("buf"), UOp.var("idx"), UPat(UOps.VECTORIZE, name='vec', src=(
-    UPat(UOps.GEP, src=(UOp.var("val"),)),), allow_any_len=True)),),
-    lambda buf,idx,val,vec: UOp.store(buf, idx, val.src[0]) if all(s.arg == i for i,s in enumerate(vec.src))else None),
+  (UPat(UOps.STORE, src=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.VECTORIZE, name='vec', src=(
+    UPat(UOps.GEP, src=(UPat(name="val"),)),), allow_any_len=True)),),
+    lambda buf,idx,val,vec: UOp.store(buf, idx, val) if all(s.arg == i for i,s in enumerate(vec.src)) else None),
   # VECTORIZE-PHI-GEP -> PHI-VECTORIZE
   (UPat(UOps.VECTORIZE, name="root", src=tuple(
     UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),

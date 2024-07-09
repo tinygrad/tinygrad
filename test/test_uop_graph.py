@@ -3,7 +3,7 @@ from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite, constant_folder
 #from tinygrad.engine.graph import print_tree
 
 simple_pm = PatternMatcher([
@@ -127,6 +127,20 @@ class TestUOpGraph(TestUOps):
     out = g.uops[-1]
     self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 0.0)
+
+  def test_unvectorize_sizes(self):
+    uop = UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
+      UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(4))))
+
+    uop3 = UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
+      UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(3))))
+
+    uop_ = UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
+      UOp(UOps.GEP, arg=0, src=(UOp.var("val"),)) for i in range(4))))
+
+    self.assertEqual(constant_folder.rewrite(uop).op, UOps.STORE)
+    self.assertEqual(constant_folder.rewrite(uop3).op, UOps.STORE)
+    self.assertIsNone(constant_folder.rewrite(uop_))
 
   def test_noop_vectorize_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
