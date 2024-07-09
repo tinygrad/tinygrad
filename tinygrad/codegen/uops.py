@@ -238,12 +238,15 @@ constant_folder = PatternMatcher([
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.VECTORIZE, src=UPat(UOps.CONST, name="c")))), lambda root, c: UOp.const(root.dtype, c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
-  # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
+  # a phi on a DEFINE_ACC without loops, CONST, or a vectorized CONST is a noop. this is for correctness, not just speed
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST),)), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=UPat(UOps.CONST)),)), UPat(name="x"))), lambda x: x),
   (UPat(UOps.PHI, src=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=UPat(UOps.CONST)), UPat(name="x"))), lambda x: x),
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
   (UPat(UOps.DEFINE_ACC, name="root", src=(UPat(UOps.CONST),)), lambda root: UOp.cast(root.src[0], root.dtype)),
+  (UPat(UOps.DEFINE_ACC, name="root", src=(UPat(UOps.VECTORIZE, src=UPat(UOps.CONST)),)), lambda root: UOp.cast(root.src[0], root.dtype)),
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
   (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
