@@ -241,6 +241,7 @@ def xsin(d:LazyBuffer, fast:bool=False, switch_over:float=39800.0) -> LazyBuffer
   - fast=True assumes x <= switch_over.
   - switch_over is the threshold for switching to payne_hanek_reduction.
   """
+  assert is_dtype_transcendental_supported(d.dtype)
   if 0 in d.shape: return d
   if d.dtype == dtypes.float16:
     switch_over = 9500.0
@@ -269,6 +270,7 @@ def xexp2(x:LazyBuffer) -> LazyBuffer:
   Implements a 1.0 ULP approximation for UnaryOps.EXP2
   - Paper: https://arxiv.org/pdf/2001.09258
   """
+  assert is_dtype_transcendental_supported(x.dtype)
   if 0 in x.shape: return x
   fp64_p = x.dtype == dtypes.float64
   # mask +=inf/nan as zero.
@@ -299,6 +301,7 @@ def xlog2(d:LazyBuffer) -> LazyBuffer:
   Implements a 1.0 ULP approximation for UnaryOps.LOG2
   Paper: https://arxiv.org/pdf/2001.09258
   """
+  assert is_dtype_transcendental_supported(d.dtype)
   if 0 in d.shape: return d
   fp64_p = d.dtype == dtypes.float64
   FLT_MIN = d.const(1e-6 if d.dtype == dtypes.float16 else 1e-4)
