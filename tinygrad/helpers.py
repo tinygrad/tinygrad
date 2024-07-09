@@ -109,8 +109,8 @@ MULTIOUTPUT, PROFILE = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0)
 @dataclass(frozen=True)
 class Metadata:
   name: str
+  caller: str
   backward: bool = False
-  caller: Optional[str] = None
   def __hash__(self): return hash(self.name)
   def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
   def __str__(self): return self.name + (" bw" if self.backward else "")
