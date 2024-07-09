@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any
 from dataclasses import dataclass
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWCommandQueue, Compiler, CompileError, BufferOptions, hcq_profile
+from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWCommandQueue, Compiler, CompileError, BufferOptions, hcq_profile, HWComputeQueue, HWCopyQueue
 from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod, PROFILE
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler, PTXCompiler, PTX
@@ -96,28 +96,21 @@ class NVCommandQueue(HWCommandQueue):
       self.binded_device.synchronize() # Synchronize to ensure the buffer is no longer in use.
       self.binded_device._gpu_free(self.hw_page)
 
-  @HWCommandQueue.command
-  def memory_barrier(self): pass
-
-  @HWCommandQueue.command
-  def wait(self, signal, value=0):
+  def _wait(self, signal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
 
-  @HWCommandQueue.command
   def timestamp(self, signal): return NVCommandQueue.signal(self, signal, timestamp=True)
 
-  @HWCommandQueue.command
-  def signal(self, signal, value=0, timestamp=False):
+  def _signal(self, signal, value=0, timestamp=False):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
                (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
 
-  def update_signal(self, cmd_idx, signal=None, value=None): return self.update_wait(cmd_idx, signal, value) # the same offsets and commands
-  def update_wait(self, cmd_idx, signal=None, value=None):
+  def _update_signal(self, cmd_idx, signal=None, value=None): return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
+  def _update_wait(self, cmd_idx, signal=None, value=None):
     if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', [*nvdata64_le(mv_address(signal))])
     if value is not None: self.q[(valoff:=self.cmds_offset[cmd_idx]+3):valoff+2] = array.array('I', [*nvdata64_le(value)])
-    return self
 
   def bind(self, device: NVDevice):
     self.binded_device = device
@@ -128,7 +121,7 @@ class NVCommandQueue(HWCommandQueue):
     # From now on, the queue is on the device for faster submission.
     self.q = hw_view # type: ignore
 
-  def _submit(self, dev, gpfifo:GPFifo):
+  def _submit_to_gpfifo(self, dev, gpfifo:GPFifo):
     if len(self.q) == 0: return
 
     if dev == self.binded_device: cmdq_addr = self.hw_page.va_addr
@@ -147,20 +140,19 @@ class NVCommandQueue(HWCommandQueue):
     dev.gpu_mmio[0x90 // 4] = gpfifo.token
     gpfifo.put_value += 1
 
-class NVComputeQueue(NVCommandQueue):
+class NVComputeQueue(NVCommandQueue, HWComputeQueue):
   def __init__(self):
     self.cmd_idx_to_qmd, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}
     super().__init__()
 
-  @HWCommandQueue.command
   def copy_from_cpu(self, gpuaddr, data):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_OFFSET_OUT_UPPER, 2), *nvdata64(gpuaddr)]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LINE_LENGTH_IN, 2), len(data)*4, 0x1]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LAUNCH_DMA, 1), 0x41]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + list(data)
+    return self
 
-  @HWCommandQueue.command
-  def exec(self, prg, kernargs, global_size, local_size):
+  def _exec(self, prg, kernargs, global_size, local_size):
     cmd_idx = len(self) - 1 # TODO: remove from here?
 
     ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
@@ -182,50 +174,44 @@ class NVComputeQueue(NVCommandQueue):
       prev_qmd.dependent_qmd0_prefetch = 1
       prev_qmd.dependent_qmd0_enable = 1
 
-  def update_exec(self, cmd_idx, global_size, local_size):
+  def _update_exec(self, cmd_idx, global_size, local_size):
     # Patch the exec cmd with new launch dims
     self.cmd_idx_to_global_dims[cmd_idx][:] = array.array('I', global_size)
     self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
 
-  @HWCommandQueue.command
-  def signal(self, signal, value=0):
-    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 1)) is None or prev_qmd.release0_enable == 1: return super().signal(signal, value)
+  def _signal(self, signal, value=0):
+    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 1)) is None or prev_qmd.release0_enable == 1: return super()._signal(signal, value)
     prev_qmd.release0_address_upper, prev_qmd.release0_address_lower = nvdata64(ctypes.addressof(from_mv(signal)))
     prev_qmd.release0_payload_upper, prev_qmd.release0_payload_lower = nvdata64(value)
     prev_qmd.release0_enable = 1
     self.cmd_idx_to_qmd[len(self)] = prev_qmd # this command is embedded into qmd.
 
-  def update_signal(self, cmd_idx, signal=None, value=None):
-    if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super().update_signal(cmd_idx, signal, value)
+  def _update_signal(self, cmd_idx, signal=None, value=None):
+    if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_signal(cmd_idx, signal, value)
     if signal is not None: qmd.release0_address_upper, qmd.release0_address_lower = nvdata64(ctypes.addressof(from_mv(signal)))
     if value is not None: qmd.release0_payload_upper, qmd.release0_payload_lower = nvdata64(value)
-    return self
 
-  def submit(self, dev:NVDevice): self._submit(dev, dev.compute_gpfifo)
+  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.compute_gpfifo)
 
-class NVCopyQueue(NVCommandQueue):
-  @HWCommandQueue.command
-  def copy(self, dest, src, copy_size):
+class NVCopyQueue(NVCommandQueue, HWCopyQueue):
+  def _copy(self, dest, src, copy_size):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *nvdata64(src), *nvdata64(dest)]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182] # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
 
-  def update_copy(self, cmd_idx, dest=None, src=None):
+  def _update_copy(self, cmd_idx, dest=None, src=None):
     if dest is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+3):sigoff+2] = array.array('I', [*nvdata64(dest)])
     if src is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+1):sigoff+2] = array.array('I', [*nvdata64(src)])
-    return self
 
-  @HWCommandQueue.command
-  def signal(self, signal, value=0):
+  def _signal(self, signal, value=0):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *nvdata64(ctypes.addressof(from_mv(signal))), value, 4]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
 
-  def update_signal(self, cmd_idx, signal=None, value=None):
+  def _update_signal(self, cmd_idx, signal=None, value=None):
     if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', [*nvdata64(mv_address(signal))])
     if value is not None: self.q[self.cmds_offset[cmd_idx]+3] = value
-    return self
 
-  def submit(self, dev:NVDevice): self._submit(dev, dev.dma_gpfifo)
+  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
 
 SHT_PROGBITS, SHT_NOBITS, SHF_ALLOC, SHF_EXECINSTR = 0x1, 0x8, 0x2, 0x4
 class NVProgram:
