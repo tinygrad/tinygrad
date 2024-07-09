@@ -389,7 +389,7 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
 
 def no_float4_alu(alu):
   alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(),
-                   tuple(UOp(UOps.GEP, alu.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
+                   tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 float4_folding = PatternMatcher([
@@ -417,7 +417,7 @@ float4_folding = PatternMatcher([
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   # no ALU on float4 (float4 constructor doesn't work in METAL/GPU)
-  (UPat(UOps.ALU, dtype={dtypes.float.vec(2), dtypes.float.vec(4)}, name="alu"), no_float4_alu),
+  (UPat(UOps.ALU, dtype={dtypes.float.vec(2), dtypes.float.vec(4), dtypes.bool.vec(2), dtypes.bool.vec(4)}, name="alu"), no_float4_alu),
 ])
 
 # ***** tensor core handling *****
@@ -430,7 +430,8 @@ constant_folder = PatternMatcher([
   (UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(4))), lambda x: x),
   # ALU before CONTRACT
   (UOp(UOps.CONTRACT, src=(UOp(UOps.ALU).name("alu"),)).name("contract"),
-   lambda contract, alu: UOp(alu.op, contract.dtype, tuple(UOp(UOps.CONTRACT, contract.dtype, (x,), contract.arg) for x in alu.src), alu.arg)),
+   lambda contract, alu: UOp(alu.op, contract.dtype,
+      tuple(UOp(UOps.CONTRACT, x.dtype.vec(contract.dtype.count), (x,), contract.arg) for x in alu.src), alu.arg)),
   # tensor core cleanups
   (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
@@ -703,7 +704,13 @@ class UOpGraph:
     assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
 
-    if do_type_verify: type_verify(self.uops)
+    if do_type_verify:
+      try:
+        type_verify(self.uops)
+      except AssertionError as e:
+        self.print()
+        self.graph()
+        raise e
 
   # *** checker functions ***
 
