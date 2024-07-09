@@ -26,35 +26,12 @@ render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
+# TODO: change this once UOps is ready to replace symbolic
 def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
   fake_idxs = [Variable(f"__idx{i}", 0, s-1) for i,s in enumerate(st.shape)]
   idx, valid = st.expr_idxs(fake_idxs)
   ctx = dict(zip(fake_idxs, idxs))
   return idx.render(render_ops, ctx), valid.render(render_ops, ctx).cast(dtypes.bool)
-
-# TODO: enable this once UOps is ready to replace symbolic
-"""
-def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
-  # TODO: dtypes.realint
-  iexpr = variable_to_uop(view.offset)
-  for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
-    if sh != 1 and st != 0: iexpr = iexpr + idx*variable_to_uop(st)
-    if m is not None:
-      if m[0] != 0: vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
-      if m[1] != sh: vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
-  return iexpr, vexpr
-
-def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
-  idx, valid = _uop_view(st.views[-1], idxs, UOp.const(dtypes.bool, True))
-  for view in reversed(st.views[0:-1]):
-    view = view.minify()
-    acc, idxs = 1, []
-    for d in reversed(view.shape):
-      idxs.append((idx//acc)%variable_to_uop(d))
-      acc *= variable_to_uop(d)
-    idx, valid = _uop_view(view, idxs[::-1], valid)
-  return idx, valid
-"""
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0) -> Tuple[List[UOp], List[UOp]]:
   local_idxs = loop_local_idxs = [UOp(UOps.SPECIAL, dtypes.int32, (), (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501

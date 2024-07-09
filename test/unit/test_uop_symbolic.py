@@ -561,14 +561,5 @@ class TestSymbolicRealWorld(unittest.TestCase):
     # NOTE: this used to have 13,151,129,600 in the output which is out of int32 range.
     assert idx.render() == "((((1+lidx5)%16)*49)+(((1+lidx5)//16)*802816)+(gidx0*3211264)+(gidx1*784)+(gidx2*8)+(lidx4*100352)+2207744+lidx3)"
 
-from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.codegen.lowerer import st_to_uops
-class TestUOpShapeTracker(unittest.TestCase):
-  def test_st(self):
-    st = ShapeTracker.from_shape((10,10))
-    x,y = UOp.const(dtypes.int32, 5), UOp.const(dtypes.int32, 5)
-    idx, valid = st_to_uops(st, [x,y])
-    print(idx, valid)
-
 if __name__ == '__main__':
   unittest.main()
