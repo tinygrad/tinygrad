@@ -97,6 +97,12 @@ class TestUOps(unittest.TestCase):
             c = dtypes.as_const(c, dts[2])
             self._equal(f([a,b,c], op, dts), fxn(a,b,c))
 
+  def _test_n_op_fxn(self, op, fxn, dts=(dtypes.float32, )):
+    for f in [_test_single_value, _test_single_value_const]:
+      for args in np.random.randint(-10, 10, (10, 5)):
+        args = [dtypes.as_const(a, dts[0]) for a in args]
+        self._equal(f(args, op, dts*len(args)), fxn(*args))
+
 class TestFloatUOps(TestUOps):
   def test_neg(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a)
   def test_exp2(self): self._test_uop_fxn(UnaryOps.EXP2, lambda a: np.exp2(a))
@@ -113,6 +119,9 @@ class TestFloatUOps(TestUOps):
 
   def test_where(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float, dtypes.float))
+
+  def test_n_add(self): self._test_n_op_fxn(op=BinaryOps.ADD, fxn=lambda *args: sum(args), dts=(dtypes.float32, ))
+  def test_n_mul(self): self._test_n_op_fxn(op=BinaryOps.MUL, fxn=lambda *args: np.prod(args), dts=(dtypes.float32, ))
 
   @unittest.skipUnless(getenv("PYTHON"), "only python supports MULACC")
   def test_mulacc(self):
