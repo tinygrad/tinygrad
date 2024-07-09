@@ -1,7 +1,7 @@
 """This is where the forwards and backwards passes live."""
 import math
 from typing import Tuple, Optional
-from tinygrad.helpers import argsort, getenv
+from tinygrad.helpers import argsort, TRANSCENDENTAL
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
@@ -14,11 +14,11 @@ def use_transcendental(d:LazyBuffer) -> bool:
   # TRANSCENDENTAL=0 to always ignore.
   # TRANSCENDENTAL=1 to run only in CLANG/LLVM (default).
   # TRANSCENDENTAL=2 to always run it.
-  lv = getenv("TRANSCENDENTAL", 1)
-  if lv == 0: return False
-  if lv == 2: return True
-  return (is_dtype_transcendental_supported(d.dtype) and
-          d.device in transcendental_supported_devices)
+  if TRANSCENDENTAL >= 2: return True
+  if TRANSCENDENTAL >= 1:
+    return (is_dtype_transcendental_supported(d.dtype) and
+            d.device in transcendental_supported_devices)
+  return False
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
