@@ -161,7 +161,6 @@ def __match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return []
   if pat.op is not None and __unmatch(pat.op, uop.op): return []
   if pat.src is None: return stores
-
   # only one if it's a tuple
   # try all permutations if it's a list
   # repeat if it's a UPat
