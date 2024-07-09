@@ -301,11 +301,12 @@ class Linearizer(Kernel):
                         for z, acc in enumerate(accs[reduceop])]
     elif self.amx:
       dto, reduceop_dto = self.amx.dtype_out, reduceop.dtype
-      cast_buf1 = UOp(UOps.CAST, dto, tuple(self.global_load(1,global_idxs+reduce_idxs+[full_upcast_idxs[0]]+[NumNode(0)])))
-      cast_buf2 = UOp(UOps.CAST, dto, tuple(self.global_load(2,global_idxs+reduce_idxs+[NumNode(0)]+[full_upcast_idxs[1]])))
+      cast_buf1 = UOp(UOps.VECTORIZE, dto, tuple(self.global_load(1,global_idxs+reduce_idxs+[full_upcast_idxs[0]]+[NumNode(0)])))
+      cast_buf2 = UOp(UOps.VECTORIZE, dto, tuple(self.global_load(2,global_idxs+reduce_idxs+[NumNode(0)]+[full_upcast_idxs[1]])))
       def avoid_GEP(casting): return casting.src[0].src[0] if(all(s.op is UOps.GEP for s in casting.src)) else casting
-      mma = UOp(UOps.MMA, dto, (avoid_GEP(cast_buf1),avoid_GEP(cast_buf2))+tuple(accs[reduceop]), (str(self.amx), self.amx.dims, dto, reduceop_dto))
-      accs[reduceop] = [UOp(UOps.PHI, dto, (acc, mma)) for acc in accs[reduceop]]
+      accs_src = [accs[reduceop][x].src[0] for x in range(0, dto.count)]
+      mma = UOp(UOps.MMA, dto, (avoid_GEP(cast_buf1),avoid_GEP(cast_buf2))+tuple(accs_src), (str(self.amx), self.amx.dims, dto, reduceop_dto))
+      accs[reduceop] = [UOp(UOps.PHI, reduceop_dto, (acc, UOp(UOps.GEP, dto, (mma,), z%dto.count))) for z, acc in enumerate(accs[reduceop])]
     else:
       assert not locals_to_store, "storing locals isn't supported here"
 

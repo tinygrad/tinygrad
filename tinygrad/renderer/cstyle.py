@@ -83,9 +83,6 @@ class CStyleLanguage(Renderer):
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.count == 1 else str(var_dtype.count)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.count > 1:
-      if(var_name.startswith('amx_acc')):
-        zreg = int(var_name[7:var_name.index('[')])*buf_dtype.itemsize
-        return f"__ST_{var_dtype.name}(&{buf_name}[{idx}], {(zreg + (2 if zreg>=64 else 0)) % 64});"
       prefix = self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix
       return f"*(({prefix}{self.render_dtype(buf_dtype)}{var_dtype.count}*)({buf_name}+{idx})) = {var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
@@ -150,6 +147,9 @@ class CStyleLanguage(Renderer):
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
           if not r[src[0]].startswith('amx_acc'): kk(f"{r[src[0]]} = {r[src[1]]};")
+          else:
+            zreg = src[1].arg*(dtype.itemsize//dtype.count)
+            kk(f"__ST_{dtype.name}(&{r[src[0]]}, {(zreg + (2 if zreg>=64 else 0)) % 64});")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}:
           assert len(src) == 1 or (uop is UOps.VECTORIZE and len(src) > 1), "Invalid source length for operation"
@@ -173,12 +173,12 @@ class CStyleLanguage(Renderer):
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.MMA: kk(f"__{args[0]}({r[src[0]]}, {r[src[1]]});")
+        elif uop is UOps.MMA: kk(f"__{args[0]}({r[src[0]]}, {r[src[1]]}); // {ssa('mma',u)}"),
         elif uop is UOps.DEFINE_ACC:
-          if not(len(args) == 3 and args[2] == 'amx_acc'): kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
+          if not(len(args) == 3 and args[2] == 'amx_acc'):  kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
           else:
-            ssa('amx_acc',u)
-            if(args[1] == 0): kk("AMX_SET(1); AMX_SET(0);")
+            if(args[1] == 0): kk("AMX_SET(1); AMX_SET(0);") # tidy up this
+            kk(f"{self.render_dtype(dtype)} {ssa('amx_acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
@@ -208,7 +208,7 @@ class ClangRenderer(CStyleLanguage):
         f"""{arg[2].name} make_{arg[2].name}({arg[3].name + " x" + f", {arg[3].name} x".join([str(x) for x in range(arg[2].count)])}) {{ return ({arg[2].name}) {{x{", x".join([str(x) for x in range(arg[2].count)])}}}; }}""",  # noqa: E501
         '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
         '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
-        f"void __ST_{arg[2].name}({arg[3].name}* restrict data0, int zreg){{ AMX(5, data0, 1ull<<62 | (zreg*1ull)<<56); }}",
+        f"void __ST_{arg[2].name}({arg[2].name}* acc, int zreg){{ AMX(5, acc, 1ull<<62 | (zreg*1ull)<<56); }}",
         f"""void __MMA_{arg[2].count}_{arg[2].count}_{arg[2].name}({arg[2].name} data1, {arg[2].name} data2){{
   AMX(0, (int *) (&data2), 1ull<<62); AMX(1, (int *) (&data1), 1ull<<62);
   AMX({amx_op[arg[3]]}, 0, 0ull); AMX({amx_op[arg[3]]}, 0, 1ull<<20 | 64<<10); AMX({amx_op[arg[3]]}, 0, 2ull<<20 | 64); AMX({amx_op[arg[3]]}, 0, 3ull<<20 | 64<<10 | 64);

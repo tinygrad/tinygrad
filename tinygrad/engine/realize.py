@@ -19,7 +19,7 @@ def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
   k = Linearizer(*ast, opts=renderer)
   k.required_optimizations()
   if not NOOPT:
-    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1)) or k.apply_amx()): k.hand_coded_optimizations()
+    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1)) or k.apply_amx(getenv("AMX", 0))): k.hand_coded_optimizations()
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
       kb, k_opt = Linearizer(*ast, opts=renderer), k

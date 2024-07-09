@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
+  TC = auto(); AMX = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
   GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
@@ -407,19 +407,31 @@ class Kernel:
     except KernelOptError:
       return False
 
-  def apply_amx(self):
-    if not (getenv("AMX", 0) and (r := self.reduceop) is not None and r.op is ReduceOps.SUM and (r.dtype in [dtypes.double, dtypes.float])) \
-      or (mul_op := r.src[0]).op is not BinaryOps.MUL:
+  def _apply_amx_opt(self, use_amx:int) -> bool:
+    if use_amx and (r := self.reduceop) is not None and r.op is ReduceOps.SUM and (mul_op := r.src[0]).op is BinaryOps.MUL:
+      if r.dtype not in [dtypes.double, dtypes.float]: return False
+
+      for src in mul_op.src:
+        if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
+
+      if not all(x % (amx_size:=128//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
+
+      self.amx = AMX(dims=(amx_size, amx_size), dtype_out=r.dtype.vec(amx_size))
+      self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
+      self.apply_opt(Opt(OptOps.UNROLL, -1, amx_size)) # unroll to support matvec, otherwise cannot upcast reduce dim
+      if use_amx == 2: self.amx = None
+      return True
+    return False
+
+  def apply_amx(self, use_amx=1) -> bool:
+    if not use_amx: return False
+
+    try:
+      self.apply_opt(Opt(OptOps.AMX, None, None))
+
+      return True
+    except KernelOptError:
       return False
-    for src in mul_op.src:
-      if(src.op is not BufferOps.LOAD or src.arg.dtype is not r.dtype): return False
-
-    if not all(x % (amx_size:=128//self.outbufs[0].dtype.itemsize) == 0 and x > amx_size for x in self.full_shape): return False
-
-    self.amx=AMX(dims=(amx_size, amx_size), dtype_out=r.dtype.vec(amx_size))
-    self.apply_opt(Opt(OptOps.UPCAST, 0, amx_size))
-    self.apply_opt(Opt(OptOps.UNROLL, -1, amx_size)) # unroll to support matvec, otherwise cannot upcast reduce dim
-    return True
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
@@ -429,6 +441,12 @@ class Kernel:
       check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
       check((use_tensor_cores:=self.opts.tc) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
+      self.applied_opts.append(opt)
+      return
+
+    if opt.op is OptOps.AMX:
+      check(len(self.applied_opts) == 0, "amx opts must be first")
+      check(self._apply_amx_opt(1), "amx not available")
       self.applied_opts.append(opt)
       return
 
