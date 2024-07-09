@@ -4,13 +4,10 @@ from tinygrad.codegen.linearizer import Linearizer
 #from tinygrad.codegen.lowerer import Lowerer
 from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, LazyOp, ReduceOps, verify_lazyop
+from tinygrad.ops import BufferOps, MemBuffer, LazyOp, ReduceOps, verify_lazyop
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
 from tinygrad.shape.view import View
-
-class LazyOp(LazyOp):
-  def __add__(self, other:LazyOp): return LazyOp(BinaryOps.ADD, (self, other))
 
 class InvalidLazyOpException(Exception): pass
 def lower(*ast:LazyOp):
