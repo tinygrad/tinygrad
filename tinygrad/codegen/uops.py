@@ -328,7 +328,7 @@ def cast_reduce(cst):
 contractor = PatternMatcher([
   (UPat(UOps.CONTRACT, name="root"), replace_contract),
   # CAST after REDUCEs -> one REDUCE (breaks TestConv.test_two_binops_no_rerun)
-  (UPat(UOps.CAST, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
+  (UPat(UOps.VECTORIZE, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
 ])
 
 # ***** reduce+image handling *****
