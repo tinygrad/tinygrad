@@ -29,7 +29,7 @@ class _Device:
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
-    for device in ["METAL", "AMD", "CUDA", "GPU", "CLANG", "LLVM"]:
+    for device in ["METAL", "AMD", "NV", "CUDA", "GPU", "CLANG", "LLVM"]:
       try:
         if self[device]:
           os.environ[device] = "1"   # we set this in environment for spawned children
@@ -187,12 +187,17 @@ class Compiled:
 # **************** for HCQ Compatible Devices ****************
 
 @contextlib.contextmanager
-def hcq_profile(dev, queue_type, enabled, desc):
+def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
   st, en = (dev._alloc_signal(), dev._alloc_signal()) if enabled else (None, None)
-  if enabled: queue_type().timestamp(st).submit(dev)
+
+  if enabled and queue is not None: queue.timestamp(st)
+  elif enabled: queue_type().timestamp(st).submit(dev)
+
   try: yield (st, en)
   finally:
-    if enabled: queue_type().timestamp(en).submit(dev)
+    if enabled and queue is not None: queue.timestamp(en)
+    elif enabled: queue_type().timestamp(en).submit(dev)
+
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQCompatCompiled(Compiled):
@@ -268,7 +273,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
   def _alloc(self, size:int, options:BufferOptions) -> HCQCompatAllocRes: raise NotImplementedError("need hcq compat alloc")
 
   def copyin(self, dest: HCQCompatAllocRes, src: memoryview):
-    with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"CPU -> {self.device.dname}", enabled=PROFILE):
+    with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"CPU -> {self.device.dname}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
         self.device._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
@@ -287,7 +292,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
         return (self.b[self.b_next].va_addr, self.b_next)
       return None
 
-    with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"DISK -> {self.device.dname}", enabled=PROFILE):
+    with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"DISK -> {self.device.dname}", enabled=PROFILE):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
         self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
                                      .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
@@ -298,7 +303,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
   def copyout(self, dest:memoryview, src: HCQCompatAllocRes):
     self.device.synchronize()
 
-    with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
+    with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
       for i in range(0, dest.nbytes, self.b[0].size):
         self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
                                      .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
@@ -311,7 +316,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
   def transfer(self, dest: HCQCompatAllocRes, src: HCQCompatAllocRes, sz: int, src_dev, dest_dev):
     src_dev._gpu_map(dest)
 
-    with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
+    with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
       src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
                                .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
                                .copy(dest.va_addr, src.va_addr, sz) \

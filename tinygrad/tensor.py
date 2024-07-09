@@ -1,6 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct
+import dataclasses
+import time, math, itertools, functools, struct, sys, inspect
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
 from collections import defaultdict
@@ -8,7 +9,7 @@ import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
+from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA, Metadata, TRACEMETA
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps, truncate
@@ -20,18 +21,19 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, me
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
-  def __init__(self, device:Union[str, Tuple[str, ...]], *tensors:Tensor):
+  def __init__(self, device:Union[str, Tuple[str, ...]], *tensors:Tensor, metadata:Optional[Metadata]=None):
     self.device = device
     self.needs_input_grad = [t.requires_grad for t in tensors]
     self.requires_grad = True if any(self.needs_input_grad) else None if None in self.needs_input_grad else False
     if self.requires_grad: self.parents = tensors
+    self.metadata = metadata
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
   def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
 
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
-    ctx = fxn(x[0].device, *x)
+    ctx = fxn(x[0].device, *x, metadata=_METADATA.get())
     ret = Tensor.__new__(Tensor)
     ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
     ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
@@ -740,7 +742,9 @@ class Tensor:
 
     for t0 in reversed(self._deepwalk()):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
+      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := t0._ctx.metadata) is not None else None)
       grads = t0._ctx.backward(t0.grad.lazydata)
+      _METADATA.reset(token)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
@@ -3091,3 +3095,36 @@ def custom_random(out:Buffer):
   if out.dtype == dtypes.half: rng_np_buffer = (rng.integers(low=0, high=2047, size=out.size) / 2048).astype(np.half, copy=False)
   else: rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=_to_np_dtype(out.dtype), copy=False)
   out.copyin(rng_np_buffer.data)
+
+def _metadata_wrapper(fn):
+  def _wrapper(*args, **kwargs):
+    if _METADATA.get() is not None: return fn(*args, **kwargs)
+
+    caller_frame = sys._getframe(frame := 1)
+    caller_module = caller_frame.f_globals.get("__name__", None)
+    caller_func = caller_frame.f_code.co_name
+    if caller_module is None: return fn(*args, **kwargs)
+
+    # if its called from nn we want to step up frames until we are out of nn
+    while caller_module.startswith("tinygrad.nn") and "optim" not in caller_module:
+      caller_frame = sys._getframe(frame := frame + 1)
+      caller_module = caller_frame.f_globals.get("__name__", None)
+      if caller_module is None: return fn(*args, **kwargs)
+
+    # if its called from a lambda in tinygrad we want to look two more frames up
+    if caller_module.startswith("tinygrad") and caller_func == "<lambda>": caller_frame = sys._getframe(frame := frame + 2)
+    caller_module = caller_frame.f_globals.get("__name__", None)
+    if caller_module is None: return fn(*args, **kwargs)
+    caller_func = caller_frame.f_code.co_name
+    caller_lineno = caller_frame.f_lineno
+
+    token = _METADATA.set(Metadata(name=fn.__name__, caller=f"{caller_module}:{caller_lineno}::{caller_func}"))
+    ret = fn(*args, **kwargs)
+    _METADATA.reset(token)
+    return ret
+  return _wrapper
+
+if TRACEMETA >= 1:
+  for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
+    if name in ["__class__", "__init__", "__repr__", "backward", "sequential"]: continue
+    setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
