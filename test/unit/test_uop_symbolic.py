@@ -24,14 +24,12 @@ def render(self) -> str:
   fxn = TestRenderer().render("", graph)
   return fxn.split("data0[0] = ")[1].split(";")[0]
 
-
 def Variable(expr, nmin, nmax):
   # TODO: fix DEFINE_VAR to not need this
   class TempVar:
     def __init__(self, x): self.expr = x
   #return UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)), TempVar(expr))
   return UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)), TempVar(expr))
-
 class Node:
   @staticmethod
   def sum(ops): return functools.reduce(lambda x,y: x+y, ops)
