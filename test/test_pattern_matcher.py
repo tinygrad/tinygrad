@@ -2,7 +2,7 @@ import unittest
 from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp, UPat
+from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp, UPat, _match
 
 class TestPatternMatcher(TestUOps):
   def test_simple_match(self):
@@ -132,6 +132,15 @@ class TestPatternMatcher(TestUOps):
     self.assertEqual(matcher.rewrite(c4), c4)
     self.assertEqual(matcher.rewrite(c5), None)
     self.assertEqual(matcher.rewrite(c6), c6)
+
+  def test_deep_src_permutations(self):
+    c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
+    c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
+    u1 = (c1 + c2) + c1
+    u2 = (c2 + c1) + c1
+    pat = UPat(UOps.ALU, src = (UPat(UOps.ALU, src=[UPat(name='a'), UPat(name='b')]), UPat(name='b')))
+    assert _match(u1, pat, {})
+    assert _match(u2, pat, {})
 
   @unittest.skip("no longer supported")
   def test_rewrite_graph_folds(self):

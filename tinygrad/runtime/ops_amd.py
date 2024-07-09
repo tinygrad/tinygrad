@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, List, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from dataclasses import dataclass
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions
+from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions, hcq_profile
 from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -365,20 +365,19 @@ class AMDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    sig_st, sig_en = (self.device._alloc_signal(), self.device._alloc_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
+    q = HWPM4Queue().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
-    q = HWPM4Queue()
-    q.wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
-    if wait or PROFILE: q.timestamp(sig_st)
-    q.exec(self, self.device.kernargs_ptr, global_size, local_size)
-    if wait or PROFILE: q.timestamp(sig_en)
+    with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
+      q.exec(self, self.device.kernargs_ptr, global_size, local_size)
+
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+
     self.device.timeline_value += 1
     self.device.kernargs_ptr += self.kernargs_alloc_size
 
-    if PROFILE: self.device.sig_prof_records.append((sig_st, sig_en, self.name, False))
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
+      if not PROFILE: self.device.signals_pool += [sig_st, sig_en]
       return (sig_en.start_ts - sig_st.start_ts) / 1e8
 
 class AMDAllocator(HCQCompatAllocator):
@@ -498,8 +497,6 @@ class AMDDevice(HCQCompatCompiled):
       self._gpu_map(AMDDevice.signals_page)
       self._gpu_map(AMDDevice.event_page)
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
-
-    self.time_event_st, self.time_event_en = AMDDevice._alloc_signal(), AMDDevice._alloc_signal()
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr

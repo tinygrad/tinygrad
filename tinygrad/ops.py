@@ -78,6 +78,12 @@ class LazyOp:
     const_vars = [x.arg.val for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
     return sorted(set.union(*extract_vars, set(const_vars)), key=lambda v: v.expr)
 
+  # TODO: support non-lazyop
+  def __add__(self, x:LazyOp): return LazyOp(BinaryOps.ADD, (self, x))
+  def __sub__(self, x:LazyOp): return LazyOp(BinaryOps.ADD, (self, -x))
+  def __mul__(self, x:LazyOp): return LazyOp(BinaryOps.MUL, (self, x))
+  def __neg__(self): return LazyOp(UnaryOps.NEG, (self,))
+
 # **************** independent FlopCounter ****************
 
 @dataclass
