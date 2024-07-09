@@ -29,3 +29,5 @@ class TestTranscendentalSchedule(unittest.TestCase):
       c = c.exp2()
       check_schedule(c, 1)
 
+if __name__ == '__main__':
+  unittest.main()
