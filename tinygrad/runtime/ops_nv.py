@@ -212,6 +212,11 @@ class HWCopyQueue(HWQueue):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182] # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self._mark_command_end()
 
+  def update_copy(self, cmd_idx, dest=None, src=None):
+    if dest is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+3):sigoff+2] = array.array('I', [*nvdata64(dest)])
+    if src is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+1):sigoff+2] = array.array('I', [*nvdata64(src)])
+    return self
+
   def signal(self, signal, value=0):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *nvdata64(ctypes.addressof(from_mv(signal))), value, 4]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
