@@ -80,12 +80,20 @@ class Lowerer(Kernel):
       #arg = x.op
       dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
       if x.op is ReduceOps.WMMA:
-        upcast_axis = self.shape_len-self.upcasted+1
-        ret = UOp(UOps.WMMA, dtype=dtype.vec(2), src=(
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(2), src=(in_uops[0],), arg=(upcast_axis, 2)),
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(2), src=(in_uops[1],), arg=(upcast_axis, 2)),
-          UOp.const(dtype.vec(2), 0.0)), arg=x.arg)
-        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(2)), arg=upcast_axis)
+        # METAL
+        if x.arg[-1] == "METAL":
+          tc_in_size = 2
+          tc_out_size = 2
+          upcast_axis = self.shape_len-self.upcasted+1
+        else:
+          tc_in_size = 16
+          tc_out_size = 8
+          upcast_axis = self.shape_len-self.upcasted
+        ret = UOp(UOps.WMMA, dtype=dtype.vec(tc_out_size), src=(
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(tc_in_size), src=(in_uops[0],), arg=(upcast_axis, tc_in_size)),
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(tc_in_size), src=(in_uops[1],), arg=(upcast_axis, tc_in_size)),
+          UOp.const(dtype.vec(tc_out_size), 0.0)), arg=x.arg)
+        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(tc_out_size)), arg=upcast_axis)
       src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
       return UOp(UOps.REDUCE, dtype, src, x.op)
     return UOp.alu(x.op, *in_uops)
@@ -95,13 +103,6 @@ class Lowerer(Kernel):
     sts_backup, bufs_backup = self.sts, self.bufs
 
     self.uop_cache: Dict[LazyOp, UOp] = {}
-
-    # late alias the tensor core buffers
-    if (tc:=self.tensor_core) and self.tensor_core_opts is not None:
-      # NOTE: the 4 is required if using real locals
-      alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [4]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
-      for op, tc_bufs in self.bufs_for_tensor_core.items():
-        for tc_buf in tc_bufs: self.alias_buffer(op, tc_buf, alias_pattern)
 
     # kernel name (before late upcast)
     self.name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
@@ -131,55 +132,44 @@ class Lowerer(Kernel):
       if op.op in BufferOps:
         idx = self.bufs.index(op.arg)
         arg = replace(op.arg, st=self.sts[idx])
-        for top, v in self.local_alias.items():
-          if idx in v and (tc:=self.tensor_core):
-            lbuf = v[idx]
-            lidx = self.bufs.index(lbuf)
-            assert arg.st.real_size() == self.sts[idx].real_size()
+        if tc:=self.tensor_core:
+          st1:ShapeTracker = arg.st
+          shape_szs = {i+1:k for i,(_,k) in enumerate(tc.threads)}
+          shape_szs[-1] = tc.thread_local_sizes[-1][0]
 
-            # two shapetrackers
-            st1:ShapeTracker = arg.st
-            st2 = self.sts[lidx]
+          if op.op is BufferOps.STORE:
+            tla = tc.thread_local_aliases[2]
+          else:
+            for idx_this in self.bufs_for_tensor_core.values():
+              tc_buf_num = idx_this.index(idx)
+              tla = tc.thread_local_aliases[tc_buf_num]
 
-            shape_szs = {i+1:k for i,(_,k) in enumerate(tc.threads)}
-            shape_szs[-1] = tc.thread_local_sizes[-1][0]
+          # very hacky shapetracker fixup
+          new_shape = tuple(st1.shape[:self.shape_len-self.upcasted])
+          mtla = tla[len(tc.threads):]
+          for i,t in enumerate(mtla):
+            if len(t) == 1:
+              new_shape += (st1.shape[self.shape_len-self.upcasted+i],)
+            else:
+              new_shape += tuple(shape_szs[tt] for tt in t[::-1])
+          new_shape += tuple(st1.shape[self.shape_len-self.upcasted+len(mtla):])
+          permaxis = list(range(0, len(new_shape)))
+          fmtla = flatten([x[::-1] for x in mtla])
 
-            tc_buf_num = self.bufs_for_tensor_core[top].index(idx)
-            tla = tc.thread_local_aliases[tc_buf_num]
+          for i,a in enumerate(fmtla):
+            tidx = self.shape_len-self.upcasted+i
+            if a == -1: swap = self.shape_len-self.upcasted+len(fmtla)-1
+            elif a > 0: swap = self.global_dims+a-1
+            else: continue
+            permaxis[swap], permaxis[tidx] = permaxis[tidx], permaxis[swap]
 
-            # very hacky shapetracker fixup
-            new_shape = tuple(st1.shape[:self.shape_len-self.upcasted])
-            mtla = tla[len(tc.threads):]
-            for i,t in enumerate(mtla):
-              if len(t) == 1:
-                new_shape += (st1.shape[self.shape_len-self.upcasted+i],)
-              else:
-                new_shape += tuple(shape_szs[tt] for tt in t[::-1])
-            new_shape += tuple(st1.shape[self.shape_len-self.upcasted+len(mtla):])
-            permaxis = list(range(0, len(new_shape)))
-            fmtla = flatten([x[::-1] for x in mtla])
+          old_shape = st1.shape
+          st1 = st1.reshape(new_shape)
+          st1 = st1.permute(tuple(permaxis))
+          st1 = st1.reshape(old_shape)
 
-            for i,a in enumerate(fmtla):
-              tidx = self.shape_len-self.upcasted+i
-              if a == -1: swap = self.shape_len-self.upcasted+len(fmtla)-1
-              elif a > 0: swap = self.global_dims+a-1
-              else: continue
-              permaxis[swap], permaxis[tidx] = permaxis[tidx], permaxis[swap]
+          return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), MemBuffer(arg.idx, arg.dtype, st1))
 
-            def fix_st(st, new_shape, permaxis):
-              old_shape = st.shape
-              st = st.reshape(old_shape[:self.shape_len-self.upcasted] + new_shape[self.shape_len-self.upcasted:])
-              st = st.permute(tuple(permaxis))
-              return st.reshape(old_shape)
-
-            st1 = fix_st(st1, new_shape, permaxis)
-            st2 = fix_st(st2, new_shape, permaxis)
-
-            start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), MemBuffer(arg.idx, arg.dtype, st1))
-            return start
-            #local_store = LazyOp(BufferOps.STORE, (start,), MemBuffer(lidx, start.dtype, st2))
-            #local_load = LazyOp(BufferOps.LOAD, (local_store,), MemBuffer(lidx, start.dtype, self.sts[lidx]))
-            #return local_load
       elif op.op in ReduceOps:
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):

@@ -320,7 +320,7 @@ def replace_reduce(root):
 def replace_contract(root:UOp):
   parents = root.parents
   expands: List[UOp] = [x for x in parents if x.op is UOps.EXPAND and x.arg == root.arg[0]]
-  assert all_same([root.arg[1]] + [len(x.src) for x in expands])
+  assert all_same(expand_lens := [root.arg[1]] + [len(x.src) for x in expands]), expand_lens
   ret = expand_nodes(parents, expands, root.src[0])
   if len(ret) == 1: ret = ret*root.arg[1]   # TODO: why is this needed?
   return UOp(UOps.VECTORIZE, cast(DType, root.dtype), tuple(ret))
