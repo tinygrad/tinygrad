@@ -1,3 +1,4 @@
+from __future__ import annotations
 import itertools
 import numpy as np
 from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar
@@ -73,7 +74,7 @@ def _exec_si(si:ScheduleItem, seed:int):
   ei.run()
 
 T = TypeVar("T")
-def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[Tuple[T, ...]]:
+def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]|Dict[T, int]) -> List[Tuple[T, ...]]:
   visited: Set[T] = set()
   ret: List[Tuple[T, ...]] = []
   path: List[T] = []
