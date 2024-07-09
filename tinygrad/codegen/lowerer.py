@@ -5,8 +5,8 @@ from dataclasses import replace
 from collections import defaultdict
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.dtype import dtypes, PtrDType, ImageDType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, get_lazyop_info
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, BinaryOps, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod, flatten
@@ -79,13 +79,14 @@ class Lowerer(Kernel):
       # NOTE: always using ridxs is fine here
       #arg = x.op
       dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
-      if tc := self.tensor_core:
-        wmma_sz = [prod(l) for l in tc.thread_local_sizes]
-        arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, self.shape_len-self.upcasted+1)
-        reduce_axis = self.shape_len-self.upcasted
-        src = (UOp(UOps.TC, dtype, (in_uops[0],), arg),) + tuple(self.ridxs[i] for i in x.arg if i != reduce_axis)
-      else:
-        src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
+      if x.op is ReduceOps.WMMA:
+        upcast_axis = self.shape_len-self.upcasted+1
+        ret = UOp(UOps.WMMA, dtype=dtype.vec(2), src=(
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(2), src=(in_uops[0],), arg=(upcast_axis, 2)),
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(2), src=(in_uops[1],), arg=(upcast_axis, 2)),
+          UOp.const(dtype.vec(2), 0.0)), arg=x.arg)
+        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(2)), arg=upcast_axis)
+      src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
       return UOp(UOps.REDUCE, dtype, src, x.op)
     return UOp.alu(x.op, *in_uops)
 
@@ -122,9 +123,6 @@ class Lowerer(Kernel):
         temp_dtype = cast(LazyOp, self.reduceop).dtype
         self.bufs.append(LocalBuffer(f"temp{i if len(self.reduceops) > 1 else ''}", self.sts[-1].size,
                                      temp_dtype.base if isinstance(temp_dtype, ImageDType) else temp_dtype))
-
-    #from tinygrad.engine.graph import print_tree
-    #print_tree(self.ast[0])
 
     # set the shapetrackers to the optimized ones, fixup reduceop
     # transformed to the final LazyOp
@@ -178,12 +176,21 @@ class Lowerer(Kernel):
             st2 = fix_st(st2, new_shape, permaxis)
 
             start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), MemBuffer(arg.idx, arg.dtype, st1))
-            local_store = LazyOp(BufferOps.STORE, (start,), MemBuffer(lidx, start.dtype, st2))
-            local_load = LazyOp(BufferOps.LOAD, (local_store,), MemBuffer(lidx, start.dtype, self.sts[lidx]))
-            return local_load
+            return start
+            #local_store = LazyOp(BufferOps.STORE, (start,), MemBuffer(lidx, start.dtype, st2))
+            #local_load = LazyOp(BufferOps.LOAD, (local_store,), MemBuffer(lidx, start.dtype, self.sts[lidx]))
+            #return local_load
       elif op.op in ReduceOps:
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])
-        #if op in self.bufs_for_tensor_core: assert op.src[0].op is BinaryOps.MUL
+        if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
+          rsrc = op.src[0]
+          if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
+          assert rsrc.op is BinaryOps.MUL
+          wmma_sz = [prod(l) for l in tc.thread_local_sizes]
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device)
+          reduce_axis = self.shape_len-self.upcasted
+          ret = LazyOp(ReduceOps.WMMA, tuple(fixup_ast(x) for x in rsrc.src), wmma_arg)
+          return LazyOp(op.op, (ret,), tuple(i for i in arg if i != reduce_axis)) if len(arg) > 1 else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
           local_buffer = MemBuffer(-1, start.dtype, self.sts[-1])

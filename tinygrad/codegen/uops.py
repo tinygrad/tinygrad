@@ -322,7 +322,7 @@ def replace_contract(root:UOp):
   assert all_same([root.arg[1]] + [len(x.src) for x in expands])
   ret = expand_nodes(parents, expands, root.src[0])
   if len(ret) == 1: ret = ret*root.arg[1]   # TODO: why is this needed?
-  return UOp(UOps.VECTORIZE, cast(DType, root.dtype).vec(root.arg[1]), tuple(ret))
+  return UOp(UOps.VECTORIZE, cast(DType, root.dtype), tuple(ret))
 
 def cast_reduce(cst):
   if cst.dtype.scalar() == cst.dtype: return None  # not for normal CAST. TODO: the merging one shouldn't be CAST
@@ -384,7 +384,7 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
   if idx3 is not None: idx = idx + idx3
   if not idx.divides(len(ex.src)): return None
 
-  new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
+  new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
 
 def no_float4_alu(alu):
@@ -418,37 +418,22 @@ float4_folding = PatternMatcher([
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   # no ALU on float4 (float4 constructor doesn't work in METAL/GPU)
   (UPat(UOps.ALU, dtype={dtypes.float.vec(2), dtypes.float.vec(4)}, name="alu"), no_float4_alu),
-  (UOp(UOps.GEP, src=(UOp(UOps.VECTORIZE).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
 ])
 
 # ***** tensor core handling *****
 
-def tc_expand(red_allow_any_len, tc, lb1, lb2, v1, v2):
-  upcast_axis = tc.arg[-1]
-  ret = UOp(UOps.WMMA, dtype=tc.dtype.vec(2), src=(
-    UOp(UOps.CONTRACT, dtype=v1.dtype, src=(v1,), arg=(upcast_axis, 2)),
-    UOp(UOps.CONTRACT, dtype=v2.dtype, src=(v2,), arg=(upcast_axis, 2)),
-    UOp.const(tc.dtype.vec(2), 0.0)), arg=tc.arg)
-  ret = UOp(red_allow_any_len.op, red_allow_any_len.dtype.vec(2), src=(ret,)+red_allow_any_len.src[1:], arg=red_allow_any_len.arg)
-  return UOp(UOps.EXPAND, tc.dtype, tuple(UOp(UOps.GEP, tc.dtype, (ret,), i) for i in range(2)), arg=upcast_axis)
-
-tensor_core_pattern = [
-  # tensor core
-  (UOp(UOps.REDUCE, src=(UOp(UOps.TC, src=(UOp.cast(
-      UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
-      UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),)))
-    ),)).name("tc"),)).name("red_allow_any_len"),
-    tc_expand),
-  (UOp(UOps.REDUCE, src=(UOp(UOps.TC, src=(
-      UOp.load(UOp.var("lb1"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb1"), UOp.var(), UOp.var("v1")),)))*
-      UOp.load(UOp.var("lb2"), UOp.var(), UOp(UOps.BARRIER, src=(UOp.store(UOp.var("lb2"), UOp.var(), UOp.var("v2")),)))
-    ,)).name("tc"),)).name("red_allow_any_len"),
-    tc_expand),
-  (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
-    lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg))]
-
 # this is symbolic 2.0
-constant_folder = PatternMatcher(tensor_core_pattern+[
+constant_folder = PatternMatcher([
+  # VECTORIZE/GEP
+  (UOp(UOps.GEP, src=(UOp(UOps.VECTORIZE).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
+  (UOp(UOps.VECTORIZE, dtypes.float.vec(2), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))), lambda x: x),
+  (UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(4))), lambda x: x),
+  # ALU before CONTRACT
+  (UOp(UOps.CONTRACT, src=(UOp(UOps.ALU).name("alu"),)).name("contract"),
+   lambda contract, alu: UOp(alu.op, contract.dtype, tuple(UOp(UOps.CONTRACT, contract.dtype, (x,), contract.arg) for x in alu.src), alu.arg)),
+  # tensor core cleanups
+  (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
+    lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL, src=[UPat(UOps.CONST, name="mval"),
@@ -574,7 +559,7 @@ constant_folder = PatternMatcher(tensor_core_pattern+[
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None)
 ])
 
-constant_folder_w_f4 = PatternMatcher(float4_folding.patterns + constant_folder.patterns)
+constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.patterns)
 
 # *** uop graph ***
 
