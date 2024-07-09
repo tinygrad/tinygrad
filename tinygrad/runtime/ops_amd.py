@@ -216,7 +216,7 @@ class HWPM4Queue(HWQueue):
 SDMA_MAX_COPY_SIZE = 0x400000
 class HWCopyQueue(HWQueue):
   def __init__(self):
-    self.internal_cmd_sizes, self.copy_cmd_offsets = [], {}
+    self.internal_cmd_sizes, self.copy_cmds_per_copy = [], {}
     super().__init__()
 
   def _q(self, arr):
@@ -245,8 +245,8 @@ class HWCopyQueue(HWQueue):
 
   def update_copy(self, cmd_idx, dest=None, src=None):
     for i in range(self.copy_cmds_per_copy[cmd_idx]):
-      if dest is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+7+i*7):sigoff+2] = array.array('I', [*data64_le(dest)])
-      if src is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+9+i*7):sigoff+2] = array.array('I', [*data64_le(src)])
+      if src is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+8+i*7):sigoff+2] = array.array('I', [*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
+      if dest is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+10+i*7):sigoff+2] = array.array('I', [*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
     return self
 
   def signal(self, signal: hsa.amd_signal_t, value=0):
