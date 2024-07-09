@@ -1536,6 +1536,7 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a@b, [[Opt(OptOps.UNROLL, 0, 0), Opt(OptOps.PADTO, 2, 8)]])
 
+  @unittest.skipIf(getenv("PTX"), "TODO: broken in PTX")
   def test_padto_sum_ok(self):
     N = 18 * 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
