@@ -370,11 +370,12 @@ def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None):
   vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
   return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
 
-def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtypes.int, 0), idx2=None):
+def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtypes.int, 0), idx2=None, idx3=None):
   if len(ex.src) not in [2, 4]: return None
   if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
   if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
   if idx2 is not None: idx = idx + idx2
+  if idx3 is not None: idx = idx + idx3
   if not idx.divides(len(ex.src)): return None
 
   new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
@@ -398,6 +399,10 @@ float4_folding = PatternMatcher([
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
   # float(2,4) store
+  # TODO: fold ADDs into one UOp and remove add chains
+  (UOp(UOps.STORE, src=(UOp.var("buf"),
+    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("idx2")+UOp.var("idx3"), UOp.var("var"))).name("store_allow_any_len"),
+    float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("idx2"), UOp.var("var"))).name("store_allow_any_len"),
     float4_contract_store),
