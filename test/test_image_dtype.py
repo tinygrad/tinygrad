@@ -29,6 +29,11 @@ class TestImageDType(unittest.TestCase):
     out = (it*2).realize()
     assert isinstance(out.lazydata.base.realized.dtype, ImageDType)
 
+  def test_sum(self):
+    it = Tensor.rand(8).cast(dtypes.imagef((1,2,4))).realize()
+    itn = it.numpy()
+    np.testing.assert_equal(np.sum(itn), it.sum().numpy())
+
   def test_shrink_max(self):
     it = Tensor.randn(8).cast(dtypes.imagef((1,2,4))).realize()
     imgv = it.numpy()

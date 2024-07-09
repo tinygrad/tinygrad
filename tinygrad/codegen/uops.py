@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
-from tinygrad.helpers import prod, DEBUG, getenv, flatten, all_same
+from tinygrad.helpers import prod, DEBUG, getenv, flatten, all_same, dedup
 
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
@@ -274,7 +274,12 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
         replace[cc] = super_replace
     else:
       for replace in replaces:
-        replace[cc] = UOp(cc.op, cc.dtype, tuple(replace.get(x, x) for x in cc.src), cc.arg)
+        if cc in replace:
+          # NOTE: handle expands that are already replaced
+          tcc = replace[cc]
+          replace[cc] = UOp(tcc.op, tcc.dtype, tuple(replace.get(x, x) for x in tcc.src), tcc.arg)
+        else:
+          replace[cc] = UOp(cc.op, cc.dtype, tuple(replace.get(x, x) for x in cc.src), cc.arg)
 
   return [x.get(base, base) for x in replaces]
 
@@ -295,7 +300,8 @@ def replace_reduce(root):
 
   # add other expands for float4. TODO: should be a faster way
   expand_args = [x.arg for x in expands]
-  expands += [x for x in root.parents if x.op is UOps.EXPAND and x.arg in expand_args]
+  new_expands = [x for x in root.parents if x.op is UOps.EXPAND and x.arg in expand_args]
+  expands = dedup(expands + new_expands)
 
   if len(expands):
     new_uops = expand_nodes(root.parents, expands, root.src[0])
