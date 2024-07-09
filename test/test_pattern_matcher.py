@@ -133,7 +133,6 @@ class TestPatternMatcher(TestUOps):
     self.assertEqual(matcher.rewrite(c5), None)
     self.assertEqual(matcher.rewrite(c6), c6)
 
-  @unittest.expectedFailure
   def test_deep_src_permutations(self):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
