@@ -308,8 +308,8 @@ def xlog2(d:LazyBuffer) -> LazyBuffer:
   Y_FLT_MIN = d.const(math.log2({dtypes.float64: 1e-228, dtypes.float32: 1e-38, dtypes.float16: 1e-6}[d.dtype]))
   d_orig = d
   denormal_map = d.e(BinaryOps.CMPLT, FLT_MIN)
-  for _ in range(2):
-    d = denormal_map.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(2 ** 32)), d)
+  for _ in range(4):
+    d = denormal_map.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(2 ** 16)), d)
 
   e = ilogb2k(d.e(BinaryOps.MUL, d.const(1.0 / 0.75))).cast(d.dtype)
   m = ldexp3k(d, e.e(UnaryOps.NEG))
