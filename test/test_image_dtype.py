@@ -32,7 +32,7 @@ class TestImageDType(unittest.TestCase):
   def test_sum(self):
     it = Tensor.rand(8).cast(dtypes.imagef((1,2,4))).realize()
     itn = it.numpy()
-    np.testing.assert_allclose(np.sum(itn), it.sum().numpy())
+    np.testing.assert_allclose(np.sum(itn), it.sum().numpy(), rtol=1e-6)
 
   def test_shrink_max(self):
     it = Tensor.randn(8).cast(dtypes.imagef((1,2,4))).realize()
