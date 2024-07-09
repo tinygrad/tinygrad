@@ -37,7 +37,7 @@ class BenchmarkBertTrain(unittest.TestCase):
     return f"{layer_id}-layer, Input: {input_shapes}", layer_map.get(layer_id), input_shapes
 
   def _test_layer(self, name, layer, input_shapes):
-    optim = LAMB(get_parameters(layer), 0.001)
+    optim = LAMB(get_parameters(layer))
     with Context(SAVE_SCHEDULE=0): Tensor.realize(*[t.assign(t.detach().contiguous()) for t in get_parameters(optim)])
 
     JITCNT = getenv("JITCNT", 1)
@@ -68,7 +68,7 @@ class BenchmarkBertTrain(unittest.TestCase):
       et = time.perf_counter()
 
       flops = GlobalCounters.global_ops / JITCNT
-      mem_used = GlobalCounters.mem_used  # a little high with JITCNT > 1 fsr
+      mem_used = GlobalCounters.mem_used
       mem = GlobalCounters.global_mem / JITCNT
       if kernels is None: kernels = GlobalCounters.kernel_count // JITCNT
       tm = (et-st) / JITCNT
