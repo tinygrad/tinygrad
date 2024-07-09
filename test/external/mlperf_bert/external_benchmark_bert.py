@@ -49,11 +49,11 @@ class BenchmarkBertTrain(unittest.TestCase):
 
       y = layer(*inputs).contiguous().contiguous_backward()
       y.sum().backward()
-      if getenv("ASSIGN", 1): sched, _ = Tensor.schedule_with_vars(y, *[i for i in inputs], *optim.schedule_step())
-      else: sched, _ = Tensor.schedule_with_vars(y, *[i for i in inputs], *[t.grad for t in optim.params])
+      if getenv("ASSIGN", 1): sched, _ = Tensor.schedule_with_vars(y, *list(inputs), *optim.schedule_step())
+      else: sched, _ = Tensor.schedule_with_vars(y, *list(inputs), *[t.grad for t in optim.params])
 
       for _ in range(JITCNT):
-        run_schedule(list(sched))
+        run_schedule(sched)
 
     CNT = getenv("CNT", 5)
     best_tm = None
@@ -91,7 +91,7 @@ class BenchmarkBertTrain(unittest.TestCase):
     cls.est_flops += flops * mult
     cls.est_mem += mem * mult
     cls.est_kernels += kernels * mult
-  
+
   @classmethod
   def tearDownClass(cls):
     print(f"\restimated step tm: {cls.est_tm * 1000.0:.2f} ms, {cls.est_flops / 10 ** 12 / cls.est_tm:.3f} tflops, "
