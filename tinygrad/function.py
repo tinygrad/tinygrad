@@ -14,7 +14,8 @@ def use_transcendental(d:LazyBuffer) -> bool:
   # TRANSCENDENTAL=0 to always ignore.
   # TRANSCENDENTAL=1 to run only in CLANG/LLVM (default).
   # TRANSCENDENTAL=2 to always run it.
-  if TRANSCENDENTAL >= 2: return True
+  if TRANSCENDENTAL >= 2:
+    return is_dtype_transcendental_supported(d.dtype)
   if TRANSCENDENTAL >= 1:
     return (is_dtype_transcendental_supported(d.dtype) and
             d.device in transcendental_supported_devices)

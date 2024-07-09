@@ -25,12 +25,13 @@ class TestJit(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT in ["LLVM", "CLANG"], f"no support on {Device.DEFAULT}")
   @given(strat.sampled_from([Tensor.exp2, Tensor.log2, Tensor.sin]))
   def test_approx_jit_timeout(self, op):
-    model = [ResBlock(16, 24, 16) for _ in range(4)]
-    @TinyJit
-    def fw_approx(t, t2):
-      for l in model: t = l(t, t2)
-      return op(t).realize()
-    fw_approx(Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24))
+    with Context(TRANSCENDENTAL=2):
+      model = [ResBlock(16, 24, 16) for _ in range(4)]
+      @TinyJit
+      def fw_approx(t, t2):
+        for l in model: t = l(t, t2)
+        return op(t).realize()
+      fw_approx(Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24))
 
   def test_simple_jit(self):
     @TinyJit
