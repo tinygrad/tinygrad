@@ -2,7 +2,7 @@
 import unittest
 from tinygrad import dtypes, Device
 from tinygrad.helpers import CI
-from tinygrad.codegen.lowerer import Lowerer as Linearizer
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.engine.search import time_linearizer, bufs_from_lin
 

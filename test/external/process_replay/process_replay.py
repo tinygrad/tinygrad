@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
 import difflib, pickle
-from tinygrad.codegen.lowerer import Lowerer as Linearizer
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import colored, db_connection, VERSION, getenv, tqdm
 
 page_size = 100

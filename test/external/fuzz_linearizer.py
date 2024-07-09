@@ -6,7 +6,7 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.codegen.lowerer import Lowerer as Linearizer
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.uops import UOp
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_linearizer_actions, bufs_from_lin

@@ -1,7 +1,7 @@
 import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.codegen.lowerer import Lowerer as Linearizer
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer

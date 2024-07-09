@@ -10,7 +10,7 @@ from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, LoadOps, ReduceOps, UnaryOps
 from tinygrad.helpers import DEBUG, flatten, getenv
-from tinygrad.codegen.lowerer import Lowerer as Linearizer
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule

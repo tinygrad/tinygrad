@@ -5,7 +5,7 @@ from dataclasses import replace
 from test.external.fuzz_linearizer import compare_linearizer
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
-from tinygrad.codegen.lowerer import Lowerer as Linearizer
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Device, Buffer

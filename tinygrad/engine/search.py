@@ -6,7 +6,7 @@ from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
-from tinygrad.codegen.lowerer import Lowerer as Linearizer
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.uops import UOpGraph
 from tinygrad.tensor import Tensor

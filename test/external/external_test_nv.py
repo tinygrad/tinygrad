@@ -8,7 +8,7 @@ from test.test_linearizer_failures import helper_test_lin
 from tinygrad.engine.realize import get_runner, CompiledRunner
 from test.external.fuzz_linearizer import get_fuzz_rawbufs
 
-from tinygrad.codegen.lowerer import Lowerer as Linearizer
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View

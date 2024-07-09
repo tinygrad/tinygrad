@@ -4,7 +4,7 @@ from tinygrad import dtypes, Tensor
 from tinygrad.helpers import prod
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, get_lazyop_info, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.codegen.lowerer import Lowerer as Linearizer
+from tinygrad.codegen.linearizer import Linearizer
 
 class TestFlopCounter(unittest.TestCase):
   def setUp(self):
