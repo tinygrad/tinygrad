@@ -40,8 +40,7 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
 # TODO: CUDACPU segfaults on sin
-# TODO: METAL sin is flaky for float16
-if getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "METAL": unary_operations.remove((Tensor.sin, np.sin))
+if getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV"): unary_operations.remove((Tensor.sin, np.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
@@ -160,6 +159,12 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skip("broken. TODO: fix it")
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
+
+class TestFromFuzzer(unittest.TestCase):
+  @given(strat.sampled_from(dtypes_float))
+  def test_sin(self, dtype):
+    if not is_dtype_supported(dtype): return
+    np.testing.assert_allclose(Tensor([25]).cast(dtype=dtype).sin().numpy(), np.sin(np.array([25])), rtol=3e-4)
 
 if __name__ == '__main__':
   unittest.main()

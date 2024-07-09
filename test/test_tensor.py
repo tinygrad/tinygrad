@@ -2,7 +2,8 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import getenv, temp, CI
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.helpers import getenv, temp, CI, _METADATA
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from test.helpers import is_dtype_supported
@@ -603,6 +604,58 @@ class TestInferenceMode(unittest.TestCase):
       assert mm.grad is None
       assert W.grad is None
     f(x, m, W)
+
+class TestTensorMetadata(unittest.TestCase):
+  def test_matmul(self):
+    _METADATA.set(None)
+    x = Tensor.rand(3, requires_grad=True)
+    W = Tensor.rand(3, 3, requires_grad=True)
+    out = x.matmul(W)
+    assert out.lazydata.metadata.name == "matmul"
+    s = create_schedule([out.lazydata])
+    assert len(s[-1].metadata) == 1
+    assert s[-1].metadata[0].name == "matmul"
+
+  def test_relu(self):
+    _METADATA.set(None)
+    x = Tensor.rand(3, requires_grad=True)
+    out = x.relu()
+    assert out.lazydata.metadata.name == "relu"
+    s = create_schedule([out.lazydata])
+    assert len(s[-1].metadata) == 1
+    assert s[-1].metadata[0].name == "relu"
+
+  def test_complex(self):
+    _METADATA.set(None)
+    x = Tensor.rand(3, requires_grad=True)
+    y = Tensor.rand(3, requires_grad=True)
+    out = x.relu() * y.sigmoid()
+    assert out.lazydata.metadata.name == "__mul__"
+    assert out.lazydata.srcs[0].metadata.name == "relu"
+    assert out.lazydata.srcs[1].metadata.name == "sigmoid"
+    s = create_schedule([out.lazydata])
+    assert len(s[-1].metadata) == 3
+    assert s[-1].metadata[0].name == "relu"
+    assert s[-1].metadata[1].name == "sigmoid"
+    assert s[-1].metadata[2].name == "__mul__"
+
+  def test_complex_backward(self):
+    _METADATA.set(None)
+    x = Tensor.rand(3, requires_grad=True)
+    y = Tensor.rand(3, requires_grad=True)
+    out = (x.relu() * y.sigmoid()).sum()
+    assert out.lazydata.metadata.name == "sum"
+    out.backward()
+    assert x.grad.lazydata.metadata.name == "relu"
+    assert x.grad.lazydata.metadata.backward
+    assert y.grad.lazydata.metadata.name == "sigmoid"
+    assert y.grad.lazydata.metadata.backward
+    s = create_schedule([out.lazydata, x.grad.lazydata, y.grad.lazydata])
+    assert len(s[-1].metadata) == 3
+    assert s[-1].metadata[0].name == "sigmoid"
+    assert s[-1].metadata[1].name == "sigmoid"
+    assert s[-1].metadata[1].backward
+    assert s[-1].metadata[2].name == "relu"
 
 if __name__ == '__main__':
   unittest.main()
