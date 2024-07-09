@@ -143,37 +143,31 @@ class Lowerer(Kernel):
           wmma_sz = [prod(l) for l in tc.thread_local_sizes]
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device)
           reduce_axis = self.shape_len-self.upcasted
+
+          def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
+            wd = self.global_dims
+            tcd = self.shape_len-self.upcasted
+            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
+            assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, "tcd dims wrong"
+            new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
+            permaxis = list(range(wd))
+            for x,y in pattern_1: permaxis.append(y + (wd if x == 0 else tcd))
+            permaxis += list(range(wd+len(warp_dims), tcd))
+            for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
+            permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
+            return st1.reshape(new_shape).permute(tuple(permaxis)).reshape(st1.shape)
+
           if self.opts.device == "AMD":
-            # input fixups for AMD
-            inp_1 = fixup_ast(rsrc.src[0], lambda st1: st1.reshape(st1.shape[0:-1] + (2,4)).permute((5,2,4,1,3,0)).reshape(st1.shape))
-            inp_2 = fixup_ast(rsrc.src[1], lambda st1: st1.permute((1,0,2,3,4)).reshape(st1.shape))
+            fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
+            fix_st2 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((0,1), (0,0), (0,2)), ((1,0), (1,1), (1,2)))
           elif self.opts.device == "METAL":
-            def fix_st1(st1):
-              wd = self.global_dims
-              tcd = self.shape_len-self.upcasted
-              assert st1.shape[wd:wd+4] == (2,4,2,2), "metal warp wrong"
-              assert st1.shape[tcd:tcd+2] == (8,2), "metal tcd wrong" # METAL has 8(UNROLL) and 2(UPCAST)
+            fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
+            fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
+          else:
+            raise RuntimeError("unsupported device for tensor cores")
 
-              new_shape = st1.shape[:tcd] + (2,2,2,2) + st1.shape[tcd+2:]  # expand the tcd
-              # globals, warp, locals, reduces, tcd, upcasts
-              permaxis = list(range(wd)) + [tcd+1, wd+1, tcd, wd+3] + list(range(wd+4, tcd)) + \
-                 [wd, wd+2, tcd+3, tcd+2] + list(range(tcd+4, self.shape_len+2))
-              return st1.reshape(new_shape).permute(tuple(permaxis)).reshape(st1.shape)
-
-            def fix_st2(st1):
-              wd = self.global_dims
-              tcd = self.shape_len-self.upcasted
-              assert st1.shape[wd:wd+4] == (2,4,2,2), "metal warp wrong"
-              assert st1.shape[tcd:tcd+2] == (8,2), "metal tcd wrong" # METAL has 8(UNROLL) and 2(UPCAST)
-
-              new_shape = st1.shape[:tcd] + (2,2,2,2) + st1.shape[tcd+2:]  # expand the tcd
-              # globals, warp, locals, reduces, tcd, upcasts
-              permaxis = list(range(wd)) + [wd, tcd+1, tcd+2, wd+2, tcd] + list(range(wd+4, tcd)) + \
-                [wd+1, wd+3, tcd+3] + list(range(tcd+4, self.shape_len+2))
-              return st1.reshape(new_shape).permute(tuple(permaxis)).reshape(st1.shape)
-
-            inp_1 = fixup_ast(rsrc.src[0], fix_st1)
-            inp_2 = fixup_ast(rsrc.src[1], fix_st2)
+          inp_1 = fixup_ast(rsrc.src[0], fix_st1)
+          inp_2 = fixup_ast(rsrc.src[1], fix_st2)
           ret = LazyOp(ReduceOps.WMMA, (inp_1, inp_2), wmma_arg)
           return LazyOp(op.op, (ret,), tuple(i for i in arg if i != reduce_axis)) if len(arg) > 1 else ret
         if self.group_for_reduces:
