@@ -258,7 +258,7 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
   rps = list(itertools.product(*replacements.values()))
 
   acc_number = 0
-  replaces = []
+  replaces: List[Dict[UOp, UOp]] = []
   for rp in rps:
     rpk = dict(zip(replacements.keys(), rp))
     replace = {r:r.src[rpk[r.arg]] for r in expands}
@@ -658,6 +658,7 @@ class UOpGraph:
       sink = graph_rewrite(sink, reducer)
 
       # do upcasts (after reduce unrolls and rewrites) ... one at a time
+      # TODO: shouldn't need to be one at a time anymore
       while 1:
         all_parents = set([sink]).union(sink.parents)
         expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
