@@ -82,18 +82,27 @@ class Lowerer(Kernel):
       if x.op is ReduceOps.WMMA:
         # METAL
         if x.arg[-1] == "METAL":
-          tc_in_size = 2
+          tc_in_1_size = tc_in_2_size = 2
           tc_out_size = 2
-          upcast_axis = self.shape_len-self.upcasted+1
+          upcast_axis_1 = upcast_axis_2  = self.shape_len-self.upcasted+1
           upcast_axis_out = self.shape_len-self.upcasted+1
-        else:
-          tc_in_size = 16
+        elif x.arg[-1] == "AMD":
+          tc_in_1_size = tc_in_2_size = 16
           tc_out_size = 8
-          upcast_axis = self.shape_len-self.upcasted
+          upcast_axis_1 = upcast_axis_2 = self.shape_len-self.upcasted
           upcast_axis_out = self.shape_len-self.upcasted+1
+        elif x.arg[-1] == "CUDA":
+          tc_in_1_size = 8
+          tc_in_2_size = 4
+          tc_out_size = 4
+          upcast_axis_1 = self.shape_len-self.upcasted
+          upcast_axis_2 = self.shape_len-self.upcasted+2
+          upcast_axis_out = self.shape_len-self.upcasted+2
+        else:
+          raise RuntimeError("not supported device")
         ret = UOp(UOps.WMMA, dtype=dtype.vec(tc_out_size), src=(
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(tc_in_size), src=(in_uops[0],), arg=(upcast_axis, tc_in_size)),
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(tc_in_size), src=(in_uops[1],), arg=(upcast_axis, tc_in_size)),
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(tc_in_1_size), src=(in_uops[0],), arg=(upcast_axis_1, tc_in_1_size)),
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(tc_in_2_size), src=(in_uops[1],), arg=(upcast_axis_2, tc_in_2_size)),
           UOp.const(dtype.vec(tc_out_size), 0.0)), arg=x.arg)
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(tc_out_size)), arg=upcast_axis_out)
       src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
@@ -155,7 +164,7 @@ class Lowerer(Kernel):
             permaxis += list(range(wd+len(warp_dims), tcd))
             for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
             permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
-            return st1.reshape(new_shape).permute(tuple(permaxis)).reshape(st1.shape)
+            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape)
 
           if self.opts.device == "AMD":
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
@@ -163,11 +172,20 @@ class Lowerer(Kernel):
           elif self.opts.device == "METAL":
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
+          elif self.opts.device == "CUDA":
+            # 0,1,8,9,128,129,136,137
+            fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
+              ((1,1), (0,1), (0,2), (0,3), (1,0)), ((1,5), (1,3), (1,2), (1,4), (0,0), (0,4)))
+            # 0,8,64,72
+            fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
+              ((1,4), (0,0), (0,4), (1,1), (1,0)), ((0,1), (0,2), (0,3), (1,5), (1,3), (1,2)))
           else:
             raise RuntimeError("unsupported device for tensor cores")
 
           assert apply_to_st is None, "double tensor core? not supported"
           ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
+          if self.opts.device == "CUDA":
+            return LazyOp(op.op, (ret,), tuple(i for i in arg if i != reduce_axis and i != reduce_axis+1)) if len(arg) > 2 else ret
           return LazyOp(op.op, (ret,), tuple(i for i in arg if i != reduce_axis)) if len(arg) > 1 else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
