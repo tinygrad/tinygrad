@@ -3,8 +3,7 @@ from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite, constant_folder
-#from tinygrad.engine.graph import print_tree
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite
 
 simple_pm = PatternMatcher([
   (UOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -128,20 +127,6 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 0.0)
 
-  def test_unvectorize_sizes(self):
-    uop = UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
-      UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(4))))
-
-    uop3 = UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
-      UOp(UOps.GEP, arg=i, src=(UOp.var("val"),)) for i in range(3))))
-
-    uop_ = UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.VECTORIZE, src=tuple(
-      UOp(UOps.GEP, arg=0, src=(UOp.var("val"),)) for _ in range(4))))
-
-    self.assertEqual(constant_folder.rewrite(uop).op, UOps.STORE)
-    self.assertEqual(constant_folder.rewrite(uop3).op, UOps.STORE)
-    self.assertIsNone(constant_folder.rewrite(uop_))
-
   def test_noop_vectorize_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
     idx = UOp.const(dtypes.int, 0)
@@ -152,6 +137,18 @@ class TestUOpGraph(TestUOps):
     out = UOp(UOps.STORE, None, (d0, idx, alu))
     g = UOpGraph([out])
     self.assertEqual(len([x for x in g.uops if x.op is UOps.VECTORIZE]), 0)
+
+  def test_unvectorize_sizes(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
+    idx = UOp.const(dtypes.int, 0)
+    val = UOp(UOps.DEFINE_VAR, dtypes.float, arg=Variable('tmp', 0, 1))
+    uop = UOp.store(buf, idx, UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(4))))
+    uop3 = UOp.store(buf, idx, UOp(UOps.VECTORIZE, dtypes.float.vec(3), tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(3))))
+    uop_ = UOp.store(buf, idx, UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, (val,), 0) for _ in range(4))))
+
+    self.assert_equiv_uops(UOpGraph([uop]).uops[-1].src[2], val)
+    self.assert_equiv_uops(UOpGraph([uop3]).uops[-1].src[2], val)
+    self.assertEqual(UOpGraph([uop_]).uops[-1].src[2].op, UOps.VECTORIZE)
 
   def test_cast_alu_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=(0, True))
