@@ -187,8 +187,11 @@ class PatternMatcher:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
+    from temp.utils import viscompare
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
+      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
+        viscompare(uop, ret)
+        return ret # NOTE: if it returns None, we keep trying to match
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -240,9 +243,8 @@ constant_folder = PatternMatcher([
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST),)), UPat(name="x"))), lambda x: x),
   (UPat(UOps.PHI, src=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
-  # a DEFINE_ACC without inputs is a const + GEP on a const is the const
+  # a DEFINE_ACC without inputs is a const
   (UPat(UOps.DEFINE_ACC, name="root", src=(UPat(UOps.CONST),)), lambda root: UOp.cast(root.src[0], root.dtype)),
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
   (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
   # bool < False is always false, True < bool is always false
@@ -305,10 +307,9 @@ constant_folder = PatternMatcher([
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.alu(TernaryOps.WHERE, UOp.var("gate"), UOp.var("alt"), UOp.load(UOp.var("buf"), UOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
-  # store float4/float2 directly (remove VECTORIZE/GEP)
-  (UPat(UOps.STORE, src=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.VECTORIZE, name='vec', src=(
-    UPat(UOps.GEP, src=(UPat(name="val"),)),), allow_any_len=True)),),
-    lambda buf,idx,val,vec: UOp.store(buf, idx, val) if all(s.arg == i for i,s in enumerate(vec.src)) else None),
+  # Anything that goes from float4 -> gep -> float4 can fold the gep
+  (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.GEP, src=UPat(name='val')), allow_any_len=True),
+    lambda root, val: val if all(s.arg == i for i,s in enumerate(root.src)) else None),
   # VECTORIZE-PHI-GEP -> PHI-VECTORIZE
   (UPat(UOps.VECTORIZE, name="root", src=tuple(
     UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),

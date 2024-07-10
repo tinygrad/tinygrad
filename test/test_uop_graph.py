@@ -138,14 +138,13 @@ class TestUOpGraph(TestUOps):
     g = UOpGraph([out])
     self.assertEqual(len([x for x in g.uops if x.op is UOps.VECTORIZE]), 0)
 
-  def test_unvectorize_sizes(self):
+  def test_gep_vec_fold(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
     idx = UOp.const(dtypes.int, 0)
     val = UOp(UOps.DEFINE_VAR, dtypes.float, arg=Variable('tmp', 0, 1))
     uop = UOp.store(buf, idx, UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(4))))
     uop3 = UOp.store(buf, idx, UOp(UOps.VECTORIZE, dtypes.float.vec(3), tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(3))))
     uop_ = UOp.store(buf, idx, UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, (val,), 0) for _ in range(4))))
-
     self.assert_equiv_uops(UOpGraph([uop]).uops[-1].src[2], val)
     self.assert_equiv_uops(UOpGraph([uop3]).uops[-1].src[2], val)
     self.assertEqual(UOpGraph([uop_]).uops[-1].src[2].op, UOps.VECTORIZE)
