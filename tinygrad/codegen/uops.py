@@ -698,7 +698,10 @@ class UOpGraph:
     for u in (self._uops):
       if u.op in END_FOR_UOP: self._uops.insert(max([self._uops.index(l) for l in scope_children[u]])+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
+    # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
+    assert len(all_stores := [x.src[0:2] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), f"repeated stores {self.print()}"
+
     self._uops = self._uops[:-1]
 
     if getenv("FUZZ_UOPS"):

@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, GlobalCounters
-from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG
+from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.schedule import create_schedule
@@ -50,6 +50,7 @@ class TestWinograd(unittest.TestCase):
     assert GlobalCounters.kernel_count == 4
     out.numpy()
 
+  @unittest.skipIf(getenv("PTX"), "winograd uses too much in PTX")
   def test_counters(self):
     IC, OC, X, Y = 4,4,9,9
     #OC, IC, X, Y = 512, 256, 8, 8
