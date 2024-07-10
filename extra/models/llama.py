@@ -109,6 +109,9 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
       setattr(sample, "alpha_counter", Tensor.zeros_like(logits, dtype=dtypes.int32).contiguous())
     logits = logits - (sample.alpha_counter * af + (sample.alpha_counter > 0) * ap)
 
+  # replace NaNs with -inf
+  logits = (logits != logits).where(-float("inf"), logits)
+
   # softmax
   t = (logits / temp).softmax()
 
