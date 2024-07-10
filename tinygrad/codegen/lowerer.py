@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
-from tinygrad.helpers import to_function_name, DEBUG, getenv, prod
+from tinygrad.helpers import to_function_name, DEBUG, getenv, prod, diskcache_put
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
 def variable_to_uop(x, ctx=None) -> UOp:
@@ -136,7 +136,8 @@ class Lowerer(Kernel):
 
   def to_program(self) -> Program:
     self.linearize()
-    src = self.opts.render(to_function_name(self.name), self.uops)
+    src = self.opts.render(name:=to_function_name(self.name), self.uops)
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src))
     info = get_lazyop_info(self.ast[0])
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size or []) + (self.local_size or []))
