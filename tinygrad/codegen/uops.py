@@ -26,6 +26,8 @@ class UOps(Enum):
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
+END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
+
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(frozen=True, eq=False)
 class UOp:
@@ -154,22 +156,22 @@ class UPat:
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
 
-def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
-  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return False
-  if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
-  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
-  if pat.op is not None and __unmatch(pat.op, uop.op): return False
-  if pat.src is None: return True
+def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return []
+  if pat.arg is not None and __unmatch(pat.arg, uop.arg): return []
+  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return []
+  if pat.op is not None and __unmatch(pat.op, uop.op): return []
+  if pat.src is None: return [store]
   # only one if it's a tuple
   # try all permutations if it's a list
   # repeat if it's a UPat
+  res: List[Dict[str, UOp]] = []
   for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
-    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len) and not pat.allow_any_len: return False
-    new_store = store.copy()
-    if all(_match(uu, vv, new_store) for uu, vv in zip(uop.src, vp)):
-      store.update(new_store)
-      return True
-  return False
+    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len) and not pat.allow_any_len: return []
+    new_stores = [store.copy()]
+    for uu, vv in zip(uop.src, vp): new_stores = [rstore for nstore in new_stores for rstore in _match(uu, vv, nstore)]
+    res.extend(new_stores)
+  return res
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
@@ -186,8 +188,7 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      store: Dict[str, UOp] = {}
-      if _match(uop, p, store) and (ret:=fxn(**store)) is not None: return ret  # NOTE: if it returns None, we keep trying to match
+      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -368,9 +369,9 @@ class UOpGraph:
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
 
   @property
-  def uops(self):
+  def uops(self) -> List[UOp]:
     if self._uops is None: self.linearize()
-    return self._uops
+    return cast(List[UOp], self._uops)
 
   def graph(self):
     from tinygrad.engine.graph import graph_uops
@@ -415,8 +416,7 @@ class UOpGraph:
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
 
     # scope children impact the toposort and END* insertion
-    end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
-    scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in reversed(in_degree) if p.op in end_for_uop}
+    scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
@@ -429,10 +429,6 @@ class UOpGraph:
     for u in children:
       if in_degree[u] == 0: push(u)
 
-    if getenv("FUZZ_UOPS", 0):
-      from test.external.fuzz_uops import fuzz_uops
-      self.fuzz_paths = fuzz_uops(children, in_degree.copy(), scope_children)
-
     self._uops = []
     while queue:
       p,x = heapq.heappop(queue)
@@ -443,19 +439,20 @@ class UOpGraph:
       if x.op is UOps.DEFINE_ACC and len(x.src) > 1:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
-      else:
-        self._uops.append(x)
-      for u, ss in scope_children.items():
-        if x in ss:
-          ss.remove(x)
-          if len(ss) == 0: self._uops.append(UOp(end_for_uop[u.op][1], None, (u,)))
+      else: self._uops.append(x)
       for u in children[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
 
+    for u in (self._uops):
+      if u.op in END_FOR_UOP: self._uops.insert(max([self._uops.index(l) for l in scope_children[u]])+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+
     assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
 
+    if getenv("FUZZ_UOPS"):
+      from test.external.fuzz_uops import fuzz_uops
+      self._fuzz_paths = fuzz_uops(self)
     if do_type_verify: type_verify(self.uops)
 
   # *** checker functions ***

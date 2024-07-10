@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, List, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from dataclasses import dataclass
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions
+from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions, hcq_profile
 from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -216,7 +216,7 @@ class HWPM4Queue(HWQueue):
 SDMA_MAX_COPY_SIZE = 0x400000
 class HWCopyQueue(HWQueue):
   def __init__(self):
-    self.internal_cmd_sizes = []
+    self.internal_cmd_sizes, self.copy_cmds_per_copy = [], {}
     super().__init__()
 
   def _q(self, arr):
@@ -228,8 +228,8 @@ class HWCopyQueue(HWQueue):
     self._q([amd_gpu.SDMA_OP_GCR_REQ, 0, amd_gpu.SDMA_GCR_GLM_INV | amd_gpu.SDMA_GCR_GLK_INV | amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GLV_INV | \
       amd_gpu.SDMA_GCR_GL1_INV | amd_gpu.SDMA_GCR_GL2_WB | amd_gpu.SDMA_GCR_GL2_INV, 0, 0])
 
-    copied = 0
-    copy_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
+    copied, copy_commands = 0, (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
+    self.copy_cmds_per_copy[len(self)] = copy_commands
     for _ in range(copy_commands):
       step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
 
@@ -242,6 +242,12 @@ class HWCopyQueue(HWQueue):
     self._q([amd_gpu.SDMA_OP_GCR_REQ, 0, amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GL2_WB, 0, 0])
 
     return self._mark_command_end()
+
+  def update_copy(self, cmd_idx, dest=None, src=None):
+    for i in range(self.copy_cmds_per_copy[cmd_idx]):
+      if src is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+8+i*7):sigoff+2] = array.array('I', [*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
+      if dest is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+10+i*7):sigoff+2] = array.array('I', [*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
+    return self
 
   def signal(self, signal: hsa.amd_signal_t, value=0):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET), value])
@@ -365,20 +371,19 @@ class AMDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    sig_st, sig_en = (self.device._alloc_signal(), self.device._alloc_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
+    q = HWPM4Queue().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
-    q = HWPM4Queue()
-    q.wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
-    if wait or PROFILE: q.timestamp(sig_st)
-    q.exec(self, self.device.kernargs_ptr, global_size, local_size)
-    if wait or PROFILE: q.timestamp(sig_en)
+    with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
+      q.exec(self, self.device.kernargs_ptr, global_size, local_size)
+
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+
     self.device.timeline_value += 1
     self.device.kernargs_ptr += self.kernargs_alloc_size
 
-    if PROFILE: self.device.sig_prof_records.append((sig_st, sig_en, self.name, False))
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
+      if not PROFILE: self.device.signals_pool += [sig_st, sig_en]
       return (sig_en.start_ts - sig_st.start_ts) / 1e8
 
 class AMDAllocator(HCQCompatAllocator):
@@ -498,8 +503,6 @@ class AMDDevice(HCQCompatCompiled):
       self._gpu_map(AMDDevice.signals_page)
       self._gpu_map(AMDDevice.event_page)
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
-
-    self.time_event_st, self.time_event_en = AMDDevice._alloc_signal(), AMDDevice._alloc_signal()
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr

@@ -144,22 +144,61 @@ class TestHCQ(unittest.TestCase):
   # Test copy
   def test_copy(self):
     TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                .copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8) \
+                                .copy(TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr, 8) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
+    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 0.0, f"got val {val}"
+    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
 
-  def test_copy_100_times(self):
+  def test_copy_long(self):
+    sz = 64 << 20
+    buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
+    ctypes.memset(buf2._buf.va_addr, 1, sz)
+
+    TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                .copy(buf1._buf.va_addr, buf2._buf.va_addr, sz) \
+                                .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+
+    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
+    mv_buf1 = buf1.as_buffer().cast('Q')
+    for i in range(sz//8): assert mv_buf1[i] == 0x0101010101010101, f"offset {i*8} differs, not all copied, got {hex(mv_buf1[i])}"
+
+  def test_update_copy(self):
     q = TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                    .copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8) \
+                                    .copy(0x0, 0x0, 8) \
                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
-    for _ in range(100):
-      q.update_wait(0, value=TestHCQ.d0.timeline_value - 1).update_signal(2, value=TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
-      q.submit(TestHCQ.d0)
-      TestHCQ.d0.timeline_value += 1
+    q.update_copy(1, dest=TestHCQ.b.lazydata.buffer._buf.va_addr, src=TestHCQ.a.lazydata.buffer._buf.va_addr) \
+     .submit(TestHCQ.d0)
+
+    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
+    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
+
+  def test_update_copy_long(self):
+    sz = 64 << 20
+    buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
+    ctypes.memset(buf2._buf.va_addr, 1, sz)
+
+    q = TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                    .copy(0x0, 0x0, sz) \
+                                    .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+
+    q.update_copy(1, buf1._buf.va_addr, buf2._buf.va_addr) \
+     .submit(TestHCQ.d0)
+
+    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
+    mv_buf1 = buf1.as_buffer().cast('Q')
+    for i in range(sz//8): assert mv_buf1[i] == 0x0101010101010101, f"offset {i*8} differs, not all copied, got {hex(mv_buf1[i])}"
 
   # Test bind api
   def test_bind(self):
