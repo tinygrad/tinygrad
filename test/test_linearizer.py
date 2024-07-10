@@ -397,7 +397,7 @@ class TestLinearizer(unittest.TestCase):
 
     assert len(lin.uops.uops) <= 7, "too many uops"
     a_bufs = [u.op for u in lin.uops.uops[-1].src[2].src]
-    assert a_bufs == [UOps.LOAD, UOps.CONST]
+    assert a_bufs == [UOps.CONST, UOps.LOAD]
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
