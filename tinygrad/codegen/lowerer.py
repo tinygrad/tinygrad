@@ -77,34 +77,15 @@ class Lowerer(Kernel):
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
       # NOTE: always using ridxs is fine here
-      #arg = x.op
       dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
       if x.op is ReduceOps.WMMA:
-        # METAL
-        if x.arg[-1] == "METAL":
-          tc_in_1_size = tc_in_2_size = 2
-          tc_out_size = 2
-          upcast_axis_1 = upcast_axis_2  = self.shape_len-self.upcasted+1
-          upcast_axis_out = self.shape_len-self.upcasted+1
-        elif x.arg[-1] == "AMD":
-          tc_in_1_size = tc_in_2_size = 16
-          tc_out_size = 8
-          upcast_axis_1 = upcast_axis_2 = self.shape_len-self.upcasted
-          upcast_axis_out = self.shape_len-self.upcasted+1
-        elif x.arg[-1] == "CUDA":
-          tc_in_1_size = 8
-          tc_in_2_size = 4
-          tc_out_size = 4
-          upcast_axis_1 = self.shape_len-self.upcasted
-          upcast_axis_2 = self.shape_len-self.upcasted+2
-          upcast_axis_out = self.shape_len-self.upcasted+2
-        else:
-          raise RuntimeError("not supported device")
-        ret = UOp(UOps.WMMA, dtype=dtype.vec(tc_out_size), src=(
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(tc_in_1_size), src=(in_uops[0],), arg=(upcast_axis_1, tc_in_1_size)),
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(tc_in_2_size), src=(in_uops[1],), arg=(upcast_axis_2, tc_in_2_size)),
-          UOp.const(dtype.vec(tc_out_size), 0.0)), arg=x.arg)
-        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(tc_out_size)), arg=upcast_axis_out)
+        wmma_sz = x.arg[4]
+        upcast_axis = x.arg[-1]
+        ret = UOp(UOps.WMMA, dtype=dtype.vec(wmma_sz[2]), src=(
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=(upcast_axis[0], wmma_sz[0])),
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=(upcast_axis[1], wmma_sz[1])),
+          UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
+        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axis[2])
       src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
       return UOp(UOps.REDUCE, dtype, src, x.op)
     return UOp.alu(x.op, *in_uops)
@@ -149,9 +130,6 @@ class Lowerer(Kernel):
           rsrc = op.src[0]
           if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
           assert rsrc.op is BinaryOps.MUL
-          wmma_sz = [prod(l) for l in tc.thread_local_sizes]
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device)
-          reduce_axis = self.shape_len-self.upcasted
 
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd = self.global_dims
@@ -167,12 +145,18 @@ class Lowerer(Kernel):
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape)
 
           if self.opts.device == "AMD":
+            reduce_axes = [self.shape_len-self.upcasted]
+            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
             fix_st2 = None
           elif self.opts.device == "METAL":
+            reduce_axes = [self.shape_len-self.upcasted]
+            upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1)
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
-          elif self.opts.device == "CUDA":
+          elif self.opts.device in {"CUDA", "NV"}:
+            reduce_axes = [self.shape_len-self.upcasted, self.shape_len-self.upcasted+1]
+            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted+2, self.shape_len-self.upcasted+2)
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
             fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
               ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
@@ -182,10 +166,11 @@ class Lowerer(Kernel):
             raise RuntimeError("unsupported device for tensor cores")
 
           assert apply_to_st is None, "double tensor core? not supported"
+          wmma_sz = [prod(l) for l in tc.thread_local_sizes]
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, upcast_axis)
           ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
-          if self.opts.device == "CUDA":
-            return LazyOp(op.op, (ret,), tuple(i for i in arg if i != reduce_axis and i != reduce_axis+1)) if len(arg) > 2 else ret
-          return LazyOp(op.op, (ret,), tuple(i for i in arg if i != reduce_axis)) if len(arg) > 1 else ret
+          new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
+          return LazyOp(op.op, (ret,), new_reduce_axes) if len(new_reduce_axes) else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
           local_buffer = MemBuffer(-1, start.dtype, self.sts[-1])

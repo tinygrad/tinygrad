@@ -285,10 +285,8 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
   return [x.get(base, base) for x in replaces]
 
 def get_reduce_acc(op, dtype):
-  if op is ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
-  if op is ReduceOps.MAX:
-    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
-    return -math.inf if dtypes.is_float(dtype) else False
+  if op is ReduceOps.SUM: return dtypes.as_const(0, dtype)
+  if op is ReduceOps.MAX: return dtypes.min(dtype)
 
 acc_number = 0
 def replace_reduce(root):
@@ -658,6 +656,7 @@ class UOpGraph:
 
       # do graph rewrite (2)
       sink = graph_rewrite(sink, self.folder)
+      if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
     # BFS toposort
