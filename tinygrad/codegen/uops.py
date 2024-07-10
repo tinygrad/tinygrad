@@ -187,11 +187,8 @@ class PatternMatcher:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    from temp.utils import viscompare
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
-        viscompare(uop, ret)
-        return ret # NOTE: if it returns None, we keep trying to match
+      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
