@@ -300,11 +300,8 @@ def expand_wmma(wmma):
   expands = [x for x in wmma.parents if x.op is UOps.EXPAND and x.arg in wmma.arg[-1]]
   if len(expands) == 0: return None
   new_uops = expand_nodes(wmma.sparents, expands, wmma)
-  ret = new_uops[0]
-  for x in new_uops[1:]:
-    assert x.src[2].op is UOps.CONST
-    ret = UOp(UOps.WMMA, x.dtype, x.src[0:2] + (ret,), x.arg)
-  return ret
+  # TODO: assert that these are all the same. they have to be
+  return new_uops[0]
 
 acc_number = 0
 def replace_reduce(root):
