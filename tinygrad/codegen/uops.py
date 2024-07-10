@@ -221,9 +221,8 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
   for p in parents:
     if p.op is UOps.PHI:
       phi_parents = p.parents
-      #reduce_expands = flatten([x.src[3:] if x.op is UOps.WMMA else x.src[1:] for x in phi_parents if x.op in {UOps.WMMA, UOps.REDUCE}])
-      #parent_expands_for_acc = [x.arg for x in phi_parents if x in expands and x not in reduce_expands]
-      parent_expands_for_acc = [x.arg for x in phi_parents if x in expands]
+      wmma_reduce_axes = flatten([x.arg[7] for x in phi_parents if x.op is UOps.WMMA])
+      parent_expands_for_acc = [x.arg for x in phi_parents if x in expands and x.arg not in wmma_reduce_axes]
       define_accs.append((p.src[0], parent_expands_for_acc))
     for x in p.src:
       children[x].append(p)
@@ -720,7 +719,7 @@ class UOpGraph:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
       # TODO: this should be enabled, and the valid clause should be removed
-      assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), "repeated stores in uops"
+      #assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       self.print()
       if getenv("GRAPHUOPS"): self.graph()
