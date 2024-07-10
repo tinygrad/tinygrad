@@ -1,7 +1,6 @@
 from __future__ import annotations
-from collections import defaultdict
 import itertools
-from typing import DefaultDict, Optional, List, Tuple, cast, Dict, Union
+from typing import Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
@@ -9,13 +8,13 @@ from tinygrad.dtype import dtypes, ImageDType, DType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
-from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.shape.view import strides_for_shape
 from dataclasses import dataclass
 from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
@@ -89,7 +88,6 @@ class Kernel:
     self.group_for_reduces: int = 0
     self.upcasted: int = 0
     self.local_dims: int = 0
-    self.local_alias: DefaultDict[LazyOp, Dict[int, LocalBuffer]] = defaultdict(dict)
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     # the local aliased buffers for A and B
@@ -117,8 +115,7 @@ class Kernel:
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
-    ret.tensor_core, ret.tensor_core_opts, ret.local_alias, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, defaultdict(dict), \
-        self.bufs_for_tensor_core
+    ret.tensor_core, ret.tensor_core_opts, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, self.bufs_for_tensor_core
 
     # uncached since linearize didn't run
     ret.applied_opts_cache = None
@@ -281,25 +278,6 @@ class Kernel:
     # do the reshapes
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
-  # ******************** helpers ********************
-
-  def alias_buffer(self, op:LazyOp, i:int, pattern:List[int]) -> None:
-    assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
-
-    bst = 1
-    real_strides = self.sts[i].real_strides()
-    shp, stride = [(s if p != 0 else 1) for s,p in zip(self.sts[i].shape, pattern)], [0]*len(pattern)
-    for priority in range(1, max(pattern)+1):  # priority. 0 is non local and ignored
-      for j,p in enumerate(pattern):
-        if priority == p and real_strides[j] != 0:
-          stride[j] = bst
-          bst *= shp[j]
-
-    self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].real_size()))   # real_size ignores the 0's
-    if DEBUG >= 4: print("aliasing buffer", self.sts[i])
-    self.local_alias[op][i] = cast(LocalBuffer, self.bufs[-1])
-
   # ******************** high level optimizers ********************
 
   def _create_tc_opts(self, reduceop:LazyOp, tc:TensorCore, axis:int, opt_level:int) -> Optional[TensorCoreOptions]:
@@ -347,12 +325,31 @@ class Kernel:
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
-        self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
-        for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
-          if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
-        for (tc_dim, tc_amt) in tc.threads:
-          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-
+        if self.opts.device == "AMD":
+          # NOTE: AMD requires locals first
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
+            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
+        elif self.opts.device == "METAL":
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
+            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+        elif self.opts.device in {"CUDA", "NV"}:
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[0], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
+          # NOTE: MERGE is needed because we can't deal with two upcasted dimensions
+          self.apply_opt(Opt(OptOps.MERGE, self.shape_len-2), append_opt=False)
         # assert tensor core
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
         return True
@@ -466,6 +463,11 @@ class Kernel:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
+    elif opt.op is OptOps.MERGE:
+      check(axis >= self.shape_len-self.upcasted, "only merge upcasted")
+      self.reshape_and_permute(None, tuple(range(axis)) + (axis+1, axis) + tuple(range(axis+2, self.shape_len)))
+      self.reshape_and_permute(lambda x: x[0:axis] + (x[axis] * x[axis+1],) + x[axis+2:], None)
+      self.upcasted -= 1
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.shape_len - self.upcasted, "cannot pad upcasted")

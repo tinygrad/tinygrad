@@ -24,7 +24,7 @@ class TernaryOps(Enum):
   WHERE = auto(); MULACC = auto() # noqa: E702
 class ReduceOps(Enum):
   """A -> B (reduce)"""
-  SUM = auto(); MAX = auto() # noqa: E702
+  SUM = auto(); MAX = auto(); WMMA = auto() # noqa: E702
 class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 
@@ -61,6 +61,7 @@ class LazyOp:
   @functools.cached_property
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
+    if self.op is ReduceOps.WMMA: return self.arg[3]   # WMMA can change the type
     if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
     return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPNE} else self.src[-1].dtype
 
