@@ -20,7 +20,11 @@ While it's designed primarily for the home or office, the tinybox is 12U rack mo
 
 ## Power limiting the box
 
-While a tinybox should ideally be run without power limits, there are cases where you might want to run the box off of a single outlet. In such cases, it is possible to power limit the box using the provided `power-limit` script, which will power limit all of the GPUs to a specified wattage. `sudo power-limit 150` should be good to run off of a single 120V 15A outlet.
+While a tinybox should ideally be run without power limits, there are cases where you might want to run the box off of a single outlet.
+
+In such cases, it is possible to power limit the box using the provided `power-limit` script, which will power limit all of the GPUs to a specified wattage.
+
+`sudo power-limit 150` should be good to run off of a single 120V 15A outlet.
 
 ## Connecting to the box
 
@@ -34,7 +38,11 @@ The BMC also has a web interface you can use if you find that easier.
 
 ## Changing the BMC password
 
-If you try to change the BMC password over IPMI or over the web interface, you will notice that it does not persist across reboots, and the password will revert to the one displayed on the screen. If you want to change the password imperatively, remove the `/root/.bmc_password` file and then set the password, the BMC password will also no longer be displayed on the screen. Additionally, you may modify the password stored in the `/root/.bmc_password` file to one that you choose if you still want it displayed on the screen. Reboot after making these changes.
+If you try to change the BMC password over IPMI or over the web interface, you will notice that it does not persist across reboots, and the password will revert to the one displayed on the screen.
+
+If you want to change the password imperatively, remove the `/root/.bmc_password` file and then set the password, the BMC password will also no longer be displayed on the screen. Additionally, you may modify the password stored in the `/root/.bmc_password` file to one that you choose if you still want it displayed on the screen.
+
+Reboot after making these changes.
 
 ## What do I use it for?
 
