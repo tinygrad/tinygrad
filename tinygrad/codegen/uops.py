@@ -323,12 +323,12 @@ def replace_reduce(root):
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
 
 def replace_contract(root:UOp):
-  parents = root.parents
-  expands: List[UOp] = [x for x in parents if x.op is UOps.EXPAND and x.arg == root.arg[0]]
-  assert all_same(expand_lens := [root.arg[1]] + [len(x.src) for x in expands]), expand_lens
+  parents, dtype = root.parents, cast(DType, root.dtype)
+  expands: List[UOp] = [x for x in parents if x.op is UOps.EXPAND and x.arg in root.arg]
+  assert all_same(expand_lens := [dtype.count] + [len(x.src) for x in expands]), expand_lens
   ret = expand_nodes(parents, expands, root.src[0])
-  if len(ret) == 1: ret = ret*root.arg[1]   # TODO: why is this needed?
-  return UOp(UOps.VECTORIZE, cast(DType, root.dtype), tuple(ret))
+  if len(ret) == 1: ret = ret*dtype.count   # TODO: why is this needed?
+  return UOp(UOps.VECTORIZE, dtype, tuple(ret))
 
 def fix_image_idx(ls:UOp):
   if ls.src[1].dtype is None or ls.src[1].dtype.count != 1: return None
@@ -389,7 +389,7 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
   if idx3 is not None: idx = idx + idx3
   if not idx.divides(len(ex.src)): return None
 
-  new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), (ex.arg, len(ex.src)))
+  new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), (ex.arg,))
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
 
 def no_float4_alu(alu):
