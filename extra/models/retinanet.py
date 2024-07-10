@@ -2,6 +2,8 @@ import math
 from tinygrad.helpers import flatten, get_child
 import tinygrad.nn as nn
 from extra.models.resnet import ResNet
+from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
+from examples.mlperf.helpers import encode_boxes
 import numpy as np
 
 def nms(boxes, scores, thresh=0.5):
@@ -149,6 +151,17 @@ class ClassificationHead:
     self.num_classes = num_classes
     self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.cls_logits = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
+
+  def loss(self, logits_class, matched_idxs, labels):
+    batch_size = logits_class.shape[0]
+    foreground_idxs = matched_idxs >= 0
+    num_foreground = foreground_idxs.sum(-1)
+
+    labels = (labels + 1) * foreground_idxs - 1
+    gt_classes_target = labels.one_hot(logits_class.shape[-1])
+    valid_idxs = matched_idxs != -2
+    return (sigmoid_focal_loss(logits_class, gt_classes_target, valid_idxs.reshape(batch_size, -1, 1)) / num_foreground).mean()
+
   def __call__(self, x):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     return out[0].cat(*out[1:], dim=1).sigmoid()
@@ -157,6 +170,19 @@ class RegressionHead:
   def __init__(self, in_channels, num_anchors):
     self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.bbox_reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, padding=1)
+
+  def loss(self, logits_reg, anchors, matched_idxs, boxes):
+    foreground_idxs = matched_idxs >= 0
+    num_foreground = foreground_idxs.sum(-1)
+    mask = foreground_idxs.reshape(logits_reg.shape[0], -1, 1)
+    
+    matched_gt_boxes = boxes * mask
+    bbox_reg = logits_reg * mask
+    anchors = anchors * mask
+    target_regression = encode_boxes(matched_gt_boxes, anchors)
+    target_regression = target_regression * mask
+    return (l1_loss(bbox_reg, target_regression) / num_foreground).mean()
+
   def __call__(self, x):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     return out[0].cat(*out[1:], dim=1)
