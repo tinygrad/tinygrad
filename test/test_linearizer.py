@@ -101,6 +101,25 @@ class TestLinearizer(unittest.TestCase):
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
+  @unittest.skipIf(CI and Device.DEFAULT == "AMD", "remu doesn't have multiple wave syncs yet")
+  def test_var_multireduce(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(3, 27, 32).realize()
+    # push reduce (3, 27, 32) -> (3, 27, 1) -> (3, 27, 32) expand to LOAD
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((3, 27, 32, 1)).expand((3, 27, 32, 32))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (3,))
+    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(0.03125, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((3, 27, 32, 1)))) # noqa: E501
+    # store = LazyOp(BufferOps.STORE, (mean,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 27, 32, 1))))
+    # verify_lazyop(store)
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((3, 27, 32, 1))))
+    squares = (second_x-mean)*(second_x-mean)
+    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (2,))
+    store = LazyOp(BufferOps.STORE, (squares_sum,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 27, 1, 1))))
+    helper_linearizer_ast((store, ), [x])
+    # tinygrad ref
+    y_tiny = x.var(axis=2, correction=0)
+    np.testing.assert_allclose(y_tiny.numpy(), x.numpy().var(axis=2, ddof=0), atol=1e-4, rtol=1e-4)
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_end_local(self):
@@ -150,7 +169,7 @@ class TestLinearizer(unittest.TestCase):
     # LOAD -> RANGE -> LOAD -> PHI
     assert lin.uops[ranges[0]-2].op is UOps.LOAD
 
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
+  # TODO: this test is brittle
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
@@ -158,15 +177,15 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()[0]])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     if getenv("PTX"):
-    # LOAD -> RANGE -> 3xLOAD_INDEXING -> LOAD -> ALU -> RANGE -> PHI
+    # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> PHI
       assert lin.uops[ranges[0]-2].op is UOps.LOAD
-      assert ranges[1] == ranges[0]+5
-      assert [x.op for x in lin.uops[ranges[0]+3:ranges[0]+5]] == [UOps.LOAD, UOps.ALU]
+      assert ranges[1] == ranges[0]+6
+      assert [x.op for x in lin.uops[ranges[1]-2:ranges[1]]] == [UOps.LOAD, UOps.ALU]
     # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> PHI
     else:
       assert lin.uops[ranges[0]-2].op is UOps.LOAD
       assert ranges[1] == ranges[0]+3
-      assert [x.op for x in lin.uops[ranges[0]+1:ranges[0]+3]] == [UOps.LOAD, UOps.ALU]
+      assert [x.op for x in lin.uops[ranges[1]-2:ranges[1]]] == [UOps.LOAD, UOps.ALU]
 
   def test_range_outer_op_after_phi(self):
     a = Tensor.randn(4, 1).realize()
@@ -746,7 +765,6 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_grouped_store_locals_and_globals(self):
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     out = x@y
@@ -1541,6 +1559,7 @@ class TestKernelOpts(unittest.TestCase):
     N = 18 * 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
     a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))) * 100
+    b = (Tensor.rand(N, N) < 0.5).realize().shrink(((0, 17), (0, 17)))
 
     helper_linearizer_opt(a.sum(0), [
       [Opt(OptOps.PADTO, 0, 32)],
@@ -1552,9 +1571,14 @@ class TestKernelOpts(unittest.TestCase):
     ])
 
     # can pad sum reduce axis if there's no unsafe ops prior to sum
-    helper_linearizer_opt(a.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
-    helper_linearizer_opt(a.sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
-    helper_linearizer_opt((a < 0.5).sum(), [[Opt(OptOps.PADTO, 0, 32)],])
+    for axis in (0, 1):
+      helper_linearizer_opt(a.sum(), [[Opt(OptOps.PADTO, axis, 32)],])
+      helper_linearizer_opt(a.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
+      helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, axis, 32)],])
+      helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
+      helper_linearizer_opt(b.sum(acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+      helper_linearizer_opt(b.sum(0, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+      helper_linearizer_opt(b.sum(1, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
 
     # having unsafe ops after sum is fine
     helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])

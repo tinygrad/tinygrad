@@ -839,27 +839,23 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.max(axis=1)[0], lambda x: x.max(axis=1))
     helper_test_op([()], lambda x: x.max())
 
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_any(self):
     helper_test_op([(3,4,5,6)], lambda x: x.any(), forward_only=True)
     helper_test_op(None, lambda x: x.any(), vals=[[True, True]], forward_only=True)
     helper_test_op(None, lambda x: x.any(), vals=[[True, False]], forward_only=True)
     helper_test_op(None, lambda x: x.any(), vals=[[False, False]], forward_only=True)
     helper_test_op([()], lambda x: x.any(), forward_only=True)
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_any_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.any(axis=(1,2)), forward_only=True)
   def test_any_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.any(axis=(1,3)), forward_only=True)
 
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_all(self):
     helper_test_op([(3,4,5,6)], lambda x: x.all(), forward_only=True)
     helper_test_op(None, lambda x: x.all(), vals=[[True, True]], forward_only=True)
     helper_test_op(None, lambda x: x.all(), vals=[[True, False]], forward_only=True)
     helper_test_op(None, lambda x: x.all(), vals=[[False, False]], forward_only=True)
     helper_test_op([()], lambda x: x.all(), forward_only=True)
-  @unittest.skipIf(getenv("PTX"), "broken in PTX")
   def test_all_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.all(axis=(1,2)), forward_only=True)
   def test_all_zero_axis(self):

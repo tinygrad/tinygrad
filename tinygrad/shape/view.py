@@ -3,7 +3,7 @@ import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.helpers import prod, all_int, argsort
-from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
+from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer, create_lt_node, create_ge_node
 
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
@@ -35,14 +35,15 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
-def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]], bool]:
-  if view.mask is None: return view.mask, False
-  if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in view.mask): return view.mask, True
+def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Optional[Tuple[Tuple[sint, sint], ...]]:
+  """Returns the new mask if reshape is possible, and None if not possible."""
+  if view.mask is None: return tuple((0, s) for s in new_shape)
+  if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in view.mask): return None
   new_mask: List[Tuple[int, int]] = []
 
   r_masks, r_shape, r_new_shape = reversed(view.mask), reversed(view.shape), reversed(new_shape)
   curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
-  if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), False # invalid mask
+  if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape) # invalid mask
 
   while len(new_mask) < len(new_shape):
     (l, r), next_stride = mask, new_dim * curr_stride
@@ -51,24 +52,24 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
       if old_dim == next_stride: # simply copy the mask and get next batch for merging
         new_mask.append((l // curr_stride, (r - 1) // curr_stride + 1))
         curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
-        if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), False # invalid mask
+        if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape) # invalid mask
 
       else: # mask can only be splitted if reshape doesn't cut across the mask.
         if (((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride)
-            or old_dim % next_stride != 0): return view.mask, True
+            or old_dim % next_stride != 0): return None
         new_mask.append((l % next_stride // curr_stride, (r - 1) % next_stride // curr_stride + 1))
         curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 
     else:
       next_mask = next(r_masks, (0, 1))
       # combine if the mask can unfold continuously
-      if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, True
+      if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return None
       mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
 
   for mask in r_masks: # if the old shape has leading 1s, need to make sure their mask is (0,1)
-    if mask != (0, 1): return ((0, 0),) * len(new_shape), False # invalid mask
+    if mask != (0, 1): return ((0, 0),) * len(new_shape) # invalid mask
 
-  return tuple(reversed(new_mask)), False
+  return tuple(reversed(new_mask))
 
 def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
   strides = strides_for_shape(shape)
@@ -301,11 +302,20 @@ class View:
       if acc != merged_dim: break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
-      new_mask, extra = _reshape_mask(self, new_shape)
-      if not extra:
-        new_strides = canonicalize_strides(tuple(e-b for b,e in new_mask) if new_mask else new_shape, tuple(reversed(strides)))
+      new_mask = _reshape_mask(self, new_shape)
+      if new_mask is not None:
+        new_strides = canonicalize_strides(tuple(e-b for b,e in new_mask), tuple(reversed(strides)))
         extra_offset = (sum(m[0] * s for m,s in zip(self.mask, self.strides)) if self.mask else 0) - \
-                       (sum(m[0] * s for m,s in zip(new_mask, new_strides)) if new_mask else 0)
+                       (sum(m[0] * s for m,s in zip(new_mask, new_strides)))
         return View.create(new_shape, new_strides, self.offset + extra_offset, new_mask)
 
     return None
+
+  def expr(self, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[Node, Node]:
+    assert len(idxs) == len(self.shape), f"need an idx for all dimensions {idxs} vs {self.shape}"
+    iexpr: List[Node] = [NumNode(self.offset) if isinstance(self.offset, int) else self.offset]
+    vexpr: List[Node] = [valid] if valid is not None else []
+    for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
+      if sh != 1 and st != 0: iexpr.append(idx*st)
+      if m is not None: vexpr += [create_ge_node(idx, m[0]), create_lt_node(idx, m[1])]  # idx >= m[0], idx < m[1]
+    return Node.sum(iexpr), Node.ands(vexpr)
