@@ -35,6 +35,8 @@ class UOp:
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  def __post_init__(self):
+    if self.commutative(): super().__setattr__('src', tuple(sorted(self.src)))
   def commutative(self) -> bool:
     return self.op is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
@@ -74,7 +76,7 @@ class UOp:
   @staticmethod
   def store(*src:UOp, **kwargs): return UOp(UOps.STORE, None, tuple(src)+tuple(kwargs.values()))
   @staticmethod
-  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
+  def var(name:Optional[str]="", dtype:Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
   @staticmethod
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return UOp(UOps.CONST, dtype=dtype).name(name)
   @functools.cached_property
@@ -157,7 +159,7 @@ T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
-  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return []
+  if pat.name and store.setdefault(pat.name, uop) is not uop: return []
   if pat.arg is not None and __unmatch(pat.arg, uop.arg): return []
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return []
   if pat.op is not None and __unmatch(pat.op, uop.op): return []
@@ -350,7 +352,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   replace: Dict[UOp, UOp] = {}
   def __inner_rewrite(n:UOp) -> UOp:
     if n in replace: return replace[n]
-    replace_source = (n.op, n.dtype, (lambda x: tuple(sorted(x) if n.commutative() else x))(__inner_rewrite(y) for y in n.src), n.arg)
+    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
     if found := nodes.get(replace_source): replace[n] = found
     else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
     return replace[n]
