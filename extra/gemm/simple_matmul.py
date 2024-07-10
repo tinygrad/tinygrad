@@ -11,11 +11,7 @@ ATOL = getenv("ATOL", 1e-4)
 RTOL = getenv("RTOL", 3e-2)
 
 if __name__ == "__main__":
-  if getenv("SIMPLE"):
-    a = (Tensor.arange(M*K)/(M*K)).cast(dtype_in).reshape(M, K).realize()
-    b = (1+Tensor.arange(M*K)/(M*K)).cast(dtype_in).reshape(M, K).realize()
-  else:
-    a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
+  a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
   for i in range(CNT):
     if i > 0 and getenv("RAND", 0) != 0:
       a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
@@ -25,10 +21,6 @@ if __name__ == "__main__":
   try:
     np.testing.assert_allclose(nc, comp, atol=ATOL, rtol=RTOL)
   except AssertionError as e:
-    if getenv("SIMPLE"):
-      np.set_printoptions(suppress=False, linewidth=1000)
-      print(nc)
-      print(comp)
     if getenv("DEBUG_VALUES") > 0:
       indices = np.where(~np.isclose(nc, comp, rtol=RTOL, atol=ATOL))
       non_matching_elements_nc = nc[indices]

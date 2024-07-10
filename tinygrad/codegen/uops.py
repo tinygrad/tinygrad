@@ -194,24 +194,7 @@ class PatternMatcher:
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
-def sum_collapse(phi_input, loop, val1, val2):
-  for v1,v2 in [(val1, val2), (val2, val1)]:
-    if loop not in v1.parents:
-      loop_range = loop.src[1]-loop.src[0]
-      ret = v1*loop_range.cast(v1.dtype)
-      return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+ret
-  return None
-
-def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
-  if getenv("DISABLE_LOOP_COLLAPSE") or not rng.arg[1]: return None  # must be a REDUCE
-  if mval.arg >= 0 or loop_start.arg != 0:
-    # TODO: support and test this with other mvals and loop_starts
-    if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
-    return None
-  comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
-  return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
-
-def expand_nodes(parents:Set[UOp], expands:List[UOp], base) -> List[UOp]:
+def expand_nodes(parents:Set[UOp], expands:List[UOp], base:UOp) -> List[UOp]:
   # just in case, dedup expands
   expands = dedup(expands)
 
@@ -307,10 +290,6 @@ acc_number = 0
 def replace_reduce(root):
   global acc_number
   expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
-
-  # NOTE: this is making an assumption about root.src[1], i think root.src[1] should just be moved here
-  # never mind, this IF is entirely wrong. you have to check if there's no RANGEs or EXPANDs
-  #if len(expands) == 0: return root.src[0]
 
   # add other expands for float4. TODO: should be a faster way
   expand_args = [x.arg for x in expands]
@@ -434,12 +413,29 @@ float4_folding = PatternMatcher([
   (UPat(UOps.ALU, name="alu"), no_float4_alu),
 ])
 
-# ***** tensor core handling *****
+# ***** main rewriter *****
 
 def reduce_before_expand(reduce_allow_any_len, expand, x):
   red = UOp(UOps.REDUCE, x.dtype, (x,)+reduce_allow_any_len.src[1:], reduce_allow_any_len.arg)
   gep = tuple(UOp(UOps.GEP, reduce_allow_any_len.dtype, (red,), i) for i in range(x.dtype.count))
   return UOp(expand.op, expand.dtype, gep, expand.arg)
+
+def sum_collapse(phi_input, loop, val1, val2):
+  for v1,v2 in [(val1, val2), (val2, val1)]:
+    if loop not in v1.parents:
+      loop_range = loop.src[1]-loop.src[0]
+      ret = v1*loop_range.cast(v1.dtype)
+      return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+ret
+  return None
+
+def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
+  if getenv("DISABLE_LOOP_COLLAPSE") or not rng.arg[1]: return None  # must be a REDUCE
+  if mval.arg >= 0 or loop_start.arg != 0:
+    # TODO: support and test this with other mvals and loop_starts
+    if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
+    return None
+  comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
+  return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
@@ -726,8 +722,6 @@ class UOpGraph:
     except AssertionError as e:
       self.print()
       if getenv("GRAPHUOPS"): self.graph()
-      #from tinygrad.engine.graph import print_tree
-      #print_tree(self._uops[-1])
       raise e
 
     # strip the SINK
