@@ -422,6 +422,11 @@ float4_folding = PatternMatcher([
 
 # ***** tensor core handling *****
 
+def reduce_before_expand(reduce_allow_any_len, expand, x):
+  red = UOp(UOps.REDUCE, x.dtype, (x,)+reduce_allow_any_len.src[1:], reduce_allow_any_len.arg)
+  gep = tuple(UOp(UOps.GEP, reduce_allow_any_len.dtype, (red,), i) for i in range(x.dtype.count))
+  return UOp(expand.op, expand.dtype, gep, expand.arg)
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # VECTORIZE/GEP
@@ -434,6 +439,8 @@ constant_folder = PatternMatcher([
    lambda contract, alu: UOp(alu.op, contract.dtype,
       tuple(UOp(UOps.CONTRACT, x.dtype.vec(contract.dtype.count), (x,), contract.arg) for x in alu.src), alu.arg)),
   # tensor core cleanups
+  (UOp(UOps.REDUCE, src=(UOp(UOps.EXPAND, src=tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(8))).name("expand"),))
+   .name("reduce_allow_any_len"), reduce_before_expand),
   (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # arange loop folding (early)
