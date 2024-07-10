@@ -211,7 +211,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
-def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
+def expand_nodes(parents:Set[UOp], expands:List[UOp], base) -> List[UOp]:
   # just in case, dedup expands
   expands = dedup(expands)
 
@@ -220,9 +220,8 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
   define_accs = []
   for p in parents:
     if p.op is UOps.PHI:
-      phi_parents = p.parents
-      wmma_reduce_axes = flatten([x.arg[7] for x in phi_parents if x.op is UOps.WMMA])
-      parent_expands_for_acc = [x.arg for x in phi_parents if x in expands and x.arg not in wmma_reduce_axes]
+      wmma_reduce_axes = flatten([x.arg[7] for x in p.parents if x.op is UOps.WMMA])
+      parent_expands_for_acc = [x.arg for x in p.parents if x in expands and x.arg not in wmma_reduce_axes]
       define_accs.append((p.src[0], parent_expands_for_acc))
     for x in p.src:
       children[x].append(p)
@@ -270,8 +269,8 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
   for rp in rps:
     rpk = dict(zip(replacements.keys(), rp))
     replace = {r:r.src[rpk[r.arg]] for r in expands}
-    for d, parents in define_accs:
-      acc_index = tuple((d,x,rpk[x]) for x in parents)
+    for d, acc_parents in define_accs:
+      acc_index = tuple((d,x,rpk[x]) for x in acc_parents)
       if acc_index in acc_cache:
         replace[d] = acc_cache[acc_index]
       else:
@@ -295,9 +294,7 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
 
   return [x.get(base, base) for x in replaces]
 
-def get_reduce_acc(op, dtype):
-  if op is ReduceOps.SUM: return dtypes.as_const(0, dtype)
-  if op is ReduceOps.MAX: return dtypes.min(dtype)
+# ***** reduce+image+contract handling *****
 
 acc_number = 0
 def replace_reduce(root):
@@ -318,8 +315,7 @@ def replace_reduce(root):
   else:
     new_uops = [root.src[0]]
 
-  # TODO: DEFINE_ACC should have a const input
-  const = UOp.const(root.dtype.scalar(), get_reduce_acc(root.arg, root.dtype.scalar()))
+  const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
   acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x not in expands), (acc_number,))
   acc_number += 1
   ret = acc
@@ -333,21 +329,6 @@ def replace_contract(root:UOp):
   ret = expand_nodes(parents, expands, root.src[0])
   if len(ret) == 1: ret = ret*root.arg[1]   # TODO: why is this needed?
   return UOp(UOps.VECTORIZE, cast(DType, root.dtype), tuple(ret))
-
-def cast_reduce(cst):
-  if cst.dtype.scalar() == cst.dtype: return None  # not for normal CAST. TODO: the merging one shouldn't be CAST
-  if not all_same([(x.arg, x.src[1:]) for x in cst.src]): return None
-  fst_red = cst.src[0]
-  red = UOp(UOps.VECTORIZE, cst.dtype, tuple(x.src[0] for x in cst.src))
-  return UOp(UOps.REDUCE, red.dtype, (red,) + fst_red.src[1:], fst_red.arg)
-
-contractor = PatternMatcher([
-  (UPat(UOps.CONTRACT, name="root"), replace_contract),
-  # CAST after REDUCEs -> one REDUCE (breaks TestConv.test_two_binops_no_rerun)
-  (UPat(UOps.VECTORIZE, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
-])
-
-# ***** reduce+image handling *****
 
 def fix_image_idx(ls:UOp):
   if ls.src[1].dtype is None or ls.src[1].dtype.count != 1: return None
@@ -371,6 +352,8 @@ reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), replace_reduce),
   # image indexing. TODO: why can't this just go after the float stuff?
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
+  # contracts
+  (UPat(UOps.CONTRACT, name="root"), replace_contract),
 ])
 
 # ***** float4 handling *****
@@ -438,6 +421,13 @@ def reduce_before_expand(reduce_allow_any_len, expand, x):
   gep = tuple(UOp(UOps.GEP, reduce_allow_any_len.dtype, (red,), i) for i in range(x.dtype.count))
   return UOp(expand.op, expand.dtype, gep, expand.arg)
 
+def cast_reduce(cst):
+  if cst.dtype.scalar() == cst.dtype: return None  # not for normal CAST. TODO: the merging one shouldn't be CAST
+  if not all_same([(x.arg, x.src[1:]) for x in cst.src]): return None
+  fst_red = cst.src[0]
+  red = UOp(UOps.VECTORIZE, cst.dtype, tuple(x.src[0] for x in cst.src))
+  return UOp(UOps.REDUCE, red.dtype, (red,) + fst_red.src[1:], fst_red.arg)
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # VECTORIZE/GEP
@@ -448,6 +438,8 @@ constant_folder = PatternMatcher([
   # tensor core with a 0 input is acc
   (UOp(UOps.WMMA, src=(UOp.const(None, 0.0), UOp.var(), UOp.var('acc'))), lambda acc: acc),
   (UOp(UOps.WMMA, src=(UOp.var(), UOp.const(None, 0.0), UOp.var('acc'))), lambda acc: acc),
+  # VECTORIZE after REDUCEs -> one REDUCE (breaks TestConv.test_two_binops_no_rerun)
+  (UPat(UOps.VECTORIZE, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
   # tensor core cleanups
   (UOp(UOps.REDUCE, src=(UOp(UOps.EXPAND, src=tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))).name("expand"),))
    .name("reduce_allow_any_len"), reduce_before_expand),
@@ -661,13 +653,11 @@ class UOpGraph:
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
       # do contracts/reduces
-      sink = graph_rewrite(sink, contractor)
       sink = graph_rewrite(sink, reducer)
 
       # do upcasts (after reduce unrolls and rewrites)
-      all_parents = set([sink]).union(sink.parents)
-      expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
-      new_nodes = expand_nodes(all_parents, expands, sink)
+      expands = list(sorted(x for x in sink.sparents if x.op is UOps.EXPAND))
+      new_nodes = expand_nodes(sink.sparents, expands, sink)
       sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
 
       # do graph rewrite (2)
