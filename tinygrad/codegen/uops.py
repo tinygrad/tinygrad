@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto(); TC = auto() # noqa: E702
+  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
@@ -221,8 +221,9 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
   for p in parents:
     if p.op is UOps.PHI:
       phi_parents = p.parents
-      reduce_expands = flatten([x.src[3:] if x.op is UOps.WMMA else x.src[1:] for x in phi_parents if x.op in {UOps.WMMA, UOps.REDUCE}])
-      parent_expands_for_acc = [x.arg for x in phi_parents if x in expands and x not in reduce_expands]
+      #reduce_expands = flatten([x.src[3:] if x.op is UOps.WMMA else x.src[1:] for x in phi_parents if x.op in {UOps.WMMA, UOps.REDUCE}])
+      #parent_expands_for_acc = [x.arg for x in phi_parents if x in expands and x not in reduce_expands]
+      parent_expands_for_acc = [x.arg for x in phi_parents if x in expands]
       define_accs.append((p.src[0], parent_expands_for_acc))
     for x in p.src:
       children[x].append(p)
@@ -649,8 +650,8 @@ class UOpGraph:
       if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
     for i, s in enumerate(self.sinks[:]):
-      # breaks for TC. maybe move WMMA to the lowerer?
-      if all(x.op is not UOps.TC for x in s.parents):
+      # breaks for WMMA
+      if all(x.op is not UOps.WMMA for x in s.parents):
         if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
 
@@ -718,7 +719,8 @@ class UOpGraph:
     try:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-      #assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), "repeated stores in uops"
+      # TODO: this should be enabled, and the valid clause should be removed
+      assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       self.print()
       if getenv("GRAPHUOPS"): self.graph()

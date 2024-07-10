@@ -79,11 +79,11 @@ class Lowerer(Kernel):
       # NOTE: always using ridxs is fine here
       dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
       if x.op is ReduceOps.WMMA:
-        wmma_sz, upcast_axis, reduce_axes = x.arg[4], x.arg[6], x.arg[7]
+        wmma_sz, upcast_axis = x.arg[4], x.arg[6]
         ret = UOp(UOps.WMMA, dtype=dtype.vec(wmma_sz[2]), src=(
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=(upcast_axis[0], wmma_sz[0])),
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=(upcast_axis[1], wmma_sz[1])),
-          UOp.const(dtype.vec(wmma_sz[2]), 0.0)) + tuple(self.ridxs[i] for i in reduce_axes), arg=x.arg)
+          UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axis[2])
       src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
       return UOp(UOps.REDUCE, dtype, src, x.op)
