@@ -58,7 +58,7 @@ class Lowerer(Kernel):
         dtype = x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
       if x.arg.idx == -1:
-        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype), (), ("temp", x.arg.st.size))
+        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype), (), ("temp", x.arg.st.size))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
                   (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
@@ -81,8 +81,7 @@ class Lowerer(Kernel):
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=(upcast_axis[1],)),
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axis[2])
-      src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
-      return UOp(UOps.REDUCE, dtype, src, x.op)
+      return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
 
   def linearize(self) -> Lowerer:
