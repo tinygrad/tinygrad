@@ -348,12 +348,24 @@ def fix_image_idx(ls:UOp):
     return ret
   return UOp(ls.op, ls.dtype, (ls.src[0], image_idx) + ls.src[2:], ls.arg)
 
+def cast_reduce(cst):
+  if cst.dtype.scalar() == cst.dtype: return None  # not for normal CAST. TODO: the merging one shouldn't be CAST
+  if not all_same([(x.arg, x.src[1:]) for x in cst.src]): return None
+  fst_red = cst.src[0]
+  red = UOp(UOps.VECTORIZE, cst.dtype, tuple(x.src[0] for x in cst.src))
+  return UOp(UOps.REDUCE, red.dtype, (red,) + fst_red.src[1:], fst_red.arg)
+
+contractor = PatternMatcher([
+  # contracts
+  (UPat(UOps.CONTRACT, name="root"), replace_contract),
+  # VECTORIZE after REDUCEs -> one REDUCE (breaks TestConv.test_two_binops_no_rerun)
+  (UPat(UOps.VECTORIZE, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
+])
+
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), replace_reduce),
   # image indexing. TODO: why can't this just go after the float stuff?
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
-  # contracts
-  (UPat(UOps.CONTRACT, name="root"), replace_contract),
 ])
 
 # ***** float4 handling *****
@@ -421,13 +433,6 @@ def reduce_before_expand(reduce_allow_any_len, expand, x):
   gep = tuple(UOp(UOps.GEP, reduce_allow_any_len.dtype, (red,), i) for i in range(x.dtype.count))
   return UOp(expand.op, expand.dtype, gep, expand.arg)
 
-def cast_reduce(cst):
-  if cst.dtype.scalar() == cst.dtype: return None  # not for normal CAST. TODO: the merging one shouldn't be CAST
-  if not all_same([(x.arg, x.src[1:]) for x in cst.src]): return None
-  fst_red = cst.src[0]
-  red = UOp(UOps.VECTORIZE, cst.dtype, tuple(x.src[0] for x in cst.src))
-  return UOp(UOps.REDUCE, red.dtype, (red,) + fst_red.src[1:], fst_red.arg)
-
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # VECTORIZE/GEP
@@ -438,8 +443,6 @@ constant_folder = PatternMatcher([
   # tensor core with a 0 input is acc
   (UOp(UOps.WMMA, src=(UOp.const(None, 0.0), UOp.var(), UOp.var('acc'))), lambda acc: acc),
   (UOp(UOps.WMMA, src=(UOp.var(), UOp.const(None, 0.0), UOp.var('acc'))), lambda acc: acc),
-  # VECTORIZE after REDUCEs -> one REDUCE (breaks TestConv.test_two_binops_no_rerun)
-  (UPat(UOps.VECTORIZE, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
   # tensor core cleanups
   (UOp(UOps.REDUCE, src=(UOp(UOps.EXPAND, src=tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))).name("expand"),))
    .name("reduce_allow_any_len"), reduce_before_expand),
@@ -653,6 +656,7 @@ class UOpGraph:
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
       # do contracts/reduces
+      sink = graph_rewrite(sink, contractor)
       sink = graph_rewrite(sink, reducer)
 
       # do upcasts (after reduce unrolls and rewrites)
