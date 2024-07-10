@@ -173,12 +173,11 @@ class Lowerer(Kernel):
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device == "CUDA":
-            # 0,1,8,9,128,129,136,137
+            # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
             fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
-              ((1,1), (0,1), (0,2), (0,3), (1,0)), ((1,5), (1,3), (1,2), (1,4), (0,0), (0,4)))
-            # 0,8,64,72
+              ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
             fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
-              ((1,4), (0,0), (0,4), (1,1), (1,0)), ((0,1), (0,2), (0,3), (1,5), (1,3), (1,2)))
+              ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
           else:
             raise RuntimeError("unsupported device for tensor cores")
 
