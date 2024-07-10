@@ -308,7 +308,7 @@ constant_folder = PatternMatcher([
   # store float4/float2 directly (remove VECTORIZE/GEP)
   (UPat(UOps.STORE, src=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.VECTORIZE, name='vec', src=(
     UPat(UOps.GEP, src=(UPat(name="val"),)),), allow_any_len=True)),),
-    lambda buf,idx,val,vec: UOp.store(buf, idx, val) if all(s.arg == i for i,s in enumerate(vec.src))),
+    lambda buf,idx,val,vec: UOp.store(buf, idx, val) if all(s.arg == i for i,s in enumerate(vec.src)) else None),
   # VECTORIZE-PHI-GEP -> PHI-VECTORIZE
   (UPat(UOps.VECTORIZE, name="root", src=tuple(
     UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
