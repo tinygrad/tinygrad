@@ -85,15 +85,12 @@ class Lowerer(Kernel):
     return UOp.alu(x.op, *in_uops)
 
   def linearize(self) -> Lowerer:
-    self.uop_cache: Dict[LazyOp, UOp] = {}
-
-    self.idxs = []
     modified_ast = self.get_optimized_ast()
-
     if DEBUG >= 4:
       from tinygrad.engine.graph import print_tree
       for mast in modified_ast: print_tree(mast)
 
+    self.idxs = []
     if self.opts.has_local:
       # define indexes
       global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
@@ -127,6 +124,7 @@ class Lowerer(Kernel):
     for a in range(self.first_reduce, self.first_reduce+self.group_for_reduces):
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(self.full_shape[a])), (1000+a, True))
 
+    self.uop_cache: Dict[LazyOp, UOp] = {}
     self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast], self.opts)
 
     # maybe graph the uops

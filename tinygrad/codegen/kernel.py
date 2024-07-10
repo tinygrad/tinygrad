@@ -615,7 +615,8 @@ class Kernel:
           self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
           if will_delete_shape: deleted_shape += 1
 
-  # **** kernel properties ****
+  # **** kernel outputs ****
+
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   @functools.cached_property
   def name(self) -> str:
