@@ -212,12 +212,16 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
 def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
+  # just in case, dedup expands
+  expands = dedup(expands)
+
   # get children and define_accs
   children = defaultdict(list)
   define_accs = []
   for p in parents:
     if p.op is UOps.PHI:
-      define_accs.append(p.src[0])
+      parent_expands_for_acc = [x.arg for x in p.parents if x in expands]
+      define_accs.append((p.src[0], parent_expands_for_acc))
     for x in p.src:
       children[x].append(p)
 
@@ -260,12 +264,17 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
 
   acc_number = 0
   replaces: List[Dict[UOp, UOp]] = []
+  acc_cache: Dict[Tuple[Tuple[UOp, int, int], ...], UOp] = {}
   for rp in rps:
     rpk = dict(zip(replacements.keys(), rp))
     replace = {r:r.src[rpk[r.arg]] for r in expands}
-    for d in define_accs:
-      replace[d] = UOp(d.op, d.dtype, d.src, d.arg + (acc_number,))
-      acc_number += 1
+    for d, parents in define_accs:
+      acc_index = tuple((d,x,rpk[x]) for x in parents)
+      if acc_index in acc_cache:
+        replace[d] = acc_cache[acc_index]
+      else:
+        replace[d] = acc_cache[acc_index] = UOp(d.op, d.dtype, d.src, d.arg + (acc_number,))
+        acc_number += 1
     replaces.append(replace)
 
   for cc in toposort:
@@ -615,7 +624,8 @@ class UOpGraph:
 
   def print(self):
     for i,u in enumerate(self):
-      print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
+      formatted_parents = [self.uops.index(x) if x.op is not UOps.CONST else {f"{x.arg}"} for x in u.src]
+      print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str(formatted_parents):32s} {u.arg}")
 
   cnt = 0
   def linearize(self, extra_pm:Optional[PatternMatcher]=None):
@@ -703,7 +713,7 @@ class UOpGraph:
     try:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-      assert len(all_stores := [x.src[0:2] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), f"repeated stores {self.print()}"
+      assert len(all_stores := [x.src[0:2] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), "repeated stores in uops list"
     except AssertionError as e:
       self.print()
       if getenv("GRAPHUOPS"): self.graph()
