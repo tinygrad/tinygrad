@@ -434,11 +434,9 @@ constant_folder = PatternMatcher([
   (UOp(UOps.VECTORIZE, dtypes.float.vec(2), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))), lambda x: x),
   (UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(4))), lambda x: x),
   (UOp(UOps.VECTORIZE, dtypes.float.vec(8), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(8))), lambda x: x),
-  # ALU before CONTRACT
-  (UOp(UOps.CONTRACT, src=(UOp(UOps.ALU).name("alu"),)).name("contract"),
-   lambda contract, alu: UOp(alu.op, contract.dtype,
-      tuple(UOp(UOps.CONTRACT, x.dtype.vec(contract.dtype.count), (x,), contract.arg) for x in alu.src), alu.arg)),
   # tensor core cleanups
+  (UOp(UOps.REDUCE, src=(UOp(UOps.EXPAND, src=tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))).name("expand"),))
+   .name("reduce_allow_any_len"), reduce_before_expand),
   (UOp(UOps.REDUCE, src=(UOp(UOps.EXPAND, src=tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(8))).name("expand"),))
    .name("reduce_allow_any_len"), reduce_before_expand),
   (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
@@ -620,7 +618,7 @@ class UOpGraph:
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
   cnt = 0
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None, do_type_verify=True):
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None):
     global acc_number
     acc_number = 0
 
@@ -651,15 +649,11 @@ class UOpGraph:
       sink = graph_rewrite(sink, contractor)
       sink = graph_rewrite(sink, reducer)
 
-      # do upcasts (after reduce unrolls and rewrites) ... one at a time
-      # TODO: shouldn't need to be one at a time anymore
-      while 1:
-        all_parents = set([sink]).union(sink.parents)
-        expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
-        if not expands: break
-        local_expands = [x for x in expands if x.arg == expands[0].arg]
-        new_nodes = expand_nodes(all_parents, local_expands, sink)
-        sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
+      # do upcasts (after reduce unrolls and rewrites)
+      all_parents = set([sink]).union(sink.parents)
+      expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
+      new_nodes = expand_nodes(all_parents, expands, sink)
+      sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
 
       # do graph rewrite (2)
       sink = graph_rewrite(sink, self.folder)
@@ -706,21 +700,21 @@ class UOpGraph:
       if u.op in END_FOR_UOP: self._uops.insert(max([self._uops.index(l) for l in scope_children[u]])+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-    assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-    assert len(all_stores := [x.src[0:2] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), f"repeated stores {self.print()}"
+    try:
+      type_verify(self.uops)
+      assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
+      assert len(all_stores := [x.src[0:2] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), f"repeated stores {self.print()}"
+    except AssertionError as e:
+      self.print()
+      if getenv("GRAPHUOPS"): self.graph()
+      raise e
 
+    # strip the SINK
     self._uops = self._uops[:-1]
 
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import fuzz_uops
       self._fuzz_paths = fuzz_uops(self)
-    if do_type_verify:
-      try:
-        type_verify(self.uops)
-      except AssertionError as e:
-        self.print()
-        if getenv("GRAPHUOPS"): self.graph()
-        raise e
 
   # *** checker functions ***
 
