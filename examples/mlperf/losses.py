@@ -6,12 +6,12 @@ def dice_ce_loss(pred, tgt):
   dice = (1.0 - dice_score(pred, tgt, argmax=False, to_one_hot_x=False)).mean()
   return (dice + ce) / 2
 
-def cust_bin_cross_logits_retinanet(inputs:Tensor, targets:Tensor): 
-  return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
-
 def sigmoid_focal_loss(inputs:Tensor, targets:Tensor, mask:Tensor, alpha = 0.25, gamma = 2.0):
+  def cust_bin_cross_logits(inputs:Tensor, targets:Tensor): 
+    return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
+
   p = Tensor.sigmoid(inputs) * mask
-  ce_loss = cust_bin_cross_logits_retinanet(inputs, targets)
+  ce_loss = cust_bin_cross_logits(inputs, targets)
   p_t = p * targets + (1 - p) * (1 - targets)
   loss = ce_loss * ((1 - p_t) ** gamma)
 
