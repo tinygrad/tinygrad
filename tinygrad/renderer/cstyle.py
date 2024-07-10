@@ -7,8 +7,6 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 from tinygrad.renderer import Renderer, TensorCore
 
-def op_chain(op:str='', sep:str=','): return lambda *a: ''.join([f'{op}({x}{sep}' for x in a[:-2]]) +f'{a[-2]}' + ')'*(len(a)-2)
-
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
   buffer_prefix: str = ""
