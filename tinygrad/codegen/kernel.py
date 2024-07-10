@@ -488,7 +488,7 @@ class Kernel:
     elif opt.op is OptOps.MERGE:
       check(axis >= self.shape_len-self.upcasted, "only merge upcasted")
       self.reshape_and_permute(None, tuple(range(axis)) + (axis+1, axis) + tuple(range(axis+2, self.shape_len)))
-      self.reshape_and_permute(lambda x: x[0:axis] + (x[axis] + x[axis+1],) + x[axis+2:], None)
+      self.reshape_and_permute(lambda x: x[0:axis] + (x[axis] * x[axis+1],) + x[axis+2:], None)
       self.upcasted -= 1
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
