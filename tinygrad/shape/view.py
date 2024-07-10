@@ -121,13 +121,14 @@ class View:
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def unbind(self) -> Tuple[View, Dict[Variable, int]]:
-    unbound_vars = {v:v.unbind()[0] for v in self.vars()}
+    var_unboundvar_val = [(v, v.unbind()) for v in self.vars()]
+    unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
     def substitute(x): return x if isinstance(x, int) else x.substitute(unbound_vars)
     new_shape = tuple(map(substitute, self.shape))
     new_strides = tuple(map(substitute, self.strides))
     new_offset = substitute(self.offset)
-    new_mask = tuple(tuple(map(substitute, x)) for x in self.mask) if self.mask is not None else None
-    return View.create(new_shape, new_strides, new_offset, new_mask), dict(v.unbind() for v in self.vars())
+    new_mask = tuple((substitute(x[0]), substitute(x[1])) for x in self.mask) if self.mask is not None else None
+    return View.create(new_shape, new_strides, new_offset, new_mask), dict(x[1] for x in var_unboundvar_val)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, vm1:View) -> Optional[View]:
