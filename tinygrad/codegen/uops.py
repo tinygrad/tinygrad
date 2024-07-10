@@ -297,7 +297,7 @@ def expand_nodes(parents:Set[UOp], expands:List[UOp], base) -> List[UOp]:
 # ***** reduce+image+contract handling *****
 
 def expand_wmma(wmma):
-  expands = [x for x in wmma.parents if x.op is UOps.EXPAND and x.arg in wmma.arg[-1]]
+  expands = [x for x in wmma.parents if x.op is UOps.EXPAND and (x.arg in wmma.arg[-1] or x.arg in wmma.arg[-2])]
   if len(expands) == 0: return None
   new_uops = expand_nodes(wmma.sparents, expands, wmma)
   # TODO: assert that these are all the same. they have to be
