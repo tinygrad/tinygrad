@@ -296,6 +296,16 @@ def expand_nodes(parents:Set[UOp], expands:List[UOp], base) -> List[UOp]:
 
 # ***** reduce+image+contract handling *****
 
+def expand_wmma(wmma):
+  expands = [x for x in wmma.parents if x.op is UOps.EXPAND and x.arg in wmma.arg[-1]]
+  if len(expands) == 0: return None
+  new_uops = expand_nodes(wmma.sparents, expands, wmma)
+  ret = new_uops[0]
+  for x in new_uops[1:]:
+    assert x.src[2].op is UOps.CONST
+    ret = UOp(UOps.WMMA, x.dtype, x.src[0:2] + (ret,), x.arg)
+  return ret
+
 acc_number = 0
 def replace_reduce(root):
   global acc_number
@@ -364,6 +374,7 @@ contractor = PatternMatcher([
 
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), replace_reduce),
+  (UPat(UOps.WMMA, name="wmma"), expand_wmma),
   # image indexing. TODO: why can't this just go after the float stuff?
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
 ])
@@ -664,9 +675,9 @@ class UOpGraph:
       new_nodes = expand_nodes(sink.sparents, expands, sink)
       sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
 
-      # do graph rewrite (2)
-      sink = graph_rewrite(sink, self.folder)
-      if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
+    # do graph rewrite (2)
+    sink = graph_rewrite(sink, self.folder)
+    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
     # BFS toposort
@@ -712,11 +723,14 @@ class UOpGraph:
     try:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
+      assert all(x.op not in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE} for x in self._uops), "fake UOp left in list"
       # TODO: this should be enabled, and the valid clause should be removed
-      #assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), "repeated stores in uops"
+      assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       self.print()
       if getenv("GRAPHUOPS"): self.graph()
+      #from tinygrad.engine.graph import print_tree
+      #print_tree(self._uops[-1])
       raise e
 
     # strip the SINK
