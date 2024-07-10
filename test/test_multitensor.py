@@ -165,7 +165,6 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  @unittest.skipIf(Device.DEFAULT in ("NV", "AMD"), "not supported in HCQ #4817")
   def test_copy_jit(self):
     @TinyJit
     def copy_tensor(x:Tensor): return (x.to(f"{x.device.split(':')[0]}:1") + 1)
@@ -174,7 +173,6 @@ class TestMultiTensor(unittest.TestCase):
       x = copy_tensor(t)
       np.testing.assert_equal((t+1).numpy(), x.numpy())
 
-  @unittest.skipIf(Device.DEFAULT in ("NV", "AMD"), "not supported in HCQ #4817")
   def test_allreduce_naive_jit(self):
     with Context(RING=0):
       jit_allreduce = TinyJit(_test_allreduce)
@@ -182,7 +180,6 @@ class TestMultiTensor(unittest.TestCase):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  @unittest.skipIf(Device.DEFAULT in ("NV", "AMD"), "not supported in HCQ #4817")
   def test_allreduce_ring_jit(self):
     with Context(RING=2):
       jit_allreduce = TinyJit(_test_allreduce)
