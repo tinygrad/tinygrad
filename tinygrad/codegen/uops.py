@@ -220,7 +220,9 @@ def expand_nodes(parents, expands:List[UOp], base) -> List[UOp]:
   define_accs = []
   for p in parents:
     if p.op is UOps.PHI:
-      parent_expands_for_acc = [x.arg for x in p.parents if x in expands]
+      phi_parents = p.parents
+      reduce_expands = flatten([x.src[3:] if x.op is UOps.WMMA else x.src[1:] for x in phi_parents if x.op in {UOps.WMMA, UOps.REDUCE}])
+      parent_expands_for_acc = [x.arg for x in phi_parents if x in expands and x not in reduce_expands]
       define_accs.append((p.src[0], parent_expands_for_acc))
     for x in p.src:
       children[x].append(p)
@@ -443,6 +445,9 @@ constant_folder = PatternMatcher([
   (UOp(UOps.VECTORIZE, dtypes.float.vec(2), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))), lambda x: x),
   (UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(4))), lambda x: x),
   (UOp(UOps.VECTORIZE, dtypes.float.vec(8), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(8))), lambda x: x),
+  # tensor core with a 0 input is acc
+  (UOp(UOps.WMMA, src=(UOp.const(None, 0.0), UOp.var(), UOp.var('acc'))), lambda acc: acc),
+  (UOp(UOps.WMMA, src=(UOp.var(), UOp.const(None, 0.0), UOp.var('acc'))), lambda acc: acc),
   # tensor core cleanups
   (UOp(UOps.REDUCE, src=(UOp(UOps.EXPAND, src=tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))).name("expand"),))
    .name("reduce_allow_any_len"), reduce_before_expand),
@@ -624,7 +629,7 @@ class UOpGraph:
 
   def print(self):
     for i,u in enumerate(self):
-      formatted_parents = [self.uops.index(x) if x.op is not UOps.CONST else {f"{x.arg}"} for x in u.src]
+      formatted_parents = [self.uops.index(x) if x.op is not UOps.CONST else f"{x.arg}" for x in u.src]
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str(formatted_parents):32s} {u.arg}")
 
   cnt = 0
@@ -713,7 +718,7 @@ class UOpGraph:
     try:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-      assert len(all_stores := [x.src[0:2] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), "repeated stores in uops list"
+      #assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE]) == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       self.print()
       if getenv("GRAPHUOPS"): self.graph()

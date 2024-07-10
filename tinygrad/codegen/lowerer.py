@@ -79,12 +79,11 @@ class Lowerer(Kernel):
       # NOTE: always using ridxs is fine here
       dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
       if x.op is ReduceOps.WMMA:
-        wmma_sz = x.arg[4]
-        upcast_axis = x.arg[-1]
+        wmma_sz, upcast_axis, reduce_axes = x.arg[4], x.arg[6], x.arg[7]
         ret = UOp(UOps.WMMA, dtype=dtype.vec(wmma_sz[2]), src=(
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=(upcast_axis[0], wmma_sz[0])),
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=(upcast_axis[1], wmma_sz[1])),
-          UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
+          UOp.const(dtype.vec(wmma_sz[2]), 0.0)) + tuple(self.ridxs[i] for i in reduce_axes), arg=x.arg)
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axis[2])
       src = (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg)
       return UOp(UOps.REDUCE, dtype, src, x.op)
@@ -167,7 +166,7 @@ class Lowerer(Kernel):
 
           assert apply_to_st is None, "double tensor core? not supported"
           wmma_sz = [prod(l) for l in tc.thread_local_sizes]
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, upcast_axis)
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, upcast_axis, tuple(reduce_axes))
           ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
           new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
           return LazyOp(op.op, (ret,), new_reduce_axes) if len(new_reduce_axes) else ret
