@@ -40,11 +40,11 @@ def _reshape_mask(_mask:Optional[Tuple[Tuple[sint, sint], ...]], old_shape:Tuple
   """Returns the new mask if reshape is possible, and None if not possible."""
   if _mask is None: return tuple((0, s) for s in new_shape)
   if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in _mask): return None
-  masks: Tuple[Tuple[int, int], ...] = cast(Tuple[Tuple[int, int], ...], _mask)  # mypy cannot deduce this
-  if any(mask[1] - mask[0] < 1 for mask in masks): return ((0, 0),) * len(new_shape)  # zero mask
-  new_mask: List[Tuple[int, int]] = []
+  if any(m[1] - m[0] < 1 for m in _mask): return ((0, 0),) * len(new_shape)  # zero mask
 
-  r_masks, r_shape, r_new_shape = reversed(masks), reversed(old_shape), reversed(new_shape)
+  new_mask: List[Tuple[int, int]] = []
+  # _mask is all int here
+  r_masks, r_shape, r_new_shape = reversed(cast(Tuple[Tuple[int, int], ...], _mask)), reversed(old_shape), reversed(new_shape)
   curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
 
   while len(new_mask) < len(new_shape):
