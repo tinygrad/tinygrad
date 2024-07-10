@@ -1,15 +1,13 @@
 from __future__ import annotations
-from typing import List, Tuple, cast, Optional, Any, Dict, Final, DefaultDict
+from typing import List, Tuple, cast, Optional, Any, Dict
 import functools
-from dataclasses import replace
-from collections import defaultdict
-from tinygrad.codegen.kernel import LocalBuffer, Kernel
+from tinygrad.codegen.kernel import Kernel
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MemBuffer, BinaryOps, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
-from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
+from tinygrad.helpers import to_function_name, DEBUG, getenv, prod
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
 def variable_to_uop(x, ctx=None) -> UOp:
@@ -59,10 +57,8 @@ class Lowerer(Kernel):
       if x.op is BufferOps.CONST:
         dtype = x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
-      if isinstance(self.bufs[x.arg.idx], LocalBuffer):
-        # TODO: this should come from somewhere else
-        lb = self.bufs[x.arg.idx]
-        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(lb.dtype), (), (lb.name, lb.size))
+      if x.arg.idx == -1:
+        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype), (), ("temp", x.arg.st.size))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
                   (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
@@ -89,97 +85,11 @@ class Lowerer(Kernel):
       return UOp(UOps.REDUCE, dtype, src, x.op)
     return UOp.alu(x.op, *in_uops)
 
-  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self) -> Lowerer:
-    sts_backup, bufs_backup = self.sts, self.bufs
-
     self.uop_cache: Dict[LazyOp, UOp] = {}
 
-    # kernel name (before late upcast)
-    self.name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
-                 (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
-                 colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
-    if DEBUG >= 4: print(self.name)
-
-    # name the function something unique
-    Lowerer.kernel_cnt[(function_name := to_function_name(self.name))] += 1
-    suffix = f"{'n'+str(Lowerer.kernel_cnt[function_name]-1)}" if Lowerer.kernel_cnt[function_name] > 1 else ""
-    self.name = self.name+colored(suffix, 'BLACK')
-
     self.idxs = []
-    # add a local buffer for multistage reduce.
-    if self.group_for_reduces:
-      for i in range(len(self.reduceops)):
-        # TODO: the strides of this can be controlled
-        self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
-        temp_dtype = cast(LazyOp, self.reduceop).dtype
-        self.bufs.append(LocalBuffer(f"temp{i if len(self.reduceops) > 1 else ''}", self.sts[-1].size,
-                                     temp_dtype.base if isinstance(temp_dtype, ImageDType) else temp_dtype))
-
-    # set the shapetrackers to the optimized ones, fixup reduceop
-    # transformed to the final LazyOp
-    @functools.lru_cache(None)
-    def fixup_ast(op:LazyOp, apply_to_st=None) -> LazyOp:
-      if op.op in BufferOps:
-        idx = self.bufs.index(op.arg)
-        arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
-      elif op.op in ReduceOps:
-        arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])
-        if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
-          rsrc = op.src[0]
-          if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
-          assert rsrc.op is BinaryOps.MUL
-
-          def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
-            wd = self.global_dims
-            tcd = self.shape_len-self.upcasted
-            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
-            assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, "tcd dims wrong"
-            new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
-            permaxis = list(range(wd))
-            for x,y in pattern_1: permaxis.append(y + (wd if x == 0 else tcd))
-            permaxis += list(range(wd+len(warp_dims), tcd))
-            for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
-            permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
-            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape)
-
-          if self.opts.device == "AMD":
-            reduce_axes = [self.shape_len-self.upcasted]
-            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
-            fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
-            fix_st2 = None
-          elif self.opts.device == "METAL":
-            reduce_axes = [self.shape_len-self.upcasted]
-            upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1)
-            fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
-            fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
-          elif self.opts.device in {"CUDA", "NV"}:
-            reduce_axes = [self.shape_len-self.upcasted, self.shape_len-self.upcasted+1]
-            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted+2, self.shape_len-self.upcasted+2)
-            # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
-            fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
-              ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
-            fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
-              ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
-          else:
-            raise RuntimeError("unsupported device for tensor cores")
-
-          assert apply_to_st is None, "double tensor core? not supported"
-          wmma_sz = [prod(l) for l in tc.thread_local_sizes]
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, upcast_axis, tuple(reduce_axes))
-          ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
-          new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
-          return LazyOp(op.op, (ret,), new_reduce_axes) if len(new_reduce_axes) else ret
-        if self.group_for_reduces:
-          start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-          local_buffer = MemBuffer(-1, start.dtype, self.sts[-1])
-          local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
-          local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
-          return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
-      else:
-        arg = op.arg
-      return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    modified_ast = tuple(fixup_ast(x) for x in self.ast)
+    modified_ast = self.get_optimized_ast()
 
     if DEBUG >= 4:
       from tinygrad.engine.graph import print_tree
@@ -219,8 +129,6 @@ class Lowerer(Kernel):
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(self.full_shape[a])), (1000+a, True))
 
     self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast], self.opts)
-
-    self.sts, self.bufs = sts_backup, bufs_backup
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
