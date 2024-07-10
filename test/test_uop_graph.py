@@ -145,7 +145,7 @@ class TestUOpGraph(TestUOps):
     uop_ = UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, (val,), 0) for _ in range(4)))
     self.assert_equiv_uops(UOpGraph([uop]).uops[-1], val)
     self.assert_equiv_uops(UOpGraph([uop3]).uops[-1], val)
-    self.assertEqual(UOpGraph([uop_]).uops[-1].op, uop_)
+    self.assert_equiv_uops(UOpGraph([uop_]).uops[-1], uop_)
 
   def test_cast_alu_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=(0, True))
