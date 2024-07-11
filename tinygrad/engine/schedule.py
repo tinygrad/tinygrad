@@ -197,7 +197,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     if not forced_realize and len(group) > 1:
-      # create a multi output kernel if the LazyBufferss can cleanly group
+      # create a multi output kernel if the LazyBuffers can cleanly group
       cache: Set[LazyBuffer] = set()
       rc_parents, rc_children = deque(group), deque(group)
       while rc_parents:

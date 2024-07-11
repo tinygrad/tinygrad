@@ -11,8 +11,9 @@ class TestArange(unittest.TestCase):
     return GlobalCounters.global_ops
 
   def test_complexity(self):
-    f1 = self._get_flops(256)
-    f2 = self._get_flops(2560)
+    # add 1 to avoid divide by 0. arange is 0 flops now!
+    f1 = self._get_flops(256) + 1
+    f2 = self._get_flops(2560) + 1
     print(f"{f1=}, {f2=}")
     assert f2 / f1 < 15, f"bad complexity, flops {f2/f1:.1f}X while inputs 10X"
 
