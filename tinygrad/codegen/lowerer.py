@@ -5,7 +5,8 @@ from tinygrad.codegen.kernel import Kernel
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, get_lazyop_info
-from tinygrad.codegen.uops import UOp, UOpGraph, UOps
+from tinygrad.codegen.uops import UOp, flops_mem, UOps
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, DEBUG, getenv, prod, diskcache_put
 
@@ -139,7 +140,7 @@ class Lowerer(Kernel):
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
     if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src))
     info = get_lazyop_info(self.ast[0])
-    ops, mem = self.uops.flops_mem()
+    ops, mem = flops_mem(self.uops.uops)
     run_count = prod((self.global_size or []) + (self.local_size or []))
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
                    self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

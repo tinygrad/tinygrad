@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, di
 from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
-from tinygrad.codegen.uops import UOpGraph
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.engine.realize import CompiledRunner

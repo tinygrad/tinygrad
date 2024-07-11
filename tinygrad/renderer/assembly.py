@@ -4,7 +4,8 @@ from collections import defaultdict
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOps, UOp, UOpGraph, PatternMatcher, UPat
+from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat
 from tinygrad.renderer import Renderer, TensorCore
 
 def render_val(x, dtype):

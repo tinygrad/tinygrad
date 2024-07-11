@@ -2,7 +2,7 @@ from typing import Optional, List, Tuple, Dict
 import functools
 from dataclasses import dataclass
 from tinygrad.helpers import getenv, to_function_name
-from tinygrad.codegen.uops import UOpGraph
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.shape.symbolic import sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
