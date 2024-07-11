@@ -281,10 +281,12 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 
   queue_in, queue_out = Queue(), Queue()
   procs, data_out_count = [], [0] * batch_count
-  shm_name = "unet3d"
-  sz, shm_path = (batch_size * batch_count, 1, 128, 128, 128), f"/dev/shm/{shm_name}"
-  if os.path.exists(shm_path): os.unlink(shm_path)
-  shm = shared_memory.SharedMemory(name=shm_name, create=True, size=prod(sz))
+  shm_name_x, shm_name_y = "unet3d_x", "unet3d_y"
+  sz = (batch_size * batch_count, 1, 128, 128, 128)
+  if shm_path_x := os.path.exists(f"/dev/shm/{shm_name_x}"): os.unlink(shm_path_x)
+  if shm_path_y := os.path.exists(f"/dev/shm/{shm_name_y}"): os.unlink(shm_path_y)
+  shm_x = shared_memory.SharedMemory(name=shm_name_x, create=True, size=prod(sz))
+  shm_y = shared_memory.SharedMemory(name=shm_name_y, create=True, size=prod(sz))
 
   shutdown = False
   class Cookie:
@@ -308,8 +310,8 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
   ds_iter = iter(file_indices)
 
   try:
-    X = Tensor.empty(*sz, dtype=dtypes.float32, device=f"disk:{shm_path}")
-    Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:{shm_path}")
+    X = Tensor.empty(*sz, dtype=dtypes.float32, device=f"disk:/dev/shm/{shm_name_x}")
+    Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/{shm_name_y}")
 
     for _ in range(cpu_count()):
       proc = Process(target=load_unet3d_data, args=(preprocessed_dataset_dir, seed, queue_in, queue_out, X, Y))
@@ -342,9 +344,11 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
     # shutdown processes
     for proc in procs: proc.join()
 
-    shm.close()
+    shm_x.close()
+    shm_y.close()
     try:
-      shm.unlink()
+      shm_x.unlink()
+      shm_y.unlink()
     except FileNotFoundError:
       # happens with BENCHMARK set
       pass
