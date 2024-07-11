@@ -5,6 +5,7 @@ from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_arg
 from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
+from tinygrad.helpers import FUSE_AS_ONE_KERNEL
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -127,7 +128,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
       simple_pads.add(buf.base)
     # realize all expands
-    elif prod(buf.base.st.shape) < prod(buf.st.shape):
+    elif prod(buf.base.st.shape) < prod(buf.st.shape) and not FUSE_AS_ONE_KERNEL:
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         pass # don't realize image to image casts. this is part of a larger problem
       else:
@@ -197,7 +198,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     if not forced_realize and len(group) > 1:
-      # create a multi output kernel if the LazyBufferss can cleanly group
+      # create a multi output kernel if the LazyBuffers can cleanly group
       cache: Set[LazyBuffer] = set()
       rc_parents, rc_children = deque(group), deque(group)
       while rc_parents:
@@ -228,7 +229,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
-    if forced_realize:
+    if forced_realize and not FUSE_AS_ONE_KERNEL:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
