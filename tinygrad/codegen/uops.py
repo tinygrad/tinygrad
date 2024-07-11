@@ -68,7 +68,8 @@ class UOp:
   def _const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     if dtype is not None and dtype != dtype.scalar():
-      return UOp(UOps.VECTORIZE, dtype, src=tuple(UOp(UOps.CONST, dtype.scalar(), arg=dtypes.as_const(b, dtype.scalar())) for i in range(dtype.count)))
+      return UOp(UOps.VECTORIZE, dtype, src=tuple(
+        UOp(UOps.CONST, dtype.scalar(), arg=dtypes.as_const(b, dtype.scalar())) for _ in range(dtype.count)))
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
