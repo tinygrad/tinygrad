@@ -187,6 +187,15 @@ class Compiled:
 # **************** for HCQ Compatible Devices ****************
 
 def hcq_command(func):
+  """
+  Decorator for HWCommandQueue commands.
+
+  Enables command indexing and stores metadata for command updates.
+
+  Usage:
+  @hcq_command
+  def command_method(self, ...): ...
+  """
   def __wrapper(self, *args, **kwargs):
     self.cmds_offset.append(len(self.q))
     func(self, *args, **kwargs)
@@ -211,7 +220,7 @@ class HWCommandQueue:
   @hcq_command
   def timestamp(self, signal): self._timestamp(signal)
   def _timestamp(self, signal): raise NotImplementedError("backend should overload this function")
-  
+
   def update_signal(self, cmd_idx, signal=None, value=None):
     if self.cmds_meta[cmd_idx] != "signal": raise RuntimeError("called update_signal not on a signal command")
     self._update_signal(cmd_idx, signal, value)

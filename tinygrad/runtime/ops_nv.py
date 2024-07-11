@@ -153,7 +153,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + list(data)
 
   def _exec(self, prg, kernargs, global_size, local_size):
-    cmd_idx = len(self) - 1 # TODO: remove from here?
+    cmd_idx = len(self) - 1
 
     ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     self.cmd_idx_to_qmd[cmd_idx] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update

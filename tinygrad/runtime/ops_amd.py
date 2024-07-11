@@ -209,7 +209,7 @@ class AMDCopyQueue(HWCopyQueue):
       amd_gpu.SDMA_GCR_GL1_INV | amd_gpu.SDMA_GCR_GL2_WB | amd_gpu.SDMA_GCR_GL2_INV, 0, 0])
 
     copied, copy_commands = 0, (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
-    self.copy_cmds_per_copy[len(self)] = copy_commands
+    self.copy_cmds_per_copy[len(self) - 1] = copy_commands
     for _ in range(copy_commands):
       step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
 
