@@ -8,7 +8,7 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
 from tinygrad.helpers import DEBUG, getenv, flatten, all_same, dedup, TRANSCENDENTAL
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
-from tinygrad.codegen.transcendental import xexp2, xlog2, xsin
+from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
@@ -290,11 +290,11 @@ float4_folding = PatternMatcher([
 
 # ***** transcendental *****
 
-transcendental_rules = [
-  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, src=(UOp.var("x"),), arg=UnaryOps.EXP2), xexp2),
-  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, src=(UOp.var("d"),), arg=UnaryOps.LOG2), xlog2),
-  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, src=(UOp.var("d"),), arg=UnaryOps.SIN), xsin),
-]
+transcendental_folding = PatternMatcher([
+  (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="x"),), arg=UnaryOps.EXP2), xexp2),
+  (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=UnaryOps.LOG2), xlog2),
+  (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=UnaryOps.SIN), xsin),
+])
 
 # ***** main rewriter *****
 
@@ -494,7 +494,7 @@ class UOpGraph:
     self.folder = constant_folder if opts is None or not opts.supports_float4 else constant_folder_w_f4
     if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
       # TODO: slow to rebuild this...
-      self.folder = PatternMatcher(self.folder.patterns + transcendental_rules)
+      self.folder = PatternMatcher(self.folder.patterns + transcendental_folding.patterns)
 
   def __reduce__(self): return self.__class__, (self.sinks, self.opts)
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)

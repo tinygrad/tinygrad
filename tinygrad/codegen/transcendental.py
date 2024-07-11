@@ -1,11 +1,10 @@
 import math
-from typing import Tuple, List
+from typing import Tuple, List, cast
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.uops import UOp
 
-def is_dtype_transcendental_supported(d:DType):
-  return d in [dtypes.float16, dtypes.float32, dtypes.float64]
+TRANSCENDENTAL_SUPPORTED_DTYPES = {dtypes.float16, dtypes.float32, dtypes.float64}
 
 def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
@@ -31,19 +30,19 @@ def dfdiv2_f2_f2_f2(nx:UOp, ny:UOp, dx:UOp, dy:UOp) -> Tuple[UOp, UOp]:
   return qx, qy
 # *** helper functions for bit manipulation ***
 def significand_bits(d:DType) -> int:
-  assert is_dtype_transcendental_supported(d)
+  assert d in TRANSCENDENTAL_SUPPORTED_DTYPES
   return {dtypes.float64: 52, dtypes.float32: 23, dtypes.float16: 10}[d]
 
 def exponent_bias(d:DType) -> int:
-  assert is_dtype_transcendental_supported(d)
+  assert d in TRANSCENDENTAL_SUPPORTED_DTYPES
   return {dtypes.float64: 1022, dtypes.float32: 126, dtypes.float16: 14}[d]
 
 def exponent_mask(d:DType) -> int:
-  assert is_dtype_transcendental_supported(d)
+  assert d in TRANSCENDENTAL_SUPPORTED_DTYPES
   return {dtypes.float64: 0x7FF, dtypes.float32: 0xFF, dtypes.float16: 0x1F}[d]
 
 def float_to_bits(d:UOp) -> UOp:
-  assert is_dtype_transcendental_supported(d.dtype)
+  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   cast_to = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[d.dtype]
   return d.bitcast(cast_to)
 
@@ -57,7 +56,7 @@ def shl(x:UOp, y:int) -> UOp: return x.e(BinaryOps.MUL, x.const(2**y))
 
 def rintk(d:UOp) -> UOp:
   """ceiling(d:float) -> int"""
-  assert is_dtype_transcendental_supported(d.dtype)
+  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   return_t = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype]
   return d.e(BinaryOps.ADD, d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.const(-0.5), d.const(0.5))).cast(return_t)
 
@@ -69,7 +68,7 @@ def pow2if(q:UOp, float_dtype:DType):
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
-  assert is_dtype_transcendental_supported(d.dtype)
+  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   dint = d.bitcast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype])
   # -1 <= ilog2bk(d) <= 128
   # ((float_to_bits(d) >> significand_bits(dtype)) & exponent_mask(dtype)) - exponent_bias(dtype)
@@ -77,7 +76,7 @@ def ilogb2k(d:UOp) -> UOp:
 
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
-  assert is_dtype_transcendental_supported(d.dtype) and is_dtype_transcendental_supported(e.dtype)
+  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   dtype = d.dtype
   cast_map = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
   e = e.cast(cast_map[d.dtype])
@@ -87,12 +86,12 @@ def ldexp3k(d:UOp, e:UOp) -> UOp:
 
 def ldexp2k(d:UOp, e:UOp) -> UOp:
   """d*2^e. much faster than ldexp3k but risky. d > 0 and d is not denormal."""
-  assert is_dtype_transcendental_supported(d.dtype) and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
+  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
   return d.e(BinaryOps.MUL, pow2if(shr(e, 1), d.dtype)).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.ADD, shr(e, 1).e(UnaryOps.NEG)), d.dtype)) # noqa: E501
 
 def frexp(v:UOp) -> Tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent)"""
-  assert is_dtype_transcendental_supported(v.dtype)
+  assert v.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x800FFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3C00}[v.dtype]
@@ -126,7 +125,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
     ensuring that `r` is in the range of [0, pi/2).
   - `q`[int32] is an integer taking values 0,1,2 or 3, corresponding to the quadrant of the original angle `d`.
   """
-  assert is_dtype_transcendental_supported(d.dtype)
+  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410]
 
   input_dtype: DType = d.dtype
@@ -145,7 +144,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
     if count+offset <= len(two_over_pi_f[0:-2]):
       an = _eq(i, count).e(TernaryOps.WHERE, _take(an, offset, count=count+1), an.const(two_over_pi_f[count+offset]))
     return an
-  def _exact_pow2if(x): return pow2if(x, d.dtype).cast(acc_dtype)
+  def _exact_pow2if(x): return pow2if(x, cast(DType, d.dtype)).cast(acc_dtype)
   def _shl_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.MUL, _exact_pow2if(y)).cast(dtypes.uint32)
   def _shr_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.IDIV, _exact_pow2if(y)).cast(dtypes.uint32)
   # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
@@ -241,7 +240,7 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=39800.0) -> UOp:
   - fast=True assumes x <= switch_over.
   - switch_over is the threshold for switching to payne_hanek_reduction.
   """
-  assert is_dtype_transcendental_supported(d.dtype)
+  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   if d.dtype == dtypes.float16:
     switch_over = 9500.0
   reduction_algo = cody_waite_reduction if fast else payne_hanek_reduction
@@ -269,7 +268,7 @@ def xexp2(x:UOp) -> UOp:
   Implements a 1.0 ULP approximation for UnaryOps.EXP2
   - Paper: https://arxiv.org/pdf/2001.09258
   """
-  assert is_dtype_transcendental_supported(x.dtype)
+  assert x.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   fp64_p = x.dtype == dtypes.float64
   # mask +=inf/nan as zero.
   d = _lazy_map_numbers(x, x.const(0.0), x.const(0.0), x.const(0.0), x)
@@ -299,7 +298,7 @@ def xlog2(d:UOp) -> UOp:
   Implements a 1.0 ULP approximation for UnaryOps.LOG2
   Paper: https://arxiv.org/pdf/2001.09258
   """
-  assert is_dtype_transcendental_supported(d.dtype)
+  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   fp64_p = d.dtype == dtypes.float64
   FLT_MIN = d.const(1e-6 if d.dtype == dtypes.float16 else 1e-4)
   Y_FLT_MIN = d.const(math.log2({dtypes.float64: 1e-228, dtypes.float32: 1e-38, dtypes.float16: 1e-6}[d.dtype]))
