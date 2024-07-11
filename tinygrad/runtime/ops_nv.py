@@ -109,8 +109,8 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
 
   def _update_signal(self, cmd_idx, signal=None, value=None): return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
   def _update_wait(self, cmd_idx, signal=None, value=None):
-    if signal is not None: self._patch(cmd_idx, offset=1, data=nvdata64_le(mv_address(signal)))
-    if value is not None: self._patch(cmd_idx, offset=3, data=nvdata64_le(value))
+    if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', nvdata64_le(mv_address(signal)))
+    if value is not None: self.q[(valoff:=self.cmds_offset[cmd_idx]+3):valoff+2] = array.array('I', nvdata64_le(value))
 
   def bind(self, device: NVDevice):
     self.binded_device = device
