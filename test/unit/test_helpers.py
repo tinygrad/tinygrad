@@ -36,7 +36,6 @@ class TestContextVars(unittest.TestCase):
     self.assertEqual(C.value, 13)
 
   def test_assignment_across_modules(self):
-    VARIABLE = ContextVar("VARIABLE", 1)
     # local assignment
     VARIABLE.value = 2
     self.assertEqual(VARIABLE.value, 2)
@@ -44,6 +43,7 @@ class TestContextVars(unittest.TestCase):
     exec('from tinygrad.helpers import ContextVar;VARIABLE = ContextVar("VARIABLE", 0);VARIABLE.value = 3;', {}) # pylint:disable=exec-used
     # Assignment in another module should affect this one as well.
     self.assertEqual(VARIABLE.value, 3)
+    VARIABLE.value = 0
 
   def test_context_assignment(self):
     with Context(VARIABLE=1):
