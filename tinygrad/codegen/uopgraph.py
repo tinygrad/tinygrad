@@ -36,7 +36,9 @@ def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinsta
 
 def _hashstore(store:Dict[str, UOp]): return hash(tuple(sorted((k, id(v)) for k,v in store.items())))
 
-def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+def _match(uop:UOp, pat:UPat, store:Dict[str, UOp], cache= None) -> List[Dict[str, UOp]]:
+  if cache is None: cache = {}
+  if cached := cache.get((id(uop), id(pat), _hashstore(store))): return cached
   if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return []
   if pat.arg is not None and __unmatch(pat.arg, uop.arg): return []
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return []
@@ -49,8 +51,9 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
     if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len) and not pat.allow_any_len: return []
     new_stores = [store.copy()]
-    for uu, vv in zip(uop.src, vp): new_stores = list({_hashstore(x):x for nstore in new_stores for x in _match(uu, vv, nstore)}.values())
+    for uu, vv in zip(uop.src, vp): new_stores = list({_hashstore(x):x for nstore in new_stores for x in _match(uu, vv, nstore, cache)}.values())
     res.extend(new_stores)
+  cache[(id(uop), id(pat), _hashstore(store))] = res
   return res
 
 class PatternMatcher:

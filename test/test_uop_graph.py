@@ -248,5 +248,12 @@ class TestUOpGraph(TestUOps):
     delta = time.perf_counter()-st
     assert delta < 1.0, f"speed test took {delta} seconds"
 
+    for i in range(50):
+      u = u+u
+      p = UPat(UOps.ALU, BinaryOps.ADD, [p, p])
+    delta = time.perf_counter()-st
+    assert delta < 1.0, f"speed test took {delta} seconds"
+
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
