@@ -93,6 +93,9 @@ class Sign(Function):
   # backward always return 0 to match torch
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.const(0)
 
+class Threefry(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer: return x.e(UnaryOps.THREEFRY)
+
 # ************* binary ops *************
 
 class Less(Function):
