@@ -24,7 +24,7 @@ class TernaryOps(Enum):
   WHERE = auto(); MULACC = auto() # noqa: E702
 class ReduceOps(Enum):
   """A -> B (reduce)"""
-  SUM = auto(); MAX = auto() # noqa: E702
+  SUM = auto(); MAX = auto(); WMMA = auto() # noqa: E702
 class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 
@@ -61,6 +61,7 @@ class LazyOp:
   @functools.cached_property
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
+    if self.op is ReduceOps.WMMA: return self.arg[3]   # WMMA can change the type
     if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
     return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPNE} else self.src[-1].dtype
 
@@ -76,6 +77,12 @@ class LazyOp:
     extract_vars = [x.arg.st.vars() for x in self.lazyops if x.op in BufferOps]
     const_vars = [x.arg.val for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
     return sorted(set.union(*extract_vars, set(const_vars)), key=lambda v: v.expr)
+
+  # TODO: support non-lazyop
+  def __add__(self, x:LazyOp): return LazyOp(BinaryOps.ADD, (self, x))
+  def __sub__(self, x:LazyOp): return LazyOp(BinaryOps.ADD, (self, -x))
+  def __mul__(self, x:LazyOp): return LazyOp(BinaryOps.MUL, (self, x))
+  def __neg__(self): return LazyOp(UnaryOps.NEG, (self,))
 
 # **************** independent FlopCounter ****************
 
@@ -127,6 +134,7 @@ python_alu = {
   BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
+  TernaryOps.MULACC: lambda x,y,z: (x*y)+z,
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
 def truncate_fp16(x):
