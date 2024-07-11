@@ -589,7 +589,7 @@ class UOpGraph:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
       if x in scope_children: scope_end[x] = x
-      if x.op is UOps.DEFINE_ACC and len(x.src) > 1:
+      if x.op is UOps.DEFINE_ACC:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
       else:

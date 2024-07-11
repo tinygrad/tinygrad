@@ -54,20 +54,19 @@ class Lowerer(Kernel):
     if x.op in BufferOps:
       idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
       # TODO: check has_valid in UPat, not here
-      has_valid = valid.op is not UOps.CONST or (valid.arg is not True and valid.arg != 1)
+      has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
         dtype = x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
       if x.arg.idx == -1:
         buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype), (), ("temp", x.arg.st.size))
       else:
-        # NOTE: outbufs is quickly findable in AST
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
-                  (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
+                  (x.arg.idx, any(x.arg.idx == y.arg.idx for y in self.ast)))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
-      # TODO: what is this?
+      # NOTE: only store the local reduceop in the first thread
       if self.group_for_reduces > 0 and x.arg.idx != -1: valid, has_valid = valid * self.idxs[self.first_reduce].eq(0), True
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
