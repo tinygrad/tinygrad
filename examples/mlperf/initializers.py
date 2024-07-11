@@ -27,6 +27,18 @@ class Conv2dHeNormal(nn.Conv2d):
     return x.conv2d(self.weight.cast(dtypes.default_float), self.bias.cast(dtypes.default_float) if self.bias is not None else None,
                     padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
+class Conv2dNormal(Conv2dHeNormal):
+  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, mean=0, std=0.01, b=0.0):
+    super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+    self.weight = Tensor.normal(self.weight.shape, mean=mean, std=std, dtype=dtypes.float32)
+    if bias: self.bias = Tensor.full(self.bias.shape, b, dtype=dtypes.float32)
+
+class Conv2dKaiming(Conv2dHeNormal):
+  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, a=1, b=0.0):
+    super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+    self.weight = Tensor.kaiming_uniform(self.weight.shape, a=a, dtype=dtypes.float32)
+    if bias: self.bias = Tensor.full(self.bias.shape, b, dtype=dtypes.float32)
+
 class Linear(nn.Linear):
   def __init__(self, in_features, out_features, bias=True):
     super().__init__(in_features, out_features, bias=bias)
