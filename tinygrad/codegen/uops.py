@@ -70,7 +70,7 @@ class UOp:
   def const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     if dtype is not None and dtype != dtype.scalar():
-      return UOp(UOps.VECTORIZE, dtype, src=tuple(UOp(UOps.CONST, dtype.scalar(), arg=dtypes.as_const(b, dtype)) for i in range(dtype.count)))
+      return UOp(UOps.VECTORIZE, dtype, src=tuple(UOp(UOps.CONST, dtype.scalar(), arg=dtypes.as_const(b, dtype.scalar())) for i in range(dtype.count)))
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
@@ -304,7 +304,7 @@ def replace_reduce(root):
   else:
     new_uops = [root.src[0]]
 
-  const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
+  const = UOp.const(root.dtype, dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
   acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x not in expands), (acc_number,))
   acc_number += 1
   ret = acc
