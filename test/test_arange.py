@@ -22,10 +22,13 @@ class TestIndexing(unittest.TestCase):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
     needle[1337] = 1
     needle.realize()
-    with Context(GRAPH=1, NOOPT=1):
+    with Context(GRAPH=1, NOOPT=1, FUSE_AS_ONE_KERNEL=1):
       GlobalCounters.reset()
       # TODO: it should work without these reshapes
-      out = ((Tensor.arange(1,16385).reshape(16384,1)-1)*needle.reshape(16384,1)).sum().realize()
+      out = ((Tensor.arange(1,16385).reshape(16384,1)-1)*needle.reshape(16384,1)).sum()
+      sched = out.schedule()
+      assert len(sched) == 1
+      run_schedule(sched)
     assert out.item() == 1337, f"expected 1337, got {out.item()}"
 
   def test_index(self):
