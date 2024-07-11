@@ -133,6 +133,7 @@ jobs:
     - name: Test Docs
       run: |
         python docs/abstractions2.py
+        python docs/abstractions3.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test README
@@ -155,8 +156,8 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Repo line count <8000 lines
-      run: MAX_LINE_COUNT=8000 python sz.py
+    - name: Repo line count <8500 lines
+      run: MAX_LINE_COUNT=8500 python sz.py
 
   testopencl:
     strategy:
@@ -347,6 +348,8 @@ jobs:
       run: PYTHONPATH="." METAL=1 CACHELEVEL=0 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=48 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py
     - name: Fuzz Test models schedule
       run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
+    - name: Run TRANSCENDENTAL math
+      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run process replay tests
       if: env.RUN_PROCESS_REPLAY == '1'
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
@@ -540,6 +543,8 @@ jobs:
           PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
           clang -O2 recognize.c -lm -o recognize
           cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
+      - name: Run TRANSCENDENTAL math
+        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
         run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py

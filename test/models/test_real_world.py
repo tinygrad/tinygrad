@@ -4,7 +4,7 @@ from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import CI, Context
 from tinygrad.shape.symbolic import Variable
 from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model, is_dtype_supported
@@ -83,7 +83,6 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 14.9, 192 if CI else 719, all_jitted=True)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
-  @unittest.skipIf(getenv("JIT"), "failed if JIT is explicitly set")  # TODO: fix this
   def test_gpt2(self):
     dtypes.default_float = dtypes.float16
 
@@ -91,7 +90,8 @@ class TestRealWorld(unittest.TestCase):
     model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))
     derandomize_model(model)
     @TinyJit
-    def test(t, v): return model(t, v).realize()
+    def test(t, v):
+      with Context(JIT=0): return model(t, v).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 164 if CI else 468, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CLANG", "slow")

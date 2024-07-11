@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast, Generator, Tuple
-import time
+import time, pprint
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING
+from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata
 from tinygrad.ops import BufferOps, LoadOps, LazyOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -136,7 +136,7 @@ def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
     prg: Program = get_linearizer(Device[dname].renderer, ast).to_program()
-    if hasattr(prg.uops, "fuzz_paths"):
+    if hasattr(prg.uops, "_fuzz_paths"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return UOpsFuzzerRunner(replace(prg, dname=dname))
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
@@ -148,6 +148,7 @@ def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
 class ExecItem:
   prg: Runner
   bufs: List[Optional[Buffer]]
+  metadata: Optional[List[Metadata]] = None
   def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
@@ -159,7 +160,8 @@ class ExecItem:
       if DEBUG >= 2:
         ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
         print(f"{colored(f'*** {self.prg.dname[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(38-ansilen(self.prg.display_name))} arg {len(self.bufs):3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
-              (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))  # noqa: E501
+              (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)" +  # noqa: E501
+               f" {[repr(m) if DEBUG >= 3 else str(m) for m in self.metadata] if self.metadata else ''}"))
       self.prg.first_run = False
     return et
 
@@ -167,7 +169,7 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY or getenv("USE_COPY_KERNEL")
   if si.ast[0].op is BufferOps.STORE:
     runner = get_runner(si.outputs[0].device, si.ast)
-    return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals])
+    return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals], si.metadata)
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     kernel_type = BufferCopy
@@ -180,7 +182,15 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
-  while len(schedule): yield lower_schedule_item(schedule.pop(0))
+  while len(schedule):
+    si = schedule.pop(0)
+    try: yield lower_schedule_item(si)
+    except Exception as e:
+      if DEBUG >= 2:
+        print(f"error lowering {si.ast[0].op}")
+        print("tensor operations:")
+        pprint.pprint(si.metadata, indent=2)
+      raise e
 
 # **************** main run function ****************
 
