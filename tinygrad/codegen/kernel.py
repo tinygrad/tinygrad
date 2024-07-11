@@ -7,7 +7,7 @@ from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, Cons
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction, to_function_name
+from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, get_contraction, to_function_name # noqa: E501
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
@@ -20,6 +20,16 @@ class OptOps(Enum):
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
+
+@dataclass(frozen=True)
+class KernelInfo:
+  full_shape: Tuple[sint, ...]  # full shape (findable in AST)
+  global_dims: int              # number of global dimensions (this is remapping RANGE to SPECIAL)
+  first_reduce: int             # axis of first_reduce        (findable in AST)
+  group_for_reduces: int        # count that are grouped      (findable in AST)
+  upcasted: int                 # count that are upcasted     (this is remapping RANGE to EXPAND)
+  @property
+  def shape_len(self): return len(self.full_shape)
 
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
@@ -61,9 +71,8 @@ class Kernel:
       return cached_ordered_lazyops[op]
     self.reduceops = dedup([x for out in self.ast for x in ordered_lazyops(out) if x.op in ReduceOps])
 
-    self.outbufs, self.vars = [x.arg for x in self.ast], flatten([x.vars() for x in self.ast])
-    loadops = [BufferOps.LOAD, BufferOps.CONST]
-    self.bufs: List[Union[MemBuffer, ConstBuffer]] = self.outbufs + dedup([x.arg for x in self.lazyops if x.op in loadops])
+    self.vars = flatten([x.vars() for x in self.ast])
+    self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.lazyops if x.op in BufferOps])
 
     # get earlybufs, before any reduceops
     self.earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
@@ -102,8 +111,8 @@ class Kernel:
     ret.opts, ret.ast, ret.lazyops = self.opts, self.ast, self.lazyops
 
     # things downstream of the AST
-    ret.reduceops, ret.outbufs, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
-      self.reduceops, self.outbufs, self.vars, self.bufs, self.earlybufs, self.full_buf_index
+    ret.reduceops, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
+      self.reduceops, self.vars, self.bufs, self.earlybufs, self.full_buf_index
     ret.sts = self.sts[:len(ret.bufs)] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
@@ -364,7 +373,7 @@ class Kernel:
       1: allows kernels with multiple reduce axes and also multiplication of UnaryOps.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
-    if tc_opt is None: tc_opt = self.opts.tc_opt
+    if tc_opt is None: tc_opt = TC_OPT.value
     if not self.opts.tensor_cores and use_tensor_cores != 2: return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
@@ -397,7 +406,7 @@ class Kernel:
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
       check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
-      check((use_tensor_cores:=self.opts.tc) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
+      check((use_tensor_cores:=USE_TC.value) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
       self.applied_opts.append(opt)
       return
@@ -622,7 +631,7 @@ class Kernel:
   def name(self) -> str:
     # kernel name (before late upcast)
     name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
-                 (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
+                 (f"{len(self.ast)}_" if len(self.ast) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # name the function something unique
@@ -630,7 +639,7 @@ class Kernel:
     suffix = f"{'n'+str(Kernel.kernel_cnt[function_name]-1)}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name+colored(suffix, 'BLACK')
 
-  def get_optimized_ast(self) -> Tuple[LazyOp, ...]:
+  def get_optimized_ast(self) -> Tuple[Tuple[LazyOp, ...], KernelInfo]:
     # set the shapetrackers to the optimized ones, fixup reduceop
     # transformed to the final LazyOp
     @functools.lru_cache(None)
@@ -695,4 +704,5 @@ class Kernel:
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    return tuple(fixup_ast(x) for x in self.ast)
+    return tuple(fixup_ast(x) for x in self.ast), \
+      KernelInfo(self.full_shape, self.global_dims, self.first_reduce, self.group_for_reduces, self.upcasted)

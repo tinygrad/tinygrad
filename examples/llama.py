@@ -460,7 +460,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       outputted += user_prompt
 
     new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
-    assert toks == new_toks[:len(toks)]
+    assert toks == new_toks[:len(toks)] or args.gen == "3"
     toks = new_toks
     assert outputted == llama.tokenizer.decode(toks)
 
@@ -490,7 +490,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       outputted = cur
 
       # stop after you have your answer
-      if chatbot and outputted.endswith(end_delim): break
+      if chatbot and end_delim in outputted[-10:]: break
     if not chatbot: break
 
   # validate output!

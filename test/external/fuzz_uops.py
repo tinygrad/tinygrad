@@ -3,7 +3,8 @@ from collections import defaultdict
 import numpy as np
 from dataclasses import replace
 from typing import DefaultDict, Dict, List, Tuple
-from tinygrad.codegen.uops import END_FOR_UOP, UOp, UOpGraph
+from tinygrad.codegen.uops import END_FOR_UOP, UOp
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import DEBUG, colored

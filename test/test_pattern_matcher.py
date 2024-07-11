@@ -2,7 +2,8 @@ import unittest
 from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp, UPat, _match
+from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat, _match
 
 class TestPatternMatcher(TestUOps):
   def test_simple_match(self):

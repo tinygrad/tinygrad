@@ -13,9 +13,6 @@ from tinygrad.engine.schedule import ScheduleItem
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
-  if DEBUG >= 3:
-    from tinygrad.engine.graph import print_tree
-    for op in ast: print_tree(op)
   k = Linearizer(*ast, opts=renderer)
   k.required_optimizations()
   if not NOOPT:
