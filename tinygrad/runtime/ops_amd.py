@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import Tuple, List, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from dataclasses import dataclass
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWComputeQueue, HWCopyQueue, Compiler, CompileError, BufferOptions, hcq_profile
+from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWComputeQueue, HWCopyQueue, hcq_profile, \
+                            Compiler, CompileError, BufferOptions
 from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
