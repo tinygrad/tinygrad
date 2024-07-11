@@ -91,7 +91,7 @@ class NVPTXCompiler(NVCompiler):
       raise CompileError(f"compile failed: {_get_bytes(handle, nvrtc.nvJitLinkGetErrorLog, nvrtc.nvJitLinkGetErrorLogSize, jitlink_check).decode()}")
     return _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, jitlink_check)
 
-class NVCommandQueue(HWCommandQueue):
+class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
   def __del__(self):
     if self.binded_device is not None:
       self.binded_device.synchronize() # Synchronize to ensure the buffer is no longer in use.
@@ -191,7 +191,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     if signal is not None: qmd.release0_address_upper, qmd.release0_address_lower = nvdata64(ctypes.addressof(from_mv(signal)))
     if value is not None: qmd.release0_payload_upper, qmd.release0_payload_lower = nvdata64(value)
 
-  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.compute_gpfifo)
+  def _submit(self, device:NVDevice): self._submit_to_gpfifo(device, device.compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue, HWCopyQueue):
   def _copy(self, dest, src, copy_size):
@@ -211,7 +211,7 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
     if signal is not None: self._patch(cmd_idx, offset=1, data=nvdata64(mv_address(signal)))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
-  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
+  def _submit(self, device:NVDevice): self._submit_to_gpfifo(device, device.dma_gpfifo)
 
 SHT_PROGBITS, SHT_NOBITS, SHF_ALLOC, SHF_EXECINSTR = 0x1, 0x8, 0x2, 0x4
 class NVProgram:

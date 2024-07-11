@@ -151,9 +151,9 @@ class AMDComputeQueue(HWComputeQueue):
       amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(mem_data_sel) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(mem_int_sel) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
       *data64_le(address), *data64_le(value), cst]
 
-  def _timestamp(self, sig):
+  def _timestamp(self, signal):
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0,
-                      address=ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'start_ts').offset)
+                      address=ctypes.addressof(signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
 
   def _signal(self, signal:hsa.amd_signal_t, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
@@ -244,9 +244,9 @@ class AMDCopyQueue(HWCopyQueue):
     if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
-  def _timestamp(self, sig: hsa.amd_signal_t):
+  def _timestamp(self, signal:hsa.amd_signal_t):
     self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
-             *data64_le(ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'start_ts').offset)])
+             *data64_le(ctypes.addressof(signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)])
 
   def _submit(self, device: AMDDevice):
     if device.sdma_queue.put_value - device.sdma_queue.read_ptr[0] > device.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
