@@ -306,7 +306,7 @@ constant_folder = PatternMatcher([
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # Anything that goes from float4 -> gep -> float4 can fold the gep
   (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.GEP, src=UPat(name='val')), allow_any_len=True),
-    lambda root, val: val if all(s.arg == i for i, s in enumerate(root.src)) else None),
+    lambda root, val: val if root.dtype.count == val.dtype.count and all(s.arg == i for i, s in enumerate(root.src)) else None),
   # VECTORIZE-PHI-GEP -> PHI-VECTORIZE
   (UPat(UOps.VECTORIZE, name="root", src=tuple(
     UPat(UOps.PHI, src=(UPat(UOps.GEP, i, src=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
