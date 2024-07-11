@@ -439,7 +439,10 @@ class UOpGraph:
         if in_degree[u] == 0: push(u)
 
     for u in (self._uops):
-      if u.op in END_FOR_UOP: self._uops.insert(max([self._uops.index(l) for l in scope_children[u]])+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+      if u.op in END_FOR_UOP:
+        for i in range(len(self._uops)-1, -1, -1):
+          if self._uops[i] in scope_children[u]: break
+        self._uops.insert(i+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
