@@ -128,7 +128,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
       simple_pads.add(buf.base)
     # realize all expands
-    elif prod(buf.base.st.shape) < prod(buf.st.shape):
+    elif prod(buf.base.st.shape) < prod(buf.st.shape) and not FUSE_AS_ONE_KERNEL:
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         pass # don't realize image to image casts. this is part of a larger problem
       else:
