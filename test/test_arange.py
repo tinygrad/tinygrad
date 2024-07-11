@@ -1,4 +1,5 @@
 import unittest
+import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes
 from tinygrad.helpers import Context
 from tinygrad.engine.realize import run_schedule
@@ -31,16 +32,20 @@ class TestIndexing(unittest.TestCase):
       run_schedule(sched)
     assert out.item() == 1337, f"expected 1337, got {out.item()}"
 
-  @unittest.expectedFailure
   def test_manual_index(self):
-    #dataset = Tensor.rand(16384, 256).realize()
-    #idxs = Tensor([0,3,5,6]).realize()
+    dataset = Tensor.rand(16384, 256).realize()
+    idxs = Tensor([0,3,5,6]).realize()
+    real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
     with Context(NOOPT=1, FUSE_AS_ONE_KERNEL=1):
       GlobalCounters.reset()
-      rng = Tensor.arange(1,16385).reshape(1,16384,1).expand(4, 16384, 256)-1
-      sched = rng.schedule()
+      rng = Tensor.ones(4, 256, 16384, dtype=dtypes.int)._cumsum(axis=-1, _first_zero=True).reshape(4, 256, 16384, 1)
+      idxs = idxs.reshape(4,1,1,1).expand(4, 256, 16384, 1)
+      X = ((rng==idxs).float() * dataset.T.reshape(1, 256, 16384, 1).expand(4, 256, 16384, 1)).sum(axis=(2,3))
+      sched = X.schedule()
+      assert len(sched) == 1
       run_schedule(sched)
+    np.testing.assert_allclose(real_index, X.numpy())
 
   def test_index(self):
     dataset = Tensor.rand(16384, 256).realize()
