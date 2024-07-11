@@ -332,6 +332,8 @@ jobs:
         METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run metal test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
+    - name: Run TRANSCENDENTAL math
+      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Run ONNX
@@ -523,6 +525,8 @@ jobs:
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
         run: python -m pytest -n=auto test/ --durations=20
+      - name: Run TRANSCENDENTAL math
+        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       # - name: Run test_ops with FUZZ_UOPS=1
       #   if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
       #   run: FUZZ_UOPS=1 python -m pytest -n=auto test/test_ops.py --durations=20
