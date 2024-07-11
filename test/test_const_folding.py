@@ -13,10 +13,8 @@ def _check_ast_count(desired_count:int, t:Tensor):
   assert len(asts) == desired_count
 
 class TestUnaryOpsConstFolding(unittest.TestCase):
-  def test_all_const_ops_todo(self):
-    _check_ast_count(0, Tensor.ones(4).exp())
-
   def test_all_consts_ops(self):
+    _check_ast_count(0, Tensor.ones(4).exp())
     _check_ast_count(0, Tensor.ones(4).sqrt())
     _check_ast_count(0, Tensor.ones(4) + Tensor.ones(4))
     _check_ast_count(0, Tensor.ones(4) / Tensor.ones(4))
