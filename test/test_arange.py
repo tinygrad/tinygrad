@@ -50,6 +50,7 @@ class TestIndexing(unittest.TestCase):
   def test_index(self):
     dataset = Tensor.rand(16384, 256).realize()
     idxs = Tensor([0,3,5,6]).realize()
+    real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
     with Context(NOOPT=1):
       GlobalCounters.reset()
@@ -58,6 +59,7 @@ class TestIndexing(unittest.TestCase):
       sched = X.schedule()
       #assert len(sched) == 1
       run_schedule(sched)
+    np.testing.assert_allclose(real_index, X.numpy())
 
 if __name__ == "__main__":
   unittest.main()
