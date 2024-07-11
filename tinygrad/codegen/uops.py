@@ -59,8 +59,6 @@ class UOp:
   def __xor__(self, x): return UOp.alu(BinaryOps.XOR, self, ufix(self.dtype, x))
   def __and__(self, x): return UOp.alu(BinaryOps.AND, self, ufix(self.dtype, x))
   def __or__(self, x): return UOp.alu(BinaryOps.OR, self, ufix(self.dtype, x))
-  def __lshift__(self, x): return UOp.alu(BinaryOps.SHL, self, ufix(self.dtype, x))
-  def __rshift__(self, x): return UOp.alu(BinaryOps.SHR, self, ufix(self.dtype, x))
   def ne(self, x): return UOp.alu(BinaryOps.CMPNE, self, ufix(self.dtype, x))
   def eq(self, x): return -self.ne(x)
   def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
