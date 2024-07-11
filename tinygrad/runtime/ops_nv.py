@@ -97,6 +97,15 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
       self.binded_device.synchronize() # Synchronize to ensure the buffer is no longer in use.
       self.binded_device._gpu_free(self.hw_page)
 
+  @hcq_command
+  def setup(self, compute_class=None, copy_class=None, local_mem_window=None, shared_mem_window=None, local_mem=None, local_mem_tpc_bytes=None):
+    if compute_class: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), compute_class]
+    if copy_class: self.q += [nvmethod(4, nv_gpu.NVC6C0_SET_OBJECT, 1), copy_class]
+    if local_mem_window: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *nvdata64(local_mem_window)]
+    if shared_mem_window: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *nvdata64(shared_mem_window)]
+    if local_mem: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(local_mem)]
+    if local_mem_tpc_bytes: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(local_mem_tpc_bytes), 0x40]
+
   def _wait(self, signal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(mv_address(signal)), *nvdata64_le(value),
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
@@ -547,9 +556,7 @@ class NVDevice(HCQCompatCompiled):
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
                      functools.partial(NVProgram, self), NVComputeQueue, NVCopyQueue, timeline_signals=[self._alloc_signal(), self._alloc_signal()])
 
-    self._cmdq_setup_compute_gpfifo()
-    self._cmdq_setup_dma_gpfifo()
-
+    self._setup_gpfifos()
     NVDevice.devices.append(self)
 
   @classmethod
@@ -604,26 +611,18 @@ class NVDevice(HCQCompatCompiled):
     return GPFifo(ring=to_mv(gpfifo_area.va_addr + offset, entries * 8).cast("Q"), entries_count=entries, token=ws_token_params.workSubmitToken,
                   controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.va_addr + offset + entries * 8))
 
-  def _cmdq_setup_compute_gpfifo(self):
+  def _setup_gpfifos(self):
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window, self.slm_per_thread = 0xfe000000, 0xff000000, 0
 
-    queue = NVComputeQueue()
-    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), self.compute_class]
-    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *nvdata64(self.local_mem_window)]
-    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *nvdata64(self.shared_mem_window)]
-    queue.signal(self.timeline_signal, self.timeline_value).submit(self)
-    self.timeline_value += 1
+    NVComputeQueue().setup(compute_class=self.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
+                    .signal(self.timeline_signal, self.timeline_value).submit(self)
 
-    self.synchronize()
+    NVCopyQueue().wait(self.timeline_signal, self.timeline_value) \
+                 .setup(copy_class=nv_gpu.AMPERE_DMA_COPY_B) \
+                 .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
 
-  def _cmdq_setup_dma_gpfifo(self):
-    queue = NVCopyQueue()
-    queue.q += [nvmethod(4, nv_gpu.NVC6C0_SET_OBJECT, 1), nv_gpu.AMPERE_DMA_COPY_B]
-    queue.signal(self.timeline_signal, self.timeline_value).submit(self)
-    self.timeline_value += 1
-
-    self.synchronize()
+    self.timeline_value += 2
 
   def _ensure_has_local_memory(self, required):
     if self.slm_per_thread >= required: return
@@ -636,8 +635,6 @@ class NVDevice(HCQCompatCompiled):
     bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
     self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True)
 
-    queue = NVComputeQueue()
-    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(self.shader_local_mem.va_addr)]
-    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(bytes_per_tpc), 0x40]
-    queue.signal(self.timeline_signal, self.timeline_value).submit(self)
+    NVComputeQueue().setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
+                    .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
