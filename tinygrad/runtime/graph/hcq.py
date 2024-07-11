@@ -82,7 +82,7 @@ class HCQGraph(MultiGraphRunner):
       self.last_ji[enqueue_queue] = j
 
     # Build hardware queues.
-    self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
+    self.op_cmd_idx: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
     self.kickoff_wait_cmds: Dict[Any, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
 
@@ -101,14 +101,13 @@ class HCQGraph(MultiGraphRunner):
       if prof_info: enqueue_queue.timestamp(prof_info[0])
 
       # Encode main commands based on ji type.
-      if isinstance(ji.prg, CompiledRunner):
-        enqueue_queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals))
-        self.exec_ptrs[j] = (enqueue_queue, len(enqueue_queue) - 1)
+      if isinstance(ji.prg, CompiledRunner): enqueue_queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         Device[src.device]._gpu_map(dest._buf) #type: ignore
         enqueue_queue.copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])
+      self.op_cmd_idx[j] = (enqueue_queue, len(enqueue_queue) - 1)
 
       if signal_val is not None: enqueue_queue.signal(signal, signal_val)
 
@@ -137,14 +136,16 @@ class HCQGraph(MultiGraphRunner):
         dev.raw_prof_records += [(dev._read_timestamp(st), dev._read_timestamp(en), desc, is_cp)]
 
     # Update rawbuffers
-    for (j,i),input_idx in self.input_replace.items(): self.ji_args_bufs[j][i] = input_rawbuffers[input_idx]._buf.va_addr
+    for (j,i),input_idx in self.input_replace.items():
+      if j in self.ji_args_bufs: self.ji_args_bufs[j][i] = input_rawbuffers[input_idx]._buf.va_addr
+      else: self.op_cmd_idx[j][0].update_copy(self.op_cmd_idx[j][1], **{('dest' if i == 0 else 'src'): input_rawbuffers[input_idx]._buf.va_addr})
 
     # Update var_vals
     for j in self.jc_idx_with_updatable_var_vals:
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars): self.ji_args_vars[j][i] = var_vals[v]
 
     for j in self.jc_idx_with_updatable_launch_dims:
-      queue, cmd_ptr = self.exec_ptrs[j]
+      queue, cmd_ptr = self.op_cmd_idx[j]
       queue.update_exec(cmd_ptr, *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
 
     for dev in self.devices:

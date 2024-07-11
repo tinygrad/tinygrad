@@ -135,9 +135,9 @@ class PythonProgram:
         elif uop is UOps.WMMA:
           # here are the models for the WMMA instruction on the different hardware
           def wmma_helper(WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
-            assert len(inp[0]) == NUM_A, f"A must have {NUM_A} elements per thread"
-            assert len(inp[1]) == NUM_B, f"B must have {NUM_B} elements per thread"
-            assert len(inp[2]) == NUM_C, f"C must have {NUM_C} elements per thread"
+            assert len(inp[0]) == NUM_A, f"A must have {NUM_A} elements per thread, it has {len(inp[0])}"
+            assert len(inp[1]) == NUM_B, f"B must have {NUM_B} elements per thread, it has {len(inp[1])}"
+            assert len(inp[2]) == NUM_C, f"C must have {NUM_C} elements per thread, it has {len(inp[2])}"
             assert len(flatten(inp[0])) == NUM_A * warp_size, f"WMMA must have {NUM_A * warp_size} total elements for A in WMMA"
             assert len(flatten(inp[1])) == NUM_B * warp_size, f"WMMA must have {NUM_B * warp_size} total elements for B in WMMA"
             assert len(flatten(inp[2])) == NUM_C * warp_size, f"WMMA must have {NUM_C * warp_size} total elements for C in WMMA"
