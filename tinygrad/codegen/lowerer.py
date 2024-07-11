@@ -10,11 +10,6 @@ from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, DEBUG, getenv, prod, diskcache_put, ContextVar
 
-# TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
-def variable_to_uop(x, ctx=None) -> UOp:
-  if isinstance(x, int): return UOp.const(dtypes.int32, x)
-  return x.render(render_ops, ctx)
-
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
 render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
                     MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*variable_to_uop(self.b, ctx),
@@ -25,12 +20,20 @@ render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
+# TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
+def variable_to_uop(x, ctx=None) -> UOp:
+  if isinstance(x, int): return UOp.const(dtypes.int32, x)
+  return x.render(render_ops, ctx)
+
 # TODO: change this once UOps is ready to replace symbolic
 def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
   fake_idxs = [Variable(f"__idx{i}", 0, s-1) for i,s in enumerate(st.shape)]
   idx, valid = st.expr_idxs(fake_idxs)
   ctx = dict(zip(fake_idxs, idxs))
-  return idx.render(render_ops, ctx), valid.render(render_ops, ctx).cast(dtypes.bool)
+  uidx, uvalid = idx.render(render_ops, ctx), valid.render(render_ops, ctx)
+  if uvalid.op is UOps.CONST: uvalid = UOp.const(dtypes.bool, uvalid.arg)
+  assert uvalid.dtype == dtypes.bool
+  return uidx, uvalid
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0) -> Tuple[List[UOp], List[UOp]]:
   local_idxs = loop_local_idxs = [UOp(UOps.SPECIAL, dtypes.int32, (), (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501
@@ -88,7 +91,7 @@ class Lowerer(Kernel):
 
   def linearize(self) -> Lowerer:
     modified_ast, ki = self.get_optimized_ast()
-    if DEBUG >= 4:
+    if DEBUG >= 3:
       from tinygrad.engine.graph import print_tree
       for mast in modified_ast: print_tree(mast)
 

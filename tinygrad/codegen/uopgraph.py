@@ -383,7 +383,6 @@ constant_folder = PatternMatcher([
   # ** self folding **
   (-(-UOp.var('x')), lambda x: x),    # -(-x) -> x
   (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
-  (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
   (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
   (UOp.var('x') * -1, lambda x: -x),  # x*-1 -> -x
   (UOp.var('x') // UOp.var('x'), lambda x: UOp.const(x.dtype, 1)), # x//x -> 1
@@ -406,6 +405,8 @@ constant_folder = PatternMatcher([
   # *** rules from symbolic ***
   # two stage mul, (x*c1)*c2 = x*(c1*c2)
   ((UOp.var("x") * UOp.cvar("c1")) * UOp.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
+  # -(x+y) -> -x + -y
+  (-(UOp.var("x") + UOp.var("y")), lambda x,y: (-x)+(-y)),
   # x%1 -> 0
   (UOp.var("x") % UOp.const(None, 1), lambda x: UOp.const(x.dtype, 0)),
   # (x*c0)+(x*c1) -> x*(c0+c1)
