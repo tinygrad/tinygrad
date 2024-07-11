@@ -1,7 +1,7 @@
 from typing import Optional, List, Tuple, Dict
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import getenv, to_function_name
+from tinygrad.helpers import TC, TC_OPT, getenv, to_function_name
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.shape.symbolic import sym_infer, sint, Variable
 from tinygrad.dtype import DType
@@ -58,8 +58,8 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   @functools.cached_property
-  def tc_opt(self): return getenv("TC_OPT")
+  def tc_opt(self): return TC_OPT
   @functools.cached_property
-  def tc(self): return getenv("TC", 1)
+  def tc(self): return TC
 
   def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("needs a renderer")
