@@ -119,7 +119,7 @@ class TestLinearizer(unittest.TestCase):
     # verify_lazyop is correct here
     verify_lazyop(store)
     # TODO: fixup_ast merges the wrong axes
-    with self.assertRaises(Exception):
+    with Context(VERIFY_POST_FIXUP=1, NOOPT=1):
       helper_linearizer_ast((store, ), [x])
     # tinygrad ref
     y_tiny = x.var(axis=2, correction=0)

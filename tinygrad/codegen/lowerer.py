@@ -4,11 +4,11 @@ import functools
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, get_lazyop_info, verify_lazyop
 from tinygrad.codegen.uops import UOp, flops_mem, UOps
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Program
-from tinygrad.helpers import to_function_name, DEBUG, getenv, prod, diskcache_put, ContextVar
+from tinygrad.helpers import VERIFY_POST_FIXUP, to_function_name, DEBUG, getenv, prod, diskcache_put, ContextVar
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -113,7 +113,11 @@ class Lowerer(Kernel):
     modified_ast, ki = self.get_optimized_ast()
     if DEBUG >= 3:
       from tinygrad.engine.graph import print_tree
+      for op in self.ast: print_tree(op)
+      print("-------")
       for mast in modified_ast: print_tree(mast)
+    # TODO: figure out local reduce output_shape
+    if VERIFY_POST_FIXUP: verify_lazyop(*modified_ast)
 
     if self.opts.has_local:
       # define indexes
