@@ -185,7 +185,7 @@ class AMDComputeQueue(HWComputeQueue):
                          len(self.q) | amd_gpu.INDIRECT_BUFFER_VALID]
     self.q = hw_view # type: ignore
 
-  def _submit(self, device: AMDDevice):
+  def _submit(self, device):
     cmds = self.indirect_cmd if device == self.binded_device else self.q
 
     for i, value in enumerate(cmds): device.compute_queue.ring[(device.compute_queue.put_value + i) % len(device.compute_queue.ring)] = value
@@ -248,7 +248,7 @@ class AMDCopyQueue(HWCopyQueue):
     self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
              *data64_le(ctypes.addressof(signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)])
 
-  def _submit(self, device: AMDDevice):
+  def _submit(self, device):
     if device.sdma_queue.put_value - device.sdma_queue.read_ptr[0] > device.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
 
     tail_blit_dword = 0

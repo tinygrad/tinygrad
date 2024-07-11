@@ -233,10 +233,10 @@ class HWCommandQueue:
     return self
   def _update_wait(self, cmd_idx, signal, value): raise NotImplementedError("backend should overload this function")
 
-  def submit(self, device:Compiled):
+  def submit(self, device:HCQCompatCompiled):
     self._submit(device)
     return self
-  def _submit(self, device:Compiled): raise NotImplementedError("backend should overload this function")
+  def _submit(self, device:HCQCompatCompiled): raise NotImplementedError("backend should overload this function")
 
 class HWComputeQueue(HWCommandQueue):
   @hcq_command

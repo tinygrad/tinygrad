@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, cast
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
                             hcq_profile, Compiler, CompileError, BufferOptions
@@ -191,7 +191,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     if signal is not None: qmd.release0_address_upper, qmd.release0_address_lower = nvdata64(ctypes.addressof(from_mv(signal)))
     if value is not None: qmd.release0_payload_upper, qmd.release0_payload_lower = nvdata64(value)
 
-  def _submit(self, device:NVDevice): self._submit_to_gpfifo(device, device.compute_gpfifo)
+  def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue, HWCopyQueue):
   def _copy(self, dest, src, copy_size):
@@ -211,7 +211,7 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
     if signal is not None: self._patch(cmd_idx, offset=1, data=nvdata64(mv_address(signal)))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
-  def _submit(self, device:NVDevice): self._submit_to_gpfifo(device, device.dma_gpfifo)
+  def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).dma_gpfifo)
 
 SHT_PROGBITS, SHT_NOBITS, SHF_ALLOC, SHF_EXECINSTR = 0x1, 0x8, 0x2, 0x4
 class NVProgram:
