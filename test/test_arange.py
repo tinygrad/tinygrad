@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, GlobalCounters
+from tinygrad import Tensor, GlobalCounters, dtypes
 from tinygrad.helpers import Context
 from tinygrad.engine.realize import run_schedule
 
@@ -18,6 +18,16 @@ class TestArange(unittest.TestCase):
     assert f2 / f1 < 15, f"bad complexity, flops {f2/f1:.1f}X while inputs 10X"
 
 class TestIndexing(unittest.TestCase):
+  def test_arange_2_reduce(self):
+    needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
+    needle[1337] = 1
+    needle.realize()
+    with Context(GRAPH=1):
+      GlobalCounters.reset()
+      # TODO: it should work without these reshapes
+      out = ((Tensor.arange(1,16385).reshape(16384,1)-1)*needle.reshape(16384,1)).sum().realize()
+    assert out.item() == 1337
+
   def test_index(self):
     dataset = Tensor.rand(16384, 256).realize()
     idxs = Tensor([0,3,5,6]).realize()
