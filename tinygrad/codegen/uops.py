@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Any, Set, cast, List
+from typing import Optional, Tuple, Any, Set, cast, List, Union
 import functools
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -62,12 +62,12 @@ class UOp:
   def ge(self, x): return -self.lt(x)
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
   def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
-  def __getattribute__(self, attr):
-    if attr == "const": return functools.partial(UOp.const, self.dtype)
-    return super().__getattribute__(attr)
+  def const(self:Union[UOp, DType, None], b:ConstType|Variable):
+    if isinstance(self, UOp): return UOp._const(self.dtype, b)
+    return UOp._const(self, b)
   @staticmethod
   @functools.lru_cache(maxsize=None)
-  def const(dtype:Optional[DType], b:ConstType|Variable):
+  def _const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
