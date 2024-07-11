@@ -468,6 +468,7 @@ class Kernel:
       self.dont_use_locals = True
     elif opt.op is OptOps.MERGE:
       check(axis >= self.shape_len-self.upcasted, "only merge upcasted")
+      check(self.full_shape[axis:axis+2] == self.output_shape[axis:axis+2], "can't merge reduces")
       self.reshape_and_permute(None, tuple(range(axis)) + (axis+1, axis) + tuple(range(axis+2, self.shape_len)))
       self.reshape_and_permute(lambda x: x[0:axis] + (x[axis] * x[axis+1],) + x[axis+2:], None)
       self.upcasted -= 1
