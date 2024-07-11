@@ -3,7 +3,8 @@ import unittest
 from tinygrad.engine.graph import print_tree
 
 from tinygrad import Tensor, dtypes
-from tinygrad.codegen.uops import UOps, UOp, UPat
+from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uopgraph import UPat
 from tinygrad.ops import BinaryOps
 
 import sys, io
