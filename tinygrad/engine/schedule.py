@@ -128,7 +128,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
       simple_pads.add(buf.base)
     # realize all expands
-    if buf.base.op in ReduceOps and buf.base.srcs[0].op is LoadOps.CONST:
+    if buf.base.op in ReduceOps and buf.base.srcs[0].base.op is LoadOps.CONST:
       return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
     elif prod(buf.base.st.shape) < prod(buf.st.shape):
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
