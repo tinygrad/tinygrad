@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 from typing import Optional, Union
 import argparse
-from tqdm import trange
 import numpy as np
 import tiktoken
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable
-from tinygrad.helpers import Timing, DEBUG, getenv, fetch, colored
+from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 
@@ -109,7 +108,7 @@ class Transformer:
     return ret.flatten().realize()
 
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    forward = (self.forward_jit if (isinstance(tokens, Variable) or tokens.shape[1] == 1) and getenv("JIT") else self.forward)
+    forward = (self.forward_jit if JIT and (isinstance(tokens, Variable) or tokens.shape[1] == 1) else self.forward)
     return forward(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257

@@ -4,7 +4,8 @@ from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOps, UOp, UOpGraph
+from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
@@ -29,12 +30,16 @@ class CStyleLanguage(Renderer):
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
     BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
+    BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
-    if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x[0]}))"
-    if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
+  def render_cast(self, x:str, var_dtype:DType, bitcast=False) -> str:
+    if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x}))"
+    return f"({self.render_dtype(var_dtype)})({x})"
+
+  # returns a str expression of the vectorized xs with the given type
+  def render_vectorize(self, x:List[str], var_dtype:DType) -> str:
     assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
     return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
@@ -43,10 +48,11 @@ class CStyleLanguage(Renderer):
   def render_const(self, x:ConstType, dtype:DType) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    elif dtype == dtypes.bool: val = "1" if x else "0"
-    elif dtype == dtypes.float: val = f"{x}f"
+    elif dtype.scalar() == dtypes.bool: val = "1" if x else "0"
+    elif dtype.scalar() == dtypes.float: val = f"{x}f"
     else: val = str(x)
-    return (self.render_cast([val] * dtype.count, dtype) if dtype.count > 1 or dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
+    if dtype.count > 1: return self.render_vectorize([val] * dtype.count, dtype)
+    return (self.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -56,10 +62,8 @@ class CStyleLanguage(Renderer):
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and output_dtype.scalar() != dtypes.float16:
       return f"vload_half{'' if output_dtype.count == 1 else str(output_dtype.count)}(0, {buf_name}+{idx})"
     if output_dtype.count > 1:
-      out_val = f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{self.render_dtype(buf_dtype)}{output_dtype.count}*)({buf_name}+{idx}))"  # noqa: E501
-    else:
-      out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
-    return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
+      return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{self.render_dtype(buf_dtype)}{output_dtype.count}*)({buf_name}+{idx}))"  # noqa: E501
+    return f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
 
   def get_kernel_modifier(self, uops:UOpGraph) -> str: return ""
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:UOpGraph, prefix=None) -> str:
@@ -105,6 +109,7 @@ class CStyleLanguage(Renderer):
 
     child_count = Counter(v for ru in uops for v in ru.src)
 
+    seen_vars = set()
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       # these four uops don't have output dtypes
@@ -139,38 +144,40 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.LOAD:
           val = self.render_load(dtype, r[src[0]], src[0].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
           # NOTE: this relies on the load not happening if it's in the unselected branch
-          if len(src) > 3: val = self.code_for_op[TernaryOps.WHERE](r[src[2]], val, r[src[3]], dtype)
+          if len(src) > 3 and src[2].op is UOps.ALU: val = self.code_for_op[TernaryOps.WHERE](r[src[2]], val, r[src[3]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
           kk(f"{r[src[0]]} = {r[src[1]]};")
           r[u] = r[src[0]]
-        elif uop in {UOps.CAST, UOps.BITCAST}:
+        elif uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}:
+          assert len(src) == 1 or (uop is UOps.VECTORIZE and len(src) > 1), "Invalid source length for operation"
           if uop is UOps.BITCAST:
-            assert len(src) == 1
             precast = ssa('precast')
             kk(f"{self.render_dtype(cast(DType, src[0].dtype))} {precast} = {r[src[0]]};")
-            val = self.render_cast([precast], dtype, bitcast=True)
-          else:
-            val = self.render_cast([r[x] for x in src], dtype, bitcast=False)
+            val = self.render_cast(precast, dtype, bitcast=True)
+          elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
+          else: val = self.render_vectorize([r[x] for x in src], dtype)
           if child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
           kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_VAR:
+          assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
+          seen_vars.add(args.expr)
           bufs.append((args.expr, (dtype,False)))
           r[u] = args.expr
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(args[0], dtype)};")
+        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
           r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
-        else: raise RuntimeError(f"failed to render {uop}")
+        else: raise RuntimeError(f"failed to render {u}")
 
     return self.render_kernel(name, kernel, bufs, uops)
 
@@ -199,7 +206,7 @@ class OpenCLRenderer(CStyleLanguage):
   uses_vload = True
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
-    return f"as_{self.render_dtype(var_dtype)}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+    return f"as_{self.render_dtype(var_dtype)}({x})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
@@ -228,10 +235,10 @@ class MetalRenderer(CStyleLanguage):
     UnaryOps.SQRT: lambda x,dtype: f"(bfloat)sqrt({x})" if dtype == dtypes.bfloat16 else f"sqrt({x})",
     UnaryOps.EXP2: lambda x,dtype: f"(bfloat)exp2({x})" if dtype == dtypes.bfloat16 else f"exp2({x})",
     UnaryOps.LOG2: lambda x,dtype: f"(bfloat)log2({x})" if dtype == dtypes.bfloat16 else f"log2({x})",
-    UnaryOps.SIN: lambda x,dtype: f"(bfloat)sin({x})" if dtype == dtypes.bfloat16 else f"sin({x})",}
+    UnaryOps.SIN: lambda x,dtype: f"(bfloat)precise::sin({x})" if dtype == dtypes.bfloat16 else f"precise::sin({x})",}
 
-  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
-    return f"as_type<{self.render_dtype(var_dtype)}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+  def render_cast(self, x:str, var_dtype:DType, bitcast=False) -> str:
+    return f"as_type<{self.render_dtype(var_dtype)}>({x})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.op is UOps.WMMA])
@@ -349,18 +356,18 @@ f"""  __attribute__((device)) __attribute__((const)) {dt} __ocml_fmax_f{n}({dt},
     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""
 struct hip_bfloat16 {
   unsigned short data;
-  __attribute__((device)) hip_bfloat16(float val) {
+  inline __attribute__((device)) hip_bfloat16(float val) {
     union { float fp32; unsigned int u32; } u = {val};
     if (~u.u32 & 0x7f800000) { u.u32 += 0x7fff + ((u.u32 >> 16) & 1); } else if (u.u32 & 0xffff) { u.u32 |= 0x10000; }
     data = (u.u32 >> 16);
   }
-  __attribute__((device)) operator float() const {
+  inline __attribute__((device)) operator float() const {
     unsigned int uval = data << 16;
     return *reinterpret_cast<float*>(&uval);
   }
 };
-static __attribute__((device)) bool operator<(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) < ((float)b); }
-static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) == ((float)b); }
+static inline __attribute__((device)) bool operator<(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) < ((float)b); }
+static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) == ((float)b); }
 """)
 
     if any(uop.dtype == dtypes.half for uop in uops):
@@ -371,7 +378,7 @@ static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) {
 
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
       if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
-      else: prefix.append(f"static __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
+      else: prefix.append(f"static inline __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
   half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
   c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
@@ -384,3 +391,4 @@ static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) {
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
 
 class NVRenderer(CUDARenderer): device = "NV"
+class HIPRenderer(AMDRenderer): device = "HIP"

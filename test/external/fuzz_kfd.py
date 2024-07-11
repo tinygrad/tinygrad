@@ -16,7 +16,7 @@ if __name__ == "__main__":
     d2, b2 = random.choice(buffers)
     d1._gpu_map(b2)
     q = HWComputeQueue()
-    q.signal(sig:=AMDDevice._get_signal(10))
+    q.signal(sig:=AMDDevice._alloc_signal(10))
     qc = HWCopyQueue()
     qc.wait(sig)
     qc.copy(b1.va_addr, b2.va_addr, min(b1.size, b2.size))

@@ -16,6 +16,16 @@ tinybox has two 1600W PSUs, which together exceed the capacity of most 120V hous
 
 You'll also want to connect the Ethernet port without a rubber stopper to your home network.
 
+While it's designed primarily for the home or office, the tinybox is 12U rack mountable using [these rails](https://rackmountmart.store.turbify.net/26slidrailfo.html).
+
+## Power limiting the box
+
+While a tinybox should ideally be run without power limits, there are cases where you might want to run the box off of a single outlet.
+
+In such cases, it is possible to power limit the box using the provided `power-limit` script, which will power limit all of the GPUs to a specified wattage.
+
+`sudo power-limit 150` should be good to run off of a single 120V 15A outlet.
+
 ## Connecting to the box
 
 tinybox ships with a relatively basic install of Ubuntu 22.04. To do initial setup, you can either plug in a VGA monitor and keyboard, or you can connect remotely to the machine using the BMC. The BMC IP and password are displayed on the screen.
@@ -25,6 +35,14 @@ tinybox ships with a relatively basic install of Ubuntu 22.04. To do initial set
 The default username is `tiny` and the default password is `tiny`. Once you are logged in, you can add an SSH key to authorized keys to connect over SSH (on the normal IP). Exit `ipmitool` with `~~.`
 
 The BMC also has a web interface you can use if you find that easier.
+
+## Changing the BMC password
+
+If you try to change the BMC password over IPMI or over the web interface, you will notice that it does not persist across reboots, and the password will revert to the one displayed on the screen.
+
+If you want to change the password imperatively, remove the `/root/.bmc_password` file and then set the password, the BMC password will also no longer be displayed on the screen. Additionally, you may modify the password stored in the `/root/.bmc_password` file to one that you choose if you still want it displayed on the screen.
+
+Reboot after making these changes.
 
 ## What do I use it for?
 

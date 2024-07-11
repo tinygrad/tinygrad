@@ -51,7 +51,7 @@ And we can change `DEBUG` to `4` to see the generated code.
 As it turns out, 90% of what you need for neural networks are a decent autograd/tensor library.
 Throw in an optimizer, a data loader, and some compute, and you have all you need.
 
-```py
+```python
 from tinygrad import Tensor, nn
 
 class LinearNet:
@@ -66,11 +66,12 @@ optim = nn.optim.Adam([model.l1, model.l2], lr=0.001)
 
 x, y = Tensor.rand(4, 1, 28, 28), Tensor([2,4,3,7])  # replace with real mnist dataloader
 
-for i in range(10):
-  optim.zero_grad()
-  loss = model(x).sparse_categorical_crossentropy(y).backward()
-  optim.step()
-  print(i, loss.item())
+with Tensor.train():
+  for i in range(10):
+    optim.zero_grad()
+    loss = model(x).sparse_categorical_crossentropy(y).backward()
+    optim.step()
+    print(i, loss.item())
 ```
 
 See [examples/beautiful_mnist.py](examples/beautiful_mnist.py) for the full version that gets 98% in ~5 seconds
@@ -109,11 +110,11 @@ python3 -m pip install git+https://github.com/tinygrad/tinygrad.git
 
 ## Documentation
 
-Documentation along with a quick start guide can be found in the [docs/](/docs) directory.
+Documentation along with a quick start guide can be found on the [docs website](https://docs.tinygrad.org/) built from the [docs/](/docs) directory.
 
 ### Quick example comparing to PyTorch
 
-```py
+```python
 from tinygrad import Tensor
 
 x = Tensor.eye(3, requires_grad=True)
@@ -126,7 +127,7 @@ print(y.grad.numpy())  # dz/dy
 ```
 
 The same thing but in PyTorch:
-```py
+```python
 import torch
 
 x = torch.eye(3, requires_grad=True)

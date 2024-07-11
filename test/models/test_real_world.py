@@ -4,7 +4,7 @@ from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import CI, Context
 from tinygrad.shape.symbolic import Variable
 from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model, is_dtype_supported
@@ -12,7 +12,8 @@ from test.helpers import derandomize_model, is_dtype_supported
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet, hyp
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
-from examples.stable_diffusion import UNetModel, ResBlock
+from examples.stable_diffusion import UNetModel, unet_params
+from extra.models.unet import ResBlock
 
 global_mem_used = 0
 def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jitted=False):
@@ -46,23 +47,28 @@ class TestRealWorld(unittest.TestCase):
   def tearDown(self):
     dtypes.default_float = self.old_float
 
-  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(CI, "too big for CI")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_stable_diffusion(self):
-    model = UNetModel()
+    params = unet_params
+    if CI:
+      params["model_ch"] = 16
+      params["ctx_dim"] = 16
+      params["num_res_blocks"] = 1
+      params["n_heads"] = 2
+    model = UNetModel(**params)
     derandomize_model(model)
     @TinyJit
-    def test(t, t2): return model(t, 801, t2).realize()
-    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
+    def test(t, t2): return model(t, Tensor([801]), t2).realize()
+    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, params["ctx_dim"])), test, 18.0, 513 if CI else 839)
 
-  def test_mini_stable_diffusion(self):
+  def test_unet_resblock(self):
     model = [ResBlock(16, 24, 16) for _ in range(4)]
     derandomize_model(model)
     @TinyJit
     def test(t, t2):
       for l in model: t = l(t, t2)
       return t.realize()
-    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 43)
+    helper_test("test_unet_resblock", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 43)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_llama(self):
@@ -77,7 +83,6 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 14.9, 192 if CI else 719, all_jitted=True)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
-  @unittest.skipIf(getenv("JIT"), "failed if JIT is explicitly set")  # TODO: fix this
   def test_gpt2(self):
     dtypes.default_float = dtypes.float16
 
@@ -85,7 +90,8 @@ class TestRealWorld(unittest.TestCase):
     model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))
     derandomize_model(model)
     @TinyJit
-    def test(t, v): return model(t, v).realize()
+    def test(t, v):
+      with Context(JIT=0): return model(t, v).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 164 if CI else 468, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CLANG", "slow")

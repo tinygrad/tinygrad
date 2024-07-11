@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, di
 from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
-from tinygrad.codegen.uops import UOpGraph
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.engine.realize import CompiledRunner
@@ -45,7 +45,7 @@ def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_
   input_bufs = [rawbufs[i] for i,_ in car.p.globals]
   for _ in range(cnt):
     if clear_l2:
-      with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
+      with Context(DEBUG=0, BEAM=0, CAPTURING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
     tms.append(cast(float, car(input_bufs, var_vals, wait=True))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
@@ -118,7 +118,7 @@ beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
 def beam_search(lin:Linearizer, rawbufs:List[Buffer], amt:int, allow_test_size=True) -> Linearizer:
   global beam_pool
   key = {"ast": lin.ast[0].key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device, "suffix": lin.opts.suffix}
-  if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
+  if not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
     ret = lin.copy()
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret

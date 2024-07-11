@@ -3,10 +3,11 @@ from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  return Tensor.stack(freqs.cos().half(), freqs.sin().half(), dim=-1).reshape(1, end, 1, dim//2, 2)
+  # TODO: move dtype outside this
+  return Tensor.stack(freqs.cos().cast(dtype), freqs.sin().cast(dtype), dim=-1).reshape(1, end, 1, dim//2, 2)
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, c, d):
@@ -15,7 +16,7 @@ def complex_mult(A, c, d):
   co = a*d + b*c
   return ro.cat(co, dim=-1)
 
-def apply_rotary_emb(xq, xk, freqs_cis) -> Tuple[Tensor, Tensor]:
+def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor]:
   assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
   xq = xq.reshape(*xq.shape[0:-1], -1, 2)
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
@@ -31,17 +32,6 @@ def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   # NOTE: this is different from x.repeat((1, 1, n_rep, 1))
   return x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
 
-class RMSNorm:
-  def __init__(self, dim, eps=1e-6):
-    self.eps = eps
-    self.weight = Tensor.ones(dim)
-
-  def _norm(self, x:Tensor):
-    return x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()
-
-  def __call__(self, x:Tensor):
-    return self._norm(x.float()).cast(x.dtype) * self.weight
-
 class Attention:
   def __init__(self, dim, n_heads, n_kv_heads, max_context, linear=nn.Linear):
     self.n_heads = n_heads
@@ -56,8 +46,7 @@ class Attention:
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
-    x = x.half()
-    xq, xk, xv = self.wq(x).half(), self.wk(x).half(), self.wv(x).half()
+    xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
@@ -98,8 +87,8 @@ class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int, linear=nn.Linear, feed_forward=FeedForward):
     self.attention = Attention(dim, n_heads, n_kv_heads, max_context, linear)
     self.feed_forward = feed_forward(dim, hidden_dim, linear)
-    self.attention_norm = RMSNorm(dim, norm_eps)
-    self.ffn_norm = RMSNorm(dim, norm_eps)
+    self.attention_norm = nn.RMSNorm(dim, norm_eps)
+    self.ffn_norm = nn.RMSNorm(dim, norm_eps)
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
@@ -119,6 +108,9 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
     if not hasattr(sample, "alpha_counter"):
       setattr(sample, "alpha_counter", Tensor.zeros_like(logits, dtype=dtypes.int32).contiguous())
     logits = logits - (sample.alpha_counter * af + (sample.alpha_counter > 0) * ap)
+
+  # replace NaNs with -inf
+  logits = (logits != logits).where(-float("inf"), logits)
 
   # softmax
   t = (logits / temp).softmax()
@@ -154,7 +146,7 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
 class Transformer:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=nn.Linear, n_kv_heads=None, rope_theta=10000, max_context=1024, jit=True, feed_forward=FeedForward):
     self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context, linear, feed_forward=feed_forward) for _ in range(n_layers)]
-    self.norm = RMSNorm(dim, norm_eps)
+    self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.output = nn.Linear(dim, vocab_size, bias=False)
     self.max_context = max_context

@@ -5,6 +5,7 @@ from tinygrad.helpers import prod
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, get_lazyop_info, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.uops import flops_mem
 
 class TestFlopCounter(unittest.TestCase):
   def setUp(self):
@@ -18,8 +19,8 @@ class TestFlopCounter(unittest.TestCase):
     # NOTE: why does hand coded optimizations change flops for the GEMM?
     #lin.hand_coded_optimizations()
     lin.linearize()
-    ops, mem = lin.uops.flops_mem(ignore_indexing=True)
-    run_count = prod((lin.global_size if lin.global_size else []) + (lin.local_size if lin.local_size else []))
+    ops, mem = flops_mem(lin.uops.uops, ignore_indexing=True)
+    run_count = prod((lin.global_size or []) + (lin.local_size or []))
     self.assertEqual(info.flops, ops*run_count)
     print(info.flops, info.mem_estimate, "vs", ops*run_count, mem*run_count)
     #lin.uops.print()

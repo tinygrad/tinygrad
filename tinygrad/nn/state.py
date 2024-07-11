@@ -2,7 +2,7 @@ import os, json, pathlib, zipfile, pickle, tarfile, struct
 from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tinytqdm
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
 
@@ -118,7 +118,7 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
-    for k,v in (t := tinytqdm(model_state_dict.items(), disable=CI or not verbose)):
+    for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
       t.desc = f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}: "
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
@@ -159,8 +159,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. CLANG to permute {intermediate_shape} with {permute_indexes}")
       assert storage[1] != dtypes.bfloat16, "can't CLANG permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
-      # TODO: BUG: a ".realize()" is needed here for 'GPU=1 python3 test/models/test_efficientnet.py TestEfficientNet.test_car'
-      ret = ret.clang().reshape(intermediate_shape).permute(permute_indexes).realize()
+      ret = ret.clang().reshape(intermediate_shape).permute(permute_indexes)
 
     return ret.reshape(size)
 

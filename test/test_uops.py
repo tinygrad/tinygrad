@@ -9,13 +9,14 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
-from tinygrad.codegen.uops import UOps, UOp, UOpGraph
+from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uopgraph import UOpGraph
 from test.helpers import is_dtype_supported
 
-def _uops_to_prg(uops_list, print=False):
+def _uops_to_prg(uops_list, print_uops=False):
   uops = UOpGraph(uops_list)
   src = Device[Device.DEFAULT].renderer.render("test", uops)
-  if print: uops.print()
+  if print_uops: uops.print()
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops))
 
@@ -59,7 +60,7 @@ def _test_uops_result(output_dtype, uops, res):
   # res = output_fn(uops)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg([out], print=True)
+  prg = _uops_to_prg([out], print_uops=True)
   prg.exec([buf])
   ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
@@ -114,6 +115,10 @@ class TestFloatUOps(TestUOps):
   def test_where(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float, dtypes.float))
 
+  @unittest.skipUnless(getenv("PYTHON"), "only python supports MULACC")
+  def test_mulacc(self):
+    self._test_top_fxn(TernaryOps.MULACC, lambda a,b,c: a*b+c, (dtypes.float, dtypes.float, dtypes.float))
+
 class TestNonFloatUOps(TestUOps):
   def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, (dtypes.int32, ))
   def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
@@ -124,6 +129,8 @@ class TestNonFloatUOps(TestUOps):
   def test_shl_int32(self): self._test_bop_fxn(BinaryOps.SHL, lambda a,b: int(a)<<int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
   def test_div_int32(self):
     self._test_bop_fxn(BinaryOps.IDIV, lambda a,b: int(a/b), (dtypes.int32, dtypes.int32), no_b_zero=True)
+  def test_and_int32(self): self._test_bop_fxn(BinaryOps.AND, lambda a,b: int(a)&int(b), (dtypes.int32, dtypes.int32))
+  def test_or_int32(self): self._test_bop_fxn(BinaryOps.OR, lambda a,b: int(a)|int(b), (dtypes.int32, dtypes.int32))
   def test_mod_int32(self):
     self._test_bop_fxn(BinaryOps.MOD,
                        lambda a,b: abs(int(a))%abs(int(b))*(1,-1)[a<0], (dtypes.int32, dtypes.int32), no_b_zero=True)
@@ -157,6 +164,8 @@ class TestBoolUOps(TestUOps):
   def test_add_bool(self): self._test_bop_bool_fxn(BinaryOps.ADD, lambda a,b: a or b)
   def test_mul_bool(self): self._test_bop_bool_fxn(BinaryOps.MUL, lambda a,b: a and b)
   def test_xor_bool(self): self._test_bop_bool_fxn(BinaryOps.XOR, lambda a,b: a != b)
+  def test_and_bool(self): self._test_bop_bool_fxn(BinaryOps.AND, lambda a,b: a & b)
+  def test_or_bool(self): self._test_bop_bool_fxn(BinaryOps.OR, lambda a,b: a | b)
   def test_cmpne_bool(self): self._test_bop_bool_fxn(BinaryOps.CMPNE, lambda a,b: a != b)
   def test_cmplt_bool(self): self._test_bop_bool_fxn(BinaryOps.CMPLT, lambda a,b: a < b)
   def test_where_bool(self): self._test_top_bool_fxn(TernaryOps.WHERE, lambda a,b,c: b if a else c)
@@ -289,7 +298,7 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, UOps.LOAD, dtypes.int32, (smem, ofs))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
-@unittest.skipUnless(Device.DEFAULT in {"CUDA"} and getenv("PTX"), "This only tests assembly backends")
+@unittest.skipUnless(getenv("PTX"), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
     g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
@@ -300,8 +309,8 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
     uops = UOpGraph([a1,a2])
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops.uops[-1].arg, BinaryOps.MUL)
-    self.assertEqual(uops.uops[-2].arg, BinaryOps.SHL)
+    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHL)
+    self.assertEqual(uops.uops[-2].arg, BinaryOps.MUL)
 
   def test_bitshift_right(self):
     g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
@@ -312,8 +321,17 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
     uops = UOpGraph([a1,a2])
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops.uops[-1].arg, BinaryOps.IDIV)
-    self.assertEqual(uops.uops[-2].arg, BinaryOps.SHR)
+    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHR)
+    self.assertEqual(uops.uops[-2].arg, BinaryOps.IDIV)
+
+class TestUOpCompare(unittest.TestCase):
+  def test_alu_same_src_different_arg(self):
+    a = UOp(UOps.CONST, dtypes.float, (), 2.0)
+    b = UOp(UOps.CONST, dtypes.float, (), 3.0)
+
+    add = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.ADD)
+    mul = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.MUL)
+    assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
