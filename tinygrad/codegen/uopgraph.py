@@ -34,6 +34,8 @@ class UPat:
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
 
+def _hashstore(store:Dict[str, UOp]): return hash(tuple(sorted((k, id(v)) for k,v in store.items())))
+
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return []
   if pat.arg is not None and __unmatch(pat.arg, uop.arg): return []
@@ -47,7 +49,9 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
     if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len) and not pat.allow_any_len: return []
     new_stores = [store.copy()]
-    for uu, vv in zip(uop.src, vp): new_stores = [rstore for nstore in new_stores for rstore in _match(uu, vv, nstore)]
+    for uu, vv in zip(uop.src, vp):
+
+      new_stores = list({_hashstore(x):x for nstore in new_stores for x in _match(uu, vv, nstore)}.values())
     res.extend(new_stores)
   return res
 
