@@ -180,11 +180,11 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
 
   def _signal(self, signal, value=0):
-    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 1)) is None or prev_qmd.release0_enable == 1: return super()._signal(signal, value)
+    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 2)) is None or prev_qmd.release0_enable == 1: return super()._signal(signal, value)
     prev_qmd.release0_address_upper, prev_qmd.release0_address_lower = nvdata64(ctypes.addressof(from_mv(signal)))
     prev_qmd.release0_payload_upper, prev_qmd.release0_payload_lower = nvdata64(value)
     prev_qmd.release0_enable = 1
-    self.cmd_idx_to_qmd[len(self)] = prev_qmd # this command is embedded into qmd.
+    self.cmd_idx_to_qmd[len(self) - 1] = prev_qmd # this command is embedded into qmd.
 
   def _update_signal(self, cmd_idx, signal=None, value=None):
     if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_signal(cmd_idx, signal, value)
