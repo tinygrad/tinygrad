@@ -4,6 +4,8 @@ import difflib, pickle
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
 
+class ProcessReplayError(Exception): pass
+
 page_size = 100
 conn = db_connection()
 cur = conn.cursor()
@@ -25,7 +27,8 @@ for offset in tqdm(range(0, row_count, page_size)):
           diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
           for line in diff:
             print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-          if getenv("ASSERT_PROCESS_REPLAY", 1): raise e
+          if getenv("ASSERT_PROCESS_REPLAY", 1): raise ProcessReplayError()
+      except ProcessReplayError as e: raise e
       except Exception as e:
         print("FAILED TO RECREATE KERNEL")
         print(ast)
