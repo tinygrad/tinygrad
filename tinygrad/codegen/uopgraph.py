@@ -6,8 +6,9 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
-from tinygrad.helpers import DEBUG, getenv, flatten, all_same, dedup
+from tinygrad.helpers import DEBUG, getenv, flatten, all_same, dedup, TRANSCENDENTAL
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
+from tinygrad.codegen.transcendental import xexp2, xlog2, xsin
 
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
@@ -287,6 +288,14 @@ float4_folding = PatternMatcher([
   (UPat(UOps.ALU, name="alu"), no_float4_alu),
 ])
 
+# ***** transcendental *****
+
+transcendental_rules = [
+  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, arg=UnaryOps.EXP2).name("x"), xexp2),
+  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, arg=UnaryOps.LOG2).name("d"), xlog2),
+  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, arg=UnaryOps.SIN).name("d"), xsin),
+]
+
 # ***** main rewriter *****
 
 def reduce_before_expand(reduce_allow_any_len, expand, x):
@@ -483,6 +492,10 @@ class UOpGraph:
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
     self.folder = constant_folder if opts is None or not opts.supports_float4 else constant_folder_w_f4
+    if TRANSCENDENTAL >= 2 or (TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
+      print("here")
+      # TODO: slow...
+      self.folder = PatternMatcher(self.folder.patterns + transcendental_rules)
 
   def __reduce__(self): return self.__class__, (self.sinks, self.opts)
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)

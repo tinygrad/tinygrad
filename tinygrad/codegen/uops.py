@@ -45,6 +45,7 @@ class UOp:
   def __repr__(self):
     return f"{str(self.op):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.op for x in self.src]):32s} {self.arg}"
   def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
+  def bitcast(self, dtype=None): return UOp(UOps.BITCAST, dtype, (self,))
   def name(self, name:Optional[str]): return UOp(UOps.VAR, src=(self,), arg=name)
   def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
@@ -61,6 +62,9 @@ class UOp:
   def ge(self, x): return -self.lt(x)
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
   def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
+  def __getattribute__(self, attr):
+    if attr == "const": return functools.partial(UOp.const, self.dtype)
+    return super().__getattribute__(attr)
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def const(dtype:Optional[DType], b:ConstType|Variable):
@@ -68,6 +72,7 @@ class UOp:
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
+  def e(self, arg, *src:UOp): return UOp.alu(arg, self, *src)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod
