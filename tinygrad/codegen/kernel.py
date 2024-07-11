@@ -7,7 +7,7 @@ from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, Cons
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import TC, TC_OPT, all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction, to_function_name
+from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, round_up, all_int, get_contraction, to_function_name, TC, TC_OPT, DEBUG # noqa: E501
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
