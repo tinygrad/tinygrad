@@ -7,7 +7,7 @@ from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, Cons
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, round_up, all_int, get_contraction, to_function_name, TC, TC_OPT, DEBUG # noqa: E501
+from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, get_contraction, to_function_name # noqa: E501
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
@@ -406,7 +406,7 @@ class Kernel:
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
       check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
-      check((use_tensor_cores:=TC.value) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
+      check((use_tensor_cores:=USE_TC.value) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
       self.applied_opts.append(opt)
       return
