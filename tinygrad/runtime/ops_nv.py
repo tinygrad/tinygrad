@@ -97,12 +97,14 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
       self.binded_device.synchronize() # Synchronize to ensure the buffer is no longer in use.
       self.binded_device._gpu_free(self.hw_page)
 
-  def _setup(self, chnl, nvobject=None, local_mem_window=None, shared_mem_window=None, local_mem=None, local_mem_tpc_bytes=None):
-    if nvobject: self.q += [nvmethod(chnl, nv_gpu.NVC6C0_SET_OBJECT, 1), nvobject]
-    if local_mem_window: self.q += [nvmethod(chnl, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *nvdata64(local_mem_window)]
-    if shared_mem_window: self.q += [nvmethod(chnl, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *nvdata64(shared_mem_window)]
-    if local_mem: self.q += [nvmethod(chnl, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(local_mem)]
-    if local_mem_tpc_bytes: self.q += [nvmethod(chnl, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(local_mem_tpc_bytes), 0x40]
+  @hcq_command
+  def setup(self, compute_class=None, copy_class=None, local_mem_window=None, shared_mem_window=None, local_mem=None, local_mem_tpc_bytes=None):
+    if compute_class: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), compute_class]
+    if copy_class: self.q += [nvmethod(4, nv_gpu.NVC6C0_SET_OBJECT, 1), copy_class]
+    if local_mem_window: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *nvdata64(local_mem_window)]
+    if shared_mem_window: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *nvdata64(shared_mem_window)]
+    if local_mem: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(local_mem)]
+    if local_mem_tpc_bytes: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(local_mem_tpc_bytes), 0x40]
 
   def _wait(self, signal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(mv_address(signal)), *nvdata64_le(value),
@@ -153,9 +155,6 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     super().__init__()
 
   @hcq_command
-  def setup(self, **kwargs): self._setup(chnl=1, **kwargs)
-
-  @hcq_command
   def copy_from_cpu(self, gpuaddr, data):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_OFFSET_OUT_UPPER, 2), *nvdata64(gpuaddr)]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LINE_LENGTH_IN, 2), len(data)*4, 0x1]
@@ -204,9 +203,6 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue, HWCopyQueue):
-  @hcq_command
-  def setup(self, **kwargs): self._setup(chnl=4, **kwargs)
-
   def _copy(self, dest, src, copy_size):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *nvdata64(src), *nvdata64(dest)]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]
@@ -619,11 +615,11 @@ class NVDevice(HCQCompatCompiled):
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window, self.slm_per_thread = 0xfe000000, 0xff000000, 0
 
-    NVComputeQueue().setup(nvobject=self.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
+    NVComputeQueue().setup(compute_class=self.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
 
     NVCopyQueue().wait(self.timeline_signal, self.timeline_value) \
-                 .setup(nvobject=nv_gpu.AMPERE_DMA_COPY_B) \
+                 .setup(copy_class=nv_gpu.AMPERE_DMA_COPY_B) \
                  .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
 
     self.timeline_value += 2
