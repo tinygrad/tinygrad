@@ -89,7 +89,7 @@ class AMDComputeQueue(HWComputeQueue):
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) | \
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_WB(gl2)]
 
-  def memory_barrier(self):
+  def _memory_barrier(self):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5), amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | \
       amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ) | amd_gpu.WAIT_REG_MEM_ENGINE(0), nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_REQ),
       nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), 0xffffffff, 0xffffffff, 0x20]
@@ -122,9 +122,8 @@ class AMDComputeQueue(HWComputeQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
   def _update_exec(self, cmd_idx, global_size, local_size):
-    # Patch the exec cmd with new launch dims
-    self.q[self.cmds_offset[cmd_idx] + 52 : self.cmds_offset[cmd_idx] + 55] = array.array('I', local_size)
-    self.q[self.cmds_offset[cmd_idx] + 61 : self.cmds_offset[cmd_idx] + 64] = array.array('I', global_size)
+    self._patch(cmd_idx, offset=52, data=local_size)
+    self._patch(cmd_idx, offset=61, data=global_size)
 
     if (dp:=self.ptr_to_dispatch_packet.get(cmd_idx)) is not None:
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
@@ -164,15 +163,16 @@ class AMDComputeQueue(HWComputeQueue):
                         value=signal.event_id, cst=signal.event_id, cache_flush=True)
 
   def _update_wait(self, cmd_idx, signal=None, value=None):
-    if signal is not None: self._patch(self.cmds_offset[cmd_idx] + 2, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
-    if value is not None: self.q[self.cmds_offset[cmd_idx] + 4] = value
+    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET))
+    if value is not None: self._patch(cmd_idx, offset=4, data=[value])
 
   def _update_signal(self, cmd_idx, signal=None, value=None):
-    if signal is not None:
-      self._patch(self.cmds_offset[cmd_idx] + 3, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
-      if self.cmds_offset[cmd_idx + 1] - self.cmds_offset[cmd_idx] > 8: # has trap info
-        self._patch(self.cmds_offset[cmd_idx] + 8 + 3, [*data64_le(signal.event_mailbox_ptr), *data64_le(signal.event_id), signal.event_id])
-    if value is not None: self._patch(self.cmds_offset[cmd_idx] + 5, [*data64_le(value)])
+    if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET))
+    if value is not None: self._patch(cmd_idx, offset=5, data=data64_le(value))
+
+    # Check if the signal command has mailptr part
+    if signal is not None and self.cmds_len[cmd_idx] > 8:
+      self._patch(cmd_idx, offset=11, data=[*data64_le(signal.event_mailbox_ptr), *data64_le(signal.event_id), signal.event_id])
 
   def bind(self, device: AMDDevice):
     self.binded_device = device
@@ -223,8 +223,8 @@ class AMDCopyQueue(HWCopyQueue):
 
   def _update_copy(self, cmd_idx, dest=None, src=None):
     for i in range(self.copy_cmds_per_copy[cmd_idx]):
-      if src is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+8+i*7):sigoff+2] = array.array('I', [*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
-      if dest is not None: self.q[(sigoff:=self.cmd_offsets[cmd_idx]+10+i*7):sigoff+2] = array.array('I', [*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
+      if src is not None: self._patch(cmd_idx, offset=8+i*7, data=[*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
+      if dest is not None: self._patch(cmd_idx, offset=10+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
 
   def _signal(self, signal: hsa.amd_signal_t, value=0):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET), value])
@@ -238,13 +238,10 @@ class AMDCopyQueue(HWCopyQueue):
       amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET), value, 0xffffffff,
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
 
-  def _update_signal(self, cmd_idx, signal=None, value=None):
-    if signal is not None: self._patch(self.cmds_offset[cmd_idx] + 1, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
-    if value is not None: self.q[self.cmds_offset[cmd_idx] + 3] = value
-
+  def _update_signal(self, cmd_idx, signal=None, value=None): return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
   def _update_wait(self, cmd_idx, signal=None, value=None):
-    if signal is not None: self._patch(self.cmds_offset[cmd_idx] + 1, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
-    if value is not None: self.q[self.cmds_offset[cmd_idx] + 3] = value
+    if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET))
+    if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
   def _timestamp(self, sig: hsa.amd_signal_t):
     self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
@@ -254,7 +251,7 @@ class AMDCopyQueue(HWCopyQueue):
     if device.sdma_queue.put_value - device.sdma_queue.read_ptr[0] > device.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
 
     tail_blit_dword = 0
-    for cmdsz in self.cmds_len:
+    for cmdsz in self.internal_cmd_sizes:
       if (tail_blit_dword + cmdsz) * 4 >= device.sdma_queue.ring.nbytes - device.sdma_queue.put_value % device.sdma_queue.ring.nbytes: break
       tail_blit_dword += cmdsz
 
