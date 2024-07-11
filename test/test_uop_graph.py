@@ -1,10 +1,10 @@
-import unittest
+import unittest, time
 from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
 from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, graph_rewrite
+from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, graph_rewrite, _match, UPat
 #from tinygrad.engine.graph import print_tree
 
 simple_pm = PatternMatcher([
@@ -236,6 +236,17 @@ class TestUOpGraph(TestUOps):
     endranges = [x for x in uops if x.op is UOps.ENDRANGE]
     # ranges are closed in the right order
     self.assertEqual(endranges[-1].src[0], ranges[0])
+
+  def test_commutative_speed(self):
+    st = time.perf_counter()
+    u = UOp.const(dtypes.int, 1)
+    p = UPat(name = "a")
+    for i in range(8):
+      u = u+u
+      p = UPat(UOps.ALU, BinaryOps.ADD, [p, p])
+    len(_match(u, p, {}))
+    delta = time.perf_counter()-st
+    assert delta < 1.0, f"speed test took {delta} seconds"
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
