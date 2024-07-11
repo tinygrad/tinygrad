@@ -65,7 +65,7 @@ def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
   assert q.dtype in (dtypes.int64, dtypes.int32, dtypes.int16, dtypes.uint32)
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype, dtypes.uint32: dtypes.float32}[q.dtype]
-  return shl(q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)), significand_bits(final_dtype)).cast(final_dtype, True, allow_buffer_view=False) # noqa: E501
+  return shl(q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)), significand_bits(final_dtype)).bitcast(final_dtype) # noqa: E501
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
@@ -300,7 +300,6 @@ def xlog2(d:UOp) -> UOp:
   Paper: https://arxiv.org/pdf/2001.09258
   """
   assert is_dtype_transcendental_supported(d.dtype)
-  if 0 in d.shape: return d
   fp64_p = d.dtype == dtypes.float64
   FLT_MIN = d.const(1e-6 if d.dtype == dtypes.float16 else 1e-4)
   Y_FLT_MIN = d.const(math.log2({dtypes.float64: 1e-228, dtypes.float32: 1e-38, dtypes.float16: 1e-6}[d.dtype]))

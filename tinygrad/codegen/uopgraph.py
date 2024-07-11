@@ -291,9 +291,9 @@ float4_folding = PatternMatcher([
 # ***** transcendental *****
 
 transcendental_rules = [
-  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, arg=UnaryOps.EXP2).name("x"), xexp2),
-  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, arg=UnaryOps.LOG2).name("d"), xlog2),
-  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, arg=UnaryOps.SIN).name("d"), xsin),
+  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, src=(UOp.var("x"),), arg=UnaryOps.EXP2), xexp2),
+  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, src=(UOp.var("d"),), arg=UnaryOps.LOG2), xlog2),
+  (UOp(UOps.ALU, dtype={dtypes.float16, dtypes.float32, dtypes.float64}, src=(UOp.var("d"),), arg=UnaryOps.SIN), xsin),
 ]
 
 # ***** main rewriter *****
@@ -492,9 +492,8 @@ class UOpGraph:
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
     self.folder = constant_folder if opts is None or not opts.supports_float4 else constant_folder_w_f4
-    if TRANSCENDENTAL >= 2 or (TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
-      print("here")
-      # TODO: slow...
+    if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
+      # TODO: slow to rebuild this...
       self.folder = PatternMatcher(self.folder.patterns + transcendental_rules)
 
   def __reduce__(self): return self.__class__, (self.sinks, self.opts)
