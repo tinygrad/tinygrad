@@ -23,7 +23,7 @@ render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
 if getenv("UOP_IS_SYMBOLIC"):
-  # TODO: change this once UOps is ready to replace symbolic. note: this doesn't work for variable shapetrackers now
+  # TODO: change this once UOps is ready to replace symbolic
   def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
     # TODO: dtypes.realint
     iexpr = variable_to_uop(view.offset)
