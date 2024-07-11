@@ -550,25 +550,20 @@ class UOpGraph:
     sink = graph_rewrite(sink, self.folder)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
-    children: Dict[UOp, List[UOp]] = {}
+    children: Dict[UOp, List[UOp]]= {}
     in_degree = {}
     scope_children:Dict[UOp, Set[UOp]]= {}
-    SCOPE_ENDS = {UOps.PHI: UOps.RANGE, UOps.STORE: UOps.IF}
 
     @functools.lru_cache(None)
     def get_scope_children(u:UOp)->Set[UOp]:
-      in_degree[u] = len(u.src)
-      scopes: Set[UOp]= set()
-      children[u] = []
-      for x in u.src:
-        scopes.update(get_scope_children(x))
-        children[x].append(u)
+      in_degree[u], children[u], scopes = len(u.src), [], set.union(set(),*[get_scope_children(x) for x in u.src])
+      for x in u.src: children[x].append(u)
       if u.op in END_FOR_UOP:
         scopes.add(u)
         scope_children.setdefault(u, set())
       elif u.op is not UOps.SINK:
         for sc in scopes: scope_children[sc].add(u)
-      if remove := SCOPE_ENDS.get(u.op, None): scopes = {x for x in scopes if x.op is not remove}
+      if remove := {UOps.PHI: UOps.RANGE, UOps.STORE: UOps.IF}.get(u.op, None): scopes = {x for x in scopes if x.op is not remove}
       return scopes
 
     get_scope_children(sink)
