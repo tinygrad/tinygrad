@@ -466,14 +466,6 @@ constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.
 
 # *** uop graph ***
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
-  if u in children: return
-  children[u] = []
-  for x in u.src:
-    get_children_dfs(x, children, in_degree)
-    children[x].append(u)
-  in_degree[u] = len(u.src)
-
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
   replace: Dict[UOp, UOp] = {}
@@ -558,19 +550,28 @@ class UOpGraph:
     sink = graph_rewrite(sink, self.folder)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
-    # filter nodes that don't link to a sink
-    # BFS toposort
     children: Dict[UOp, List[UOp]] = {}
-    in_degree: Dict[UOp, int] = {}
-    get_children_dfs(sink, children, in_degree)
+    in_degree = {}
+    scope_children:Dict[UOp, Set[UOp]]= {}
+    SCOPE_ENDS = {UOps.PHI: UOps.RANGE, UOps.STORE: UOps.IF}
 
     @functools.lru_cache(None)
-    def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
-      if x.op is UOps.SINK: return set()
-      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
+    def get_scope_children(u:UOp)->Set[UOp]:
+      in_degree[u] = len(u.src)
+      scopes: Set[UOp]= set()
+      children[u] = []
+      for x in u.src:
+        scopes.update(get_scope_children(x))
+        children[x].append(u)
+      if u.op in END_FOR_UOP:
+        scopes.add(u)
+        scope_children.setdefault(u, set())
+      elif u.op is not UOps.SINK:
+        for sc in scopes: scope_children[sc].add(u)
+      if remove := SCOPE_ENDS.get(u.op, None): scopes = {x for x in scopes if x.op is not remove}
+      return scopes
 
-    # scope children impact the toposort and END* insertion
-    scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
+    get_scope_children(sink)
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
