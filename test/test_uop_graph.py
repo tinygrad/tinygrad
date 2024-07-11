@@ -143,9 +143,11 @@ class TestUOpGraph(TestUOps):
     uop = UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(4)))
     uop3 = UOp(UOps.VECTORIZE, dtypes.float.vec(3), tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(3)))
     uop_ = UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, (val,), 0) for _ in range(4)))
+    uop_wrong_sizes = UOp(UOps.VECTORIZE, dtypes.float.vec(2), tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(4)))
     self.assert_equiv_uops(UOpGraph([uop]).uops[-1], val)
     self.assert_equiv_uops(UOpGraph([uop3]).uops[-1], val)
     self.assert_equiv_uops(UOpGraph([uop_]).uops[-1], uop_)
+    self.assert_equiv_uops(UOpGraph([uop_wrong_sizes]).uops[-1], uop_wrong_sizes)
 
   def test_cast_alu_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=(0, True))
