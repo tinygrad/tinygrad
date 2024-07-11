@@ -20,7 +20,7 @@ for offset in tqdm(range(0, row_count, page_size)):
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
         try: assert compare_src == good_src
-        except AssertionError as e:
+        except AssertionError:
           print("PROCESS REPLAY DETECTED CHANGE")
           print(ast)
           print(applied_opts)
