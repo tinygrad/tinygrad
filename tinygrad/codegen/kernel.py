@@ -83,6 +83,7 @@ class Kernel:
     self.sts: List[ShapeTracker] = [x.st for x in self.bufs]
 
     # add the shapetrackers for each reduce
+    # we use this to track which axes are reduced in each reduce
     for x in self.reduceops:
       self.sts.append(lazyop_sts_map[x])
       self.sts.append(lazyop_sts_map[x.src[0]])
@@ -117,9 +118,8 @@ class Kernel:
     ret.opts, ret.ast, ret.lazyops = self.opts, self.ast, self.lazyops
 
     # things downstream of the AST
-    ret.reduceops, ret.vars, ret.bufs, ret.full_buf_index = \
-      self.reduceops, self.vars, self.bufs, self.full_buf_index
-    ret.sts = self.sts[:len(ret.bufs)] # NOTE: must redo the local buffers with TC in beam
+    ret.reduceops, ret.vars, ret.bufs, ret.full_buf_index, ret.sts = \
+      self.reduceops, self.vars, self.bufs, self.full_buf_index, self.sts
 
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
