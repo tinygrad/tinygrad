@@ -57,9 +57,5 @@ class Renderer:
   local_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
-  @functools.cached_property
-  def tc_opt(self): return TC_OPT
-  @functools.cached_property
-  def tc(self): return TC
 
   def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("needs a renderer")
