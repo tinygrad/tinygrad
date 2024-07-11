@@ -242,7 +242,7 @@ class NVProgram(HCQProgram):
       except Exception as e: print("failed to disasm cubin", str(e))
 
     if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
-    else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
+    else: image, sections, relocs, _ = elf_loader(self.lib, force_section_align=128)
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, BufferOptions(cpu_access=True))
@@ -260,7 +260,7 @@ class NVProgram(HCQProgram):
           if typ & 0xffff == 0x1204: self.device._ensure_has_local_memory(val + 0x240)
 
     # Apply relocs
-    for apply_image_offset, rel_sym_offset, typ, _ in relocs:
+    for apply_image_offset, rel_sym_offset, typ in relocs:
       # These types are CUDA-specific, applying them here
       if typ == 2: image[apply_image_offset:apply_image_offset+8] = struct.pack('<Q', self.lib_gpu.va_addr + rel_sym_offset) # R_CUDA_64
       elif typ == 0x38: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) & 0xffffffff)

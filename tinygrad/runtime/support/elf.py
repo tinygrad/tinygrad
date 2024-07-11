@@ -1,18 +1,19 @@
 from __future__ import annotations
-from typing import Tuple, List, Any
+import struct, pickle
+from typing import Dict, Tuple, List, Any
 from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc
 
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
 
-def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[ElfSection], Any]:
-  def _elf_parse_names(tabs): return {sum(len(w) + 1 for w in tabs.split(b'\0')[:i]): w.decode('utf-8') for i, w in enumerate(tabs.split(b'\0'))}
+def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[ElfSection], Any, Dict[str, int]]:
+  def _elf_get_name(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
 
   header = libc.Elf64_Ehdr.from_buffer_copy(blob)
   section_headers = (libc.Elf64_Shdr * header.e_shnum).from_buffer_copy(blob[header.e_shoff:])
-  section_names = _elf_parse_names(blob[(shstrst:=section_headers[header.e_shstrndx].sh_offset):shstrst+section_headers[header.e_shstrndx].sh_size])
-  sections = [ElfSection(section_names[sh.sh_name], sh, blob[sh.sh_offset:sh.sh_offset+sh.sh_size]) for sh in section_headers]
+  strtab = blob[(shstrst:=section_headers[header.e_shstrndx].sh_offset):shstrst+section_headers[header.e_shstrndx].sh_size]
+  sections = [ElfSection(_elf_get_name(strtab, sh.sh_name), sh, blob[sh.sh_offset:sh.sh_offset+sh.sh_size]) for sh in section_headers]
 
   def _to_carray(sh, ctype): return (ctype * (sh.header.sh_size // sh.header.sh_entsize)).from_buffer_copy(sh.content)
   rel = [(sh, sh.name[4:], _to_carray(sh, libc.Elf64_Rel)) for sh in sections if sh.header.sh_type == libc.SHT_REL]
@@ -33,6 +34,30 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[
   for sh, trgt_sh_name, c_rels in rel + rela:
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
     rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
-    relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
+    relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value + raddend, rtype) for roff, sym, rtype, raddend in rels]
 
-  return memoryview(image), sections, relocs
+  # Exports
+  exports: Dict[str, int] = {}
+  for sym in symtab:
+    if sym.st_info == 0x12: exports[_elf_get_name(strtab, sym.st_name)] = sections[sym.st_shndx].header.sh_addr + sym.st_value
+
+  return memoryview(image), sections, relocs, exports
+
+def patchuint32(blob: memoryview, ploc: int, new: int): blob[ploc:ploc+4] = struct.pack("<I", struct.unpack("<I", blob[ploc:ploc+4])[0] | new)
+
+def fixup_relocations(blob: bytes) -> bytes:
+  img, _, relocs, exports = elf_loader(blob)
+  for ploc,tgt,r_type in relocs:
+    rel = tgt - ploc
+    tgt_pg, ploc_pg = tgt >> 12, ploc >> 12
+    lo, hi = (tgt_pg-ploc_pg)&0b11,(tgt_pg-ploc_pg)>>2
+    if r_type in {0x2, 0x4}: patchuint32(img, ploc, 2**32+rel if rel < 0 else rel) # x86
+    elif r_type == 0x113: patchuint32(img, ploc, lo<<29 | hi<<5)  # R_AARCH64_ADR_PREL_PG_HI21
+    elif r_type == 0x115: patchuint32(img, ploc, (tgt&0xFFF)<<10) # R_AARCH64_ADD_ABS_LO12_NC
+    elif r_type in {0x11a, 0x11b}: patchuint32(img, ploc, 2**26+(rel>>2) if rel < 0 else (rel>>2)) # R_AARCH64_CALL26
+    elif r_type == 0x11c: patchuint32(img, ploc, (tgt&0xFFF)<<9) # R_AARCH64_LDST16_ABS_LO12_NC
+    elif r_type == 0x11d: patchuint32(img, ploc, (tgt&0xFFF)<<8) # R_AARCH64_LDST32_ABS_LO12_NC
+    elif r_type == 0x11e: patchuint32(img, ploc, (tgt&0xFFF)<<7) # R_AARCH64_LDST64_ABS_LO12_NC
+    elif r_type == 0x12b: patchuint32(img, ploc, (tgt&0xFFF)<<6) # R_AARCH64_LDST128_ABS_LO12_NC
+    else: raise NotImplementedError(f"Encountered unknown relocation type {r_type:#x}")
+  return pickle.dumps((exports, bytes(img)))

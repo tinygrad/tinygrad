@@ -294,7 +294,7 @@ class AMDProgram(HCQProgram):
 
     if DEBUG >= 6: print(disasm(lib))
 
-    image, sections, _ = elf_loader(self.lib)
+    image, sections, _, _ = elf_loader(self.lib)
     self.lib_gpu = self.device._gpu_alloc(round_up(image.nbytes, 0x1000), kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
