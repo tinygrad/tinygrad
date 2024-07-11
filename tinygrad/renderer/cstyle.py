@@ -170,8 +170,7 @@ class CStyleLanguage(Renderer):
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
         elif uop is UOps.DEFINE_ACC:
-          val = r[src[0]] if dtype.count > 1 else self.render_const(src[0].arg, dtype)
-          kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {val};")
+          kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {r[src[0]] if dtype.count > 1 else self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
