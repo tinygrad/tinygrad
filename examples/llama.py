@@ -490,7 +490,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       outputted = cur
 
       # stop after you have your answer
-      if chatbot and outputted.endswith(end_delim): break
+      if chatbot and end_delim in outputted[-10:]: break
     if not chatbot: break
 
   # validate output!
