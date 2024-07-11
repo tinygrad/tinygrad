@@ -351,6 +351,9 @@ jobs:
     - name: Run process replay tests
       if: env.RUN_PROCESS_REPLAY == '1'
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
+    - name: Run TRANSCENDENTAL math
+      # put this after process replay since it has same ast
+      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -544,6 +547,9 @@ jobs:
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
         run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      - name: Run TRANSCENDENTAL math
+        # put this after process replay since it has same ast
+        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test
