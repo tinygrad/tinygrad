@@ -62,9 +62,7 @@ class UOp:
   def ge(self, x): return -self.lt(x)
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
   def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
-  def const(self:Union[UOp, DType, None], b:ConstType|Variable):
-    if isinstance(self, UOp): return UOp._const(self.dtype, b)
-    return UOp._const(self, b)
+  def const(self:Union[UOp, DType, None], b:ConstType|Variable): return UOp._const(self.dtype if isinstance(self, UOp) else self, b)
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def _const(dtype:Optional[DType], b:ConstType|Variable):
