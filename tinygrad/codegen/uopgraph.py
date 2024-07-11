@@ -588,6 +588,7 @@ class UOpGraph:
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
+      if x in scope_children: scope_end[x] = x
       if x.op is UOps.DEFINE_ACC and len(x.src) > 1:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
@@ -602,7 +603,8 @@ class UOpGraph:
         if in_degree[u] == 0: push(u)
 
     # end scopes in toposort order
-    for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+    for u, x in scope_end.items():
+      self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     try:
