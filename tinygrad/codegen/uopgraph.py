@@ -550,9 +550,11 @@ class UOpGraph:
     sink = graph_rewrite(sink, self.folder)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
-    children: Dict[UOp, List[UOp]]= {}
-    in_degree = {}
-    scope_children:Dict[UOp, Set[UOp]]= {}
+    # filter nodes that don't link to a sink
+    # BFS toposort
+    children: Dict[UOp, List[UOp]] = {}
+    in_degree: Dict[UOp, int] = {}
+    scope_children: Dict[UOp, Set[UOp]] = {}
 
     @functools.lru_cache(None)
     def get_scope_children(u:UOp)->Set[UOp]:
