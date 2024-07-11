@@ -303,7 +303,7 @@ def threefry2x32(x: UOp, seed: UOp):
   x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
 
   rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-  ks = [0x0, seed.cast(dtypes.uint32) ^ 0x1BD11BDA, seed.cast(dtypes.uint32)]
+  ks = [0x0, (seed := seed.cast(dtypes.uint32)) ^ 0x1BD11BDA, seed]
   xr = [x0 + ks[-1], x1 + ks[0]]
   for i in range(5):
     for r in rotations[i % 2]: xr[0], xr[1] = (x0 := xr[0] + xr[1]), x0 ^ ((xr[1] * 2**r) + (xr[1] // 2**(32 - r)))
