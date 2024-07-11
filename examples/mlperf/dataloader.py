@@ -349,6 +349,123 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
       # happens with BENCHMARK set
       pass
 
+def loader_process_retinanet(q_in, q_out, X:Tensor, seed):
+  import signal
+  signal.signal(signal.SIGINT, lambda _, __: exit(0))
+
+  from extra.datasets.openimages_mlperf import preprocess_train
+  
+  with Context(DEBUG=0):
+    while (_recv := q_in.get()) is not None:
+      idx, fn = _recv
+      if fn is not None:
+        img = Image.open(fn)
+        img = img.convert('RGB') if img.mode != "RGB" else img
+
+       
+        img = preprocess_train(img)
+      else:
+        # pad data with training mean
+        img = np.tile(np.array([[[123.68, 116.78, 103.94]]], dtype=np.uint8), (224, 224, 1))
+
+      # broken out
+      #img_tensor = Tensor(img.tobytes(), device='CPU')
+      #storage_tensor = X[idx].contiguous().realize().lazydata.realized
+      #storage_tensor._copyin(img_tensor.numpy())
+
+      # faster
+      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+
+      # ideal
+      #X[idx].assign(img.tobytes())   # NOTE: this is slow!
+      q_out.put(idx)
+    q_out.put(None)
+
+def batch_load_retinanet(batch_size=64, val=False, shuffle=True, seed=None, pad_first_batch=False):
+  from extra.datasets.openimages_mlperf import get_train_files, get_val_files
+  files = get_val_files() if val else get_train_files()
+
+  if pad_first_batch:
+    FIRST_BATCH_PAD = round_up(len(files), batch_size) - len(files)
+  else:
+    FIRST_BATCH_PAD = 0
+  file_count = FIRST_BATCH_PAD + len(files)
+  BATCH_COUNT = min(32, file_count // batch_size)
+
+  def _gen():
+    for _ in range(FIRST_BATCH_PAD): yield -1
+    yield from shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
+  gen = iter(_gen())
+
+  def enqueue_batch(num):
+    for idx in range(num*batch_size, (num+1)*batch_size):
+      fidx = next(gen)
+      if fidx != -1:
+        fn = files[fidx]
+        q_in.put((idx, fn))
+      else:
+        # padding
+        q_in.put((idx, None, val))
+        Y[idx] = -1
+
+  shutdown = False
+  class Cookie:
+    def __init__(self, num): self.num = num
+    def __del__(self):
+      if not shutdown:
+        try: enqueue_batch(self.num)
+        except StopIteration: pass
+
+  gotten = [0]*BATCH_COUNT
+  def receive_batch():
+    while 1:
+      num = q_out.get()//batch_size
+      gotten[num] += 1
+      if gotten[num] == batch_size: break
+    gotten[num] = 0
+    return X[num*batch_size:(num+1)*batch_size], Cookie(num)
+
+  #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
+  q_in, q_out = Queue(), Queue()
+
+  sz = (batch_size*BATCH_COUNT, 800, 800, 3)
+  if os.path.exists("/dev/shm/retinanet_X"): os.unlink("/dev/shm/retinanet_X")
+  shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  procs = []
+
+  try:
+    # disk:shm is slower
+    #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
+    X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X")
+    Y = [None] * (batch_size*BATCH_COUNT)
+
+    for _ in range(cpu_count()):
+      p = Process(target=loader_process_retinanet, args=(q_in, q_out, X, seed))
+      p.daemon = True
+      p.start()
+      procs.append(p)
+
+    for bn in range(BATCH_COUNT): enqueue_batch(bn)
+
+    # NOTE: this is batch aligned, last ones are ignored unless pad_first_batch is True
+    for _ in range(0, file_count//batch_size): yield receive_batch()
+  finally:
+    shutdown = True
+    # empty queues
+    for _ in procs: q_in.put(None)
+    q_in.close()
+    for _ in procs:
+      while q_out.get() is not None: pass
+    q_out.close()
+    # shutdown processes
+    for p in procs: p.join()
+    shm.close()
+    try:
+      shm.unlink()
+    except FileNotFoundError:
+      # happens with BENCHMARK set
+      pass
+
 if __name__ == "__main__":
   def load_unet3d(val):
     assert not val, "validation set is not supported due to different sizes on inputs"
@@ -368,7 +485,12 @@ if __name__ == "__main__":
     with tqdm(total=len(files)) as pbar:
       for x,y,c in batch_load_resnet(val=val):
         pbar.update(x.shape[0])
-
-  load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
+  def load_retinanet(val):
+    from extra.datasets.openimages_mlperf import get_train_files, get_val_files
+    files = get_val_files() if val else get_train_files()
+    with tqdm(total=len(files)) as pbar:
+      for x,c in batch_load_retinanet(val=val):
+        pbar.update(x.shape[0])
+  load_fn_name = f"load_{getenv('MODEL', 'retinanet')}"
   if load_fn_name in globals():
-    globals()[load_fn_name](getenv("VAL", 1))
+    globals()[load_fn_name](getenv("VAL", 0))
