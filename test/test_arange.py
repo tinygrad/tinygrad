@@ -41,7 +41,9 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       rng = Tensor.ones(4, 256, 16384, dtype=dtypes.int)._cumsum(axis=-1, _first_zero=True).reshape(4, 256, 16384, 1)
       idxs = idxs.reshape(4,1,1,1).expand(4, 256, 16384, 1)
-      X = ((rng==idxs).float() * dataset.T.reshape(1, 256, 16384, 1).expand(4, 256, 16384, 1)).sum(axis=(2,3))
+      reshape_dataset = dataset.T.reshape(1, 256, 16384, 1).expand(4, 256, 16384, 1)
+      full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, 256, 16384, 1))
+      X = full.sum(axis=(2,3))
       sched = X.schedule()
       assert len(sched) == 1
       run_schedule(sched)
