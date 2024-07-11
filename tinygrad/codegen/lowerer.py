@@ -63,7 +63,7 @@ class Lowerer(Kernel):
       else:
         # NOTE: outbufs is quickly findable in AST
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
-                  (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
+                  (x.arg.idx, any(x.arg.idx == y.arg.idx for y in self.ast)))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
