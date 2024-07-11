@@ -12,8 +12,8 @@ from tinygrad.helpers import to_function_name, DEBUG, getenv, prod, diskcache_pu
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
-def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.int32, x) if isinstance(x, int) else x.render(render_ops, ctx)
-render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
+def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.bigint, x) if isinstance(x, int) else x.render(render_ops, ctx)
+render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.bigint, self.b),
                     MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*variable_to_uop(self.b, ctx),
                     DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//variable_to_uop(self.b, ctx),
                     ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%variable_to_uop(self.b, ctx),
@@ -23,7 +23,7 @@ render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
 if getenv("UOP_IS_SYMBOLIC"):
-  # TODO: change this once UOps is ready to replace symbolic. note: this doesn't work for variable shapetrackers now
+  # TODO: change this once UOps is ready to replace symbolic
   def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
     # TODO: dtypes.realint
     iexpr = variable_to_uop(view.offset)
@@ -56,7 +56,7 @@ else:
     return uidx, uvalid
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0) -> Tuple[List[UOp], List[UOp]]:
-  local_idxs = loop_local_idxs = [UOp(UOps.SPECIAL, dtypes.int32, (), (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501
+  local_idxs = loop_local_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (), (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501
   if maxdim != 0 and len(local_dims) > maxdim:
     dd = local_idxs[0]
     nli = []
@@ -128,23 +128,23 @@ class Lowerer(Kernel):
       self.local_size += [1]*(3-len(self.local_size))
     else:
       # all loops are RANGES
-      self.idxs = [UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i, False))
+      self.idxs = [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, False))
                    for i,g in enumerate(ki.full_shape[:ki.first_reduce])]
       self.global_size, self.local_size = None, None
 
     # reduce loops
-    self.idxs += [UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i, True))
+    self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True))
       for i,g in enumerate(ki.full_shape[ki.first_reduce+ki.group_for_reduces:ki.shape_len-ki.upcasted], start=ki.first_reduce+ki.group_for_reduces)]
 
     # upcast loops
     for i,g in enumerate(ki.full_shape[ki.shape_len-ki.upcasted:], start=ki.shape_len-ki.upcasted):
       assert isinstance(g, int), "needs to be int to upcast/unroll"
-      self.idxs.append(UOp(UOps.EXPAND, dtypes.int32, tuple(UOp.const(dtypes.int32, j) for j in range(0, g)), i))
+      self.idxs.append(UOp(UOps.EXPAND, dtypes.bigint, tuple(UOp.const(dtypes.bigint, j) for j in range(0, g)), i))
 
     # late indexes (group for reduce)
     self.ridxs = self.idxs[:]
     for a in range(ki.first_reduce, ki.first_reduce+ki.group_for_reduces):
-      self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(ki.full_shape[a])), (1000+a, True))
+      self.ridxs[a] = UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(ki.full_shape[a])), (1000+a, True))
 
     self.uop_cache: Dict[LazyOp, UOp] = {}
     self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast], self.opts)

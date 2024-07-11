@@ -337,6 +337,9 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # bigint is rewritten to int32
+  (UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.bigint, name="x"),
+   lambda x: UOp(x.op, dtypes.int32, x.src, x.arg)),
   # VECTORIZE/GEP
   (UOp(UOps.GEP, src=(UOp(UOps.VECTORIZE).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
   (UOp(UOps.VECTORIZE, dtypes.float.vec(2), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))), lambda x: x),
