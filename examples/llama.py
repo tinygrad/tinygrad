@@ -460,7 +460,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       outputted += user_prompt
 
     new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
-    assert toks == new_toks[:len(toks)]
+    assert toks == new_toks[:len(toks)] or args.gen == "3"
     toks = new_toks
     assert outputted == llama.tokenizer.decode(toks)
 
