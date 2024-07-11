@@ -480,18 +480,32 @@ constant_folder = PatternMatcher([
   # max on special can go away (TODO: special should be variable, same thing applies)
   (UOp.max(UOp.cvar('c'), UOp(UOps.SPECIAL).name('s')), lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
   # const rules
+  # TODO: Write a UPat for vec(8) types
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.VECTORIZE, src=UPat(UOps.CONST, name="c")))), lambda root, c: UOp.const(root.dtype, c.arg)),
+  (UPat(UOps.GEP, name="root", src=(UPat(UOps.VECTORIZE, src=(
+    UPat(UOps.CONST, name="c1"), UPat(UOps.CONST, name="c2"))))), lambda root, c1, c2: UOp.const(root.dtype, c1.arg if root.arg == 0 else c2.arg)),
+  (UPat(UOps.GEP, name="root", src=(UPat(UOps.VECTORIZE, src=(
+    UPat(UOps.CONST, name="c1"), UPat(UOps.CONST, name="c2"), UPat(UOps.CONST, name="c3"), UPat(UOps.CONST, name="c4"))))),
+    lambda root, c1, c2, c3, c4: UOp.const(root.dtype, [c1.arg, c2.arg, c3.arg, c4.arg][root.arg])),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi on a DEFINE_ACC without loops, CONST, or a vectorized CONST is a noop. this is for correctness, not just speed
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST),)), UPat(name="x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=UPat(UOps.CONST)),)), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(2)]))), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(4)]))), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(8)]))), UPat(name="x"))), lambda x: x),
   (UPat(UOps.PHI, src=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=UPat(UOps.CONST)), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(2)]), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(4)]), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(8)]), UPat(name="x"))), lambda x: x),
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
+  # TODO: Write a UPat for vec(8) types
   (UPat(UOps.DEFINE_ACC, name="root", src=(UPat(UOps.CONST),)), lambda root: UOp.cast(root.src[0], root.dtype)),
-  (UPat(UOps.DEFINE_ACC, name="root", src=(UPat(UOps.VECTORIZE, src=UPat(UOps.CONST)),)), lambda root: UOp.cast(root.src[0], root.dtype)),
+  (UPat(UOps.GEP, name="root", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[
+    UPat(UOps.CONST, name="c1"), UPat(UOps.CONST, name="c2")]))))), lambda root, c1, c2: UOp.const(root.dtype, c1.arg)),
+  (UPat(UOps.GEP, name="root", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[
+    UPat(UOps.CONST, name="c1"), UPat(UOps.CONST, name="c2"), UPat(UOps.CONST, name="c3"), UPat(UOps.CONST, name="c4")]))))),
+    lambda root, c1, c2, c3, c4: UOp.const(root.dtype, c1.arg)),
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
   (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
