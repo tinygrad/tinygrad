@@ -1,5 +1,5 @@
 import math
-from typing import Tuple, List, cast
+from typing import Tuple, List
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.uops import UOp
@@ -64,7 +64,7 @@ def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
   assert q.dtype in (dtypes.int64, dtypes.int32, dtypes.int16, dtypes.uint32)
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype, dtypes.uint32: dtypes.float32}[q.dtype]
-  return shl(q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)), significand_bits(final_dtype)).bitcast(final_dtype) # noqa: E501
+  return shl(q.e(BinaryOps.ADD, q.const(exponent_bias(final_dtype)+1)), significand_bits(final_dtype)).bitcast(final_dtype)
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
@@ -87,7 +87,7 @@ def ldexp3k(d:UOp, e:UOp) -> UOp:
 def ldexp2k(d:UOp, e:UOp) -> UOp:
   """d*2^e. much faster than ldexp3k but risky. d > 0 and d is not denormal."""
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
-  return d.e(BinaryOps.MUL, pow2if(shr(e, 1), d.dtype)).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.ADD, shr(e, 1).e(UnaryOps.NEG)), d.dtype)) # noqa: E501
+  return d.e(BinaryOps.MUL, pow2if(shr(e, 1), d.dtype)).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.ADD, shr(e, 1).e(UnaryOps.NEG)), d.dtype))
 
 def frexp(v:UOp) -> Tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent)"""
@@ -144,7 +144,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
     if count+offset <= len(two_over_pi_f[0:-2]):
       an = _eq(i, count).e(TernaryOps.WHERE, _take(an, offset, count=count+1), an.const(two_over_pi_f[count+offset]))
     return an
-  def _exact_pow2if(x): return pow2if(x, cast(DType, d.dtype)).cast(acc_dtype)
+  def _exact_pow2if(x): return pow2if(x, input_dtype).cast(acc_dtype)
   def _shl_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.MUL, _exact_pow2if(y)).cast(dtypes.uint32)
   def _shr_lazy(x, y): return x.cast(acc_dtype).e(BinaryOps.IDIV, _exact_pow2if(y)).cast(dtypes.uint32)
   # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
@@ -213,8 +213,8 @@ def trig_poly(d:UOp, coeff32, coeff64):
   if d.dtype == dtypes.float64:
     s2 = s.e(BinaryOps.MUL, s)
     s4 = s2.e(BinaryOps.MUL, s2)
-    def __poly4(x: UOp, x2: UOp, c3, c2, c1, c0) -> UOp: return mla(x2, mla(x, x.const(c3), x.const(c2)), mla(x, x.const(c1), x.const(c0))) # noqa: E501
-    def __poly8(x, x2, x4, c7, c6, c5, c4, c3, c2, c1, c0) -> UOp: return mla(x4, __poly4(x, x2, c7, c6, c5, c4), __poly4(x, x2, c3, c2, c1, c0)) # noqa: E501
+    def __poly4(x: UOp, x2: UOp, c3, c2, c1, c0) -> UOp: return mla(x2, mla(x, x.const(c3), x.const(c2)), mla(x, x.const(c1), x.const(c0)))
+    def __poly8(x, x2, x4, c7, c6, c5, c4, c3, c2, c1, c0) -> UOp: return mla(x4, __poly4(x, x2, c7, c6, c5, c4), __poly4(x, x2, c3, c2, c1, c0))
     u = __poly8(s, s2, s4, *coeff64[:-1])
     u = mla(u, s, d.const(coeff64[-1]))
   else:
