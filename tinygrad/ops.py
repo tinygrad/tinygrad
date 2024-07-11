@@ -14,11 +14,11 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
 class UnaryOps(Enum):
   """A -> A (elementwise)"""
-  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto(); RECIP = auto(); THREEFRY = auto() # noqa: E702
+  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto(); RECIP = auto() # noqa: E702
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto() # noqa: E702
 class TernaryOps(Enum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702

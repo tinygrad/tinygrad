@@ -416,8 +416,8 @@ class Tensor:
     Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
     x = counts2.cast(dtypes.uint64) << 32 | counts1.cast(dtypes.uint64)
-    x = F.Threefry.apply(x)
-    counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), (x >> 32).cast(dtypes.uint32)
+    x = F.Threefry.apply(*x._broadcasted(Tensor._seed))
+    counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
 
     out = counts1.cat(counts2).rshift(8).cast(dtypes.float32).div(2 ** 24)[:num]
     out = out.reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
