@@ -1,4 +1,8 @@
 name: Benchmarks
+env:
+  RUN_PROCESS_REPLAY: "1"
+  ASSERT_PROCESS_REPLAY: "0"
+  PYTHONPATH: .
 
 on:
   push:
@@ -21,8 +25,6 @@ jobs:
       run:
         shell: bash -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
-    env:
-      PYTHONPATH: .
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -34,9 +36,6 @@ jobs:
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
-    # - name: Setup process replay
-    # if: github.event.inputs.run_process_replay == 'true' || contains(github.event.head_commit.message, '[run_process_replay]') || contains(github.event.pull_request.title, '[run_process_replay]')
-    # run: echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
     - name: Run Stable Diffusion
       run: JIT=2 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run Stable Diffusion with fp16
@@ -87,7 +86,7 @@ jobs:
       run: JIT=2 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
     - name: Run process replay tests
       if: env.RUN_PROCESS_REPLAY == '1'
-      run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
@@ -122,8 +121,6 @@ jobs:
       run:
         shell: bash -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
-    env:
-      PYTHONPATH: .
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -193,6 +190,9 @@ jobs:
       run: NV=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
       run: NV=1 HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAST_BEFORE_VIEW=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - name: Run process replay tests
+      if: env.RUN_PROCESS_REPLAY == '1'
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA)
@@ -227,8 +227,6 @@ jobs:
       run:
         shell: bash -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
-    env:
-      PYTHONPATH: .
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -262,6 +260,9 @@ jobs:
       run: NV=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
       run: NV=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+    - name: Run process replay tests
+      if: env.RUN_PROCESS_REPLAY == '1'
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA Training)
@@ -283,8 +284,6 @@ jobs:
       run:
         shell: bash -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
-    env:
-      PYTHONPATH: .
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -349,6 +348,9 @@ jobs:
       run: AMD=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
       run: AMD=1 HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAST_BEFORE_VIEW=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - name: Run process replay tests
+      if: env.RUN_PROCESS_REPLAY == '1'
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD)
@@ -381,8 +383,6 @@ jobs:
       run:
         shell: bash -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
-    env:
-      PYTHONPATH: .
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -416,6 +416,9 @@ jobs:
       run: AMD=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
       run: AMD=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+    - name: Run process replay tests
+      if: env.RUN_PROCESS_REPLAY == '1'
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)
