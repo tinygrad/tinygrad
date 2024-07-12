@@ -23,10 +23,10 @@ class TestWinograd(unittest.TestCase):
       sched = create_schedule([out.lazydata])
 
     for i,s in enumerate(sched):
-      if s.ast[0].op in MetaOps: continue
-      ops = [out.lazyops for out in s.ast]
+      if s.ast.op is not MetaOps.SINK: continue
+      ops = s.ast.lazyops
       with Timing(f"linearize {i} with {len(ops):4d} ops: "):
-        l = Linearizer(*s.ast)
+        l = Linearizer(s.ast)
         l.hand_coded_optimizations()
         l.linearize()
       assert len(l.sts) <= 256  # just the current value to prevent regression
