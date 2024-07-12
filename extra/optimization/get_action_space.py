@@ -6,7 +6,7 @@ from tinygrad.helpers import tqdm
 
 tactions = set()
 def test_rebuild(lin):
-  linr = Linearizer(*lin.ast)
+  linr = Linearizer(lin.ast)
   for o in lin.applied_opts:
     assert o in actions, f"{o} is not in actions"
     tactions.add(o)

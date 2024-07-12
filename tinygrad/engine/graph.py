@@ -1,7 +1,7 @@
 import os, atexit, functools, contextlib
 from collections import defaultdict
 from typing import List, Any, DefaultDict, Union
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MetaOps, BufferOps, TernaryOps, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters, getenv
 from tinygrad.codegen.uops import UOps, UOp
@@ -45,11 +45,11 @@ def realized_lazybuffer(lb:'LazyBuffer', num):
   G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
   G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num}"'
 
-top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
+top_colors = {MetaOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
               TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
 def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
   init_graph()
-  if lb.base.realized is None and lb.base.op is LoadOps.CONST: return
+  if lb.base.realized is None and lb.base.op is MetaOps.CONST: return
   if lb.base != lb:
     offset = lb.st.expr_idxs([NumNode(0)] * len(lb.st.shape))[0]
     label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")
@@ -60,13 +60,13 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
     label_append = []
     for idx,x in enumerate(lb.srcs):
       if nm(x) not in G.nodes: log_lazybuffer(x)
-      if x.base.realized is None and x.base.op is LoadOps.CONST:
+      if x.base.realized is None and x.base.op is MetaOps.CONST:
         label_append.append(f"\nCONST{idx} {x.base.arg:g}")
       else:
         G.add_edge(nm(x), nm(lb), color='#a0a0a0')
     label = '"' + \
       (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
-      (f"\n{lb.dtype.name}" if lb.dtype.name != "float" else "")+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
+      (f"\n{lb.dtype.name}" if lb.dtype.name != "float" else "")+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {MetaOps.CONST, UnaryOps.CAST} else "") + \
       (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + ''.join(label_append) + f'\n{lb.metadata}"'
     G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
     if scheduled: G.nodes[nm(lb)]['shape'] = 'box'

@@ -4,7 +4,7 @@ import functools
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, get_lazyop_info
 from tinygrad.codegen.uops import UOp, flops_mem, UOps
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Program
@@ -55,12 +55,15 @@ else:
     assert uvalid.dtype == dtypes.bool
     return uidx, uvalid
 
-def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0) -> Tuple[List[UOp], List[UOp]]:
-  local_idxs = loop_local_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (), (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501
-  if maxdim != 0 and len(local_dims) > maxdim:
+def get_grouped_dims(prefix, start_dim, dims, max_sizes:Optional[Tuple[int, ...]]) -> Tuple[List[UOp], List[UOp]]:
+  # TODO: this should be per dim max
+  maxdim = len(max_sizes) if max_sizes is not None else 0
+  local_idxs = loop_local_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (),
+    (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(dims[:-(maxdim-1)]),) + dims[-(maxdim-1):] if len(dims) > maxdim else dims)]
+  if maxdim != 0 and len(dims) > maxdim:
     dd = local_idxs[0]
     nli = []
-    for s in local_dims[:-(maxdim-1)]:
+    for s in dims[:-(maxdim-1)]:
       nli.append(dd % s)
       dd //= s
     local_idxs = nli + local_idxs[-(maxdim-1):]
@@ -85,7 +88,7 @@ class Lowerer(Kernel):
         buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype), (), ("temp", x.arg.st.size))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
-                  (x.arg.idx, any(x.arg.idx == y.arg.idx for y in self.ast)))
+                  (x.arg.idx, any(x.arg.idx == y.arg.idx for y in self.ast.src)))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
@@ -94,6 +97,7 @@ class Lowerer(Kernel):
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
+    if x.op is MetaOps.SINK: return UOp(UOps.SINK, src=in_uops)
     if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg.scalar(), in_uops)
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
@@ -114,12 +118,13 @@ class Lowerer(Kernel):
     if DEBUG >= 3:
       print(self.name)
       from tinygrad.engine.graph import print_tree
-      for mast in modified_ast: print_tree(mast)
+      print_tree(modified_ast)
 
     if self.opts.has_local:
       # define indexes
-      global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, ki.full_shape[:ki.global_dims], 3)
-      local_idxs, loop_local_idxs = get_grouped_dims("lidx", ki.global_dims, ki.full_shape[ki.global_dims:ki.first_reduce+ki.group_for_reduces], 3)
+      global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, ki.full_shape[:ki.global_dims], self.opts.global_max)
+      local_idxs, loop_local_idxs = get_grouped_dims("lidx", ki.global_dims,
+                                                     ki.full_shape[ki.global_dims:ki.first_reduce+ki.group_for_reduces], self.opts.local_max)
       self.idxs = global_idxs + local_idxs
 
       # define sizes
@@ -148,7 +153,7 @@ class Lowerer(Kernel):
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(ki.full_shape[a])), (1000+a, True))
 
     self.uop_cache: Dict[LazyOp, UOp] = {}
-    self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast], self.opts)
+    self.uops:UOpGraph = UOpGraph(self.to_uop(modified_ast), self.opts)
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
@@ -165,7 +170,7 @@ class Lowerer(Kernel):
       def lin(): self.linearize().uops.linearize()
       dt = min(timeit(lin) for i in range(5)) if getenv("TIMEIT") else None
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}, dt))
-    info = get_lazyop_info(self.ast[0])
+    info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed
     ops, mem = flops_mem(self.uops.uops)
     run_count = prod((self.global_size or []) + (self.local_size or []))
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,

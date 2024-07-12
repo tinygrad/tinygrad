@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, GlobalCounters
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
-from tinygrad.ops import LoadOps
+from tinygrad.ops import MetaOps
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.schedule import create_schedule
 
@@ -23,7 +23,7 @@ class TestWinograd(unittest.TestCase):
       sched = create_schedule([out.lazydata])
 
     for i,s in enumerate(sched):
-      if s.ast[0].op in LoadOps: continue
+      if s.ast[0].op in MetaOps: continue
       ops = [out.lazyops for out in s.ast]
       with Timing(f"linearize {i} with {len(ops):4d} ops: "):
         l = Linearizer(*s.ast)
