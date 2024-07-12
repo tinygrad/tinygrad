@@ -7,11 +7,13 @@ from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSIO
 class ProcessReplayError(Exception): pass
 
 page_size = 100
+table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}_{VERSION}"
+print(table_name)
 conn = db_connection()
 cur = conn.cursor()
-row_count = cur.execute(f"select count(*) from 'process_replay_{VERSION}'").fetchone()[0]
+row_count = cur.execute(f"select count(*) from '{table_name}'").fetchone()[0]
 for offset in tqdm(range(0, row_count, page_size)):
-  cur.execute(f"SELECT val FROM 'process_replay_{VERSION}' LIMIT ? OFFSET ?", (page_size, offset))
+  cur.execute(f"SELECT val FROM '{table_name}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
     ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
     with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache}):
