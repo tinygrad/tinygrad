@@ -569,12 +569,18 @@ if __name__ == "__main__":
     with tqdm(total=len(files)) as pbar:
       for x,y,c in batch_load_resnet(val=val):
         pbar.update(x.shape[0])
+
   def load_retinanet(val):
     from extra.datasets.openimages import get_train_files, get_val_files
+    from extra.models.retinanet import anchor_generator
+    feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
+    ANCHORS = anchor_generator((10,3,800,800), feature_shapes)
+    ANCHOR_NP = ANCHORS[0].numpy()
     files = get_val_files() if val else get_train_files()
     with tqdm(total=len(files)) as pbar:
-      for x in batch_load_retinanet(val=val):
+      for x in batch_load_retinanet(val=val, anchor_np=ANCHOR_NP):
         pbar.update(x[0].shape[0])
-  load_fn_name = f"load_{getenv('MODEL', 'retinanet')}"
+
+  load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn_name in globals():
-    globals()[load_fn_name](getenv("VAL", 0))
+    globals()[load_fn_name](getenv("VAL", 1))
