@@ -205,49 +205,113 @@ def hcq_command(func):
   return __wrapper
 
 class HWCommandQueue:
+  """
+  A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
+  Both compute and copy queues should have the following commands implemented.
+  """
+
   def __init__(self): self.q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
   def __len__(self): return len(self.cmds_offset)
   def _patch(self, cmd_idx, offset, data): self.q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
 
   @hcq_command
-  def signal(self, signal, value): self._signal(signal, value)
+  def signal(self, signal, value):
+    """
+    Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.
+
+    :param signal: The signal to set
+    :param value: The value to set the signal to
+    """
+    self._signal(signal, value)
   def _signal(self, signal, value): raise NotImplementedError("backend should overload this function")
 
   @hcq_command
-  def wait(self, signal, value): self._wait(signal, value)
+  def wait(self, signal, value):
+    """
+    Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.
+
+    :param signal: The signal to wait on
+    :param value: The value to wait for
+    """
+    self._wait(signal, value)
   def _wait(self, signal, value): raise NotImplementedError("backend should overload this function")
 
   @hcq_command
-  def timestamp(self, signal): self._timestamp(signal)
+  def timestamp(self, signal):
+    """
+    Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.
+
+    :param signal: The signal to store the timestamp
+    """
+    self._timestamp(signal)
   def _timestamp(self, signal): raise NotImplementedError("backend should overload this function")
 
   def update_signal(self, cmd_idx, signal=None, value=None):
+    """
+    Updates a previously queued signal command.
+
+    :param cmd_idx: Index of the signal command to update
+    :param signal: New signal to set (if None, keeps the original)
+    :param value: New value to set (if None, keeps the original)
+    """
     if self.cmds_meta[cmd_idx] != "signal": raise RuntimeError("called update_signal not on a signal command")
     self._update_signal(cmd_idx, signal, value)
     return self
   def _update_signal(self, cmd_idx, signal, value): raise NotImplementedError("backend should overload this function")
 
   def update_wait(self, cmd_idx, signal=None, value=None):
+    """
+    Updates a previously queued wait command.
+
+    :param cmd_idx: Index of the wait command to update
+    :param signal: New signal to wait on (if None, keeps the original)
+    :param value: New value to wait for (if None, keeps the original)
+    """
     if self.cmds_meta[cmd_idx] != "wait": raise RuntimeError("called update_wait not on a wait command")
     self._update_wait(cmd_idx, signal, value)
     return self
   def _update_wait(self, cmd_idx, signal, value): raise NotImplementedError("backend should overload this function")
 
   def submit(self, device:HCQCompatCompiled):
+    """
+    Submits the command queue to a specific device for execution.
+
+    :param device: The device to submit the queue to
+    """
     self._submit(device)
     return self
   def _submit(self, device:HCQCompatCompiled): raise NotImplementedError("backend should overload this function")
 
 class HWComputeQueue(HWCommandQueue):
   @hcq_command
-  def memory_barrier(self): self._memory_barrier()
+  def memory_barrier(self):
+    """
+    Enqueues a memory barrier command to ensure memory coherence between agents.
+    """
+    self._memory_barrier()
   def _memory_barrier(self): pass
 
   @hcq_command
-  def exec(self, prg, kernargs, global_size, local_size): self._exec(prg, kernargs, global_size, local_size)
+  def exec(self, prg, kernargs, global_size, local_size):
+    """
+    Enqueues an execution command for a kernel program.
+
+    :param prg: The program to execute
+    :param kernargs: The pointer to kernel arguments
+    :param global_size: The global work size
+    :param local_size: The local work size
+    """
+    self._exec(prg, kernargs, global_size, local_size)
   def _exec(self, prg, kernargs, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
   def update_exec(self, cmd_idx, global_size, local_size):
+    """
+    Updates a previously queued execution command.
+
+    :param cmd_idx: Index of the execution command to update
+    :param global_size: New global work size
+    :param local_size: New local work size
+    """
     if self.cmds_meta[cmd_idx] != "exec": raise RuntimeError("called update_exec not on an exec command")
     self._update_exec(cmd_idx, global_size, local_size)
     return self
@@ -255,10 +319,25 @@ class HWComputeQueue(HWCommandQueue):
 
 class HWCopyQueue(HWCommandQueue):
   @hcq_command
-  def copy(self, dest, src, copy_size): self._copy(dest, src, copy_size)
+  def copy(self, dest, src, copy_size):
+    """
+    Enqueues a copy command to transfer data.
+
+    :param dest: The destination of the copy
+    :param src: The source of the copy
+    :param copy_size: The size of data to copy
+    """
+    self._copy(dest, src, copy_size)
   def _copy(self, dest, src, copy_size): raise NotImplementedError("backend should overload this function")
 
   def update_copy(self, cmd_idx, dest=None, src=None):
+    """
+    Updates a previously queued copy command.
+
+    :param cmd_idx: Index of the copy command to update
+    :param dest: New destination of the copy (if None, keeps the original)
+    :param src: New source of the copy (if None, keeps the original)
+    """
     if self.cmds_meta[cmd_idx] != "copy": raise RuntimeError("called update_copy not on an copy command")
     self._update_copy(cmd_idx, dest, src)
     return self
@@ -284,6 +363,20 @@ class HCQCompatProgram:
   def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
 
 class HCQCompatCompiled(Compiled):
+  """
+  A base class for devices compatible with the HCQ (Hardware Command Queue) API.
+
+  HCQ API is a lower level API for defining backends. HCQ-compatible devices are required to define 2 queue types:
+  1. Compute queue (`HWComputeQueue`): for compute workloads
+  2. Copy queue (`HWCopyQueue`): for transfer operations
+
+  HCQ-compatible devices should also support signals which are accessible from CPU for synchronization. For global synchronization, devices use
+  progressive per-device timeline signals. By convention, self.timeline_value points to the next value to signal. To wait for all previous
+  operations on the device to complete, use: `self._wait_signal(self.timeline_signal, self.timeline_value - 1)`
+
+  This class implements the necessary shared methods and attributes (like profiling functionality) for this kind of devices.
+  """
+
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, comp_queue_t, copy_queue_t, timeline_signals):
     self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
     self.timeline_value: int = 1
@@ -347,6 +440,12 @@ class HCQCompatCompiled(Compiled):
 class HCQCompatAllocRes(Protocol): va_addr: int; size: int # noqa: E702
 
 class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
+  """
+  A base allocator class compatible with the HCQ (Hardware Command Queue) API.
+
+  This class implements basic copy operations following the HCQ API, utilizing both `HWComputeQueue` and `HWCopyQueue`.
+  """
+
   def __init__(self, device, batch_size=(2 << 20), batch_cnt=32):
     self.device = device
     self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
