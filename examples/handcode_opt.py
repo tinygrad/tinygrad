@@ -1,32 +1,24 @@
 from typing import List
 from extra.models.resnet import ResNet50
-from tinygrad import Tensor, nn
-from tinygrad.ops import LoadOps, get_lazyop_info
-from tinygrad.device import Device, Compiled
+from examples.mlperf.helpers import get_mlperf_bert_model
+from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
-from tinygrad.helpers import ansilen, DEBUG, getenv
-from tinygrad.shape.symbolic import sym_infer
-from tinygrad.dtype import dtypes
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.device import Compiled
 from tinygrad.engine.graph import print_tree
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.helpers import DEBUG, ansilen, getenv
+from tinygrad.ops import LoadOps, get_lazyop_info
+from tinygrad.shape.symbolic import sym_infer
 
-if __name__ == "__main__":
-  if getenv("HALF"):
-    dtypes.default_float = dtypes.half
 
+def get_sched_resnet():
   mdl = ResNet50()
-  seen = set()
-
-  # the device we are optimizing for
-  device: Compiled = Device[Device.DEFAULT]
-  if getenv("BACKWARD"):
-    Tensor.training = True
-    optim = (nn.optim.LARS if getenv("LARS") else nn.optim.SGD)(nn.state.get_parameters(mdl))
-  print(f"optimizing for {Device.DEFAULT}")
+  optim = (nn.optim.LARS if getenv("LARS") else nn.optim.SGD)(nn.state.get_parameters(mdl))
 
   # run model twice to get only what changes, these are the kernels of the model
-  for i in range(2):
+  seen = set()
+  for _ in range(2):
     out = mdl(Tensor.empty(64, 3, 224, 224))
     targets = [out.lazydata]
     if getenv("BACKWARD"):
@@ -35,6 +27,47 @@ if __name__ == "__main__":
       targets += [x.lazydata for x in optim.schedule_step()]
     sched = create_schedule(targets, seen)
     print(f"schedule length {len(sched)}")
+  return sched
+
+def get_sched_bert():
+  mdl = get_mlperf_bert_model()
+  optim = nn.optim.LAMB(nn.state.get_parameters(mdl))
+
+  # fake data
+  BS = getenv("BS", 2)
+  input_ids = Tensor.empty((BS, 512), dtype=dtypes.float32)
+  segment_ids = Tensor.empty((BS, 512), dtype=dtypes.float32)
+  attention_mask = Tensor.empty((BS, 512), dtype=dtypes.default_float)
+  masked_positions = Tensor.empty((BS, 76), dtype=dtypes.float32)
+  masked_lm_ids = Tensor.empty((BS, 76), dtype=dtypes.float32)
+  masked_lm_weights = Tensor.empty((BS, 76), dtype=dtypes.float32)
+  next_sentence_labels = Tensor.empty((BS, 1), dtype=dtypes.float32)
+
+  # run model twice to get only what changes, these are the kernels of the model
+  seen = set()
+  for _ in range(2):
+    lm_logits, seq_relationship_logits = mdl(input_ids, attention_mask, masked_positions, segment_ids)
+    targets = [lm_logits.lazydata, seq_relationship_logits.lazydata]
+    if getenv("BACKWARD"):
+      optim.zero_grad()
+      loss = mdl.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
+      # ignore grad norm and loss scaler for now
+      loss.backward()
+      targets += [x.lazydata for x in optim.schedule_step()]
+    sched = create_schedule(targets, seen)
+    print(f"schedule length {len(sched)}")
+  return sched
+
+if __name__ == "__main__":
+  if getenv("HALF", 1):
+    dtypes.default_float = dtypes.half
+
+  # the device we are optimizing for
+  device: Compiled = Device[Device.DEFAULT]
+  if getenv("BACKWARD"): Tensor.training = True
+  print(f"optimizing for {Device.DEFAULT}")
+
+  sched = globals()[f"get_sched_{getenv('MODEL', 'resnet')}"]()
   sched = [x for x in sched if x.ast[0].op not in LoadOps]
 
   # focus on one kernel
