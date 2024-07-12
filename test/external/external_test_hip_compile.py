@@ -1,5 +1,5 @@
 import time, unittest
-from tinygrad.runtime.driver.hip_comgr import compile_hip
+from tinygrad.runtime.support.hip_comgr import compile_hip
 from tinygrad import Tensor
 from tinygrad.device import Device
 from tinygrad.engine.schedule import create_schedule
