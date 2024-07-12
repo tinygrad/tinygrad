@@ -23,7 +23,7 @@ class TestIndexing(unittest.TestCase):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
     needle[1337] = 1
     needle.realize()
-    with Context(NOOPT=1, FUSE_AS_ONE_KERNEL=1):
+    with Context(NOOPT=1):
       GlobalCounters.reset()
       # TODO: it should work without these reshapes
       out = ((Tensor.arange(1,16385).reshape(16384,1)-1)*needle.reshape(16384,1)).sum()
@@ -38,7 +38,7 @@ class TestIndexing(unittest.TestCase):
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
-    with Context(NOOPT=1, FUSE_AS_ONE_KERNEL=1):
+    with Context(NOOPT=1):
       GlobalCounters.reset()
       rng = Tensor.ones(4, 256, 16384, dtype=dtypes.int)._cumsum(axis=-1, _first_zero=True).reshape(4, 256, 16384, 1)
       idxs = idxs.reshape(4,1,1,1).expand(4, 256, 16384, 1)
@@ -62,7 +62,7 @@ class TestIndexing(unittest.TestCase):
       assert X.shape == (4,256)
       sched = X.schedule()
       # TODO: enable these asserts when the scheduler can handle this
-      #assert len(sched) == 1
+      #assert len(sched) == 1, f"{len(sched)} != 1"
       run_schedule(sched)
       #assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -74,12 +74,12 @@ class TestIndexing(unittest.TestCase):
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
-    with Context(NOOPT=1, FUSE_AS_ONE_KERNEL=1):
+    with Context(NOOPT=1):
       GlobalCounters.reset()
       X = dataset[idxs]
       assert X.shape == (4,256)
       sched = X.schedule()
-      assert len(sched) == 1
+      assert len(sched) == 1, f"{len(sched)} != 1"
       run_schedule(sched)
       assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
