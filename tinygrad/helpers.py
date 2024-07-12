@@ -197,7 +197,7 @@ def db_connection():
   global _db_connection
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
-    _db_connection = sqlite3.connect(CACHEDB)
+    _db_connection = sqlite3.connect(CACHEDB, timeout=30)
     _db_connection.execute("PRAGMA journal_mode=WAL")
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
