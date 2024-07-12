@@ -10,7 +10,7 @@ from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps
 from tinygrad.helpers import DEBUG, flatten, getenv
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer
 from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -38,7 +38,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
   # test the (non loadops) ops linearize
   for s in sched:
     if s.ast.op is not MetaOps.SINK: continue
-    l = Linearizer(s.ast)
+    l = Lowerer(s.ast)
     l.hand_coded_optimizations()
     l.linearize()
   return sched
