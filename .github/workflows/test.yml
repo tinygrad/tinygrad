@@ -2,6 +2,7 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '4'
+  GITHUB_CONTEXT: ${{ toJson(github) }}
 
 on:
   push:
@@ -45,9 +46,7 @@ jobs:
           echo "ASSERT_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
           echo "enabled process replay (with assert)"
         fi
-    - name: dump github context
-      env:
-        GITHUB_CONTEXT: ${{ toJson(github) }}
+    - name: print github context
       run: echo "$GITHUB_CONTEXT"
 
   uops:
