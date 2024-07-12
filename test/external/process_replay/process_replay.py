@@ -22,7 +22,7 @@ for offset in tqdm(range(0, row_count, page_size)):
         k = Linearizer(ast, opts=opts)
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
-        if ctx.get("TIMEIT"):
+        if lintime is not None:
           dt = min(timeit(lambda:k.linearize().uops.linearize()) for i in range(5)) - lintime
           if abs(dt) > 1e-3: timediffs.append((name, lintime, dt))
       except Exception as e:
