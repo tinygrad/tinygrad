@@ -13,8 +13,7 @@ row_count = cur.execute(f"select count(*) from 'process_replay_{VERSION}'").fetc
 for offset in tqdm(range(0, row_count, page_size)):
   cur.execute(f"SELECT val FROM 'process_replay_{VERSION}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
-    ast, opts, applied_opts, name, compare_src, ctx, gh_sha = pickle.loads(row[0])
-    print(gh_sha)
+    ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
     with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache}):
       try:
         k = Linearizer(*ast, opts=opts)
