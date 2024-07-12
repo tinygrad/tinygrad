@@ -150,12 +150,12 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value,
-  dtypes.int32: lambda x: ctypes.c_int32(x).value, dtypes.int64: lambda x: ctypes.c_int64(x).value,}
+  dtypes.int32: lambda x: ctypes.c_int32(x).value, dtypes.int64: lambda x: ctypes.c_int64(x).value, dtypes.bigint: lambda x: x }
 
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
 # the living definition of LazyOps
-def verify_lazyop(*ast:LazyOp):
+def verify_lazyop(*ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
   sts: Dict[LazyOp, ShapeTracker] = {}
   def dfs(op:LazyOp, st:ShapeTracker):
     if op in sts: return
@@ -175,3 +175,4 @@ def verify_lazyop(*ast:LazyOp):
     assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
     assert out.arg.st.size == ast[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
     dfs(out, out.arg.st)
+  return sts

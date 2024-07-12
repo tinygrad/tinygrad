@@ -106,6 +106,7 @@ WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEF
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
 MULTIOUTPUT, PROFILE, TRANSCENDENTAL = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("TRANSCENDENTAL", 1)
 USE_TC, TC_OPT = ContextVar("TC", 1), ContextVar("TC_OPT", 0)
+FUSE_AS_ONE_KERNEL = ContextVar("FUSE_AS_ONE_KERNEL", 0)
 
 @dataclass(frozen=True)
 class Metadata:

@@ -67,7 +67,7 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
     label = '"' + \
       (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
       (f"\n{lb.dtype.name}" if lb.dtype.name != "float" else "")+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
-      (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + ''.join(label_append) + '"'
+      (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + ''.join(label_append) + f'\n{lb.metadata}"'
     G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
     if scheduled: G.nodes[nm(lb)]['shape'] = 'box'
   else:
