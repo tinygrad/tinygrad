@@ -8,7 +8,7 @@ from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import DEBUG, ansilen, getenv
-from tinygrad.ops import LoadOps, get_lazyop_info
+from tinygrad.ops import MetaOps, get_lazyop_info
 from tinygrad.shape.symbolic import sym_infer
 
 
@@ -68,7 +68,7 @@ if __name__ == "__main__":
   print(f"optimizing for {Device.DEFAULT}")
 
   sched = globals()[f"get_sched_{getenv('MODEL', 'resnet')}"]()
-  sched = [x for x in sched if x.ast[0].op not in LoadOps]
+  sched = [x for x in sched if x.ast[0].op not in MetaOps]
 
   # focus on one kernel
   if getenv("KERNEL", -1) >= 0: sched = sched[getenv("KERNEL", -1):getenv("KERNEL", -1)+1]

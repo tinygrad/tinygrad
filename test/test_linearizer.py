@@ -9,7 +9,7 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Device, Buffer
-from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
+from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, MetaOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.renderer import TensorCore
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -674,7 +674,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
-      sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
+      sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in MetaOps]
       assert len(sched) == 1
 
       lin = Linearizer(*sched[0].ast)
@@ -695,7 +695,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
-    sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
+    sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in MetaOps]
     assert len(sched) == 1
     lin = Linearizer(*sched[0].ast)
     assert not any(u.op is UOps.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
