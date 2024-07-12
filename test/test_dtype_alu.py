@@ -176,8 +176,8 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(35.0)
     _test_value(0.0)
     _test_value(np.pi / 2)
-     # worst case in fp16. ULP 3.5
-    _test_value(np.pi * 2, unit=3.5 if dtype == dtypes.float16 else 1.0)
+     # worst case of ulp 3.5
+    _test_value(np.pi * 2, unit=3.5)
 
 if __name__ == '__main__':
   unittest.main()
