@@ -247,7 +247,7 @@ class Kernel:
     move_axis = axis if top else axis+1
     if move_axis < insert_before: insert_before += 1
     self.reshape_and_permute(
-      lambda x: list(x[0:axis]) + (([amount, x[axis]//amount] if top else [x[axis]//amount, amount]) if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
+      lambda x: x[0:axis] + (((amount, x[axis]//amount) if top else (x[axis]//amount, amount)) if x[axis] > 1 else (1,1)) + x[axis+1:],
       [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
 
   # ******************** complex simplifiers ********************
