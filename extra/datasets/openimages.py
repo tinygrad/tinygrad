@@ -91,10 +91,10 @@ def get_val_data():
     data = json.load(f)
   return data
 
-def img_resize_convert(img, size):
+def img_resize_convert(img:Image, size:int) -> Image:
   return img.resize((size, size), resample = Image.BILINEAR)
 
-def preprocess_train(img):
+def preprocess_train(img:Image) -> np.ndarray:
   return np.array(img_resize_convert(img, 800))
 
 # this slows down the conversion a lot!
