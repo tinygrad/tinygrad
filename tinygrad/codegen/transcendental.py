@@ -175,34 +175,6 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   q = fraction_map.e(TernaryOps.WHERE, q, q.e(BinaryOps.ADD, q.const(1)))
   return r, q
 
-def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
-  """
-  Performs Cody-Waite Reduction: computes the reminder of `d` modulo pi/2 for the values `d` where
-      0 <= abs(d) <= 39800.0
-  Returns a tuple of `(r, q)`, where the output format is the same as that of `payne_hanek_reduction`.
-  """
-  m_1_pi = 0.318309886183790671537767526745028724
-  qdh = d.e(BinaryOps.MUL, d.const(m_1_pi / 16777216)).cast(dtypes.int64).cast(d.dtype).e(BinaryOps.MUL, d.const(16777216.0))
-  def _quadrant(x:UOp) -> UOp:
-    if x.dtype == dtypes.float64:
-      return rintk(mla(d, d.const(m_1_pi), qdh.e(UnaryOps.NEG))).cast(x.dtype)
-    return rintk(x.e(BinaryOps.MUL, d.const(m_1_pi))).cast(x.dtype)
-  def _reduce_d(x:UOp, q:UOp):
-    if x.dtype == dtypes.float64:
-      d = mla(qdh, x.const(-3.1415926218032836914), x)
-      d = mla(q, x.const(-3.1415926218032836914), d)
-      d = mla(qdh, x.const(-3.1786509424591713469e-08), d)
-      d = mla(q, x.const(-3.1786509424591713469e-08), d)
-      d = mla(qdh, x.const(-1.2246467864107188502e-16), d)
-      d = mla(q, x.const(-1.2246467864107188502e-16), d)
-      d = mla(qdh.e(BinaryOps.ADD, q), x.const(-1.2736634327021899816e-24), d)
-    else:
-      d = mla(q, x.const(-3.1414794921875), x)
-      d = mla(q, x.const(-0.00011315941810607910156), d)
-      d = mla(q, x.const(-1.9841872589410058936e-09), d)
-      d = mla(q, x.const(-1.2154201256553420762e-10), d)
-    return d
-  return _reduce_d(d, (q := _quadrant(d))), q.cast(dtypes.int32)
 # *** approximate sine on small angle. ***
 def trig_poly(d:UOp, coeff32, coeff64):
   u = None
@@ -220,41 +192,29 @@ def trig_poly(d:UOp, coeff32, coeff64):
 # approximate sine on [-pi/2, pi/2]
 def sin_poly(d:UOp) -> UOp: return trig_poly(d, [2.6083159809786593541503e-06, -0.0001981069071916863322258, 0.00833307858556509017944336, -0.166666597127914428710938], [-7.97255955009037868891952e-18, 2.81009972710863200091251e-15, -7.64712219118158833288484e-13, 1.60590430605664501629054e-10, -2.50521083763502045810755e-08, 2.75573192239198747630416e-06, -0.000198412698412696162806809, 0.00833333333333332974823815, -0.166666666666666657414808]) # noqa: E501
 
-def sin_poly_small(d:UOp, q:UOp) -> UOp:
-  def _ifand(n: int): return q.e(BinaryOps.AND, q.const(n)).e(BinaryOps.CMPNE, q.const(0))
-  r = sin_poly(d)
-  return r.e(BinaryOps.MUL, _ifand(1).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
-
 def sin_poly_large(d:UOp, q:UOp) -> UOp:
   def _ifand(n: int): return q.e(BinaryOps.AND, q.const(n)).e(BinaryOps.CMPNE, q.const(0))
   d = d.e(BinaryOps.ADD, _ifand(1).e(TernaryOps.WHERE, d.const(math.pi / 2), d.const(0)))
   r = sin_poly(d)
   return r.e(BinaryOps.MUL, _ifand(2).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
 # *** toplevel functions for xsin/xlog2/xexp2 ***
-def xsin(d:UOp, fast:bool=False, switch_over:float=1.0) -> UOp:
+def xsin(d:UOp) -> UOp:
   """
   Implements a 1.0 ULP approximation for UnaryOps.SIN.
-  - fast=True assumes x <= switch_over.
-  - switch_over is the threshold for switching to payne_hanek_reduction.
+  - Paper: https://arxiv.org/pdf/2001.09258
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
-  reduction_algo = cody_waite_reduction if fast else payne_hanek_reduction
+  switch_over = math.pi / 2
   # mask +-inf/nan as zero
   x = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
   # x_sign = sign(x)
   x_sign = x.e(BinaryOps.CMPNE, d.const(0)).e(TernaryOps.WHERE, x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1)), x.const(0)) # noqa: E501
   x_abs = x.e(BinaryOps.MUL, x_sign)
-  r, q = reduction_algo(x_abs)
-  if fast:
-    result = sin_poly_small(r, q)
-  else:
-    # Payne Hanek Reduction assumes abs(x) >= pi/4, so for smaller values, use cody_waite_reduction.
-    # [TODO] cody_waite reduction is not anymore needed right?
-    switch_over_map = x_abs.e(BinaryOps.CMPLT, x.const(switch_over))
-    r_fast, q_fast = cody_waite_reduction(x_abs)
-    r = switch_over_map.e(TernaryOps.WHERE, r_fast, r)
-    q = switch_over_map.e(TernaryOps.WHERE, q_fast, q)
-    result = switch_over_map.e(TernaryOps.WHERE, sin_poly_small(r, q), sin_poly_large(r, q))
+  r, q = payne_hanek_reduction(x_abs)
+  switch_over_map = x_abs.e(BinaryOps.CMPLT, x.const(switch_over))
+  r = switch_over_map.e(TernaryOps.WHERE, x_abs, r)
+  q = switch_over_map.e(TernaryOps.WHERE, q.const(0), q)
+  result = sin_poly_large(r, q)
   result = result.e(BinaryOps.MUL, x_sign) # adjusts the sign for abs(x).
   # sin(Inf) = NaN, sin(-Inf) = NaN, sin(NaN) = NaN
   return _lazy_map_numbers(d, d.const(math.nan), d.const(math.nan), d.const(math.nan), result)
