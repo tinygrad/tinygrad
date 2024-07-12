@@ -7,7 +7,7 @@ from tinygrad.nn.optim import Adam
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
 from tinygrad.engine.search import actions
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, lin_to_feats, assert_same_lin
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer
 from tinygrad.helpers import getenv
 
 # stuff needed to unpack a kernel
@@ -38,7 +38,7 @@ def dataset_from_cache(fn):
   for f in tqdm(cur.fetchall()):
     Xs,As = [], []
     try:
-      lin = Linearizer(eval(f[0]))
+      lin = Lowerer(eval(f[0]))
       opts = pickle.loads(f[-1])
       for o in opts:
         Xs.append(lin_to_feats(lin, use_sts=True))
