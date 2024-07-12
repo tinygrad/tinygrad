@@ -367,10 +367,8 @@ def loader_process_retinanet(q_in, q_out, seed, X:Tensor, YB:Tensor, YL:Tensor, 
         
         boxes = [obj for obj in data['bbox']]
         boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
-
         boxes[:, 0::2] = boxes[:, 0::2].clip(0, w)
         boxes[:, 1::2] = boxes[:, 1::2].clip(0, h)
-        
         classes = [obj for obj in data['CatID']]
         classes = np.array(classes, dtype=np.int16)
 
@@ -391,26 +389,18 @@ def loader_process_retinanet(q_in, q_out, seed, X:Tensor, YB:Tensor, YL:Tensor, 
         # pad data with training mean
         img = np.tile(np.array([[[123.68, 116.78, 103.94]]], dtype=np.uint8), (800, 800, 1))
 
-      # broken out
-      #img_tensor = Tensor(img.tobytes(), device='CPU')
-      #storage_tensor = X[idx].contiguous().realize().lazydata.realized
-      #storage_tensor._copyin(img_tensor.numpy())
-
-      # faster
       X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
       YB[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tb.tobytes()
       YL[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tl.tobytes()
       YM[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = midx.tobytes()
 
-      # ideal
-      #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
     q_out.put(None)
 def loader_process_retinanet_val(q_in, q_out, seed, X:Tensor):
   import signal
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
-  from extra.datasets.openimages_mlperf import preprocess_train
+  from extra.datasets.openimages import preprocess_train
   
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
@@ -467,7 +457,6 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
           q_in.put((idx, None))
         else:
           q_in.put((idx, None, None))
-        
 
   shutdown = False
   class Cookie:
@@ -493,34 +482,36 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
       if gotten[num] == batch_size: break
     gotten[num] = 0
     return X[num*batch_size:(num+1)*batch_size], Y[num*batch_size:(num+1)*batch_size], YS[num*batch_size:(num+1)*batch_size], Cookie(num)
+
   receive_batch = receive_batch_val if val else receive_batch_train
-  
-  #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
   q_in, q_out = Queue(), Queue()
 
   sz = (batch_size*BATCH_COUNT, 800, 800, 3)
   if os.path.exists("/dev/shm/retinanet_X"): os.unlink("/dev/shm/retinanet_X")
   shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
-  bsz = (batch_size*BATCH_COUNT, 120087, 4)
-  if os.path.exists("/dev/shm/retinanet_YB"): os.unlink("/dev/shm/retinanet_YB")
-  bshm = shared_memory.SharedMemory(name="retinanet_YB", create=True, size=prod(bsz))
-  lsz = (batch_size*BATCH_COUNT, 120087)
-  if os.path.exists("/dev/shm/retinanet_YL"): os.unlink("/dev/shm/retinanet_YL")
-  lshm = shared_memory.SharedMemory(name="retinanet_YL", create=True, size=prod(lsz))
-  msz = (batch_size*BATCH_COUNT, 120087)
-  if os.path.exists("/dev/shm/retinanet_YM"): os.unlink("/dev/shm/retinanet_YM")
-  mshm = shared_memory.SharedMemory(name="retinanet_YM", create=True, size=prod(msz))
+  if not val:
+    bsz = (batch_size*BATCH_COUNT, 120087, 4)
+    if os.path.exists("/dev/shm/retinanet_YB"): os.unlink("/dev/shm/retinanet_YB")
+    bshm = shared_memory.SharedMemory(name="retinanet_YB", create=True, size=prod(bsz))
+    lsz = (batch_size*BATCH_COUNT, 120087)
+    if os.path.exists("/dev/shm/retinanet_YL"): os.unlink("/dev/shm/retinanet_YL")
+    lshm = shared_memory.SharedMemory(name="retinanet_YL", create=True, size=prod(lsz))
+    msz = (batch_size*BATCH_COUNT, 120087)
+    if os.path.exists("/dev/shm/retinanet_YM"): os.unlink("/dev/shm/retinanet_YM")
+    mshm = shared_memory.SharedMemory(name="retinanet_YM", create=True, size=prod(msz))
   procs = []
 
   try:
     # disk:shm is slower
     #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
     X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X")
-    YB = Tensor.empty(*bsz, dtype=dtypes.float32, device=f"disk:/dev/shm/retinanet_YB")
-    YL = Tensor.empty(*lsz, dtype=dtypes.int16, device=f"disk:/dev/shm/retinanet_YL")
-    YM = Tensor.empty(*msz, dtype=dtypes.int64, device=f"disk:/dev/shm/retinanet_YM")
-    Y = [None] * (batch_size*BATCH_COUNT)
-    YS = [None] * (batch_size*BATCH_COUNT)
+    if not val:
+      YB = Tensor.empty(*bsz, dtype=dtypes.float32, device=f"disk:/dev/shm/retinanet_YB")
+      YL = Tensor.empty(*lsz, dtype=dtypes.int16, device=f"disk:/dev/shm/retinanet_YL")
+      YM = Tensor.empty(*msz, dtype=dtypes.int64, device=f"disk:/dev/shm/retinanet_YM")
+    else:
+      Y = [None] * (batch_size*BATCH_COUNT)
+      YS = [None] * (batch_size*BATCH_COUNT)
     for _ in range(cpu_count()):
       if val:
         p = Process(target=loader_process_retinanet_val, args=(q_in, q_out, seed, X))
@@ -545,14 +536,16 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
     # shutdown processes
     for p in procs: p.join()
     shm.close()
-    bshm.close()
-    lshm.close()
-    mshm.close()
+    if not val:
+      bshm.close()
+      lshm.close()
+      mshm.close()
     try:
       shm.unlink()
-      bshm.unlink()
-      lshm.unlink()
-      mshm.unlink()
+      if not val:
+        bshm.unlink()
+        lshm.unlink()
+        mshm.unlink()
     except FileNotFoundError:
       # happens with BENCHMARK set
       pass
