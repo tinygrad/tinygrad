@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
-from typing import Tuple, List, Any, cast
+from typing import Tuple, List, Any, cast, Union
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
                             hcq_profile, Compiler, CompileError, BufferOptions
@@ -380,7 +380,7 @@ class NVDevice(HCQCompatCompiled):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1
-  gpus_info = None
+  gpus_info:Union[List, ctypes.Array] = []
   signals_page:Any = None
   signals_pool: List[Any] = []
   uvm_vaddr: int = 0x1000000000
