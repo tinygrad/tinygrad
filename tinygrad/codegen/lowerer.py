@@ -96,9 +96,7 @@ class Lowerer(Kernel):
       if x.arg.idx != -1:
         has_valid = True
         for oidx, ridx in zip(self.idxs, self.ridxs):
-          if oidx != ridx:
-            valid = valid * oidx.eq(0)
-            break   # TODO: this is wrong, but should maintain process replay
+          if oidx != ridx: valid = valid * oidx.eq(0)
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
