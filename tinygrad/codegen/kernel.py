@@ -3,6 +3,7 @@ import itertools, functools
 from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
+from tinygrad.engine.graph import print_tree
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
@@ -61,7 +62,11 @@ class TensorCoreOptions:
 class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    lazyop_sts_map = verify_lazyop(*ast)
+    try: lazyop_sts_map = verify_lazyop(*ast)
+    except AssertionError as e:
+      print("INVALID AST")
+      for op in ast: print_tree(op)
+      raise e
     self.ast = ast
     self.lazyops = flatten([op.lazyops for op in self.ast])
 

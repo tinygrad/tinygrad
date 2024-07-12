@@ -16,7 +16,7 @@ settings.register_profile("my_profile", max_examples=200, deadline=None, derando
 settings.load_profile("my_profile")
 print(settings.default)
 
-dtypes_float = (dtypes.float32, dtypes.float16)
+dtypes_float = (dtypes.float16, dtypes.float32, dtypes.float64)
 dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
 dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
@@ -164,6 +164,11 @@ class TestFromFuzzer(unittest.TestCase):
   @given(strat.sampled_from(dtypes_float))
   def test_sin(self, dtype):
     if not is_dtype_supported(dtype): return
+    if dtype == dtypes.float64:
+      # crashes in CUDACPU
+      if (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")): return
+      # fails now. TODO: fix
+      if Device.DEFAULT == "NV": return
     def _test_value(n: float, unit: float=1.0):
       next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
       ulp = next_float - 1.0
