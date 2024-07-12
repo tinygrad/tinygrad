@@ -87,10 +87,10 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
 
   if var_vals is None:
     # TODO: handle symbolic max case
-    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast[0].vars()}
+    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast.vars()}
 
   if ground_truth is None and not has_bf16:
-    unoptimized = Linearizer(*lin.ast)
+    unoptimized = Linearizer(lin.ast)
     unoptimized.required_optimizations()
     if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
       return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth,)
