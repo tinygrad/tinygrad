@@ -53,13 +53,6 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
       return [store]
   return []
 
-# new_store = store.copy()
-# for uu, vv in zip(uop.src, vp):
-#   if not _match(uu, vv, new_store): break
-# else:
-#   store.update(new_store)
-#   break
-
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
     self.patterns = patterns
