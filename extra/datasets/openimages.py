@@ -1,4 +1,4 @@
-import sys
+import sys, os
 import json
 import numpy as np
 from PIL import Image
@@ -9,7 +9,8 @@ from tqdm import tqdm
 import pandas as pd
 import concurrent.futures
 
-BASEDIR = pathlib.Path(__file__).parent / "open-images-v6-mlperf"
+# BASEDIR = pathlib.Path(__file__).parent / "open-images-v6-mlperf"
+BASEDIR = pathlib.Path('/raid/datasets/open-images')
 BUCKET_NAME = "open-images-dataset"
 TRAIN_BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-bbox.csv"
 VALIDATION_BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v5/validation-annotations-bbox.csv"
@@ -140,8 +141,8 @@ def fetch_openimages(output_fn, subset: str):
       t.set_description(f"Downloading images")
       future.result()
 
-  print("Converting annotations to COCO format...")
-  export_to_coco(class_map, annotations, image_list, data_dir, output_fn, subset)
+  # print("Converting annotations to COCO format...")
+  # export_to_coco(class_map, annotations, image_list, data_dir, output_fn, subset)
 
 def image_load(subset, fn):
   img_folder = BASEDIR / f"{subset}/data"
@@ -175,3 +176,7 @@ def iterate(coco, bs=8):
       annotations = coco.loadAnns(coco.getAnnIds(img_id))
       targets.append(prepare_target(annotations, img_id, original_size))
     yield np.array(X), targets
+
+if __name__ == '__main__':
+  openimages('train')
+  openimages('validation')

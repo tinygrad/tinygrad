@@ -10,7 +10,10 @@ BASEDIR = pathlib.Path(__file__).parent / "open-images-v6-mlperf"
 def get_train_files():
   if not (files:=glob.glob(p:=str(BASEDIR / "train/data/*"))): raise FileNotFoundError(f"No training files in {p}")
   return files
-
+def get_train_data():
+  with open(os.path.join(BASEDIR, 'train','train_data.json')) as f:
+    data = json.load(f)
+  return data
 # @functools.lru_cache(None)
 def get_val_files():
   if not (files:=glob.glob(p:=str(BASEDIR / "validation/data/*"))): raise FileNotFoundError(f"No validation files in {p}")

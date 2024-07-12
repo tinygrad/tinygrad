@@ -349,24 +349,46 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
       # happens with BENCHMARK set
       pass
 
-def loader_process_retinanet(q_in, q_out, X:Tensor, seed):
+def loader_process_retinanet(q_in, q_out, seed, X:Tensor, YB:Tensor, YL:Tensor, YM:Tensor, anchor_np):
   import signal
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
-  from extra.datasets.openimages_mlperf import preprocess_train
+  from extra.datasets.openimages_mlperf import preprocess_train, matcher_iou_func
   
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
-      idx, fn = _recv
+      idx, fn, data = _recv
       if fn is not None:
         img = Image.open(fn)
         img = img.convert('RGB') if img.mode != "RGB" else img
-
-       
+        w, h = img.size
         img = preprocess_train(img)
+        
+        boxes = [obj for obj in data['bbox']]
+        boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
+        # boxes[:, 2:] += boxes[:, :2]
+        boxes[:, 0::2] = boxes[:, 0::2].clip(0, w)
+        boxes[:, 1::2] = boxes[:, 1::2].clip(0, h)
+        
+        classes = [obj for obj in data['CatID']]
+        classes = np.array(classes, dtype=np.int16)
+
+        keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+        boxes = boxes[keep]
+        classes = classes[keep]
+        random.seed(seed * 2 ** 20 + idx)
+        r = random.random() < 0.5
+        if r:
+          img = np.flip(img, axis=1)
+          boxes[:, [0, 2]] = 800 - boxes[:, [2, 0]]
+        midx = matcher_iou_func(boxes, anchor_np)
+        m_temp = np.clip(midx, 0, None)
+        tb = boxes[m_temp]
+        tl = classes[m_temp]
+
       else:
         # pad data with training mean
-        img = np.tile(np.array([[[123.68, 116.78, 103.94]]], dtype=np.uint8), (224, 224, 1))
+        img = np.tile(np.array([[[123.68, 116.78, 103.94]]], dtype=np.uint8), (800, 800, 1))
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -375,16 +397,19 @@ def loader_process_retinanet(q_in, q_out, X:Tensor, seed):
 
       # faster
       X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+      YB[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tb.tobytes()
+      YL[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tl.tobytes()
+      YM[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = midx.tobytes()
 
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
     q_out.put(None)
 
-def batch_load_retinanet(batch_size=64, val=False, shuffle=True, seed=None, pad_first_batch=False):
-  from extra.datasets.openimages_mlperf import get_train_files, get_val_files
+def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_first_batch=False, anchor_np=[1,2,3,4]):
+  from extra.datasets.openimages_mlperf import get_train_files, get_val_files, get_train_data
   files = get_val_files() if val else get_train_files()
-
+  data_dict = None if val else get_train_data()
   if pad_first_batch:
     FIRST_BATCH_PAD = round_up(len(files), batch_size) - len(files)
   else:
@@ -402,11 +427,11 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=True, seed=None, pad_
       fidx = next(gen)
       if fidx != -1:
         fn = files[fidx]
-        q_in.put((idx, fn))
+        q_in.put((idx, fn, data_dict[fn]))
       else:
         # padding
         q_in.put((idx, None, val))
-        Y[idx] = -1
+        
 
   shutdown = False
   class Cookie:
@@ -423,7 +448,8 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=True, seed=None, pad_
       gotten[num] += 1
       if gotten[num] == batch_size: break
     gotten[num] = 0
-    return X[num*batch_size:(num+1)*batch_size], Cookie(num)
+    return X[num*batch_size:(num+1)*batch_size], YB[num*batch_size:(num+1)*batch_size], \
+      YL[num*batch_size:(num+1)*batch_size], YM[num*batch_size:(num+1)*batch_size], Cookie(num)
 
   #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
   q_in, q_out = Queue(), Queue()
@@ -431,16 +457,27 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=True, seed=None, pad_
   sz = (batch_size*BATCH_COUNT, 800, 800, 3)
   if os.path.exists("/dev/shm/retinanet_X"): os.unlink("/dev/shm/retinanet_X")
   shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  bsz = (batch_size*BATCH_COUNT, 120087, 4)
+  if os.path.exists("/dev/shm/retinanet_YB"): os.unlink("/dev/shm/retinanet_YB")
+  bshm = shared_memory.SharedMemory(name="retinanet_YB", create=True, size=prod(bsz))
+  lsz = (batch_size*BATCH_COUNT, 120087)
+  if os.path.exists("/dev/shm/retinanet_YL"): os.unlink("/dev/shm/retinanet_YL")
+  lshm = shared_memory.SharedMemory(name="retinanet_YL", create=True, size=prod(lsz))
+  msz = (batch_size*BATCH_COUNT, 120087)
+  if os.path.exists("/dev/shm/retinanet_YM"): os.unlink("/dev/shm/retinanet_YM")
+  mshm = shared_memory.SharedMemory(name="retinanet_YM", create=True, size=prod(msz))
   procs = []
 
   try:
     # disk:shm is slower
     #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
     X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X")
-    Y = [None] * (batch_size*BATCH_COUNT)
+    YB = Tensor.empty(*bsz, dtype=dtypes.float32, device=f"disk:/dev/shm/retinanet_YB")
+    YL = Tensor.empty(*lsz, dtype=dtypes.int16, device=f"disk:/dev/shm/retinanet_YL")
+    YM = Tensor.empty(*msz, dtype=dtypes.int64, device=f"disk:/dev/shm/retinanet_YM")
 
     for _ in range(cpu_count()):
-      p = Process(target=loader_process_retinanet, args=(q_in, q_out, X, seed))
+      p = Process(target=loader_process_retinanet, args=(q_in, q_out, seed, X, YB, YL, YM, anchor_np))
       p.daemon = True
       p.start()
       procs.append(p)
@@ -460,8 +497,14 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=True, seed=None, pad_
     # shutdown processes
     for p in procs: p.join()
     shm.close()
+    bshm.close()
+    lshm.close()
+    mshm.close()
     try:
       shm.unlink()
+      bshm.unlink()
+      lshm.unlink()
+      mshm.unlink()
     except FileNotFoundError:
       # happens with BENCHMARK set
       pass
