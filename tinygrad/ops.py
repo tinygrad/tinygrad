@@ -45,6 +45,11 @@ class ConstBuffer:
   dtype: DType
   st: ShapeTracker
 
+@dataclass(frozen=True)
+class KernelInfo:
+  local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
+  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to EXPAND)
+
 @dataclass(frozen=True, eq=False)
 class LazyOp:
   op: Op

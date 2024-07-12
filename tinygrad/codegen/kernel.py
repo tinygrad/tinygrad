@@ -4,7 +4,7 @@ from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
 from tinygrad.engine.graph import print_tree
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop, KernelInfo
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType
@@ -21,12 +21,6 @@ class OptOps(Enum):
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
-
-@dataclass(frozen=True)
-class KernelInfo:
-  local_dims: int               # number of local dimensions  (this is remapping RANGE to SPECIAL)
-  group_for_reduces: int        # count that are grouped      (probably findable in AST)
-  upcasted: int                 # count that are upcasted     (this is remapping RANGE to EXPAND)
 
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
@@ -655,7 +649,7 @@ class Kernel:
     suffix = f"{'n'+str(Kernel.kernel_cnt[function_name]-1)}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name+colored(suffix, 'BLACK')
 
-  def get_optimized_ast(self) -> Tuple[LazyOp, KernelInfo]:
+  def get_optimized_ast(self) -> LazyOp:
     # set the shapetrackers to the optimized ones, fixup reduceop
     # transformed to the final LazyOp
     @functools.lru_cache(None)
@@ -719,7 +713,9 @@ class Kernel:
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
           return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+      elif op.op is MetaOps.SINK:
+        arg = KernelInfo(self.local_dims, self.upcasted)
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    return fixup_ast(self.ast), KernelInfo(self.local_dims, self.group_for_reduces, self.upcasted)
+    return fixup_ast(self.ast)

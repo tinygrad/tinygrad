@@ -4,7 +4,7 @@ import functools
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, get_lazyop_info, KernelInfo
 from tinygrad.codegen.uops import UOp, flops_mem, UOps
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Program
@@ -117,10 +117,17 @@ class Lowerer(Kernel):
     return UOp.alu(x.op, *in_uops)
 
   def linearize(self) -> Lowerer:
-    modified_ast, ki = self.get_optimized_ast()
+    modified_ast = self.get_optimized_ast()
+    ki = modified_ast.arg if isinstance(modified_ast.arg, KernelInfo) else KernelInfo()
+    # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = modified_ast.full_shape
     first_reduce = [x!=y for x,y in zip(modified_ast.src[0].arg.st.shape[:len(full_shape)-ki.upcasted]+(0,),
                                         full_shape[:len(full_shape)-ki.upcasted]+(1,))].index(True)
+    local_loads = [x for x in modified_ast.lazyops if x.op is BufferOps.LOAD and x.arg.idx == -1]
+    # NOTE: this is taking the first one...there may be subtlelies here with multireduces
+    group_for_reduces = sum([x!=y for x,y in zip(
+      local_loads[0].arg.st.shape[first_reduce:len(full_shape)-ki.upcasted],
+      modified_ast.src[0].arg.st.shape[first_reduce:len(full_shape)-ki.upcasted])]) if len(local_loads) else 0
     global_dims = first_reduce-ki.local_dims
 
     if DEBUG >= 3:
@@ -132,7 +139,7 @@ class Lowerer(Kernel):
       # define indexes
       global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, full_shape[:global_dims], self.opts.global_max)
       local_idxs, loop_local_idxs = get_grouped_dims("lidx", global_dims,
-                                                     full_shape[global_dims:first_reduce+ki.group_for_reduces], self.opts.local_max)
+                                                     full_shape[global_dims:first_reduce+group_for_reduces], self.opts.local_max)
       self.idxs = global_idxs + local_idxs
 
       # define sizes
@@ -148,7 +155,7 @@ class Lowerer(Kernel):
 
     # reduce loops
     self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True))
-      for i,g in enumerate(full_shape[first_reduce+ki.group_for_reduces:len(full_shape)-ki.upcasted], start=first_reduce+ki.group_for_reduces)]
+      for i,g in enumerate(full_shape[first_reduce+group_for_reduces:len(full_shape)-ki.upcasted], start=first_reduce+group_for_reduces)]
 
     # upcast loops
     for i,g in enumerate(full_shape[len(full_shape)-ki.upcasted:], start=len(full_shape)-ki.upcasted):
@@ -157,7 +164,7 @@ class Lowerer(Kernel):
 
     # late indexes (group for reduce)
     self.ridxs = self.idxs[:]
-    for a in range(first_reduce, first_reduce+ki.group_for_reduces):
+    for a in range(first_reduce, first_reduce+group_for_reduces):
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(full_shape[a])), (1000+a, True))
 
     self.uop_cache: Dict[LazyOp, UOp] = {}
