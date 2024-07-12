@@ -498,8 +498,8 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   return __inner_rewrite(sink)
 
 class UOpGraph:
-  def __init__(self, sinks:List[UOp], opts:Optional[Renderer]=None):
-    self.sinks: List[UOp] = sinks
+  def __init__(self, sink:Union[UOp, List[UOp]], opts:Optional[Renderer]=None):
+    self.sink: UOp = sink if isinstance(sink, UOp) else UOp(UOps.SINK, None, tuple(sink))
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
@@ -508,7 +508,7 @@ class UOpGraph:
       # TODO: slow to rebuild this...
       self.folder = PatternMatcher(self.folder.patterns + transcendental_folding.patterns)
 
-  def __reduce__(self): return self.__class__, (self.sinks, self.opts)
+  def __reduce__(self): return self.__class__, (self.sink, self.opts)
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
@@ -545,11 +545,13 @@ class UOpGraph:
         return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
       if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
-    for i, s in enumerate(self.sinks[:]):
+    sink_srcs = list(self.sink.src)
+    for i, s in enumerate(sink_srcs[:]):
       # breaks for WMMA
       if all(x.op is not UOps.WMMA for x in s.parents):
-        if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s: self.sinks[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
-    sink = UOp(UOps.SINK, None, tuple(self.sinks))
+        if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s:
+          sink_srcs[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
+    sink = UOp(UOps.SINK, None, tuple(sink_srcs))
 
     # do graph rewrite
     sink = graph_rewrite(sink, self.folder)

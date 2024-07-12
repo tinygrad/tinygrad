@@ -4,7 +4,7 @@ import functools
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, get_lazyop_info
 from tinygrad.codegen.uops import UOp, flops_mem, UOps
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Program
@@ -94,6 +94,7 @@ class Lowerer(Kernel):
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
+    if x.op is MetaOps.SINK: return UOp(UOps.SINK, src=in_uops)
     if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg.scalar(), in_uops)
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
@@ -111,15 +112,17 @@ class Lowerer(Kernel):
 
   def linearize(self) -> Lowerer:
     modified_ast, ki = self.get_optimized_ast()
+    full_shape = modified_ast.full_shape
+
     if DEBUG >= 3:
       print(self.name)
       from tinygrad.engine.graph import print_tree
-      for mast in modified_ast: print_tree(mast)
+      print_tree(modified_ast)
 
     if self.opts.has_local:
       # define indexes
-      global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, ki.full_shape[:ki.global_dims], 3)
-      local_idxs, loop_local_idxs = get_grouped_dims("lidx", ki.global_dims, ki.full_shape[ki.global_dims:ki.first_reduce+ki.group_for_reduces], 3)
+      global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, full_shape[:ki.global_dims], 3)
+      local_idxs, loop_local_idxs = get_grouped_dims("lidx", ki.global_dims, full_shape[ki.global_dims:ki.first_reduce+ki.group_for_reduces], 3)
       self.idxs = global_idxs + local_idxs
 
       # define sizes
@@ -130,25 +133,25 @@ class Lowerer(Kernel):
     else:
       # all loops are RANGES
       self.idxs = [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, False))
-                   for i,g in enumerate(ki.full_shape[:ki.first_reduce])]
+                   for i,g in enumerate(full_shape[:ki.first_reduce])]
       self.global_size, self.local_size = None, None
 
     # reduce loops
     self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True))
-      for i,g in enumerate(ki.full_shape[ki.first_reduce+ki.group_for_reduces:ki.shape_len-ki.upcasted], start=ki.first_reduce+ki.group_for_reduces)]
+      for i,g in enumerate(full_shape[ki.first_reduce+ki.group_for_reduces:len(full_shape)-ki.upcasted], start=ki.first_reduce+ki.group_for_reduces)]
 
     # upcast loops
-    for i,g in enumerate(ki.full_shape[ki.shape_len-ki.upcasted:], start=ki.shape_len-ki.upcasted):
+    for i,g in enumerate(full_shape[len(full_shape)-ki.upcasted:], start=len(full_shape)-ki.upcasted):
       assert isinstance(g, int), "needs to be int to upcast/unroll"
       self.idxs.append(UOp(UOps.EXPAND, dtypes.bigint, tuple(UOp.const(dtypes.bigint, j) for j in range(0, g)), i))
 
     # late indexes (group for reduce)
     self.ridxs = self.idxs[:]
     for a in range(ki.first_reduce, ki.first_reduce+ki.group_for_reduces):
-      self.ridxs[a] = UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(ki.full_shape[a])), (1000+a, True))
+      self.ridxs[a] = UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(full_shape[a])), (1000+a, True))
 
     self.uop_cache: Dict[LazyOp, UOp] = {}
-    self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast], self.opts)
+    self.uops:UOpGraph = UOpGraph(self.to_uop(modified_ast), self.opts)
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
