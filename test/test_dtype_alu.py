@@ -164,7 +164,20 @@ class TestFromFuzzer(unittest.TestCase):
   @given(strat.sampled_from(dtypes_float))
   def test_sin(self, dtype):
     if not is_dtype_supported(dtype): return
-    np.testing.assert_allclose(Tensor([25]).cast(dtype=dtype).sin().numpy(), np.sin(np.array([25])), rtol=3e-4)
+    def _test_value(n: float, unit: float=1.0):
+      next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
+      ulp = next_float - 1.0
+      ulp = unit * ulp
+      np.testing.assert_allclose(Tensor([n]).cast(dtype=dtype).sin().numpy(), np.sin(np.array([n])).astype(_to_np_dtype(dtype)), atol=ulp, rtol=1e-5)
+    _test_value(-35.0)
+    _test_value(-25.0)
+    _test_value(25.0)
+    _test_value(30.0) # 30.0 == switch_over
+    _test_value(35.0)
+    _test_value(0.0)
+    _test_value(np.pi / 2)
+     # worst case in fp16. ULP 3.5
+    _test_value(np.pi * 2, unit=3.5 if dtype == dtypes.float16 else 1.0)
 
 if __name__ == '__main__':
   unittest.main()
