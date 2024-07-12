@@ -17,7 +17,7 @@ for offset in tqdm(range(0, row_count, page_size)):
     with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache}):
       # try linearize
       try:
-        k = Linearizer(*ast, opts=opts)
+        k = Linearizer(ast, opts=opts)
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
       except Exception as e:
