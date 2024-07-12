@@ -196,16 +196,16 @@ jobs:
         run: pip install -e '.[testing,testing_tf]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Kernel Count Test
-        run: PYTHONPATH="." GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
+        run: PYTHONPATH="." GPU=1 python -m pytest -n=logical test/external/external_test_opt.py
       - if: ${{ matrix.task == 'optimage'}}
         name: Test WINO=1
         run: GPU=1 DEBUG=2 WINO=1 python3 test/test_ops.py TestOps.test_simple_conv2d
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=1 ops
-        run: GPU=1 IMAGE=1 python -m pytest -n=auto test/test_ops.py
+        run: GPU=1 IMAGE=1 python -m pytest -n=logical test/test_ops.py
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops
-        run: GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
+        run: GPU=1 IMAGE=2 python -m pytest -n=logical test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
@@ -222,10 +222,10 @@ jobs:
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (GPU)
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+        run: GPU=1 python -m pytest -n=logical test/external/external_test_onnx_backend.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (CLANG)
-        run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+        run: CLANG=1 python -m pytest -n=logical test/external/external_test_onnx_backend.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Action Space
         run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
@@ -234,16 +234,16 @@ jobs:
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
       - if: ${{ matrix.task == 'onnx' }}
         name: Test MLPerf optimizers
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py --durations=20
+        run: GPU=1 python -m pytest -n=logical test/external/external_test_optim.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test MLPerf losses
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_losses.py --durations=20
+        run: GPU=1 python -m pytest -n=logical test/external/external_test_losses.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test MLPerf metrics
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_metrics.py --durations=20
+        run: GPU=1 python -m pytest -n=logical test/external/external_test_metrics.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test MLPerf datasets
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_datasets.py --durations=20
+        run: GPU=1 python -m pytest -n=logical test/external/external_test_datasets.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test THREEFRY
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py --durations=20
@@ -279,10 +279,10 @@ jobs:
   #      WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
   #      WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     #- name: Run webgpu pytest
-    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=logical
   #  - name: Run selected webgpu tests
   #    run: |
-  #      WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_dtype.py \
+  #      WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=logical test/test_ops.py test/test_dtype.py \
   #      test/test_jit.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_linearizer.py \
   #      test/test_linearizer_failures.py test/test_nn.py
   #  - name: Build WEBGPU Efficientnet
@@ -325,11 +325,11 @@ jobs:
         METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
         METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run metal test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=logical test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run real world test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=logical test/models/test_real_world.py --durations=20
     - name: Run ONNX
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=logical test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
       run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
@@ -343,7 +343,7 @@ jobs:
     - name: Fuzz Test models schedule
       run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
-      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+      run: TRANSCENDENTAL=2 python -m pytest -n=logical test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run process replay tests
       if: env.RUN_PROCESS_REPLAY == '1'
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
@@ -377,7 +377,7 @@ jobs:
 #        sudo apt-get -y install xvfb
 #        sudo /usr/bin/Xvfb :0 -screen 0 4096x4096x24+32 &
 #    - name: Run selected webgl tests
-#      run: WEBGL=1 python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_jit.py
+#      run: WEBGL=1 python -m pytest -n=logical test/test_ops.py test/test_dtype.py test/test_jit.py
 #    - name: Build WebGL Efficientnet
 #      run: WEBGL=1 python -m examples.compile_efficientnet
 
@@ -518,19 +518,19 @@ jobs:
           diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
-        run: python -m pytest -n=auto test/ --durations=20
+        run: python -m pytest -n=logical test/ --durations=20
       # - name: Run test_ops with FUZZ_UOPS=1
       #   if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
-      #   run: FUZZ_UOPS=1 python -m pytest -n=auto test/test_ops.py --durations=20
+      #   run: FUZZ_UOPS=1 python -m pytest -n=logical test/test_ops.py --durations=20
       - name: Run ONNX (only LLVM)
         if: matrix.backend == 'llvm'
-        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+        run: python -m pytest -n=logical test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='ptx'||matrix.backend=='triton'||matrix.backend=='nv'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --ignore test/test_gc.py --durations=20
+        run: python -m pytest -n=logical test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --ignore test/test_gc.py --durations=20
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py --durations=20
+        run: python -m pytest -n=logical test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py --durations=20
       - name: Compile EfficientNet to C and test it
         if: matrix.backend=='clang'
         run: |
@@ -538,7 +538,7 @@ jobs:
           clang -O2 recognize.c -lm -o recognize
           cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
       - name: Run TRANSCENDENTAL math
-        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+        run: TRANSCENDENTAL=2 python -m pytest -n=logical test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
         run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
@@ -566,4 +566,4 @@ jobs:
   #    - name: Install dependencies
   #      run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
   #    - name: Test arm
-  #      run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py
+  #      run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=logical test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py
