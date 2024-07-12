@@ -449,9 +449,10 @@ class AMDDevice(HCQCompatCompiled):
   def __init__(self, device:str=""):
     if AMDDevice.kfd == -1:
       AMDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
-      gpus_info = [g.parent for g in pathlib.Path("/sys/devices/virtual/kfd/kfd/topology/nodes").glob("*/gpu_id") if is_usable_gpu(g)]
+      gpus = [g.parent for g in pathlib.Path("/sys/devices/virtual/kfd/kfd/topology/nodes").glob("*/gpu_id") if is_usable_gpu(g)]
+      gpus = sorted(gpus, key=lambda x: int(x.name.split('/')[-1]))
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
-      AMDDevice.gpus = [gpus_info[x] for x in visible_devices] if visible_devices else gpus_info
+      AMDDevice.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
 
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     if self.device_id >= len(AMDDevice.gpus): raise RuntimeError(f"No device found for {device}. Requesting more devices than the system has?")
