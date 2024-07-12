@@ -1,13 +1,13 @@
+# ruff: noqa: E501
 import os
 if "CACHELEVEL" not in os.environ: os.environ["CACHELEVEL"] = "0"
 
 from tinygrad import dtypes, Device
-from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer
+from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, BufferOps, MemBuffer, ConstBuffer
 from tinygrad.shape.view import View
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.engine.search import time_linearizer, bufs_from_lin
 
 # from resnet50, tinybox red
 # before lowerer 1.13ms on commit 204b6169
