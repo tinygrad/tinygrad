@@ -160,8 +160,8 @@ class Lowerer(Kernel):
   def to_program(self) -> Program:
     self.linearize()
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"):
-      diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src,\
+        {k:v.value for k,v in ContextVar._cache.items()}, getenv("GITHUB_SHA", "")))
     info = get_lazyop_info(self.ast[0])
     ops, mem = flops_mem(self.uops.uops)
     run_count = prod((self.global_size or []) + (self.local_size or []))

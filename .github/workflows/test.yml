@@ -46,8 +46,6 @@ jobs:
           echo "ASSERT_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
           echo "enabled process replay (with assert)"
         fi
-    - name: print github context
-      run: echo "$GITHUB_CONTEXT"
 
   uops:
     name: uops tests
