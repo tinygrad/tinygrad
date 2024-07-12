@@ -175,3 +175,7 @@ def iterate(coco, bs=8):
       annotations = coco.loadAnns(coco.getAnnIds(img_id))
       targets.append(prepare_target(annotations, img_id, original_size))
     yield np.array(X), targets
+
+if __name__ == "__main__":
+  openimages("validation")
+  openimages("train")

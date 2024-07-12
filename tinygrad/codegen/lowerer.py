@@ -112,6 +112,7 @@ class Lowerer(Kernel):
   def linearize(self) -> Lowerer:
     modified_ast, ki = self.get_optimized_ast()
     if DEBUG >= 3:
+      print(self.name)
       from tinygrad.engine.graph import print_tree
       for mast in modified_ast: print_tree(mast)
 
@@ -160,7 +161,8 @@ class Lowerer(Kernel):
     self.linearize()
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
     if getenv("RUN_PROCESS_REPLAY"):
-      diskcache_put("process_replay", id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+      table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}"
+      diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
     info = get_lazyop_info(self.ast[0])
     ops, mem = flops_mem(self.uops.uops)
     run_count = prod((self.global_size or []) + (self.local_size or []))

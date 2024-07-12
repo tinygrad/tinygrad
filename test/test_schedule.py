@@ -1241,6 +1241,12 @@ class TestSchedule(unittest.TestCase):
     b = CycleBitcast.apply(a, allow_buffer_view=False)
     check_schedule(b, 1)
 
+  def test_reduceop_reshape_dont_push(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(10, 20).realize()
+    out = x.argmax(1)
+    run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
+
 class CycleBitcast(Function):
   def forward(self, x: LazyBuffer, allow_buffer_view=True):
     a = x.e(UnaryOps.NEG).cast(dtypes.int32, True, allow_buffer_view)

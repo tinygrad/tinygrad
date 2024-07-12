@@ -128,6 +128,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       simple_pads.add(buf.base)
     # realize all expands
     elif prod(buf.base.st.shape) < prod(buf.st.shape):
+      if buf.base.op in ReduceOps and buf.base.srcs[0].base.op is LoadOps.CONST:
+        pass # don't realize reduceops on const (unless base is forced_realize)
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         pass # don't realize image to image casts. this is part of a larger problem
       else:
@@ -197,7 +199,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     if not forced_realize and len(group) > 1:
-      # create a multi output kernel if the LazyBufferss can cleanly group
+      # create a multi output kernel if the LazyBuffers can cleanly group
       cache: Set[LazyBuffer] = set()
       rc_parents, rc_children = deque(group), deque(group)
       while rc_parents:
@@ -228,7 +230,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
-    if forced_realize:
+    if forced_realize and (r.srcs[0].base.op is not LoadOps.CONST or any(x.shape != r.shape for x in children[r])):
       tr = r
       if can_chase:
         # can chase this down to contiguous children

@@ -155,7 +155,7 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
 # the living definition of LazyOps
-def verify_lazyop(*ast:LazyOp):
+def verify_lazyop(*ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
   sts: Dict[LazyOp, ShapeTracker] = {}
   def dfs(op:LazyOp, st:ShapeTracker):
     if op in sts: return
@@ -175,3 +175,4 @@ def verify_lazyop(*ast:LazyOp):
     assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
     assert out.arg.st.size == ast[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
     dfs(out, out.arg.st)
+  return sts
