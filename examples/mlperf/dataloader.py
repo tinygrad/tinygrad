@@ -366,7 +366,7 @@ def loader_process_retinanet(q_in, q_out, seed, X:Tensor, YB:Tensor, YL:Tensor, 
         
         boxes = [obj for obj in data['bbox']]
         boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
-        # boxes[:, 2:] += boxes[:, :2]
+
         boxes[:, 0::2] = boxes[:, 0::2].clip(0, w)
         boxes[:, 1::2] = boxes[:, 1::2].clip(0, h)
         
@@ -405,11 +405,37 @@ def loader_process_retinanet(q_in, q_out, seed, X:Tensor, YB:Tensor, YL:Tensor, 
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
     q_out.put(None)
+def loader_process_retinanet_val(q_in, q_out, seed, X:Tensor):
+  import signal
+  signal.signal(signal.SIGINT, lambda _, __: exit(0))
+
+  from extra.datasets.openimages_mlperf import preprocess_train
+  
+  with Context(DEBUG=0):
+    while (_recv := q_in.get()) is not None:
+      idx, fn = _recv
+      if fn is not None:
+        img = Image.open(fn)
+        img = img.convert('RGB') if img.mode != "RGB" else img
+        img = preprocess_train(img)
+
+      else:
+        # pad data with training mean
+        img = np.tile(np.array([[[123.68, 116.78, 103.94]]], dtype=np.uint8), (800, 800, 1))
+
+      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+
+      q_out.put(idx)
+    q_out.put(None)
 
 def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_first_batch=False, anchor_np=[1,2,3,4]):
-  from extra.datasets.openimages_mlperf import get_train_files, get_val_files, get_train_data
+  from extra.datasets.openimages_mlperf import get_train_files, get_val_files, get_train_data, get_val_data
   files = get_val_files() if val else get_train_files()
-  data_dict = None if val else get_train_data()
+  data_dict = get_val_data if val else get_train_data()
+  if val:
+    path_img_dict = {}
+    for item in data_dict['images']:
+      path_img_dict[item['file_name']] = [item['id'], (item['height'], item['width'])]
   if pad_first_batch:
     FIRST_BATCH_PAD = round_up(len(files), batch_size) - len(files)
   else:
@@ -427,10 +453,19 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
       fidx = next(gen)
       if fidx != -1:
         fn = files[fidx]
-        q_in.put((idx, fn, data_dict[fn]))
+        if val:
+          q_in.put((idx, fn))
+          img_data = path_img_dict[fn.split('/')[-1]]
+          Y[idx] = img_data[0]
+          YS[idx] = img_data[1]
+        else:
+          q_in.put((idx, fn, data_dict[fn]))
       else:
         # padding
-        q_in.put((idx, None, val))
+        if val:
+          q_in.put((idx, None))
+        else:
+          q_in.put((idx, None, None))
         
 
   shutdown = False
@@ -442,7 +477,7 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
         except StopIteration: pass
 
   gotten = [0]*BATCH_COUNT
-  def receive_batch():
+  def receive_batch_train():
     while 1:
       num = q_out.get()//batch_size
       gotten[num] += 1
@@ -450,7 +485,15 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
     gotten[num] = 0
     return X[num*batch_size:(num+1)*batch_size], YB[num*batch_size:(num+1)*batch_size], \
       YL[num*batch_size:(num+1)*batch_size], YM[num*batch_size:(num+1)*batch_size], Cookie(num)
-
+  def receive_batch_val():
+    while 1:
+      num = q_out.get()//batch_size
+      gotten[num] += 1
+      if gotten[num] == batch_size: break
+    gotten[num] = 0
+    return X[num*batch_size:(num+1)*batch_size], Y[num*batch_size:(num+1)*batch_size], YS[num*batch_size:(num+1)*batch_size], Cookie(num)
+  receive_batch = receive_batch_val if val else receive_batch_train
+  
   #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
   q_in, q_out = Queue(), Queue()
 
@@ -475,9 +518,13 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
     YB = Tensor.empty(*bsz, dtype=dtypes.float32, device=f"disk:/dev/shm/retinanet_YB")
     YL = Tensor.empty(*lsz, dtype=dtypes.int16, device=f"disk:/dev/shm/retinanet_YL")
     YM = Tensor.empty(*msz, dtype=dtypes.int64, device=f"disk:/dev/shm/retinanet_YM")
-
+    Y = [None] * (batch_size*BATCH_COUNT)
+    YS = [None] * (batch_size*BATCH_COUNT)
     for _ in range(cpu_count()):
-      p = Process(target=loader_process_retinanet, args=(q_in, q_out, seed, X, YB, YL, YM, anchor_np))
+      if val:
+        p = Process(target=loader_process_retinanet_val, args=(q_in, q_out, seed, X))
+      else:
+        p = Process(target=loader_process_retinanet, args=(q_in, q_out, seed, X, YB, YL, YM, anchor_np))
       p.daemon = True
       p.start()
       procs.append(p)
@@ -532,8 +579,8 @@ if __name__ == "__main__":
     from extra.datasets.openimages_mlperf import get_train_files, get_val_files
     files = get_val_files() if val else get_train_files()
     with tqdm(total=len(files)) as pbar:
-      for x,c in batch_load_retinanet(val=val):
-        pbar.update(x.shape[0])
+      for x in batch_load_retinanet(val=val):
+        pbar.update(x[0].shape[0])
   load_fn_name = f"load_{getenv('MODEL', 'retinanet')}"
   if load_fn_name in globals():
     globals()[load_fn_name](getenv("VAL", 0))
