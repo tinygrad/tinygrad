@@ -8,7 +8,7 @@ from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, get
 from tinygrad.codegen.uops import UOp, flops_mem, UOps
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Program
-from tinygrad.helpers import to_function_name, DEBUG, getenv, prod, diskcache_put, ContextVar
+from tinygrad.helpers import to_function_name, DEBUG, getenv, prod, diskcache_put, ContextVar, timeit
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -162,7 +162,9 @@ class Lowerer(Kernel):
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}"
-      diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+      def lin(): self.linearize().uops.linearize()
+      dt = min(timeit(lin) for i in range(5)) if getenv("TIMEIT") else None
+      diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}, dt))
     info = get_lazyop_info(self.ast[0])
     ops, mem = flops_mem(self.uops.uops)
     run_count = prod((self.global_size or []) + (self.local_size or []))
