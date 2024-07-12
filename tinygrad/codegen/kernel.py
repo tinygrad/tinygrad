@@ -24,13 +24,9 @@ class KernelOptError(Exception): pass
 
 @dataclass(frozen=True)
 class KernelInfo:
-  full_shape: Tuple[sint, ...]  # full shape (findable in AST)
-  global_dims: int              # number of global dimensions (this is remapping RANGE to SPECIAL)
-  first_reduce: int             # axis of first_reduce        (findable in AST)
-  group_for_reduces: int        # count that are grouped      (findable in AST)
+  local_dims: int               # number of local dimensions  (this is remapping RANGE to SPECIAL)
+  group_for_reduces: int        # count that are grouped      (probably findable in AST)
   upcasted: int                 # count that are upcasted     (this is remapping RANGE to EXPAND)
-  @property
-  def shape_len(self): return len(self.full_shape)
 
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
@@ -726,4 +722,4 @@ class Kernel:
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    return fixup_ast(self.ast), KernelInfo(self.full_shape, self.global_dims, self.first_reduce, self.group_for_reduces, self.upcasted)
+    return fixup_ast(self.ast), KernelInfo(self.local_dims, self.group_for_reduces, self.upcasted)
