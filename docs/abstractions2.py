@@ -3,7 +3,7 @@
 # 2. a "Device" that uses the runtime but specifies compute in an abstract way for all
 # 3. a "LazyBuffer" that fuses the compute into kernels, using memory only when needed
 # 4. a "Tensor" that provides an easy to use frontend with autograd ".backward()"
-#%%
+
 
 print("******** first, the runtime ***********")
 
