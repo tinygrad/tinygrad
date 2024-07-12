@@ -161,7 +161,7 @@ class Lowerer(Kernel):
     self.linearize()
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
     if getenv("RUN_PROCESS_REPLAY"):
-      table_name = f"process_replay_{getenv("GITHUB_SHA", "HEAD")}"
+      table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
     info = get_lazyop_info(self.ast[0])
     ops, mem = flops_mem(self.uops.uops)
