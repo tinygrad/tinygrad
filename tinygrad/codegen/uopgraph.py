@@ -143,13 +143,8 @@ def expand_nodes(parents:Set[UOp], expands:List[UOp], base:UOp) -> List[UOp]:
         replace[cc] = super_replace
     else:
       for replace in replaces:
-        if cc in replace:
-          # NOTE: handle expands that are already replaced
-          tcc = replace[cc]
-          replace[cc] = UOp(tcc.op, tcc.dtype, tuple(replace.get(x, x) for x in tcc.src), tcc.arg)
-        else:
-          replace[cc] = UOp(cc.op, cc.dtype, tuple(replace.get(x, x) for x in cc.src), cc.arg)
-
+        tcc = replace.get(cc, cc)  # NOTE: handle expands that are already replaced
+        replace[cc] = UOp(tcc.op, tcc.dtype, tuple(replace.get(x, x) for x in tcc.src), tcc.arg)
   return [x.get(base, base) for x in replaces]
 
 # ***** reduce+image+contract handling *****
