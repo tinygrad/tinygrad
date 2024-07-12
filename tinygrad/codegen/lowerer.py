@@ -55,14 +55,15 @@ else:
     assert uvalid.dtype == dtypes.bool
     return uidx, uvalid
 
-def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0) -> Tuple[List[UOp], List[UOp]]:
+def get_grouped_dims(prefix, start_dim, dims, max_sizes:Optional[Tuple[int, ...]]) -> Tuple[List[UOp], List[UOp]]:
+  # TODO: this should be per dim max
+  maxdim = len(max_sizes) if max_sizes is not None else 0
   local_idxs = loop_local_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (),
-    (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] \
-                                                           if len(local_dims) > maxdim else local_dims)]
-  if maxdim != 0 and len(local_dims) > maxdim:
+    (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(dims[:-(maxdim-1)]),) + dims[-(maxdim-1):] if len(dims) > maxdim else dims)]
+  if maxdim != 0 and len(dims) > maxdim:
     dd = local_idxs[0]
     nli = []
-    for s in local_dims[:-(maxdim-1)]:
+    for s in dims[:-(maxdim-1)]:
       nli.append(dd % s)
       dd //= s
     local_idxs = nli + local_idxs[-(maxdim-1):]
@@ -121,8 +122,9 @@ class Lowerer(Kernel):
 
     if self.opts.has_local:
       # define indexes
-      global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, ki.full_shape[:ki.global_dims], 3)
-      local_idxs, loop_local_idxs = get_grouped_dims("lidx", ki.global_dims, ki.full_shape[ki.global_dims:ki.first_reduce+ki.group_for_reduces], 3)
+      global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, ki.full_shape[:ki.global_dims], self.opts.global_max)
+      local_idxs, loop_local_idxs = get_grouped_dims("lidx", ki.global_dims,
+                                                     ki.full_shape[ki.global_dims:ki.first_reduce+ki.group_for_reduces], self.opts.local_max)
       self.idxs = global_idxs + local_idxs
 
       # define sizes
