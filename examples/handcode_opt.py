@@ -1,4 +1,5 @@
 from typing import List
+from extra.models.resnet import ResNet50
 from examples.mlperf.helpers import get_mlperf_bert_model
 from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.linearizer import Linearizer
@@ -7,23 +8,30 @@ from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import DEBUG, ansilen, getenv
-from tinygrad.ops import LoadOps, get_lazyop_info
+from tinygrad.ops import MetaOps, get_lazyop_info
 from tinygrad.shape.symbolic import sym_infer
 
 
-if __name__ == "__main__":
-  if getenv("HALF", 1):
-    dtypes.default_float = dtypes.half
+def get_sched_resnet():
+  mdl = ResNet50()
+  optim = (nn.optim.LARS if getenv("LARS") else nn.optim.SGD)(nn.state.get_parameters(mdl))
 
-  mdl = get_mlperf_bert_model()
+  # run model twice to get only what changes, these are the kernels of the model
   seen = set()
+  for _ in range(2):
+    out = mdl(Tensor.empty(64, 3, 224, 224))
+    targets = [out.lazydata]
+    if getenv("BACKWARD"):
+      optim.zero_grad()
+      out.sparse_categorical_crossentropy(Tensor.empty(64, dtype=dtypes.int)).backward()
+      targets += [x.lazydata for x in optim.schedule_step()]
+    sched = create_schedule(targets, seen)
+    print(f"schedule length {len(sched)}")
+  return sched
 
-  # the device we are optimizing for
-  device: Compiled = Device[Device.DEFAULT]
-  if getenv("BACKWARD"):
-    Tensor.training = True
-    optim = (nn.optim.LAMB if getenv("LAMB") else nn.optim.SGD)(nn.state.get_parameters(mdl))
-  print(f"optimizing for {Device.DEFAULT}")
+def get_sched_bert():
+  mdl = get_mlperf_bert_model()
+  optim = nn.optim.LAMB(nn.state.get_parameters(mdl))
 
   # fake data
   BS = getenv("BS", 2)
@@ -36,7 +44,8 @@ if __name__ == "__main__":
   next_sentence_labels = Tensor.empty((BS, 1), dtype=dtypes.float32)
 
   # run model twice to get only what changes, these are the kernels of the model
-  for i in range(2):
+  seen = set()
+  for _ in range(2):
     lm_logits, seq_relationship_logits = mdl(input_ids, attention_mask, masked_positions, segment_ids)
     targets = [lm_logits.lazydata, seq_relationship_logits.lazydata]
     if getenv("BACKWARD"):
@@ -47,7 +56,19 @@ if __name__ == "__main__":
       targets += [x.lazydata for x in optim.schedule_step()]
     sched = create_schedule(targets, seen)
     print(f"schedule length {len(sched)}")
-  sched = [x for x in sched if x.ast[0].op not in LoadOps]
+  return sched
+
+if __name__ == "__main__":
+  if getenv("HALF", 1):
+    dtypes.default_float = dtypes.half
+
+  # the device we are optimizing for
+  device: Compiled = Device[Device.DEFAULT]
+  if getenv("BACKWARD"): Tensor.training = True
+  print(f"optimizing for {Device.DEFAULT}")
+
+  sched = globals()[f"get_sched_{getenv('MODEL', 'resnet')}"]()
+  sched = [x for x in sched if x.ast[0].op not in MetaOps]
 
   # focus on one kernel
   if getenv("KERNEL", -1) >= 0: sched = sched[getenv("KERNEL", -1):getenv("KERNEL", -1)+1]
@@ -55,6 +76,7 @@ if __name__ == "__main__":
   # work with the schedule
   total_tm = 0
   running_gflops = 0
+  usage = {}
   for i,si in enumerate(sched):
     ops = sum(get_lazyop_info(ast).flops for ast in si.ast)
 
@@ -94,5 +116,10 @@ if __name__ == "__main__":
     tm, gflops, lin = sorted(choices, key=lambda x: x[0])[0]
     total_tm += tm
     running_gflops += gflops * tm
-    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS")
+    if (key := str([str(m) for m in si.metadata] if si.metadata is not None else None)) not in usage: usage[key] = (0, 0)
+    usage[key] = (usage[key][0] + tm, usage[key][1] + 1)
+    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[str(m) for m in si.metadata] if si.metadata is not None else ''}")
   print(f"******* total {total_tm*1000:.2f} ms, {running_gflops/total_tm:6.0f} GFLOPS")
+  print("usage:")
+  for k in sorted(usage, key=lambda x: -usage[x][0])[:10]:
+    print(f"{usage[k][0]*1000:.2f} ms: {k} ({usage[k][1]} times)")

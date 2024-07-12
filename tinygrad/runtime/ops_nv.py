@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
-from typing import Tuple, List, Any, cast
+from typing import Tuple, List, Any, cast, Union
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
                             hcq_profile, Compiler, CompileError, BufferOptions
@@ -380,7 +380,7 @@ class NVDevice(HCQCompatCompiled):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1
-  gpus_info = None
+  gpus_info:Union[List, ctypes.Array] = []
   signals_page:Any = None
   signals_pool: List[Any] = []
   uvm_vaddr: int = 0x1000000000
@@ -388,7 +388,7 @@ class NVDevice(HCQCompatCompiled):
   devices: List[NVDevice] = []
 
   def _new_gpu_fd(self):
-    fd_dev = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
+    fd_dev = os.open(f"/dev/nvidia{self.gpu_info.deviceInstance}", os.O_RDWR | os.O_CLOEXEC)
     nv_iowr(fd_dev, nv_gpu.NV_ESC_REGISTER_FD, nv_gpu.nv_ioctl_register_fd_t(ctl_fd=self.fd_ctl))
     return fd_dev
 
@@ -488,16 +488,19 @@ class NVDevice(HCQCompatCompiled):
       uvm.initialize(self.fd_uvm)
       with contextlib.suppress(RuntimeError): uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm) # this error is okay, CUDA hits it too
 
-      NVDevice.gpus_info = (nv_gpu.nv_ioctl_card_info_t*64)()
-      nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, NVDevice.gpus_info)
+      nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, gpus_info:=(nv_gpu.nv_ioctl_card_info_t*64)())
+      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('CUDA_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
+      NVDevice.gpus_info = [gpus_info[x] for x in visible_devices] if visible_devices else gpus_info
 
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
+
+    if self.device_id >= len(NVDevice.gpus_info) or not NVDevice.gpus_info[self.device_id].valid:
+      raise RuntimeError(f"No device found for {device}. Requesting more devices than the system has?")
+
+    self.gpu_info = rmctrl.gpu_get_id_info_v2(self.fd_ctl, self.root, self.root, gpuId=NVDevice.gpus_info[self.device_id].gpu_id)
     self.fd_dev = self._new_gpu_fd()
 
-    assert NVDevice.gpus_info[self.device_id].valid, f"No valid device found for NV:{self.device_id}. Requesting more devices than the system has?"
-    gpu_info = rmctrl.gpu_get_id_info_v2(self.fd_ctl, self.root, self.root, gpuId=NVDevice.gpus_info[self.device_id].gpu_id)
-
-    device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=gpu_info.deviceInstance, hClientShare=self.root,
+    device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.gpu_info.deviceInstance, hClientShare=self.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
     self.device = rm_alloc(self.fd_ctl, nv_gpu.NV01_DEVICE_0, self.root, self.root, device_params).hObjectNew
     self.subdevice = rm_alloc(self.fd_ctl, nv_gpu.NV20_SUBDEVICE_0, self.root, self.device, None).hObjectNew

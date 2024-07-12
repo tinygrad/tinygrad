@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, cast, Generator, Tuple
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata
-from tinygrad.ops import BufferOps, LoadOps, LazyOp
+from tinygrad.ops import BufferOps, MetaOps, LazyOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.renderer import Renderer, Program
@@ -13,6 +13,9 @@ from tinygrad.engine.schedule import ScheduleItem
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
+  if DEBUG >= 5:
+    from tinygrad.engine.graph import print_tree
+    for op in ast: print_tree(op)
   k = Linearizer(*ast, opts=renderer)
   k.required_optimizations()
   if not NOOPT:
@@ -163,19 +166,19 @@ class ExecItem:
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY or getenv("USE_COPY_KERNEL")
+  assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is MetaOps.COPY or getenv("USE_COPY_KERNEL")
   if si.ast[0].op is BufferOps.STORE:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals], si.metadata)
   out, ast = si.outputs[0], si.ast[0]
-  if ast.op is LoadOps.COPY:
+  if ast.op is MetaOps.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
     return ExecItem(kernel_type(ast.arg, out.device, si.inputs[0].device), list(si.bufs))
-  if ast.op is LoadOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))
-  if ast.op is LoadOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if ast.op is LoadOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
+  if ast.op is MetaOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))
+  if ast.op is MetaOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
+  if ast.op is MetaOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:

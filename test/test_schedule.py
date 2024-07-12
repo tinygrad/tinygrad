@@ -8,7 +8,7 @@ from typing import List, Optional, Union
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, LoadOps, ReduceOps, UnaryOps
+from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps
 from tinygrad.helpers import DEBUG, flatten, getenv
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.graph import print_tree
@@ -28,7 +28,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
         for i,out in enumerate(s.outputs):
           seen.add(out)
   sched = create_schedule(flatten([r.lazydata.lbs for r in t]), seen)
-  if filter_loadops: sched = [s for s in sched if s.ast[0].op not in LoadOps]
+  if filter_loadops: sched = [s for s in sched if s.ast[0].op not in MetaOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
@@ -37,7 +37,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
   if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (non loadops) ops linearize
   for s in sched:
-    if s.ast[0].op in LoadOps: continue
+    if s.ast[0].op in MetaOps: continue
     l = Linearizer(*s.ast)
     l.hand_coded_optimizations()
     l.linearize()
@@ -1240,6 +1240,12 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(1, dtype=dtypes.float32).realize()
     b = CycleBitcast.apply(a, allow_buffer_view=False)
     check_schedule(b, 1)
+
+  def test_reduceop_reshape_dont_push(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(10, 20).realize()
+    out = x.argmax(1)
+    run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
 class CycleBitcast(Function):
   def forward(self, x: LazyBuffer, allow_buffer_view=True):

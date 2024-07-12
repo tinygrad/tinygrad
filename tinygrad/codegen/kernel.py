@@ -3,6 +3,7 @@ import itertools, functools
 from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
+from tinygrad.engine.graph import print_tree
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
@@ -61,7 +62,11 @@ class TensorCoreOptions:
 class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    verify_lazyop(*ast)
+    try: lazyop_sts_map = verify_lazyop(*ast)
+    except AssertionError as e:
+      print("INVALID AST")
+      for op in ast: print_tree(op)
+      raise e
     self.ast = ast
     self.lazyops = flatten([op.lazyops for op in self.ast])
 
@@ -75,11 +80,18 @@ class Kernel:
     self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.lazyops if x.op in BufferOps])
 
     # get earlybufs, before any reduceops
-    self.earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
-    self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
+    earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
+    self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
+    # NOTE: full_shape can be wrong if there's a tree of reduces
 
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: List[ShapeTracker] = [x.st for x in self.bufs]
+
+    # add the shapetrackers for each reduce
+    # we use this to track which axes are reduced in each reduce
+    for x in self.reduceops:
+      self.sts.append(lazyop_sts_map[x])
+      self.sts.append(lazyop_sts_map[x.src[0]])
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
@@ -111,9 +123,9 @@ class Kernel:
     ret.opts, ret.ast, ret.lazyops = self.opts, self.ast, self.lazyops
 
     # things downstream of the AST
-    ret.reduceops, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
-      self.reduceops, self.vars, self.bufs, self.earlybufs, self.full_buf_index
-    ret.sts = self.sts[:len(ret.bufs)] # NOTE: must redo the local buffers with TC in beam
+    ret.reduceops, ret.vars, ret.bufs, ret.full_buf_index = \
+      self.reduceops, self.vars, self.bufs, self.full_buf_index
+    ret.sts = self.sts[:len(ret.bufs)+len(ret.reduceops)*2] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
@@ -436,6 +448,7 @@ class Kernel:
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
+      check(len(self.reduceops) == 1, "can't group with multiple reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
@@ -468,6 +481,7 @@ class Kernel:
       self.dont_use_locals = True
     elif opt.op is OptOps.MERGE:
       check(axis >= self.shape_len-self.upcasted, "only merge upcasted")
+      check(self.full_shape[axis:axis+2] == self.output_shape[axis:axis+2], "can't merge reduces")
       self.reshape_and_permute(None, tuple(range(axis)) + (axis+1, axis) + tuple(range(axis+2, self.shape_len)))
       self.reshape_and_permute(lambda x: x[0:axis] + (x[axis] * x[axis+1],) + x[axis+2:], None)
       self.upcasted -= 1
@@ -648,7 +662,9 @@ class Kernel:
         idx = self.bufs.index(op.arg)
         arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
       elif op.op in ReduceOps:
-        arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])
+        reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
+        arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
+                    if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
           if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]

@@ -9,7 +9,7 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Device, Buffer
-from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
+from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, MetaOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.renderer import TensorCore
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -102,8 +102,8 @@ class TestLinearizer(unittest.TestCase):
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
-  @unittest.skipIf(CI and Device.DEFAULT == "AMD", "remu doesn't have multiple wave syncs yet")
-  @unittest.skip("still wrong")
+  @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "ocelot/remu doesn't have multiple wave syncs yet")
+  @unittest.skip("still broken")
   def test_var_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(3, 27, 32).realize()
@@ -117,10 +117,11 @@ class TestLinearizer(unittest.TestCase):
     squares = (second_x-mean)*(second_x-mean)
     squares_sum = LazyOp(ReduceOps.SUM, (squares,), (2,))
     store = LazyOp(BufferOps.STORE, (squares_sum,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 27, 1, 1))))
-    helper_linearizer_ast((store, ), [x])
+    wanna_output = x.numpy().var(axis=2, ddof=0)
+    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
     # tinygrad ref
     y_tiny = x.var(axis=2, correction=0)
-    np.testing.assert_allclose(y_tiny.numpy(), x.numpy().var(axis=2, ddof=0), atol=1e-4, rtol=1e-4)
+    np.testing.assert_allclose(y_tiny.numpy(), wanna_output, atol=1e-4, rtol=1e-4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -616,63 +617,64 @@ class TestLinearizer(unittest.TestCase):
         end_range = [i for i, x in enumerate(k.uops) if x.op is UOps.ENDRANGE][0]
         assert end_range < k.uops.uops.index(u)
 
-  @unittest.skip("this changed. TODO: bring test back")
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
-      idxs, loop_idxs, sizes = get_grouped_dims(prefix, 0, dims, max_sizes, reverse_dims)
+      # TODO: get_grouped_dims max_sizes should be 3 int tuple
+      # TODO: fix reverse_dims
+      max_sizes = 3
+      idxs, loop_idxs = get_grouped_dims(prefix, 0, dims, max_sizes)
+      sizes = [x.arg[2] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
       assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
       assert sizes == expected_sizes, f"expected sizes={expected_sizes}, got {sizes=}"
-      for i in range(len(dims)):
-        assert idxs[i].max+1 == dims[i], f"idxs[{i}] should have max {dims[i]-1}"
-      for i in range(len(loop_idxs)):
-        assert loop_idxs[i].expr.startswith(prefix), f"loop_idxs[{i}] must start with {prefix}"
-        assert loop_idxs[i].max+1 == sizes[i], f"loop_idxs[{i}] should have max {sizes[i]-1}"
+      # for i in range(len(dims)):
+      #   assert idxs[i].max+1 == dims[i], f"idxs[{i}] should have max {dims[i]-1}"
+      # for i in range(len(loop_idxs)):
+      #   assert loop_idxs[i].expr.startswith(prefix), f"loop_idxs[{i}] must start with {prefix}"
+      #   assert loop_idxs[i].max+1 == sizes[i], f"loop_idxs[{i}] should have max {sizes[i]-1}"
 
-    # pad sizes with ones if necessary
-    _assert_grouped_dims("gidx", (2,), (16,16,16,), False, [2,1,1])
-    _assert_grouped_dims("gidx", (2,3), (16,16,16,), False, [2,3,1])
+    # no-op
+    _assert_grouped_dims("gidx", (2,), (16,16,16,), False, [2])
+    _assert_grouped_dims("gidx", (2,3), (16,16,16,), False, [2,3])
 
     # check reverse dims
-    _assert_grouped_dims("gidx", (2,3), (16,16,16,), True, [3,2,1])
+    # _assert_grouped_dims("gidx", (2,3), (16,16,16,), True, [3,2])
     _assert_grouped_dims("gidx", (2,3,4,), (16,16,16,), False, [2,3,4])
 
     # test splitting globals
-    _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), False, [16,12,4])
-    _assert_grouped_dims("gidx", (64,3,4,), (16,4,16,), False, [16,4,12])
-    _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), True, [12,16,4])
-    _assert_grouped_dims("gidx", (128,3,4,), (16,4,256,), False, [16,4,24])
+    # _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), False, [16,12,4])
+    # _assert_grouped_dims("gidx", (64,3,4,), (16,4,16,), False, [16,4,12])
+    # _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), True, [12,16,4])
+    # _assert_grouped_dims("gidx", (128,3,4,), (16,4,256,), False, [16,4,24])
 
     # collapse on onto the left most axis
     _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), False, [6,4,5])
-    _assert_grouped_dims("gidx", (2,3,4,5,), (32,16,16,), True, [20,3,2])
-    _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5,), (32,16,16,), True, [20,3,Variable("start_pos",1,2)])
+    # _assert_grouped_dims("gidx", (2,3,4,5,), (32,16,16,), True, [20,3,2])
+    # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5,), (32,16,16,), True, [20,3,Variable("start_pos",1,2)])
 
     # collapse on left-most available axis (the left most is too small)
-    _assert_grouped_dims("gidx", (2,3,4,5,), (4,16,16,), False, [2,12,5])
-    _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), True, [5,12,2])
+    # _assert_grouped_dims("gidx", (2,3,4,5,), (4,16,16,), False, [2,12,5])
+    # _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), True, [5,12,2])
 
-    # TODO: support sint collapse
-    with self.assertRaises(RuntimeError):
-      _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5,), (16,16,16,), False, [Variable("start_pos",1,2)*3,4,5])
+    _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5,), (16,16,16,), False, [Variable("start_pos",1,2)*3,4,5])
 
-    # dim too large and not factorable
-    with self.assertRaises(AssertionError):
-      get_grouped_dims("gidx", 0, (23,), (16,16,16,), False,)
-    with self.assertRaises(AssertionError):
-      get_grouped_dims("gidx", 0, (128,3,4), (16,4,23,), False,)
+    # # dim too large and not factorable
+    # with self.assertRaises(AssertionError):
+    #   get_grouped_dims("gidx", 0, (23,), (16,16,16,), False,)
+    # with self.assertRaises(AssertionError):
+    #   get_grouped_dims("gidx", 0, (128,3,4), (16,4,23,), False,)
 
-    # too large for sizes
-    with self.assertRaises(AssertionError):
-      get_grouped_dims("gidx", 0, (2,3,4,5,6), (16,16,16,), False,)
+    # # too large for sizes
+    # with self.assertRaises(AssertionError):
+    #   get_grouped_dims("gidx", 0, (2,3,4,5,6), (16,16,16,), False,)
 
-    # variable too large
-    with self.assertRaises(AssertionError):
-      get_grouped_dims("gidx", 0, (Variable("start_pos", 0, 16),3,4), (16,16,16,), False,)
+    # # variable too large
+    # with self.assertRaises(AssertionError):
+    #   get_grouped_dims("gidx", 0, (Variable("start_pos", 0, 16),3,4), (16,16,16,), False,)
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
-      sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
+      sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in MetaOps]
       assert len(sched) == 1
 
       lin = Linearizer(*sched[0].ast)
@@ -693,7 +695,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
-    sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
+    sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in MetaOps]
     assert len(sched) == 1
     lin = Linearizer(*sched[0].ast)
     assert not any(u.op is UOps.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
