@@ -280,6 +280,18 @@ class TestTinygrad(unittest.TestCase):
       with self.assertRaises(ValueError): f((2, 2), (2, 2))
       with self.assertRaises(ValueError): f((128, 128), 0.0, 0.01)
 
+  def test_argparse_dim(self):
+    t = Tensor.rand(3, 4)
+    for name in ["sum", "max", "min", "any", "all", "mean"]:
+      f = getattr(Tensor, name)
+      np.testing.assert_equal(f(t, dim=0).numpy(), f(t, axis=0).numpy())
+      np.testing.assert_equal(f(t, keepdim=True).numpy(), f(t, keepdims=True).numpy())
+      np.testing.assert_equal(f(t, dim=0, keepdim=True).numpy(), f(t, axis=0, keepdims=True).numpy())
+      with self.assertRaises(TypeError): f(t, dim=0, axis=1)
+      with self.assertRaises(TypeError): f(t, 0, axis=1)
+      with self.assertRaises(TypeError): f(t, 0, dim=1)
+      with self.assertRaises(TypeError): f(t, keepdim=True, keepdims=True)
+
   def test_numel(self):
     assert Tensor.randn(10, 10).numel() == 100
     assert Tensor.randn(1,2,5).numel() == 10

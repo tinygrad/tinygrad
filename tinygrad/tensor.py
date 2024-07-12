@@ -1157,7 +1157,7 @@ class Tensor:
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
       res.assign(v).realize()
 
-  def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
+  def gather(self:Tensor, dim:int, index:Tensor, **kwargs) -> Tensor:
     """
     Gathers values along an axis specified by `dim`.
 
@@ -1176,7 +1176,7 @@ class Tensor:
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return ((index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * x).sum(-1, acc_dtype=self.dtype)
 
-  def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
+  def cat(self:Tensor, *args:Tensor, dim:int=0, **kwargs) -> Tensor:
     """
     Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
     All tensors must have the same shape except in the concatenating dimension.
@@ -1198,7 +1198,7 @@ class Tensor:
     for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc): s[dim] = (k, cat_dim_cumsum[-1] - k - d)
     return functools.reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
-  def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
+  def stack(self:Tensor, *args:Tensor, dim:int=0, **kwargs) -> Tensor:
     """
     Concatenates self with other `Tensor` in `args` along a new dimension specified by `dim`.
 
@@ -1213,7 +1213,7 @@ class Tensor:
     # checks for shapes and number of dimensions delegated to cat
     return self.unsqueeze(dim).cat(*[t.unsqueeze(dim) for t in args], dim=dim)
 
-  def repeat_interleave(self, repeats:int, dim:Optional[int]=None) -> Tensor:
+  def repeat_interleave(self, repeats:int, dim:Optional[int]=None, **kwargs) -> Tensor:
     """
     Repeat elements of a tensor.
 
@@ -1251,7 +1251,7 @@ class Tensor:
       raise IndexError(f"{dim=} out of range {[-max(1, self.ndim+outer), max(1, self.ndim+outer)-1]}")
     return dim + self.ndim+outer if dim < 0 else dim
 
-  def split(self, sizes:Union[int, List[int]], dim:int=0) -> Tuple[Tensor, ...]:
+  def split(self, sizes:Union[int, List[int]], dim:int=0, **kwargs) -> Tuple[Tensor, ...]:
     """
     Splits the tensor into chunks along the dimension specified by `dim`.
     If `sizes` is an integer, it splits into equally sized chunks if possible, otherwise the last chunk will be smaller.
@@ -1276,7 +1276,7 @@ class Tensor:
     assert sum(sizes) == self.shape[dim], f"expect sizes to sum exactly to {self.shape[dim]}, but got {sum(sizes)}"
     return tuple(self[sl] for sl in [tuple([slice(None)]*dim + [slice(sum(sizes[:i]), sum(sizes[:i + 1]))]) for i in range(len(sizes))])
 
-  def chunk(self, chunks:int, dim:int=0) -> List[Tensor]:
+  def chunk(self, chunks:int, dim:int=0, **kwargs) -> List[Tensor]:
     """
     Splits the tensor into `chunks` number of chunks along the dimension `dim`.
     If the tensor size along `dim` is not divisible by `chunks`, all returned chunks will be the same size except the last one.
@@ -1300,7 +1300,7 @@ class Tensor:
     dim = self._resolve_dim(dim)
     return list(self.split(math.ceil(self.shape[dim]/chunks) if self.shape[dim] else [0]*chunks, dim=dim))
 
-  def squeeze(self, dim:Optional[int]=None) -> Tensor:
+  def squeeze(self, dim:Optional[int]=None, **kwargs) -> Tensor:
     """
     Returns a tensor with specified dimensions of input of size 1 removed.
     If `dim` is not specified, all dimensions with size 1 are removed.
@@ -1320,7 +1320,7 @@ class Tensor:
     dim = self._resolve_dim(dim)
     return self if not self.ndim or self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
 
-  def unsqueeze(self, dim:int) -> Tensor:
+  def unsqueeze(self, dim:int, **kwargs) -> Tensor:
     """
     Returns a tensor with a new dimension of size 1 inserted at the specified `dim`.
 
@@ -1391,7 +1391,7 @@ class Tensor:
     start_dim, end_dim = self._resolve_dim(start_dim), self._resolve_dim(end_dim)
     return self.reshape(self.shape[:start_dim] + (prod(self.shape[start_dim:end_dim+1]), ) + self.shape[end_dim+1:])
 
-  def unflatten(self, dim:int, sizes:Tuple[int,...]):
+  def unflatten(self, dim:int, sizes:Tuple[int,...], **kwargs):
     """
     Unflattens dimension `dim` of the tensor into multiple dimensions specified by `sizes`. `Tensor.flatten()` is the inverse of this function.
 
@@ -1438,11 +1438,11 @@ class Tensor:
     ret = fxn.apply(self, axis=axis_)
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis_))
 
-  def sum(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DTypeLike]=None):
+  def sum(self, dim:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DTypeLike]=None, **kwargs):
     """
     Returns the sum of the elements of the tensor along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    You can pass in `dim` and `keepdim` keyword arguments to control the axis along
     which the maximum is computed and whether the reduced dimensions are retained.
 
     You can pass in `acc_dtype` keyword argument to control the data type of the accumulation.
@@ -1456,20 +1456,20 @@ class Tensor:
     print(t.sum().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sum(axis=0).numpy())
+    print(t.sum(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sum(axis=1).numpy())
+    print(t.sum(dim=1).numpy())
     ```
     """
-    ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
+    ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, dim, keepdim)
     return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
 
-  def prod(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DTypeLike]=None):
+  def prod(self, dim:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DTypeLike]=None, **kwargs):
     """
     Returns the product of the elements of the tensor along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    You can pass in `dim` and `keepdim` keyword arguments to control the axis along
     which the maximum is computed and whether the reduced dimensions are retained.
 
     You can pass in `acc_dtype` keyword argument to control the data type of the accumulation.
@@ -1483,19 +1483,19 @@ class Tensor:
     print(t.prod().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.prod(axis=0).numpy())
+    print(t.prod(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.prod(axis=1).numpy())
+    print(t.prod(dim=1).numpy())
     ```
     """
-    return self.cast(acc_dtype or self.dtype)._reduce(F.Prod, axis, keepdim)
+    return self.cast(acc_dtype or self.dtype)._reduce(F.Prod, dim, keepdim)
 
-  def max(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
+  def max(self, dim:Optional[Union[int, Sequence[int]]]=None, keepdim=False, **kwargs):
     """
     Returns the maximum value of the tensor along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    You can pass in `dim` and `keepdim` keyword arguments to control the axis along
     which the maximum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1506,19 +1506,19 @@ class Tensor:
     print(t.max().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.max(axis=0).numpy())
+    print(t.max(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.max(axis=1, keepdim=True).numpy())
+    print(t.max(dim=1, keepdim=True).numpy())
     ```
     """
-    return self._reduce(F.Max, axis, keepdim)
+    return self._reduce(F.Max, dim, keepdim)
 
-  def min(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
+  def min(self, dim:Optional[Union[int, Sequence[int]]]=None, keepdim=False, **kwargs):
     """
     Returns the minimum value of the tensor along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    You can pass in `dim` and `keepdim` keyword arguments to control the axis along
     which the minimum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1529,19 +1529,19 @@ class Tensor:
     print(t.min().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.min(axis=0).numpy())
+    print(t.min(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.min(axis=1, keepdim=True).numpy())
+    print(t.min(dim=1, keepdim=True).numpy())
     ```
     """
-    return -((-self).max(axis=axis, keepdim=keepdim))
+    return -((-self).max(dim, keepdim))
 
-  def any(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
+  def any(self, dim:Optional[Union[int, Sequence[int]]]=None, keepdim=False, **kwargs):
     """
     Tests if any element evaluates to `True` along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the reduce axis and whether the reduced dimensions are retained.
+    You can pass in `dim` and `keepdim` keyword arguments to control the reduce axis and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[True, True], [True, False], [False, False]])
@@ -1551,19 +1551,19 @@ class Tensor:
     print(t.any().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.any(axis=0).numpy())
+    print(t.any(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.any(axis=1, keepdim=True).numpy())
+    print(t.any(dim=1, keepdim=True).numpy())
     ```
     """
-    return self.bool().max(axis, keepdim)
+    return self.bool().max(dim, keepdim)
 
-  def all(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
+  def all(self, dim:Optional[Union[int, Sequence[int]]]=None, keepdim=False, **kwargs):
     """
     Tests if all element evaluates to `True` along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the reduce axis and whether the reduced dimensions are retained.
+    You can pass in `dim` and `keepdim` keyword arguments to control the reduce axis and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[True, True], [True, False], [False, False]])
@@ -1573,19 +1573,19 @@ class Tensor:
     print(t.all().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.all(axis=0).numpy())
+    print(t.all(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.all(axis=1, keepdim=True).numpy())
+    print(t.all(dim=1, keepdim=True).numpy())
     ```
     """
-    return self.logical_not().any(axis, keepdim).logical_not()
+    return self.logical_not().any(dim, keepdim).logical_not()
 
-  def mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
+  def mean(self, dim:Optional[Union[int, Sequence[int]]]=None, keepdim=False, **kwargs):
     """
     Returns the mean value of the tensor along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    You can pass in `dim` and `keepdim` keyword arguments to control the axis along
     which the mean is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1597,21 +1597,21 @@ class Tensor:
     print(t.mean().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mean(axis=0).numpy())
+    print(t.mean(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mean(axis=1).numpy())
+    print(t.mean(dim=1).numpy())
     ```
     """
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
-    numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
-    return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])).cast(output_dtype)
+    numerator = self.cast(sum_acc_dtype(self.dtype)).sum(dim, keepdim)
+    return numerator.div(prod([si for si, so in zip(self.shape, self.sum(dim, keepdim=True).shape) if resolve(si != so)])).cast(output_dtype)
 
-  def var(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
+  def var(self, dim:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1, **kwargs):
     """
     Returns the variance of the tensor along the specified axis or axes.
 
-    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    You can pass in `dim`, `keepdim`, and `correction` keyword arguments to control the axis along
     which the variance is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1623,21 +1623,21 @@ class Tensor:
     print(t.var().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.var(axis=0).numpy())
+    print(t.var(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.var(axis=1).numpy())
+    print(t.var(dim=1).numpy())
     ```
     """
-    squares = (self - self.mean(axis=axis, keepdim=True)).square()
-    n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    return squares.sum(axis=axis, keepdim=keepdim).div(smax([0, n-correction]))
+    squares = (self - self.mean(dim, keepdim=True)).square()
+    n = prod([si for si, so in zip(self.shape, squares.sum(dim, keepdim=True).shape) if resolve(si != so)])
+    return squares.sum(dim, keepdim=keepdim).div(max(0, n-correction))
 
-  def std(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
+  def std(self, dim:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1, **kwargs):
     """
     Returns the standard deviation of the tensor along the specified axis or axes.
 
-    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    You can pass in `dim`, `keepdim`, and `correction` keyword arguments to control the axis along
     which the standard deviation is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1649,13 +1649,13 @@ class Tensor:
     print(t.std().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.std(axis=0).numpy())
+    print(t.std(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.std(axis=1).numpy())
+    print(t.std(dim=1).numpy())
     ```
     """
-    return self.var(axis, keepdim, correction).sqrt()
+    return self.var(dim, keepdim, correction).sqrt()
 
   def std_mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
     """
@@ -1679,13 +1679,13 @@ class Tensor:
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1):
+  def softmax(self, dim=-1, **kwargs):
     """
     Applies the softmax function to the tensor along the specified axis.
 
     Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
 
-    You can pass in the `axis` keyword argument to control the axis along which the softmax is computed.
+    You can pass in the `dim` keyword argument to control the axis along which the softmax is computed.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -1696,19 +1696,19 @@ class Tensor:
     print(t.softmax().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.softmax(axis=0).numpy())
+    print(t.softmax(dim=0).numpy())
     ```
     """
-    _, e, ss = self._softmax(axis)
+    _, e, ss = self._softmax(dim)
     return e.div(ss)
 
-  def log_softmax(self, axis=-1):
+  def log_softmax(self, dim=-1, **kwargs):
     """
     Applies the log-softmax function to the tensor along the specified axis.
 
     The log-softmax function is a numerically stable alternative to the softmax function in log space.
 
-    You can pass in the `axis` keyword argument to control the axis along which the log-softmax is computed.
+    You can pass in the `dim` keyword argument to control the axis along which the log-softmax is computed.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -1719,19 +1719,19 @@ class Tensor:
     print(t.log_softmax().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.log_softmax(axis=0).numpy())
+    print(t.log_softmax(dim=0).numpy())
     ```
     """
-    m, _, ss = self._softmax(axis)
+    m, _, ss = self._softmax(dim)
     return m - ss.log()
 
-  def logsumexp(self, axis=None, keepdim=False):
+  def logsumexp(self, dim=None, keepdim=False, **kwargs):
     """
     Computes the log-sum-exp of the tensor along the specified axis or axes.
 
     The log-sum-exp function is a numerically stable way to compute the logarithm of the sum of exponentials.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    You can pass in `dim` and `keepdim` keyword arguments to control the axis along
     which the log-sum-exp is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1743,20 +1743,20 @@ class Tensor:
     print(t.logsumexp().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logsumexp(axis=0).numpy())
+    print(t.logsumexp(dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logsumexp(axis=1).numpy())
+    print(t.logsumexp(dim=1).numpy())
     ```
     """
-    m = self.max(axis=axis, keepdim=True)
-    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
+    m = self.max(dim, keepdim=True)
+    return (self - m).exp().sum(dim, keepdim=keepdim).log() + m.squeeze(dim)
 
-  def argmax(self, axis=None, keepdim=False):
+  def argmax(self, dim=None, keepdim=False, **kwargs):
     """
     Returns the indices of the maximum value of the tensor along the specified axis.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    You can pass in `dim` and `keepdim` keyword arguments to control the axis along
     which the maximum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1767,23 +1767,23 @@ class Tensor:
     print(t.argmax().numpy()) # Returns the index of the maximum value in the flattened tensor.
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmax(axis=0).numpy()) # Returns the indices of the maximum values along axis 0.
+    print(t.argmax(dim=0).numpy()) # Returns the indices of the maximum values along axis 0.
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmax(axis=1).numpy()) # Returns the indices of the maximum values along axis 1.
+    print(t.argmax(dim=1).numpy()) # Returns the indices of the maximum values along axis 1.
     ```
     """
-    if axis is None: return self.flatten().argmax(0)
-    axis = self._resolve_dim(axis)
-    m = self == self.max(axis=axis, keepdim=True)
-    idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
-    return (self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1).cast(dtypes.int32)
+    if dim is None: return self.flatten().argmax(0)
+    dim = self._resolve_dim(dim)
+    m = self == self.max(dim, keepdim=True)
+    idx = m * Tensor.arange(self.shape[dim]-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape[dim], *[1]*(self.ndim-dim-1))
+    return (self.shape[dim]-idx.max(dim, keepdim)-1).cast(dtypes.int32)
 
-  def argmin(self, axis=None, keepdim=False):
+  def argmin(self, dim=None, keepdim=False, **kwargs):
     """
     Returns the indices of the minimum value of the tensor along the specified axis.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    You can pass in `dim` and `keepdim` keyword arguments to control the axis along
     which the minimum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1794,13 +1794,13 @@ class Tensor:
     print(t.argmin().numpy()) # Returns the index of the minimum value in the flattened tensor.
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmin(axis=0).numpy()) # Returns the indices of the minimum values along axis 0.
+    print(t.argmin(dim=0).numpy()) # Returns the indices of the minimum values along axis 0.
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmin(axis=1).numpy()) # Returns the indices of the minimum values along axis 1.
+    print(t.argmin(dim=1).numpy()) # Returns the indices of the minimum values along axis 1.
     ```
     """
-    return (-self).argmax(axis=axis, keepdim=keepdim)
+    return (-self).argmax(dim, keepdim)
 
   def rearrange(self, formula: str, **sizes) -> Tensor:
     """
@@ -2082,11 +2082,12 @@ class Tensor:
     assert self.shape[axis] != 0
     pl_sz = self.shape[axis] - int(not _first_zero)
     return self.transpose(axis,-1).pad2d((pl_sz,-int(_first_zero)))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
-  def cumsum(self, axis:int=0) -> Tensor:
+
+  def cumsum(self, dim:int=0, **kwargs) -> Tensor:
     """
     Computes the cumulative sum of the tensor along the specified axis.
 
-    You can pass in the `axis` keyword argument to control the axis along which the cumulative sum is computed.
+    You can pass in the `dim` keyword argument to control the axis along which the cumulative sum is computed.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.ones(2, 3)
@@ -2096,16 +2097,16 @@ class Tensor:
     print(t.cumsum(1).numpy())
     ```
     """
-    axis = self._resolve_dim(axis)
+    dim = self._resolve_dim(dim)
     if self.ndim == 0 or 0 in self.shape: return self
     # TODO: someday the optimizer will find this on it's own
     # for now this is a two stage cumsum
     SPLIT = 256
-    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumsum(axis)
-    ret = self.transpose(axis,-1).pad2d((round_up(s, SPLIT)-s, 0)).unflatten(-1, (-1, SPLIT))._cumsum(-1)
+    if not isinstance(s:=self.shape[dim], int) or s <= SPLIT*2: return self._cumsum(dim)
+    ret = self.transpose(dim,-1).pad2d((round_up(s, SPLIT)-s, 0)).unflatten(-1, (-1, SPLIT))._cumsum(-1)
     base_add = ret[..., -1]._cumsum(-1, _first_zero=True)
     base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
-    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
+    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(dim,-1)
     return fix(ret) + fix(base_add)
 
   @staticmethod
@@ -3485,6 +3486,19 @@ if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
   setattr(Tensor, "conv2d", Tensor.image_conv2d)
   setattr(Tensor, "dot", Tensor.image_dot)
+
+def _argparse_dim(func):
+  def _wrapper(*args, **kwargs):
+    bound_args = inspect.signature(func).bind(*args, **kwargs)
+    for main, alias in [("dim", "axis"), ("keepdim", "keepdims")]:
+      if (alias_val := kwargs.get(alias)) is not None:
+        if bound_args.arguments.get(main) is not None: raise TypeError(f"cannot specify both '{main}' and '{alias}'. Use only one.")
+        bound_args.arguments[main] = alias_val
+    return func(*bound_args.args, **bound_args.kwargs)
+  return _wrapper
+
+for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
+  if {"dim", "keepdim"} & set(inspect.signature(fn).parameters): setattr(Tensor, name, functools.wraps(fn)(_argparse_dim(fn)))
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
