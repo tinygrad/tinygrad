@@ -449,8 +449,13 @@ class AMDDevice(HCQCompatCompiled):
   def __init__(self, device:str=""):
     if AMDDevice.kfd == -1:
       AMDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
-      AMDDevice.gpus = [g.parent for g in pathlib.Path("/sys/devices/virtual/kfd/kfd/topology/nodes").glob("*/gpu_id") if is_usable_gpu(g)]
+      gpus_info = [g.parent for g in pathlib.Path("/sys/devices/virtual/kfd/kfd/topology/nodes").glob("*/gpu_id") if is_usable_gpu(g)]
+      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
+      AMDDevice.gpus = [gpus_info[x] for x in visible_devices] if visible_devices else gpus_info
+
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
+    if self.device_id >= len(AMDDevice.gpus): raise RuntimeError(f"No device found for {device}. Requesting more devices than the system has?")
+
     with open(f"{AMDDevice.gpus[self.device_id]}/gpu_id", "r") as f: self.gpu_id = int(f.read())
     with open(f"{AMDDevice.gpus[self.device_id]}/properties", "r") as f: self.properties = {line.split()[0]: int(line.split()[1]) for line in f}
     self.drm_fd = os.open(f"/dev/dri/renderD{self.properties['drm_render_minor']}", os.O_RDWR)
