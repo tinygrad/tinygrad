@@ -67,7 +67,7 @@ def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
   sched = create_schedule([out.lazydata])
-  ast = sched[-1].ast[0]
+  ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))

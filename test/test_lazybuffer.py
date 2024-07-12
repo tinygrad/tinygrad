@@ -74,7 +74,7 @@ class TestReduceOp(unittest.TestCase):
     a = a.sum()
     sched = create_schedule([a.lazydata])
     assert len(sched) == 1
-    assert sched[0].ast[0].src[0].op is ReduceOps.SUM
+    assert sched[0].ast.src[0].src[0].op is ReduceOps.SUM
 
   def test_split_reduce_kernel_dim0(self):
     a = Tensor.rand(256, 255).realize()
@@ -82,7 +82,7 @@ class TestReduceOp(unittest.TestCase):
     sched = create_schedule([a.lazydata])
     assert len(sched) == 2
     for s in sched:
-      assert s.ast[0].src[0].op is ReduceOps.SUM
+      assert s.ast.src[0].src[0].op is ReduceOps.SUM
 
   def test_split_reduce_kernel_dim1(self):
     a = Tensor.rand(255, 256).realize()
@@ -90,7 +90,7 @@ class TestReduceOp(unittest.TestCase):
     sched = create_schedule([a.lazydata])
     assert len(sched) == 2
     for s in sched:
-      assert s.ast[0].src[0].op is ReduceOps.SUM
+      assert s.ast.src[0].src[0].op is ReduceOps.SUM
 
 class TestView(unittest.TestCase):
   def test_all_masked_out(self):
