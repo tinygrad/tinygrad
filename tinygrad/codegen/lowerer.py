@@ -4,7 +4,7 @@ import functools
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, get_lazyop_info
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, get_lazyop_info
 from tinygrad.codegen.uops import UOp, flops_mem, UOps
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Program
@@ -96,6 +96,7 @@ class Lowerer(Kernel):
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
+    if x.op is MetaOps.SINK: return UOp(UOps.SINK, src=in_uops)
     if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg.scalar(), in_uops)
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
@@ -116,7 +117,7 @@ class Lowerer(Kernel):
     if DEBUG >= 3:
       print(self.name)
       from tinygrad.engine.graph import print_tree
-      for mast in modified_ast: print_tree(mast)
+      print_tree(modified_ast)
 
     if self.opts.has_local:
       # define indexes
@@ -150,7 +151,7 @@ class Lowerer(Kernel):
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(ki.full_shape[a])), (1000+a, True))
 
     self.uop_cache: Dict[LazyOp, UOp] = {}
-    self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast], self.opts)
+    self.uops:UOpGraph = UOpGraph(self.to_uop(modified_ast), self.opts)
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
