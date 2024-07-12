@@ -1,16 +1,18 @@
-import sys, os
+import sys, os, glob, json
 import json
 import numpy as np
 from PIL import Image
 import pathlib
 import boto3, botocore
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, getenv, diskcache
 from tqdm import tqdm
 import pandas as pd
 import concurrent.futures
 
-# BASEDIR = pathlib.Path(__file__).parent / "open-images-v6-mlperf"
-BASEDIR = pathlib.Path('/raid/datasets/open-images')
+
+BASEDIR = getenv('DATAPATH', str(pathlib.Path(__file__).parent / "open-images-v6-mlperf"))
+BASEDIR = pathlib.Path(BASEDIR)
+
 BUCKET_NAME = "open-images-dataset"
 TRAIN_BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-bbox.csv"
 VALIDATION_BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v5/validation-annotations-bbox.csv"
@@ -65,12 +67,35 @@ def openimages(subset: str):
     ann_file = BASEDIR / f"{subset}/train_data.json"
   else:
     ann_file = BASEDIR / f"{subset}/labels/openimages-mlperf.json"
-  
 
   if not ann_file.is_file():
     fetch_openimages(ann_file, subset)
 
   return ann_file
+
+# @diskcache
+def get_train_files():
+  if not (files:=glob.glob(p:=str(BASEDIR / "train/data/*"))): raise FileNotFoundError(f"No training files in {p}")
+  return files
+def get_train_data():
+  with open(BASEDIR / 'train/train_data.json') as f:
+    data = json.load(f)
+  return data
+
+# @functools.lru_cache(None)
+def get_val_files():
+  if not (files:=glob.glob(p:=str(BASEDIR / "validation/data/*"))): raise FileNotFoundError(f"No validation files in {p}")
+  return files
+def get_val_data():
+  with open(BASEDIR / 'validation/labels/openimages-mlperf.json') as f:
+    data = json.load(f)
+  return data
+
+def img_resize_convert(img, size):
+  return img.resize((size, size), resample = Image.BILINEAR)
+
+def preprocess_train(img):
+  return np.array(img_resize_convert(img, 800))
 
 # this slows down the conversion a lot!
 # maybe use https://raw.githubusercontent.com/scardine/image_size/master/get_image_size.py

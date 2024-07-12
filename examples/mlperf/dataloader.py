@@ -353,7 +353,8 @@ def loader_process_retinanet(q_in, q_out, seed, X:Tensor, YB:Tensor, YL:Tensor, 
   import signal
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
-  from extra.datasets.openimages_mlperf import preprocess_train, matcher_iou_func
+  from extra.datasets.openimages import preprocess_train
+  from examples.mlperf.helpers import matcher_iou_func
   
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
@@ -429,7 +430,7 @@ def loader_process_retinanet_val(q_in, q_out, seed, X:Tensor):
     q_out.put(None)
 
 def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_first_batch=False, anchor_np=[1,2,3,4]):
-  from extra.datasets.openimages_mlperf import get_train_files, get_val_files, get_train_data, get_val_data
+  from extra.datasets.openimages import get_train_files, get_val_files, get_train_data, get_val_data
   files = get_val_files() if val else get_train_files()
   data_dict = get_val_data if val else get_train_data()
   if val:
@@ -576,7 +577,7 @@ if __name__ == "__main__":
       for x,y,c in batch_load_resnet(val=val):
         pbar.update(x.shape[0])
   def load_retinanet(val):
-    from extra.datasets.openimages_mlperf import get_train_files, get_val_files
+    from extra.datasets.openimages import get_train_files, get_val_files
     files = get_val_files() if val else get_train_files()
     with tqdm(total=len(files)) as pbar:
       for x in batch_load_retinanet(val=val):
