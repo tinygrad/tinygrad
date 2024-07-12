@@ -228,6 +228,6 @@ def iterate(coco, bs=8):
       targets.append(prepare_target(annotations, img_id, original_size))
     yield np.array(X), targets
 
-if __name__ == '__main__':
-  openimages('train')
-  openimages('validation')
+if __name__ == "__main__":
+  openimages("validation")
+  openimages("train")

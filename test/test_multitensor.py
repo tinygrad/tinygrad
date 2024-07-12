@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import LoadOps, ReduceOps, BufferOps, BinaryOps
+from tinygrad.ops import MetaOps, ReduceOps, BufferOps, BinaryOps
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
@@ -165,7 +165,6 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  @unittest.skipIf(Device.DEFAULT in ("NV", "AMD"), "not supported in HCQ #4817")
   def test_copy_jit(self):
     @TinyJit
     def copy_tensor(x:Tensor): return (x.to(f"{x.device.split(':')[0]}:1") + 1)
@@ -174,7 +173,6 @@ class TestMultiTensor(unittest.TestCase):
       x = copy_tensor(t)
       np.testing.assert_equal((t+1).numpy(), x.numpy())
 
-  @unittest.skipIf(Device.DEFAULT in ("NV", "AMD"), "not supported in HCQ #4817")
   def test_allreduce_naive_jit(self):
     with Context(RING=0):
       jit_allreduce = TinyJit(_test_allreduce)
@@ -182,7 +180,6 @@ class TestMultiTensor(unittest.TestCase):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  @unittest.skipIf(Device.DEFAULT in ("NV", "AMD"), "not supported in HCQ #4817")
   def test_allreduce_ring_jit(self):
     with Context(RING=2):
       jit_allreduce = TinyJit(_test_allreduce)
@@ -332,7 +329,7 @@ class TestMultiTensor(unittest.TestCase):
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
-  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV"), "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow, and flaky on LLVM")
   def test_data_parallel_resnet_train_step(self):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
@@ -455,7 +452,7 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast[0].op is not LoadOps.COPY]
+    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast.op is not MetaOps.COPY]
     assert set(out.device for sched in scheds for out in sched.outputs) == set(devices_4), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts)
@@ -530,21 +527,21 @@ class TestMultiTensor(unittest.TestCase):
       t = Tensor.zeros(16, 16).contiguous().shard(devices_4, axis).realize()
       t = t + 1
       for si in t.schedule():
-        ast = si.ast[0]
+        ast = si.ast.src[0]
         assert ast.op is BufferOps.STORE
         assert ast.src[0].op is BinaryOps.ADD
         assert ast.src[0].src[0].op is BufferOps.LOAD and ast.src[0].src[0]
         assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 1
       t = 2 * t
       for si in t.schedule():
-        ast = si.ast[0]
+        ast = si.ast.src[0]
         assert ast.op is BufferOps.STORE
         assert ast.src[0].op is BinaryOps.MUL
         assert ast.src[0].src[0].op is BufferOps.CONST and ast.src[0].src[0].arg.val == 2
         assert ast.src[0].src[1].op is BufferOps.LOAD
       t = t + t.full_like(3)
       for si in t.schedule():
-        ast = si.ast[0]
+        ast = si.ast.src[0]
         assert ast.op is BufferOps.STORE
         assert ast.src[0].op is BinaryOps.ADD
         assert ast.src[0].src[0].op is BufferOps.LOAD

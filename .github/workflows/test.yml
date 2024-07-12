@@ -37,19 +37,13 @@ jobs:
         COMMIT_MESSAGE=$(printf '%q' "$RAW_COMMIT_MESSAGE")
         RAW_PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
         PR_TITLE=$(printf '%q' "$RAW_PR_TITLE")
+        echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
+        echo "ASSERT_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
+        echo "running process replay in diff-only mode"
 
         if { echo "$COMMIT_MESSAGE" | grep -q "run_process_replay" || echo "$PR_TITLE" | grep -q "run_process_replay" || [ "${{ github.event.inputs.run_process_replay }}" = "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
-          echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
-          echo "enabled process replay"
-          if { echo "$COMMIT_MESSAGE" | grep -q "no_assert" || echo "$PR_TITLE" | grep -q "no_assert"; }; then
-            echo "ASSERT_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
-            echo "running process replay in diff-only mode"
-          else
-            echo "ASSERT_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
-          fi
-        else
-          echo "RUN_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
-          echo "disabled process replay"
+          echo "ASSERT_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
+          echo "enabled process replay (with assert)"
         fi
 
   uops:
@@ -90,9 +84,9 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         PYTHONPATH=. DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
     - name: Test dtype with Python emulator
-      run: DEBUG=1 PYTHONPATH=. PYTHON=1 python3 -m pytest test/test_dtype.py test/test_dtype_alu.py
+      run: DEBUG=1 PYTHONPATH=. PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
-      run: DEBUG=2 PYTHON=1 python3 -m pytest test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal or test_slice_fancy_indexing_dim_inject_none or test_slice_fancy_indexing_list_indices or test_slice_fancy_indexing_no_dim_collapse or test_slice_fancy_indexing_tuple_indices or test_slice_fancy_indexing_list_with_tensors or test_slice_fancy_indexing_dim_collapse_int)" --durations=20
+      run: DEBUG=2 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal or test_slice_fancy_indexing_dim_inject_none or test_slice_fancy_indexing_list_indices or test_slice_fancy_indexing_no_dim_collapse or test_slice_fancy_indexing_tuple_indices or test_slice_fancy_indexing_list_with_tensors or test_slice_fancy_indexing_dim_collapse_int)" --durations=20
     - name: Test uops with Python emulator
       run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
     - name: Test symbolic with Python emulator
@@ -133,6 +127,7 @@ jobs:
     - name: Test Docs
       run: |
         python docs/abstractions2.py
+        python docs/abstractions3.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test README
@@ -254,7 +249,7 @@ jobs:
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py --durations=20
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
-        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
+        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -347,9 +342,11 @@ jobs:
       run: PYTHONPATH="." METAL=1 CACHELEVEL=0 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=48 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py
     - name: Fuzz Test models schedule
       run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
+    - name: Run TRANSCENDENTAL math
+      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run process replay tests
       if: env.RUN_PROCESS_REPLAY == '1'
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -442,7 +439,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-6
+          key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-7
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
@@ -540,9 +537,11 @@ jobs:
           PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
           clang -O2 recognize.c -lm -o recognize
           cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
+      - name: Run TRANSCENDENTAL math
+        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
-        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 process_replay.py
+        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test

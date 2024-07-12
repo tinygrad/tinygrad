@@ -3,7 +3,8 @@ from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite
+from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, graph_rewrite
 #from tinygrad.engine.graph import print_tree
 
 simple_pm = PatternMatcher([
@@ -220,6 +221,21 @@ class TestUOpGraph(TestUOps):
     bad_gate = UOp.const(dtypes.int, 1)
     uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
     with self.assertRaises(AssertionError): uops.linearize()
+
+  def test_switched_range_order(self):
+    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    c0 = UOp.const(dtypes.int, 0)
+    c2 = UOp.const(dtypes.int, 2)
+    cf = UOp.const(dtypes.float, 0.0)
+    r1 = UOp(UOps.RANGE, dtypes.int, (c0, c2), (1, 0, False))
+    r2 = UOp(UOps.RANGE, dtypes.int, (c0, c2), (1, 1, False))
+    alu = UOp(UOps.ALU, dtypes.int, (r2, r1), BinaryOps.MUL)
+    store = UOp(UOps.STORE, None, (glbl, alu, cf))
+    uops = UOpGraph([store]).uops
+    ranges = [x for x in uops if x.op is UOps.RANGE]
+    endranges = [x for x in uops if x.op is UOps.ENDRANGE]
+    # ranges are closed in the right order
+    self.assertEqual(endranges[-1].src[0], ranges[0])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

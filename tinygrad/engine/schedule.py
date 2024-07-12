@@ -2,9 +2,9 @@ import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
-from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
+from tinygrad.ops import MetaOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -21,16 +21,17 @@ logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 
 @dataclass(frozen=True)
 class ScheduleItem:
-  ast: Tuple[LazyOp, ...]
+  ast: LazyOp
   bufs: Tuple[Buffer, ...]
+  metadata: Optional[List[Metadata]] = None
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
-    return self.bufs[:len(self.ast)]
+    return self.bufs[:len(self.ast.src)] if self.ast.op is MetaOps.SINK else self.bufs[0:1]
   @property
   def inputs(self) -> Tuple[Buffer, ...]:
     """Read only buffers in the schedule."""
-    return self.bufs[len(self.ast):]
+    return self.bufs[len(self.ast.src):] if self.ast.op is MetaOps.SINK else self.bufs[1:]
 
 # *** DAG transformation: List[LazyBuffer] -> ScheduleItem ***
 
@@ -45,7 +46,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   assert buf.op is not None
 
   # consts are always fused and generated
-  if buf.op is LoadOps.CONST:
+  if buf.op is MetaOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if isinstance(buf.arg, Variable):
@@ -73,10 +74,10 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     return LazyOp(BufferOps.LOAD, (), MemBuffer(len(outputs)+inputs.index(buf), buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
-  if buf.op is LoadOps.CONTIGUOUS:
+  if buf.op is MetaOps.CONTIGUOUS:
     assert buf in outputs
     return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, cache)
-  if buf.op is LoadOps.ASSIGN:
+  if buf.op is MetaOps.ASSIGN:
     assert buf in outputs
     assert buf.srcs[1].base is buf.srcs[1], "assign must be to base"
     assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
@@ -94,22 +95,23 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
-  if (out:=outs[0]).op is LoadOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
+  if (out:=outs[0]).op is MetaOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
     rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((out.arg,))))
-    return (LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st)), ), [x.base for x in out.srcs], {}
-  if out.op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}: return (LazyOp(out.op, (), out.arg), ), [x.base for x in out.srcs], {}
+    return LazyOp(MetaOps.SINK, (LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st)), )), [x.base for x in out.srcs], {}, []
+  if out.op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}: return LazyOp(out.op, (), out.arg), [x.base for x in out.srcs], {}, []
   var_vals: Dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
-  assign_targets = {x.srcs[1]:x for x in outs if x.op is LoadOps.ASSIGN}
+  assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
+  cache: Dict[Tuple[LazyBuffer, ShapeTracker], LazyOp] = {}
   ast: List[LazyOp] = []
   inputs: List[LazyBuffer] = []
   for i, out in enumerate(outs):
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
-    output_view = out.arg[0] if out.op is LoadOps.ASSIGN and out.arg else output_st
-    lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, cache={})
+    output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
+    lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, cache=cache)
     output_view, vv = output_view.simplify().unbind()
     if vv: var_vals.update(vv)
     ast.append(LazyOp(BufferOps.STORE, (lop, ), MemBuffer(i, out.dtype, output_view)))
-  return tuple(ast), inputs, var_vals
+  return LazyOp(MetaOps.SINK, tuple(ast)), inputs, var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -126,6 +128,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       simple_pads.add(buf.base)
     # realize all expands
     elif prod(buf.base.st.shape) < prod(buf.st.shape):
+      if buf.base.op in ReduceOps and buf.base.srcs[0].base.op is MetaOps.CONST:
+        pass # don't realize reduceops on const (unless base is forced_realize)
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         pass # don't realize image to image casts. this is part of a larger problem
       else:
@@ -136,11 +140,11 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   # base
   allbufs[buf] = None
   if buf.forced_realize: realizes[buf] = None
-  if buf.op in LoadOps: realizes[buf.base] = None
-  if buf.op is LoadOps.COPY:
+  if buf.op in MetaOps: realizes[buf.base] = None
+  if buf.op is MetaOps.COPY:
     assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
     realizes[buf.srcs[0].base] = None
-  if buf.op is LoadOps.VIEW: realizes[buf.srcs[0].base] = None
+  if buf.op is MetaOps.VIEW: realizes[buf.srcs[0].base] = None
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children)
@@ -176,7 +180,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   simple_pads: Set[LazyBuffer] = set()
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
   for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, scheduled=True)
-  assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
+  assign_targets = {x.srcs[1]:x for x in realizes if x.op is MetaOps.ASSIGN and x not in seen and x.realized is None}
 
   # check if we have to realize pads
   for p in simple_pads:
@@ -195,7 +199,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     if not forced_realize and len(group) > 1:
-      # create a multi output kernel if the LazyBufferss can cleanly group
+      # create a multi output kernel if the LazyBuffers can cleanly group
       cache: Set[LazyBuffer] = set()
       rc_parents, rc_children = deque(group), deque(group)
       while rc_parents:
@@ -219,14 +223,14 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         rc_children.extend(x for x in children[c] if x.realized is None and x.device == r.device)
       group.update(realized_descendants)
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is LoadOps.ASSIGN for x in group):
+    if not forced_realize and any(x.op is MetaOps.ASSIGN for x in group):
       parents = deque((r, *group))
       while parents and not forced_realize:
         if (p:=parents.pop().base).realized or p in realizes:
           if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
-    if forced_realize:
+    if forced_realize and (r.srcs[0].base.op is not MetaOps.CONST or any(x.shape != r.shape for x in children[r])):
       tr = r
       if can_chase:
         # can chase this down to contiguous children
@@ -248,7 +252,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
-    if buf.realized is not None or buf.op is LoadOps.CONST or buf in seen: continue
+    if buf.realized is not None or buf.op is MetaOps.CONST or buf in seen: continue
     output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
 
     # make things that can't be images not images
@@ -301,8 +305,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       for out in ps[0]: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, ps[3]])
     for out in ps[0]: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(ps[1], tuple(x.buffer for x in ps[0]+ps[2] if x.size != 0)))
-    if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
+    schedule.append(si:=ScheduleItem(ps[1], tuple(x.buffer for x in ps[0]+ps[2] if x.size != 0), ps[4]))
+    if logops and si.ast.op is MetaOps.SINK and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
     for x in graph[ps[0][0]]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(prescheduled[x])
@@ -365,5 +369,6 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
-  assigned = _internal_memory_planner([si.bufs for si in schedule], noopt_buffers={b for si in schedule if si.ast[0].op in LoadOps for b in si.bufs})
-  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]
+  assigned = _internal_memory_planner([si.bufs for si in schedule],
+                                      noopt_buffers={b for si in schedule if si.ast.op is not MetaOps.SINK for b in si.bufs})
+  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs), si.metadata) for si in schedule]
