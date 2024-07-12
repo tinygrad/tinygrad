@@ -8,7 +8,7 @@ from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, Cons
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, get_contraction, to_function_name # noqa: E501
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, get_contraction, to_function_name # noqa: E501
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
@@ -61,22 +61,28 @@ class TensorCoreOptions:
 
 class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
+    if len(ast) > 1 or ast[0].op is BufferOps.STORE:
+      assert all(x.op is BufferOps.STORE for x in ast)
+      self.ast = LazyOp(MetaOps.SINK, ast)
+    else:
+      assert len(ast) == 1 and ast[0].op is MetaOps.SINK
+      self.ast = ast[0]
+
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    try: lazyop_sts_map = verify_lazyop(*ast)
+    try: lazyop_sts_map = verify_lazyop(self.ast)
     except AssertionError as e:
       print("INVALID AST")
       for op in ast: print_tree(op)
       raise e
-    self.ast = ast
-    self.lazyops = flatten([op.lazyops for op in self.ast])
+    self.lazyops = self.ast.lazyops
 
     cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
     def ordered_lazyops(op):
       if op not in cached_ordered_lazyops: cached_ordered_lazyops[op] = dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
       return cached_ordered_lazyops[op]
-    self.reduceops = dedup([x for out in self.ast for x in ordered_lazyops(out) if x.op in ReduceOps])
+    self.reduceops = dedup([x for x in ordered_lazyops(self.ast) if x.op in ReduceOps])
 
-    self.vars = flatten([x.vars() for x in self.ast])
+    self.vars = self.ast.vars()
     self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.lazyops if x.op in BufferOps])
 
     # get earlybufs, before any reduceops
@@ -645,7 +651,7 @@ class Kernel:
   def name(self) -> str:
     # kernel name (before late upcast)
     name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
-                 (f"{len(self.ast)}_" if len(self.ast) > 1 else "_") + \
+                 (f"{len(self.ast.src)}_" if len(self.ast.src) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # name the function something unique
@@ -720,5 +726,4 @@ class Kernel:
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    return fixup_ast(LazyOp(MetaOps.SINK, src=self.ast)), \
-      KernelInfo(self.full_shape, self.global_dims, self.first_reduce, self.group_for_reduces, self.upcasted)
+    return fixup_ast(self.ast), KernelInfo(self.full_shape, self.global_dims, self.first_reduce, self.group_for_reduces, self.upcasted)

@@ -88,7 +88,7 @@ class Lowerer(Kernel):
         buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype), (), ("temp", x.arg.st.size))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
-                  (x.arg.idx, any(x.arg.idx == y.arg.idx for y in self.ast)))
+                  (x.arg.idx, any(x.arg.idx == y.arg.idx for y in self.ast.src)))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
@@ -168,7 +168,7 @@ class Lowerer(Kernel):
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
-    info = get_lazyop_info(self.ast[0])
+    info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed
     ops, mem = flops_mem(self.uops.uops)
     run_count = prod((self.global_size or []) + (self.local_size or []))
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
