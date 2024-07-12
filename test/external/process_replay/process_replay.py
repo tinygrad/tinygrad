@@ -11,7 +11,7 @@ print(table_name)
 conn = db_connection()
 cur = conn.cursor()
 row_count = cur.execute(f"select count(*) from '{table_name}'").fetchone()[0]
-timediffs:List[Tuple[str, float, float]] = []
+timediffs: List[Tuple[str, float, float]] = []
 for offset in tqdm(range(0, row_count, page_size)):
   cur.execute(f"SELECT val FROM '{table_name}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
