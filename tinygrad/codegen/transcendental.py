@@ -196,6 +196,9 @@ def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
       d = mla(qdh, x.const(-1.2246467864107188502e-16), d)
       d = mla(q, x.const(-1.2246467864107188502e-16), d)
       d = mla(qdh.e(BinaryOps.ADD, q), x.const(-1.2736634327021899816e-24), d)
+    elif x.dtype == dtypes.float16:
+      # [FIXME] when reducing `d`, FP16 needs FP32 precision to achieve 1.0 ULP precision.
+      d = _reduce_d(x.cast(dtypes.float32), q.cast(dtypes.float32)).cast(dtypes.float16)
     else:
       d = mla(q, x.const(-3.1414794921875), x)
       d = mla(q, x.const(-0.00011315941810607910156), d)
@@ -231,7 +234,7 @@ def sin_poly_large(d:UOp, q:UOp) -> UOp:
   r = sin_poly(d)
   return r.e(BinaryOps.MUL, _ifand(2).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
 # *** toplevel functions for xsin/xlog2/xexp2 ***
-def xsin(d:UOp, fast:bool=False, switch_over:float=1.0) -> UOp:
+def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   """
   Implements a 1.0 ULP approximation for UnaryOps.SIN.
   - fast=True assumes x <= switch_over.
@@ -249,7 +252,6 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=1.0) -> UOp:
     result = sin_poly_small(r, q)
   else:
     # Payne Hanek Reduction assumes abs(x) >= pi/4, so for smaller values, use cody_waite_reduction.
-    # [TODO] cody_waite reduction is not anymore needed right?
     switch_over_map = x_abs.e(BinaryOps.CMPLT, x.const(switch_over))
     r_fast, q_fast = cody_waite_reduction(x_abs)
     r = switch_over_map.e(TernaryOps.WHERE, r_fast, r)
