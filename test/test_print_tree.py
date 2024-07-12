@@ -19,7 +19,7 @@ class TestPrintTree(unittest.TestCase):
     return capturedOutput.getvalue()
 
   def test_print_uop(self):
-    x = Tensor.arange(10).schedule()[-1].ast[0]
+    x = Tensor.arange(10).schedule()[-1].ast.src[0]
     output =  self._capture_print(lambda: print_tree(x))
     assert output == '\
   0 ━┳ BufferOps.STORE MemBuffer(idx=0, dtype=dtypes.int, \
