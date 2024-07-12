@@ -16,7 +16,7 @@ settings.register_profile("my_profile", max_examples=200, deadline=None, derando
 settings.load_profile("my_profile")
 print(settings.default)
 
-dtypes_float = (dtypes.float32, dtypes.float16)
+dtypes_float = (dtypes.float16, dtypes.float32, dtypes.float64)
 dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
 dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
