@@ -43,6 +43,7 @@ if __name__ == "__main__":
   # work with the schedule
   total_tm = 0
   running_gflops = 0
+  usage = {}
   for i,si in enumerate(sched):
     ops = sum(get_lazyop_info(ast).flops for ast in si.ast)
 
@@ -82,5 +83,10 @@ if __name__ == "__main__":
     tm, gflops, lin = sorted(choices, key=lambda x: x[0])[0]
     total_tm += tm
     running_gflops += gflops * tm
+    if (key := str([str(m) for m in si.metadata] if si.metadata is not None else None)) not in usage: usage[key] = (0, 0)
+    usage[key] = (usage[key][0] + tm, usage[key][1] + 1)
     print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[str(m) for m in si.metadata] if si.metadata is not None else ''}")
   print(f"******* total {total_tm*1000:.2f} ms, {running_gflops/total_tm:6.0f} GFLOPS")
+  print("usage:")
+  for k in sorted(usage, key=lambda x: -usage[x][0])[:10]:
+    print(f"{usage[k][0]*1000:.2f} ms: {k} ({usage[k][1]} times)")
