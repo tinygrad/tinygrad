@@ -112,6 +112,7 @@ class Lowerer(Kernel):
   def linearize(self) -> Lowerer:
     modified_ast, ki = self.get_optimized_ast()
     if DEBUG >= 3:
+      print(self.name)
       from tinygrad.engine.graph import print_tree
       for mast in modified_ast: print_tree(mast)
 
