@@ -1,5 +1,4 @@
 from typing import List
-from collections import defaultdict
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor, nn
 from tinygrad.ops import LoadOps, get_lazyop_info
