@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import difflib, pickle, multiprocessing
+import difflib, pickle, multiprocessing, os
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
 
+ASSERT_PROCESS_REPLAY = getenv("ASSERT_PROCESS_REPLAY", 1)
 page_size = 100
 table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}_{VERSION}"
 
@@ -24,7 +25,7 @@ def process_replay(offset:int):
         print(ast)
         print(applied_opts)
         print(e)
-        if getenv("ASSERT_PROCESS_REPLAY", 1): raise e
+        if ASSERT_PROCESS_REPLAY: raise e
         continue
       # try compare
       try: assert compare_src == good_src
@@ -35,11 +36,12 @@ def process_replay(offset:int):
         diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
         for line in diff:
           print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-        if getenv("ASSERT_PROCESS_REPLAY", 1): raise e
+        if ASSERT_PROCESS_REPLAY: raise e
   conn.commit()
   cur.close()
 
 if __name__ == "__main__":
+  if "[run_process_replay]" in os.getenv("COMMIT_MESSAGE", "") or "[run_process_replay]" in os.getenv("PR_TITLE", ""): ASSERT_PROCESS_REPLAY = 1
   conn = db_connection()
   cur = conn.cursor()
   row_count = cur.execute(f"select count(*) from '{table_name}'").fetchone()[0]
