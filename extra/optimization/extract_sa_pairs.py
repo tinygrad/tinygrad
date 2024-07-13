@@ -13,7 +13,7 @@ inf, nan = float('inf'), float('nan')
 from tinygrad.codegen.kernel import Opt, OptOps
 
 # more stuff
-from tinygrad.codegen.lowerer import Lowerer
+from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.search import actions
 from extra.optimization.helpers import lin_to_feats
 from extra.optimization.pretrain_valuenet import ValueNet
@@ -48,7 +48,7 @@ def dataset_from_cache(fn):
     new_tm = min(opts_to_outcome[(ast,k)])
     if math.isinf(old_tm) or math.isinf(new_tm) or old_tm < 1e-9 or new_tm < 1e-9: continue
     try:
-      lin = Lowerer(eval(ast))
+      lin = Kernel(eval(ast))
     except Exception:
       continue
     for opt in k[:-1]: lin.apply_opt(opt)

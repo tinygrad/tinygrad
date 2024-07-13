@@ -1,7 +1,8 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '4'
+  DOWNLOAD_CACHE_VERSION: '5'
+  RUN_PROCESS_REPLAY: 1
 
 on:
   push:
@@ -9,43 +10,8 @@ on:
       - master
   pull_request:
   workflow_dispatch:
-    inputs:
-       run_process_replay:
-         description: "Run process replay tests"
-         required: false
-         default: false
-         type: boolean
 
 jobs:
-  check_process_replay:
-    name: Check process replay
-    runs-on: ubuntu-latest
-    outputs:
-      run_process_replay: ${{ steps.set-env.outputs.run_process_replay }}
-      assert_process_replay: ${{ steps.set-env.outputs.assert_process_replay }}
-    timeout-minutes: 5
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-    - name: Set process replay
-      id: set-env
-      run: |
-        RAW_COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-        COMMIT_MESSAGE=$(printf '%q' "$RAW_COMMIT_MESSAGE")
-        RAW_PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
-        PR_TITLE=$(printf '%q' "$RAW_PR_TITLE")
-        echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
-        echo "ASSERT_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
-        echo "running process replay in diff-only mode"
-
-        if { echo "$COMMIT_MESSAGE" | grep -q "run_process_replay" || echo "$PR_TITLE" | grep -q "run_process_replay" || [ "${{ github.event.inputs.run_process_replay }}" = "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
-          echo "ASSERT_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
-          echo "enabled process replay (with assert)"
-        fi
-
   uops:
     name: uops tests
     runs-on: ubuntu-latest
@@ -157,12 +123,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot, onnx]
-    needs: check_process_replay
-    #env:
-      #RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+        task: [optimage, onnx]
 
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
+    name: ${{ matrix.task=='optimage'&&'GPU IMAGE+compile Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04
     timeout-minutes: 10
 
@@ -201,25 +164,28 @@ jobs:
         name: Test WINO=1
         run: GPU=1 DEBUG=2 WINO=1 python3 test/test_ops.py TestOps.test_simple_conv2d
       - if: ${{ matrix.task == 'optimage'}}
-        name: Test GPU IMAGE=1 ops
-        run: GPU=1 IMAGE=1 python -m pytest -n=auto test/test_ops.py
-      - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops
         run: GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
-      - if: ${{ matrix.task == 'openpilot' }}
+      - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot model compile and size
         run: |
           PYTHONPATH="." DEBUG=2 ALLOWED_KERNEL_COUNT=208 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile2.py
           python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
-      - if: ${{ matrix.task == 'openpilot' }}
+      - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile2.py
-      - if: ${{ matrix.task == 'openpilot' }}
+      - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot alt model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
-      - if: ${{ matrix.task == 'openpilot' }}
+      - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot fastvits model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      - if: ${{ matrix.task == 'optimage' }}
+        name: Compile EfficientNet to C and test it
+        run: |
+          CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
+          clang -O2 recognize.c -lm -o recognize
+          cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -247,9 +213,9 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test THREEFRY
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py --durations=20
-      - name: Run process replay tests
-        if: env.RUN_PROCESS_REPLAY == '1'
-        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Run handcode_opt
+        run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -295,15 +261,13 @@ jobs:
   testmetal:
     name: Metal Tests
     runs-on: macos-14
-    needs: check_process_replay
-    env:
-      RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
-      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
     timeout-minutes: 20
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
       with:
@@ -345,8 +309,10 @@ jobs:
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run process replay tests
-      if: env.RUN_PROCESS_REPLAY == '1'
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      run: |
+        export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+        export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+        cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -386,10 +352,6 @@ jobs:
       fail-fast: false
       matrix:
         backend: [llvm, clang, gpu, ptx, amd, nv] #, triton]
-    needs: check_process_replay
-    env:
-      RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
-      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -398,6 +360,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -531,17 +495,13 @@ jobs:
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py --durations=20
-      - name: Compile EfficientNet to C and test it
-        if: matrix.backend=='clang'
-        run: |
-          PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
-          clang -O2 recognize.c -lm -o recognize
-          cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
-        if: env.RUN_PROCESS_REPLAY == '1'
-        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+        run: |
+          export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+          export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+          cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test

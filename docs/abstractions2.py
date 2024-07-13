@@ -79,8 +79,8 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule
 
 # allocate some values + load in values
-a = LazyBuffer.loadop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
-b = LazyBuffer.loadop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
+a = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
+b = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
 a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 del a.srcs
