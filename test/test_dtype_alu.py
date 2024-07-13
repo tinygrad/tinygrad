@@ -183,6 +183,16 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(np.pi / 2)
      # worst case of ulp 1.5
     _test_value(np.pi * 2, unit=1.5)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.float64), "need float64")
+  def test_sin_err(self):
+    n = 305015820.3125
+    dtype = dtypes.float64
+    next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
+    ulp = next_float - 1.0
+    ulp = 1.0 * ulp
+    np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
+
   @given(strat.sampled_from(dtypes_float))
   def test_log2(self, dtype):
     if not is_dtype_supported(dtype): return
