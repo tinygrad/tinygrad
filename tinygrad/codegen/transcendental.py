@@ -93,7 +93,7 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent)"""
   assert v.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
-  m1 = {dtypes.float64: 0x800FFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
+  m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3C00}[v.dtype]
   bias = {dtypes.float64: 1022, dtypes.float32: 126, dtypes.float16: 15}[v.dtype]
   bits = float_to_bits(v)
@@ -197,7 +197,7 @@ def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
       d = mla(q, x.const(-1.2246467864107188502e-16), d)
       d = mla(qdh.e(BinaryOps.ADD, q), x.const(-1.2736634327021899816e-24), d)
     elif x.dtype == dtypes.float16:
-      # when reducing `d`, FP16 needs FP32 precision to achieve 1.0 ULP precision.
+      # [FIXME] when reducing `d`, FP16 needs FP32 precision to achieve 1.0 ULP precision.
       d = _reduce_d(x.cast(dtypes.float32), q.cast(dtypes.float32)).cast(dtypes.float16)
     else:
       d = mla(q, x.const(-3.1414794921875), x)
@@ -234,15 +234,13 @@ def sin_poly_large(d:UOp, q:UOp) -> UOp:
   r = sin_poly(d)
   return r.e(BinaryOps.MUL, _ifand(2).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
 # *** toplevel functions for xsin/xlog2/xexp2 ***
-def xsin(d:UOp, fast:bool=False, switch_over:float=39800.0) -> UOp:
+def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   """
   Implements a 1.0 ULP approximation for UnaryOps.SIN.
   - fast=True assumes x <= switch_over.
   - switch_over is the threshold for switching to payne_hanek_reduction.
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
-  if d.dtype == dtypes.float16:
-    switch_over = 9500.0
   reduction_algo = cody_waite_reduction if fast else payne_hanek_reduction
   # mask +-inf/nan as zero
   x = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
