@@ -290,6 +290,21 @@ transcendental_folding = PatternMatcher([
   (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=UnaryOps.SIN), xsin),
 ])
 
+# ***** threefry *****
+
+def threefry2x32(x: UOp, seed: UOp):
+  # split x into two uint32, since x in a uint64
+  x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
+
+  rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
+  ks = [0x0, (seed := seed.cast(dtypes.uint32)) ^ 0x1BD11BDA, seed]
+  xr = [x0 + ks[-1], x1 + ks[0]]
+  for i in range(5):
+    for r in rotations[i % 2]: xr[0], xr[1] = (x0 := xr[0] + xr[1]), x0 ^ ((xr[1] * 2**r) + (xr[1] // 2**(32 - r)))
+    xr = [(xr[0] + ks[i % 3]), (xr[1] + ks[(i + 1) % 3] + i + 1)]
+
+  return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
+
 # ***** main rewriter *****
 
 def reduce_before_expand(reduce_allow_any_len, expand, x):
@@ -334,6 +349,8 @@ constant_folder = PatternMatcher([
    .name("reduce_allow_any_len"), reduce_before_expand),
   (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
+  # threefry
+  (UOp(UOps.ALU, dtype=dtypes.uint64, src=(UOp.var("x"), UOp.var("seed")), arg=BinaryOps.THREEFRY), threefry2x32),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL, src=[UPat(UOps.CONST, name="mval"),
