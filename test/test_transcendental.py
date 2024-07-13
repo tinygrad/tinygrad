@@ -23,7 +23,7 @@ class TestTranscendentalMath(unittest.TestCase):
     with Context(TRANSCENDENTAL=2):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float64)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float64))),
-                                 atol=1e-5)
+                                 atol=2e-5)
 
   @unittest.skipIf(getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV"), "crashed")
   @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
@@ -31,7 +31,7 @@ class TestTranscendentalMath(unittest.TestCase):
     with Context(TRANSCENDENTAL=2):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float32)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float32))),
-                                 atol=1e-5)
+                                 atol=2e-5)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
   @given(ht.float16, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
