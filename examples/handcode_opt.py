@@ -68,7 +68,7 @@ if __name__ == "__main__":
   print(f"optimizing for {Device.DEFAULT}")
 
   sched = globals()[f"get_sched_{getenv('MODEL', 'resnet')}"]()
-  sched = [x for x in sched if x.ast[0].op not in MetaOps]
+  sched = [x for x in sched if x.ast.op is MetaOps.SINK]
 
   # focus on one kernel
   if getenv("KERNEL", -1) >= 0: sched = sched[getenv("KERNEL", -1):getenv("KERNEL", -1)+1]
@@ -78,7 +78,7 @@ if __name__ == "__main__":
   running_gflops = 0
   usage = {}
   for i,si in enumerate(sched):
-    ops = sum(get_lazyop_info(ast).flops for ast in si.ast)
+    ops = get_lazyop_info(si.ast.src[0]).flops
 
     if DEBUG >= 2:
       for ast in si.ast: print_tree(ast)
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     choices = []
     for lin in lins:
       tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10)
-      gflops = sym_infer(ops, {k:k.min for k in lin.ast[0].vars()})*1e-9/tm
+      gflops = sym_infer(ops, {k:k.min for k in lin.ast.vars()})*1e-9/tm
       choices.append((tm, gflops, lin.linearize()))
 
       # print all kernels
