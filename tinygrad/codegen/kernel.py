@@ -1,7 +1,6 @@
 from __future__ import annotations
 import itertools, functools
-from dataclasses import replace, dataclass
-from enum import Enum, auto
+from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
 from tinygrad.engine.graph import print_tree
@@ -18,6 +17,8 @@ from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.uops import UOps, flops_mem
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.codegen.lowerer import lazyop_to_uop
+from dataclasses import dataclass
+from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -732,8 +733,7 @@ class Kernel:
     if DEBUG >= 3:
       print(self.name)
       print_tree(modified_ast)
-    # TODO: fix these
-    if not self.group_for_reduces: verify_lazyop(modified_ast)
+    verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)
 
