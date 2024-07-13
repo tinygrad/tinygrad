@@ -181,6 +181,7 @@ class RegressionHead:
     anchors = anchors * mask
     target_regression = encode_boxes(matched_gt_boxes, anchors)
     target_regression = target_regression * mask
+    target_regression = (target_regression>-1000).where(target_regression, 0) #nan replace with 0
     return (l1_loss(bbox_reg, target_regression) / num_foreground).mean()
 
   def __call__(self, x):
