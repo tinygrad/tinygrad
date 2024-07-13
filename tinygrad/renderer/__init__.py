@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple, Dict
 import functools
 from dataclasses import dataclass
 from tinygrad.helpers import to_function_name
@@ -57,6 +57,5 @@ class Renderer:
   local_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
-  extra_pm: Any = None   # extra rules for the pattern matcher
 
   def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("needs a renderer")

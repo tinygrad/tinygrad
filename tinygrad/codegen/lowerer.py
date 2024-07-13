@@ -171,9 +171,6 @@ class Lowerer(Kernel):
 
     self.uops:UOpGraph = UOpGraph(lazyop_to_uop(modified_ast, self.opts), self.opts)
 
-    # linearize the uops
-    self.uops.linearize(self.opts.extra_pm)
-
     # extract global/local sizes
     if self.opts.has_local:
       self.global_size: Optional[List[int]] = [1,1,1]
