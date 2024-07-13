@@ -2,7 +2,7 @@ from typing import List
 from extra.models.resnet import ResNet50
 from examples.mlperf.helpers import get_mlperf_bert_model
 from tinygrad import Tensor, Device, dtypes, nn
-from tinygrad.codegen.lowerer import Lowerer
+from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Compiled
 from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
@@ -84,24 +84,24 @@ if __name__ == "__main__":
     if DEBUG >= 2:
       for ast in si.ast: print_tree(ast)
 
-    rawbufs = bufs_from_lin(Lowerer(si.ast))
+    rawbufs = bufs_from_lin(Kernel(si.ast))
 
     # "linearize" the op into uops in different ways
-    lins:List[Lowerer] = []
+    lins:List[Kernel] = []
 
     # always try hand coded opt
-    lin = Lowerer(si.ast, opts=device.renderer)
+    lin = Kernel(si.ast, opts=device.renderer)
     lin.hand_coded_optimizations()
     lins.append(lin)
 
     # maybe try tensor cores
-    lin = Lowerer(si.ast, opts=device.renderer)
+    lin = Kernel(si.ast, opts=device.renderer)
     if lin.apply_tensor_cores():
       lins.append(lin)
 
     # try a beam search
     if beam:=getenv("BEAM"):
-      lin = Lowerer(si.ast, opts=device.renderer)
+      lin = Kernel(si.ast, opts=device.renderer)
       lin = beam_search(lin, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
       lins.append(lin)
 

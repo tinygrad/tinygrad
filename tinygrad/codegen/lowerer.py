@@ -1,14 +1,12 @@
 from __future__ import annotations
 from typing import List, Tuple, cast, Optional, Any, Dict
 import functools
-from tinygrad.codegen.kernel import Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, get_lazyop_info, KernelInfo
-from tinygrad.codegen.uops import UOp, flops_mem, UOps
-from tinygrad.codegen.uopgraph import UOpGraph
-from tinygrad.renderer import Program, Renderer
-from tinygrad.helpers import to_function_name, DEBUG, getenv, prod, diskcache_put, ContextVar
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo
+from tinygrad.codegen.uops import UOp, UOps
+from tinygrad.renderer import Renderer
+from tinygrad.helpers import getenv, prod
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -156,47 +154,5 @@ class IndependentLowerer:
       # NOTE: always using ridxs is fine here
       return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
+
 def lazyop_to_uop(ast:LazyOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)
-
-# TODO: move this to Kernel
-class Lowerer(Kernel):
-  def linearize(self) -> Lowerer:
-    modified_ast = self.get_optimized_ast()
-
-    if DEBUG >= 3:
-      print(self.name)
-      from tinygrad.engine.graph import print_tree
-      print_tree(modified_ast)
-
-    uop_sink = lazyop_to_uop(modified_ast, self.opts)
-
-    # extract global/local sizes
-    if self.opts.has_local:
-      self.global_size: Optional[List[int]] = [1,1,1]
-      self.local_size: Optional[List[int]] = [1,1,1]
-      for u in uop_sink.parents:
-        if u.op is UOps.SPECIAL:
-          if u.arg[1][0] == 'l': self.local_size[u.arg[0]] = u.arg[2]
-          else: self.global_size[u.arg[0]] = u.arg[2]
-    else:
-      self.global_size, self.local_size = None, None
-
-    # generate the UOpGraph
-    self.uops:UOpGraph = UOpGraph(uop_sink, self.opts)
-    if DEBUG >= 5: self.uops.print()
-    if getenv("GRAPHUOPS"):
-      self.uops.graph()
-      if getenv("GRAPHUOPS") == 2: exit(0)
-    return self
-
-  def to_program(self) -> Program:
-    self.linearize()
-    src = self.opts.render(name:=to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"):
-      table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}"
-      diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
-    info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed
-    ops, mem = flops_mem(self.uops.uops)
-    run_count = prod((self.global_size or []) + (self.local_size or []))
-    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
-                   self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

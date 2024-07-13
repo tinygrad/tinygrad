@@ -2,7 +2,7 @@ from typing import Dict, List, Final, Callable, DefaultDict
 from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import DType, PtrDType, dtypes, ImageDType, DEBUG, getenv
-from tinygrad.codegen.lowerer import  UOp, UOps
+from tinygrad.codegen.kernel import  UOp, UOps
 from triton.compiler import compile as triton_compile
 import linecache
 import math
