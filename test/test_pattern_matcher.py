@@ -47,6 +47,7 @@ class TestPatternMatcher(TestUOps):
     self.assertEqual(matcher.rewrite(c4), None)
     self.assertEqual(matcher.rewrite(c5), None)
 
+  @unittest.skip("this is not supported any more")
   def test_arg_set(self):
     matcher = PatternMatcher([(UPat(UOps.ALU, BinaryOps.MUL, (UPat(UOps.CONST, {-1, 1}), UPat(UOps.CONST, 2)), name="x"), lambda x: x)])
     y1 = UOp(UOps.CONST, dtypes.int, arg=1)

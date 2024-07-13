@@ -41,10 +41,10 @@ class UPat:
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
-  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return []
-  if pat.dtype is not None and uop.dtype is not None and uop.dtype not in pat.dtype: return []
-  if pat.arg is not None and pat.arg != uop.arg: return []
-  if pat.op is not None and uop.op not in pat.op: return []
+  if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
+     (pat.dtype is not None and uop.dtype is not None and uop.dtype not in pat.dtype) or \
+     (pat.arg is not None and pat.arg != uop.arg) or \
+     (pat.op is not None and uop.op not in pat.op): return []
   if pat.src is None: return [store]
   res: List[Dict[str, UOp]] = []
   for vp in pat.src:
