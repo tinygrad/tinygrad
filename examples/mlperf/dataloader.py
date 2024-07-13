@@ -450,7 +450,8 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
           Y[idx] = img_data[0]
           YS[idx] = img_data[1]
         else:
-          q_in.put((idx, fn, data_dict[fn]))
+          img_path = fn.split('/')[-1].split('.')[0]
+          q_in.put((idx, fn, data_dict[img_path]))
       else:
         # padding
         if val:

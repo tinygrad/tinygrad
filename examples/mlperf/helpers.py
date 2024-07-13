@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List
 from collections import OrderedDict
 import unicodedata
 import numpy as np
@@ -240,7 +240,7 @@ def get_fake_data_bert(GPUS:list[str], BS:int):
     "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
   }
 
-def cust_meshgrid(x:Tensor, y:Tensor) -> Tuple(Tensor, Tensor):
+def cust_meshgrid(x:Tensor, y:Tensor):
   xs = x.shape[0]
   ys = y.shape[0]
   temp = [y]*xs
