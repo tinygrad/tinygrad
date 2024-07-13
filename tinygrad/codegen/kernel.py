@@ -682,7 +682,7 @@ class Kernel:
             permaxis += list(range(wd+len(warp_dims), tcd))
             for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
             permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
-            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape)
+            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device == "AMD":
             reduce_axes = [self.shape_len-self.upcasted]

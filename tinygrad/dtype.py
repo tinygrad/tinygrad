@@ -57,6 +57,10 @@ class dtypes:
     if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
     return -float("inf") if dtypes.is_float(dtype) else False
   @staticmethod
+  def max(dtype:DType):
+    if dtypes.is_int(dtype): return (2**(dtype.itemsize*8-(0 if dtypes.is_unsigned(dtype) else 1)))-1
+    return float("inf") if dtypes.is_float(dtype) else True
+  @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bigint: Final[DType] = DType(-1, 0, "bigint", None, 1)   # arbitrary precision integer
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
