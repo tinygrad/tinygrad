@@ -349,28 +349,28 @@ def train_retinanet():
   import numpy as np
   import math
   
+  WANDB = getenv('WANDB')
   config = {}
-  SEED = config['SEED'] = getenv("SEED", 42)
+  SEED            = config['SEED']        = getenv("SEED", 42)
+  HOSTNAME        = config['HOST']        = getenv('SLURM_STEP_NODELIST', 'tiny')
+  EPOCHS          = config['EPOCHS']      = 5
+  BS              = config['BS']          = getenv('BS', 32)
+  BS_EVAL         = config['BS_EVAL']     = getenv('BS_EVAL', BS if BS<32 else 32)
+  LR              = config['LR']          = 0.000085
+  MAP_TARGET      = config['MAP_TARGET']  = 0.34
+  GPUS            = config['GPUS']        = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  SYNCBN          = config['SYNCBN']      = getenv("SYNCBN", 0)
+  TRAIN_BEAM      = config['TRAIN_BEAM']  = getenv("TRAIN_BEAM", BEAM.value)
+  EVAL_BEAM       = config['EVAL_BEAM']   = getenv("EVAL_BEAM", BEAM.value)
+  LOSS_SCALAR     = config['LOSS_SCALAR'] = 2048.0 if dtypes.default_float in [dtypes.float16] else 1.0
+  TEST            = config['TEST']        = getenv('TEST', 0)
+  BENCHMARK       = config['BENCHMARK']   = getenv("BENCHMARK", 10000)
+  EVAL_ONLY       = config['EVAL_ONLY']   = getenv('EVAL_ONLY')
+  CHKPT_PATH      = config['CHKPT_PATH']  = getenv('CHKPT_PATH', 'ckpts/retinanet_6xother_B60_E0.safe')
+  TRAIN_ONLY      = config['TRAIN_ONLY']  = getenv('TRAIN_ONLY')
+
   Tensor.manual_seed(SEED)
   np.random.seed(SEED)
-  WANDB = getenv('WANDB')
-  HOSTNAME = config['HOST'] = getenv('SLURM_STEP_NODELIST', 'tiny')
-  EPOCHS = config['EPOCHS'] = 5
-  BS = config['BS'] = getenv('BS', 32)
-  BS_EVAL = config['BS_EVAL'] = getenv('BS_EVAL', BS if BS<32 else 32)
-  LR = config['LR'] = 0.000085
-  MAP_TARGET = config['MAP_TARGET'] = 0.34
-  GPUS = config['GPUS'] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  SYNCBN = config['SYNCBN'] = getenv("SYNCBN", 0)
-  TRAIN_BEAM = config['TRAIN_BEAM'] = getenv("TRAIN_BEAM", BEAM.value)
-  EVAL_BEAM = config['EVAL_BEAM'] = getenv("EVAL_BEAM", BEAM.value)
-  LOSS_SCALAR = config['LOSS_SCALAR'] = 2048.0 if dtypes.default_float in [dtypes.float16] else 1.0
-  TEST = config['TEST'] = getenv('TEST', 0)
-  BENCHMARK = config['BENCHMARK'] = getenv("BENCHMARK", 10000)
-  EVAL_ONLY = config['EVAL_ONLY'] = getenv('EVAL_ONLY')
-  CHKPT_PATH = config['CHKPT_PATH'] = getenv('CHKPT_PATH', 'ckpts/retinanet_6xother_B60_E0.safe')
-  TRAIN_ONLY = config['TRAIN_ONLY'] = getenv('TRAIN_ONLY')
-  
   if WANDB:
     import wandb
     wandb.init(project='RetinaNet', config=config)
