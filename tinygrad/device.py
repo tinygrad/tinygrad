@@ -278,6 +278,10 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
 
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
+class HCQCompatProgram:
+  def __init__(self, kernargs_alloc_size): self.kernargs_alloc_size = kernargs_alloc_size
+  def fill_kernargs(self, kernargs_ptr, args, vals) -> int: raise NotImplementedError("need fill_kernargs") # return offset to args&vals in the struct
+
 class HCQCompatCompiled(Compiled):
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, comp_queue_t, copy_queue_t, timeline_signals):
     self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
