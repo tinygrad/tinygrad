@@ -1,12 +1,12 @@
 import math
 from tinygrad.helpers import flatten, get_child
-import tinygrad.nn as nn
+from tinygrad.nn import Conv2d
 from extra.models.resnet import ResNet
 import numpy as np
 
-Conv2dNormal = nn.Conv2d
-Conv2dNormal_priorprob = nn.Conv2d
-Conv2dKaiming = nn.Conv2d
+Conv2dNormal = Conv2d
+Conv2dNormal_priorprob = Conv2d
+Conv2dKaiming = Conv2d
 
 def nms(boxes, scores, thresh=0.5):
   x1, y1, x2, y2 = np.rollaxis(boxes, 1)
