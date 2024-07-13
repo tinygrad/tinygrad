@@ -213,14 +213,14 @@ def cast_reduce(cst):
 
 contractor = PatternMatcher([
   # contracts
-  (UPat(UOps.CONTRACT, name="root"), replace_contract),
+  (UOp(UOps.CONTRACT).name("root"), replace_contract),
   # VECTORIZE after REDUCEs -> one REDUCE (breaks TestConv.test_two_binops_no_rerun)
   (UPat(UOps.VECTORIZE, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
 ])
 
 reducer = PatternMatcher([
-  (UPat(UOps.REDUCE, name="root"), replace_reduce),
-  (UPat(UOps.WMMA, name="wmma"), expand_wmma),
+  (UOp(UOps.REDUCE).name("root"), replace_reduce),
+  (UOp(UOps.WMMA).name("wmma"), expand_wmma),
   # image indexing. TODO: why can't this just go after the float stuff?
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
 ])
@@ -280,7 +280,7 @@ float4_folding = PatternMatcher([
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   # no ALU on float4 (float4 constructor doesn't work in METAL/GPU)
-  (UPat(UOps.ALU, name="alu"), no_float4_alu),
+  (UOp(UOps.ALU).name("alu"), no_float4_alu),
 ])
 
 # ***** transcendental *****
