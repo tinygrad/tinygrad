@@ -239,7 +239,7 @@ def get_fake_data_bert(GPUS:list[str], BS:int):
     "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
   }
 
-def encode_boxes(reference_boxes:Tensor, proposals:Tensor):
+def encode_boxes(reference_boxes:Tensor, proposals:Tensor) -> Tensor:
   ex_ctr = proposals[:, :, 0:2] + 0.5 * (proposals[:, :, 2:4] - proposals[:, :, 0:2])
   gt_ctr = reference_boxes[:, :, 0:2] + 0.5 * (reference_boxes[:, :, 2:4] - reference_boxes[:, :, 0:2])
 
