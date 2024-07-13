@@ -69,13 +69,13 @@ class RetinaNet:
     self.anchor_gen = lambda input_size: generate_anchors(input_size, self.backbone.compute_grid_sizes(input_size), scales, aspect_ratios)
 
   def __call__(self, x, split=False):
+    return self.forward(x, split)
+
+  def forward(self, x, split):
     b = self.backbone(x)
     r, c = self.head(b)
     if split: return b, r, c
     else: return r.cat(c.sigmoid(), dim=-1)
-
-  def forward(self, x):
-    return self.head(self.backbone(x))
 
   def load_from_pretrained(self):
     model_urls = {
