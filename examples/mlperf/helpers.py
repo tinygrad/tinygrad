@@ -238,7 +238,7 @@ def get_fake_data_bert(GPUS:list[str], BS:int):
     "next_sentence_labels": Tensor.zeros((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
   }
 
-def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray):
+def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
   def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
   area1 = box_area(boxes1)
   area2 = box_area(boxes2)
@@ -250,7 +250,7 @@ def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray):
   union = area1[:, None] + area2 - inter
   return inter / union
 
-def matcher_np(match_quality_matrix:np.ndarray):
+def matcher_np(match_quality_matrix:np.ndarray) -> np.ndarray:
   assert match_quality_matrix.size != 0, 'Need valid matrix'
 
   def set_low_quality_matches_(matches:np.ndarray, all_matches:np.ndarray, match_quality_matrix:np.ndarray):
@@ -276,7 +276,7 @@ def matcher_np(match_quality_matrix:np.ndarray):
   set_low_quality_matches_(matches, all_matches, match_quality_matrix)
   return matches
 
-def matcher_iou_func(box, anchor): return matcher_np(box_iou_np(box, anchor))
+def matcher_iou_func(box:np.ndarray, anchor:np.ndarray) -> np.ndarray: return matcher_np(box_iou_np(box, anchor))
 
 def resize_boxes_np(boxes:np.ndarray, original_size: List[int], new_size: List[int]) -> np.ndarray:
   rh, rw = [n / o for n, o in zip(new_size, original_size)]
