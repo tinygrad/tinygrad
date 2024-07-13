@@ -453,9 +453,8 @@ def train_retinanet():
   @TinyJit
   def val_step(X):
     Tensor.training = False
-    _,r,c = model(normalize(X), True)
-    out = (r.cat(c.sigmoid(), dim=-1)).cast(dtypes.float32)
-    return out.realize()
+    out = model(normalize(X), False)
+    return out.cast(dtypes.float32).realize()
 
   feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
   ANCHORS = anchor_generator((BS,3,800,800), feature_shapes)

@@ -68,10 +68,10 @@ class RetinaNet:
     self.head = RetinaHead(self.backbone.out_channels, num_anchors=num_anchors, num_classes=num_classes)
     self.anchor_gen = lambda input_size: generate_anchors(input_size, self.backbone.compute_grid_sizes(input_size), scales, aspect_ratios)
 
-  def __call__(self, x, train=False):
+  def __call__(self, x, split=False):
     b = self.backbone(x)
     r, c = self.head(b)
-    if train: return b, r, c
+    if split: return b, r, c
     else: return r.cat(c.sigmoid(), dim=-1)
 
   def forward(self, x):
