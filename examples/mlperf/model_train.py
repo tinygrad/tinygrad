@@ -376,15 +376,14 @@ def train_retinanet():
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
-  from extra.datasets.openimages_new import get_openimages, batch_load_retinanet, batch_load_retinanet_val
+  from extra.datasets.openimages import openimages, get_train_files, get_val_files
+  from examples.mlperf.dataloader import batch_load_retinanet
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO
   from tinygrad.nn import BatchNorm2d
   if not TEST:
-    ROOT = 'extra/datasets/open-images-v6TEST'
-    NAME = 'openimages-mlperf'
-    coco_train = get_openimages(NAME,ROOT, 'train')
-    coco_val = get_openimages(NAME,ROOT, 'val')
+    train_files = get_train_files()
+    val_files = get_val_files()
 
   from extra.models import retinanet
   from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
@@ -470,8 +469,8 @@ def train_retinanet():
     x, yb, yl, ym, cookie = next(it)
     return x.shard(GPUS, axis=0), yb.shard(GPUS, axis=0), yl.shard(GPUS, axis=0), ym.shard(GPUS, axis=0), cookie
   def data_get_val(it):
-    x, Y_idx, cookie = next(it)
-    return x.shard(GPUS, axis=0), Y_idx, cookie
+    x, Y_idx, Y_size, cookie = next(it)
+    return x.shard(GPUS, axis=0), Y_idx, Y_size, cookie
   def fake_data_get(bs=BS):
     x = Tensor.zeros(bs, 800, 800, 3, dtype=dtypes.uint8).contiguous()
     yb = Tensor.zeros(bs, 120087, 4, dtype=dtypes.float32).contiguous()
@@ -487,8 +486,8 @@ def train_retinanet():
     if TEST or EVAL_ONLY:
       cnt, proc = 0, fake_data_get(BS)
     else:
-      batch_loader = batch_load_retinanet(coco_train, bs=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP)
-      it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
+      batch_loader = batch_load_retinanet(batch_size=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP)
+      it = iter(tqdm(batch_loader, total=len(train_files)//BS, desc=f"epoch {epoch}"))
       cnt, proc = 0, data_get(it)
 
     st = time.perf_counter()
@@ -513,7 +512,7 @@ def train_retinanet():
         f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       if WANDB: wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
                    "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (cnt + 1) / (len(coco_train)//BS)})
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (cnt + 1) / (len(train_files)//BS)})
 
       st = cl
       proc, next_proc = next_proc, None  # return old cookie
@@ -533,25 +532,23 @@ def train_retinanet():
     Tensor.training = False
     BEAM.value = EVAL_BEAM
     print(colored(f'{epoch} START EVAL', 'cyan'))
-    coco_eval = COCOeval(coco_val.coco, iouType="bbox")
+    coco_val = COCO(openimages('validation'))
+    coco_eval = COCOeval(coco_val, iouType="bbox")
     eval_times = []
     coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
-    batch_loader = batch_load_retinanet_val(coco_val, bs=BS_EVAL, shuffle=False, seed=SEED)
-    it = iter(tqdm(batch_loader, total=len(coco_val)//BS_EVAL, desc=f"epoch_val {epoch}"))
+    batch_loader = batch_load_retinanet(batch_size=BS_EVAL, shuffle=False, seed=SEED, val=True)
+    it = iter(tqdm(batch_loader, total=len(val_files)//BS_EVAL, desc=f"epoch_val {epoch}"))
     cnt, proc = 0, data_get_val(it)
 
     while proc is not None:
       GlobalCounters.reset()
       st = time.time()
-      y_idxs = proc[1]
-      orig_shapes = []
-      img_ids = []
-      for i in y_idxs:
-        img_ids.append(coco_val.ids[i])
-        orig_shapes.append(coco_val.__getitem__(i)[0].size[::-1])
+      
+      img_ids = proc[1]
+      orig_shapes = proc[2]
       with Tensor.inference_mode():
-        out, proc = val_step(proc[0]), proc[2]
+        out, proc = val_step(proc[0]), proc[3]
 
       try: next_proc = data_get_val(it)
       except StopIteration: next_proc = None
@@ -563,7 +560,7 @@ def train_retinanet():
                          for box, score, label in zip(*prediction.values())]
 
       with redirect_stdout(None):
-        coco_eval.cocoDt = coco_val.coco.loadRes(coco_results) if coco_results else COCO()
+        coco_eval.cocoDt = coco_val.loadRes(coco_results) if coco_results else COCO()
         coco_eval.params.imgIds = img_ids
         coco_eval.evaluate()
       evaluated_imgs.extend(img_ids)

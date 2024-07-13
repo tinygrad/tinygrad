@@ -1,15 +1,16 @@
-import sys
+import sys, glob
 import json
 import numpy as np
 from PIL import Image
 import pathlib
 import boto3, botocore
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, getenv
 from tqdm import tqdm
 import pandas as pd
 import concurrent.futures
 
-BASEDIR = pathlib.Path(__file__).parent / "open-images-v6-mlperf"
+BASEDIR = getenv('DATAPATH', str(pathlib.Path(__file__).parent / "open-images-v6-mlperf"))
+BASEDIR = pathlib.Path(BASEDIR)
 BUCKET_NAME = "open-images-dataset"
 TRAIN_BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-bbox.csv"
 VALIDATION_BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v5/validation-annotations-bbox.csv"
@@ -60,12 +61,39 @@ def openimages(subset: str):
   if subset not in valid_subsets:
     raise ValueError(f"{subset=} must be one of {valid_subsets}")
 
-  ann_file = BASEDIR / f"{subset}/labels/openimages-mlperf.json"
+  if 'train' in subset:
+    ann_file = BASEDIR / f"{subset}/train_data.json"
+  else:
+    ann_file = BASEDIR / f"{subset}/labels/openimages-mlperf.json"
 
   if not ann_file.is_file():
     fetch_openimages(ann_file, subset)
 
   return ann_file
+
+# @diskcache
+def get_train_files():
+  if not (files:=glob.glob(p:=str(BASEDIR / "train/data/*"))): raise FileNotFoundError(f"No training files in {p}")
+  return files
+def get_train_data():
+  with open(BASEDIR / 'train/train_data.json') as f:
+    data = json.load(f)
+  return data
+
+# @functools.lru_cache(None)
+def get_val_files():
+  if not (files:=glob.glob(p:=str(BASEDIR / "validation/data/*"))): raise FileNotFoundError(f"No validation files in {p}")
+  return files
+def get_val_data():
+  with open(BASEDIR / 'validation/labels/openimages-mlperf.json') as f:
+    data = json.load(f)
+  return data
+
+def img_resize_convert(img:Image, size:int) -> Image:
+  return img.resize((size, size), resample = Image.BILINEAR)
+
+def preprocess_train(img:Image) -> np.ndarray:
+  return np.array(img_resize_convert(img, 800))
 
 # this slows down the conversion a lot!
 # maybe use https://raw.githubusercontent.com/scardine/image_size/master/get_image_size.py
@@ -101,6 +129,34 @@ def export_to_coco(class_map, annotations, image_list, dataset_path, output_path
   with open(output_path, "w") as fp:
     json.dump(coco_annotations, fp)
 
+def export_to_custdict(class_map, annotations, image_list, output_path, classes=MLPERF_CLASSES):
+  new_annotations = {}
+
+  for i, path in enumerate(image_list):
+    new_annotations[path] = {'ImageID':i, 'bbox':[], 'CatID':[]}
+
+  categories_map = pd.DataFrame([(i, c) for i, c in enumerate(classes)], columns=["category_id", "category_name"])
+
+  class_map = class_map.merge(categories_map, left_on="DisplayName", right_on="category_name", how="inner")
+  class_unique = class_map['LabelName'].unique()
+
+  for i, row in tqdm(annotations.iterrows(), total=len(annotations)):
+    xmin, ymin, xmax, ymax, path, cat_id = [row[k] for k in ["XMin", "YMin", "XMax", "YMax", "ImageID", "LabelName"]]
+    if path in new_annotations.keys() and cat_id in class_unique:
+      if 'size' not in new_annotations[path]:
+        with Image.open(BASEDIR / f"train/data/{path}.jpg") as img:
+          width, height = img.size
+        new_annotations[path]['size'] = (width, height)
+      else:
+        width, height = new_annotations[path]['size']
+      x,y,w,h = xmin * width, ymin * height, (xmax - xmin) * width, (ymax - ymin) * height
+      new_annotations[path]['bbox'].append([x, y, w, h])
+      catIdx = int(class_map.loc[class_map['LabelName']==cat_id, 'category_id'].values[0])
+      new_annotations[path]['CatID'].append(catIdx)
+
+  with open(output_path, "w") as fp:
+    json.dump(new_annotations, fp)
+
 def get_image_list(class_map, annotations, classes=MLPERF_CLASSES):
   labels = class_map[np.isin(class_map["DisplayName"], classes)]["LabelName"]
   image_ids = annotations[np.isin(annotations["LabelName"], labels)]["ImageID"].unique()
@@ -134,14 +190,15 @@ def fetch_openimages(output_fn, subset: str):
 
   image_list = get_image_list(class_map, annotations)
 
-  with concurrent.futures.ThreadPoolExecutor() as executor:
-    futures = [executor.submit(download_image, bucket, subset, image_id, data_dir) for image_id in image_list]
-    for future in (t := tqdm(concurrent.futures.as_completed(futures), total=len(image_list))):
-      t.set_description(f"Downloading images")
-      future.result()
+  # with concurrent.futures.ThreadPoolExecutor() as executor:
+  #   futures = [executor.submit(download_image, bucket, subset, image_id, data_dir) for image_id in image_list]
+  #   for future in (t := tqdm(concurrent.futures.as_completed(futures), total=len(image_list))):
+  #     t.set_description(f"Downloading images")
+  #     future.result()
 
-  print("Converting annotations to COCO format...")
-  export_to_coco(class_map, annotations, image_list, data_dir, output_fn, subset)
+  print("Converting annotations to desired format...")
+  if 'train' in subset: export_to_custdict(class_map, annotations, image_list, output_fn)
+  else: export_to_coco(class_map, annotations, image_list, data_dir, output_fn, subset)
 
 def image_load(subset, fn):
   img_folder = BASEDIR / f"{subset}/data"
@@ -175,3 +232,6 @@ def iterate(coco, bs=8):
       annotations = coco.loadAnns(coco.getAnnIds(img_id))
       targets.append(prepare_target(annotations, img_id, original_size))
     yield np.array(X), targets
+
+if __name__ == '__main__':
+  openimages('train')
