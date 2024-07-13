@@ -353,7 +353,7 @@ def loader_process_retinanet(q_in, q_out, seed, X:Tensor, YB:Tensor, YL:Tensor, 
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
   from extra.datasets.openimages import preprocess_train
-  from examples.mlperf.helpers import matcher_iou_func
+  from examples.mlperf.helpers import matcher_iou_func, resize_boxes_np
   
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
@@ -375,6 +375,7 @@ def loader_process_retinanet(q_in, q_out, seed, X:Tensor, YB:Tensor, YL:Tensor, 
         keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
         boxes = boxes[keep]
         classes = classes[keep]
+        boxes = resize_boxes_np(boxes, (h, w), (800,800))
         random.seed(seed * 2 ** 20 + idx)
         r = random.random() < 0.5
         if r:
