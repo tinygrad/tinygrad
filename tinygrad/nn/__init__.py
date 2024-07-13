@@ -33,12 +33,11 @@ class BatchNorm2d:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    if affine: self.weight, self.bias = Tensor.ones(sz, dtype=dtypes.float32), Tensor.zeros(sz, dtype=dtypes.float32)
+    if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.running_mean = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False)
-    self.running_var = Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.int, requires_grad=False)
+    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
     if Tensor.training:
