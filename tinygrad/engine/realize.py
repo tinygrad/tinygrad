@@ -53,10 +53,12 @@ def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
             for bufs in zip(*all_outs):
               for b in bufs[1:]:
                 if dtypes.is_float(bufs[0].dtype):
+                  # we check both atol and rtol here
                   diff_count = (((b-bufs[0]).abs() > 1e-3) * (((b-bufs[0])/bufs[0]).abs() > 1e-3)).sum().item()
                 else:
                   diff_count = (b != bufs[0]).sum().item()
-                if diff_count != 0: raise RuntimeError(f"mismatch of {diff_count} items with type {b.dtype}, max {(b-bufs[0]).abs().max().item()}")
+                if diff_count != 0:
+                  raise RuntimeError(f"mismatch of {diff_count}/{b.numel()} items with type {b.dtype}, max {(b-bufs[0]).abs().max().item()}")
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
   return k
