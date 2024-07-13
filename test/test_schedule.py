@@ -10,7 +10,7 @@ from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps
 from tinygrad.helpers import DEBUG, flatten, getenv
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer
 from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -28,17 +28,17 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
         for i,out in enumerate(s.outputs):
           seen.add(out)
   sched = create_schedule(flatten([r.lazydata.lbs for r in t]), seen)
-  if filter_loadops: sched = [s for s in sched if s.ast[0].op not in MetaOps]
+  if filter_loadops: sched = [s for s in sched if s.ast.op is MetaOps.SINK]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
       print("kernel", i+1)
-      for op in s.ast: print_tree(op)
+      print_tree(s.ast)
   if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (non loadops) ops linearize
   for s in sched:
-    if s.ast[0].op in MetaOps: continue
-    l = Linearizer(*s.ast)
+    if s.ast.op is not MetaOps.SINK: continue
+    l = Lowerer(s.ast)
     l.hand_coded_optimizations()
     l.linearize()
   return sched
@@ -165,7 +165,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
     schedule = check_schedule(out, 2)
-    reduceops = [x for si in schedule for out in si.ast for x in out.lazyops if x.op in ReduceOps]
+    reduceops = [x for si in schedule for x in si.ast.lazyops if x.op in ReduceOps]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -176,7 +176,7 @@ class TestSchedule(unittest.TestCase):
     out0 = r0 + y
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 4)
-    reduceops = [x for si in schedule for out in si.ast for x in out.lazyops if x.op in ReduceOps]
+    reduceops = [x for si in schedule for x in si.ast.lazyops if x.op in ReduceOps]
     assert len(reduceops) == 2
 
   def test_fold_double_unary(self):
@@ -990,7 +990,7 @@ class TestSchedule(unittest.TestCase):
     b = r.sum(0) * 4
     c = r.sum(1) * 2
     schedule = check_schedule([b, c], 3)
-    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
 
   # multireduce spec
   def test_multireduce_simple_chase(self):
@@ -1014,7 +1014,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * d
     schedule = check_schedule([d, e], 3)
-    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
 
   # multireduce spec
   def test_multireduce_push_permute_chase(self):
@@ -1025,7 +1025,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * (d + a).sum(2)
     schedule = check_schedule([d, e], 3) # make sure it doesn't fuse
-    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
     run_schedule(schedule)
     np.testing.assert_allclose(d.numpy(), (a.numpy().sum(2) + b.numpy()).T * 4, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), (a.numpy().sum(2) + b.numpy()) * (d.numpy() + a.numpy()).sum(2), atol=1e-4, rtol=1e-4)
@@ -1037,7 +1037,7 @@ class TestSchedule(unittest.TestCase):
     r = a.sum(1) + c
     d = r[:4] * b
     schedule = check_schedule(d, 2)
-    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
 
   # multireduce spec
   def test_multireduce_push_shrink_chase(self):
@@ -1050,7 +1050,7 @@ class TestSchedule(unittest.TestCase):
     out = r[:4] * b + d.sum(1)[:4]
     # schedule = check_schedule(out, 2)
     schedule = check_schedule(out, 3)
-    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
     run_schedule(schedule)
     np.testing.assert_allclose(out.numpy(), (a.numpy().sum(1) + c.numpy())[:4] * b.numpy() + d.numpy().sum(1)[:4], atol=1e-4, rtol=1e-4)
 
@@ -1058,7 +1058,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(16, 16)
     b = (a.sum(0) + a.max(1)) + 2
     schedule = check_schedule(b, 2)
-    assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
+    assert schedule[0].ast.src[0].src[0].op is ReduceOps.MAX
 
   # multireduce spec
   def test_multireduce_midreduce_nochase(self):
@@ -1067,7 +1067,7 @@ class TestSchedule(unittest.TestCase):
     b = (a.sum(0)+a.max(0) + a.max(1)+a.sum(1)) + 2
     # schedule = check_schedule(b, 2)
     schedule = check_schedule(b, 4)
-    assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
+    assert schedule[0].ast.src[0].src[0].op is ReduceOps.MAX
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), a.numpy().sum(0)+a.numpy().max(0) + a.numpy().max(1)+a.numpy().sum(1)+2, atol=1e-4, rtol=1e-4)
 

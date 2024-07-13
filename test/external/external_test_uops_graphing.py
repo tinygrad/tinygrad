@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.engine.graph import graph_uops
 from tinygrad.engine.schedule import create_schedule
@@ -13,7 +13,7 @@ class TestUopsGraph(unittest.TestCase):
     a = Tensor.rand(N,N)
     b = Tensor.rand(N,N)
     si = create_schedule([(a@b).lazydata])[-1]
-    lin = Linearizer(si.ast)
+    lin = Lowerer(si.ast)
     lin.hand_coded_optimizations()
     print(lin.colored_shape())
     uops = lin.linearize().uops
@@ -24,7 +24,7 @@ class TestUopsGraph(unittest.TestCase):
   def test_reduce(self):
     a = Tensor.rand(1024*1024)
     si = create_schedule([a.sum().lazydata])[-1]
-    lin = Linearizer(si.ast)
+    lin = Lowerer(si.ast)
     lin.hand_coded_optimizations()
     uops = lin.linearize().uops
     graph_uops(uops)
@@ -34,7 +34,7 @@ class TestUopsGraph(unittest.TestCase):
     x = Tensor.rand(1,3,16,16)
     c = Conv2d(3, 16, (3,3))
     si = create_schedule([c(x).elu().lazydata])[-1]
-    lin = Linearizer(si.ast)
+    lin = Lowerer(si.ast)
     lin.hand_coded_optimizations()
     uops = lin.linearize().uops
     graph_uops(uops)

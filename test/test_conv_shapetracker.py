@@ -13,9 +13,9 @@ class TestConvShapetracker(unittest.TestCase):
     # first run to init the weights, they are saved in seen
     create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen)
     # run it again to get the kernels
-    sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen) if si.ast[0].op not in MetaOps]
+    sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen) if si.ast.op is MetaOps.SINK]
     assert len(sched) == 1, f"conv should only have one kernel, getting {len(sched)}"
-    for st in [x.arg.st for x in sched[0].ast[0].lazyops if x.op is BufferOps.LOAD]:
+    for st in [x.arg.st for x in sched[0].ast.lazyops if x.op is BufferOps.LOAD]:
       assert len(st.views) == 1
 
 if __name__ == '__main__':

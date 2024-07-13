@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
 import difflib, pickle
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
 
 page_size = 100
@@ -17,7 +17,7 @@ for offset in tqdm(range(0, row_count, page_size)):
     with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache}):
       # try linearize
       try:
-        k = Linearizer(*ast, opts=opts)
+        k = Lowerer(ast, opts=opts)
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
       except Exception as e:

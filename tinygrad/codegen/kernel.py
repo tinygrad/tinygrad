@@ -4,11 +4,11 @@ from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
 from tinygrad.engine.graph import print_tree
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop, KernelInfo
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, get_contraction, to_function_name # noqa: E501
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, get_contraction, to_function_name # noqa: E501
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
@@ -21,16 +21,6 @@ class OptOps(Enum):
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
-
-@dataclass(frozen=True)
-class KernelInfo:
-  full_shape: Tuple[sint, ...]  # full shape (findable in AST)
-  global_dims: int              # number of global dimensions (this is remapping RANGE to SPECIAL)
-  first_reduce: int             # axis of first_reduce        (findable in AST)
-  group_for_reduces: int        # count that are grouped      (findable in AST)
-  upcasted: int                 # count that are upcasted     (this is remapping RANGE to EXPAND)
-  @property
-  def shape_len(self): return len(self.full_shape)
 
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
@@ -61,22 +51,28 @@ class TensorCoreOptions:
 
 class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
+    if len(ast) > 1 or ast[0].op is BufferOps.STORE:
+      assert all(x.op is BufferOps.STORE for x in ast)
+      self.ast = LazyOp(MetaOps.SINK, ast)
+    else:
+      assert len(ast) == 1 and ast[0].op is MetaOps.SINK
+      self.ast = ast[0]
+
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    try: lazyop_sts_map = verify_lazyop(*ast)
+    try: lazyop_sts_map = verify_lazyop(self.ast)
     except AssertionError as e:
       print("INVALID AST")
       for op in ast: print_tree(op)
       raise e
-    self.ast = ast
-    self.lazyops = flatten([op.lazyops for op in self.ast])
+    self.lazyops = self.ast.lazyops
 
     cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
     def ordered_lazyops(op):
       if op not in cached_ordered_lazyops: cached_ordered_lazyops[op] = dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
       return cached_ordered_lazyops[op]
-    self.reduceops = dedup([x for out in self.ast for x in ordered_lazyops(out) if x.op in ReduceOps])
+    self.reduceops = dedup([x for x in ordered_lazyops(self.ast) if x.op in ReduceOps])
 
-    self.vars = flatten([x.vars() for x in self.ast])
+    self.vars = self.ast.vars()
     self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.lazyops if x.op in BufferOps])
 
     # get earlybufs, before any reduceops
@@ -241,7 +237,7 @@ class Kernel:
     move_axis = axis if top else axis+1
     if move_axis < insert_before: insert_before += 1
     self.reshape_and_permute(
-      lambda x: list(x[0:axis]) + (([amount, x[axis]//amount] if top else [x[axis]//amount, amount]) if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
+      lambda x: x[0:axis] + (((amount, x[axis]//amount) if top else (x[axis]//amount, amount)) if x[axis] > 1 else (1,1)) + x[axis+1:],
       [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
 
   # ******************** complex simplifiers ********************
@@ -645,7 +641,7 @@ class Kernel:
   def name(self) -> str:
     # kernel name (before late upcast)
     name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
-                 (f"{len(self.ast)}_" if len(self.ast) > 1 else "_") + \
+                 (f"{len(self.ast.src)}_" if len(self.ast.src) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # name the function something unique
@@ -653,7 +649,7 @@ class Kernel:
     suffix = f"{'n'+str(Kernel.kernel_cnt[function_name]-1)}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name+colored(suffix, 'BLACK')
 
-  def get_optimized_ast(self) -> Tuple[Tuple[LazyOp, ...], KernelInfo]:
+  def get_optimized_ast(self) -> LazyOp:
     # set the shapetrackers to the optimized ones, fixup reduceop
     # transformed to the final LazyOp
     @functools.lru_cache(None)
@@ -717,8 +713,9 @@ class Kernel:
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
           return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+      elif op.op is MetaOps.SINK:
+        arg = KernelInfo(self.local_dims, self.upcasted)
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    return tuple(fixup_ast(x) for x in self.ast), \
-      KernelInfo(self.full_shape, self.global_dims, self.first_reduce, self.group_for_reduces, self.upcasted)
+    return fixup_ast(self.ast)
