@@ -4,8 +4,6 @@ from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.helpers import Timing, Profiling
 
 class TestDeviceSpeed(unittest.TestCase):
-  dev: Device
-  empty: str
   @classmethod
   def setUpClass(cls):
     cls.dev = Device[Device.DEFAULT]

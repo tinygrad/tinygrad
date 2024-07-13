@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import unittest
-from typing import Set
 from tinygrad.tensor import Tensor
 from tinygrad.ops import MetaOps, BufferOps
 from tinygrad.nn import Conv2d
@@ -9,7 +8,7 @@ from tinygrad.engine.schedule import create_schedule
 class TestConvShapetracker(unittest.TestCase):
   def test_conv_3x3_one_view(self):
     conv = Conv2d(16, 32, (3, 3))
-    seen: Set = set()
+    seen = set()
 
     # first run to init the weights, they are saved in seen
     create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen)
