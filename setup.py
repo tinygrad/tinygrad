@@ -66,7 +66,7 @@ setup(name='tinygrad',
             "black"
         ],
         'testing_tf': [
-            "tensorflow==2.15.1",
+            "tensorflow",
             "tensorflow_addons",
         ]
       },
