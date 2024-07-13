@@ -410,12 +410,11 @@ def train_retinanet():
   resnet_model = resnet.ResNeXt50_32X4D()
   resnet_model.load_from_pretrained()
 
-  from extra.models.retinanet import anchor_generator
+  from examples.mlperf.helpers import anchor_generator
  
   model = retinanet.RetinaNet(resnet_model)
   model.backbone.body.fc = None
-  # model.load_from_pretrained()
-  # model.load_checkpoint('ckpts/retinanet_4xgpu015_B64_E1.safe')
+
   if EVAL_ONLY:
     model.load_checkpoint(CHKPT_PATH)
 
