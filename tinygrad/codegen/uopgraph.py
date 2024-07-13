@@ -34,9 +34,10 @@ class UPat:
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
 
   @staticmethod
-  def compile(u: UOp, name:Optional[str]=None) -> UPat:
+  def compile(u: UOp, name:Optional[str]=None, permute:bool=False) -> UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
-    return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
+    if u.op is UOps.PERMUTE: return UPat.compile(u.src[0], name=name or u.arg, permute=True)
+    return UPat(u.op, u.arg, (list if u.commutative() or permute else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
