@@ -18,7 +18,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.engine.graph import print_tree
-from tinygrad.helpers import DEBUG, prod, Context, getenv, CI
+from tinygrad.helpers import DEBUG, prod, Context, getenv, CI, flatten, dedup
 from tinygrad.dtype import DType, dtypes
 
 def helper_realized_ast(r:Union[Tensor, List[Tensor]]):
@@ -620,7 +620,8 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
       # TODO: fix reverse_dims
-      idxs, loop_idxs = get_grouped_dims(prefix, 0, dims, max_sizes)
+      idxs = get_grouped_dims(prefix, 0, dims, max_sizes)
+      loop_idxs = dedup(flatten([[y for y in sorted(list(x.sparents)) if y.op is UOps.SPECIAL] for x in idxs]))
       sizes = [x.arg[2] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
       assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
