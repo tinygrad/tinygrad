@@ -44,7 +44,7 @@ def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
             rand_bufs = [Tensor.normal(buf.size, std=0.1, dtype=buf.dtype).data() if dtypes.is_float(buf.dtype) else \
                          Tensor.randint(buf.size, low=dtypes.min(buf.dtype), high=dtypes.max(buf.dtype), dtype=buf.dtype).data() \
                          for buf in rawbufs]
-          for _, tk in lins:
+          for _, tk in lins[::-1]:
             for buf,data in zip(rawbufs, rand_bufs): buf.ensure_allocated().copyin(data)
             time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True, disable_cache=True)
             all_outs.append([Tensor(bytes(buf.as_buffer()), dtype=buf.dtype) for buf in rawbufs[:len(ast.src)]])
