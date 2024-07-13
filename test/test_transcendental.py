@@ -13,21 +13,19 @@ settings.load_profile("my_profile")
 
 class TestTranscendentalMath(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
+  @unittest.skipIf(getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV"), "crashed")
   @given(ht.float64, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
   def test_float64(self, x, op):
     if op[0] == Tensor.sin:
       # TODO: reduction does not work
       if abs(x) > 2 ** 32: return
-      # crashes in CUDACPU
-      if (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")): return
-      # fails now. TODO: fix
-      if Device.DEFAULT == "NV": return
 
     with Context(TRANSCENDENTAL=2):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float64)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float64))),
                                  atol=1e-5)
 
+  @unittest.skipIf(getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV"), "crashed")
   @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
   def test_float32(self, x, op):
     with Context(TRANSCENDENTAL=2):
