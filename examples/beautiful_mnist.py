@@ -27,7 +27,7 @@ if __name__ == "__main__":
   def train_step() -> Tensor:
     with Tensor.train():
       opt.zero_grad()
-      samples = Tensor.randint(512, high=X_train.shape[0])
+      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
       # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
       loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
       opt.step()
