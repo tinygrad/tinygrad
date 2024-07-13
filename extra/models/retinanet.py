@@ -1,15 +1,15 @@
 import math
 from typing import List
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import get_child
+from tinygrad.helpers import flatten, get_child
 from tinygrad.nn.state import safe_load, load_state_dict
-import tinygrad.nn as nn
+from tinygrad.nn import Conv2d
 from extra.models.resnet import ResNet
 import numpy as np
 
-Conv2dNormal = nn.Conv2d
-Conv2dNormal_prior_prob = nn.Conv2d
-Conv2dKaiming = nn.Conv2d
+Conv2dNormal = Conv2d
+Conv2dNormal_priorprob = Conv2d
+Conv2dKaiming = Conv2d
 
 def cust_bin_cross_logits(inputs, targets): return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
 
@@ -209,12 +209,8 @@ class RetinaNet:
 class ClassificationHead:
   def __init__(self, in_channels, num_anchors, num_classes):
     self.num_classes = num_classes
-    self.conv = []
-    for _ in range(4):
-      self.conv.append(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1))
-      self.conv.append(Tensor.relu)
-    self.cls_logits = Conv2dNormal_prior_prob(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
-
+    self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
+    self.cls_logits = Conv2dNormal_priorprob(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
 
   def __call__(self, x):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
@@ -232,13 +228,9 @@ class ClassificationHead:
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
-    self.conv = []
-    for _ in range(4):
-      self.conv.append(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1))
-      self.conv.append(Tensor.relu)
+    self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
 
-    
   def __call__(self, x):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     return out[0].cat(*out[1:], dim=1)

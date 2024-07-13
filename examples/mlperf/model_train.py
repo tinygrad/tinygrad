@@ -393,7 +393,7 @@ def train_retinanet():
   from tinygrad.nn.optim import Adam
 
   retinanet.Conv2dNormal = Conv2dNormal
-  retinanet.Conv2dNormal_prior_prob = functools.partial(Conv2dNormal, b=-math.log(99))
+  retinanet.Conv2dNormal_priorprob = functools.partial(Conv2dNormal, b=-math.log(99))
   retinanet.Conv2dKaiming = Conv2dKaiming
 
   def cust_call(self, x:Tensor):
