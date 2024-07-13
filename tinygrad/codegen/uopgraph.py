@@ -1,8 +1,7 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar, TYPE_CHECKING
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TYPE_CHECKING
 import functools, itertools, heapq, math
 from collections import defaultdict
-from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
@@ -15,15 +14,24 @@ if TYPE_CHECKING:
 
 # *** simplification logic ***
 
-@dataclass(frozen=True)
 class UPat:
-  op: Optional[Union[UOps, Set[UOps]]] = None
-  arg: Any = None
-  src: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
-  name: Optional[str] = None
-  dtype: Optional[Union[DType, Set[DType]]] = None
-  allow_len: Set[int] = field(default_factory=set)
-  allow_any_len: bool = False
+  def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
+               name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False):
+    self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
+    self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
+    self.arg = arg
+    self.src: Any = None
+    if isinstance(src, list):
+      # try all permutations if it's a list
+      self.src = list(itertools.permutations(src))
+    elif isinstance(src, tuple):
+      # only one if it's a tuple
+      self.src = [src]
+    elif isinstance(src, UPat):
+      # repeat if it's a UPat
+      self.src = [itertools.repeat(src)]
+    self.name: Optional[str] = name
+    self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
 
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
@@ -31,21 +39,15 @@ class UPat:
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
-T = TypeVar("T")
-def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinstance(m1, set) else m2 != m1
-
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
-  if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return []
-  if pat.arg is not None and __unmatch(pat.arg, uop.arg): return []
-  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return []
-  if pat.op is not None and __unmatch(pat.op, uop.op): return []
+  if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
+     (pat.dtype is not None and uop.dtype is not None and uop.dtype not in pat.dtype) or \
+     (pat.arg is not None and pat.arg != uop.arg) or \
+     (pat.op is not None and uop.op not in pat.op): return []
   if pat.src is None: return [store]
-  # only one if it's a tuple
-  # try all permutations if it's a list
-  # repeat if it's a UPat
   res: List[Dict[str, UOp]] = []
-  for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
-    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len) and not pat.allow_any_len: return []
+  for vp in pat.src:
+    if pat.allowed_len != 0 and len(uop.src) != pat.allowed_len: return []
     new_stores = [store.copy()]
     for uu, vv in zip(uop.src, vp): new_stores = [rstore for nstore in new_stores for rstore in _match(uu, vv, nstore)]
     res.extend(new_stores)
@@ -59,10 +61,7 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       if isinstance(p, UOp): p = UPat.compile(p)
       assert p.op is not None
-      if isinstance(p.op, set):
-        for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
-      else:
-        self.pdict[(p.op, p.arg)].append((p, fxn))
+      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
@@ -387,8 +386,8 @@ constant_folder = PatternMatcher([
   (UOp.var().lt(UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
   (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
-  (UOp.alu(TernaryOps.WHERE, UOp.var(), UOp.var("val"), UOp.var("val")), lambda val: val),
-  (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UOp.var().where(UOp.var("val"), UOp.var("val")), lambda val: val),
+  (UOp.cvar('gate').where(UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
@@ -493,8 +492,8 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
     if n in replace: return replace[n]
     replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
     if found := nodes.get(replace_source): replace[n] = found
-    else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
-    return replace[n]
+    else: nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
+    return found
   return __inner_rewrite(sink)
 
 class UOpGraph:

@@ -9,12 +9,12 @@ from tinygrad.shape.symbolic import Variable, NumNode
 inf, nan = float('inf'), float('nan')
 
 # kernel unpacker
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.kernel import Kernel
 def ast_str_to_ast(ast_str:str) -> Tuple[LazyOp,...]: return LazyOp(MetaOps.SINK, val) if isinstance(val:=eval(ast_str), tuple) else val
-def ast_str_to_lin(ast_str:str, opts=None): return Linearizer(ast_str_to_ast(ast_str), opts=opts)
+def ast_str_to_lin(ast_str:str, opts=None): return Kernel(ast_str_to_ast(ast_str), opts=opts)
 def kern_str_to_lin(kern_str:str, opts=None):
   (ast, applied_opts,) = eval(kern_str)
-  k = Linearizer(ast, opts=opts)
+  k = Kernel(ast, opts=opts)
   for opt in applied_opts:
     k.apply_opt(opt)
   return k
@@ -44,7 +44,7 @@ from tinygrad.shape.symbolic import Node
 
 MAX_DIMS = 16
 MAX_BUFS = 9
-def lin_to_feats(lin:Linearizer, use_sts=True):
+def lin_to_feats(lin:Kernel, use_sts=True):
   assert lin.shape_len < MAX_DIMS, "too many dims"
 
   all_colors = ["blue", "cyan", "white", "green", "red", "magenta", "yellow"]

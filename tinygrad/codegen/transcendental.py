@@ -93,7 +93,7 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent)"""
   assert v.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
-  m1 = {dtypes.float64: 0x800FFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
+  m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3C00}[v.dtype]
   bias = {dtypes.float64: 1022, dtypes.float32: 126, dtypes.float16: 15}[v.dtype]
   bits = float_to_bits(v)
@@ -197,7 +197,7 @@ def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
       d = mla(q, x.const(-1.2246467864107188502e-16), d)
       d = mla(qdh.e(BinaryOps.ADD, q), x.const(-1.2736634327021899816e-24), d)
     elif x.dtype == dtypes.float16:
-      # when reducing `d`, FP16 needs FP32 precision to achieve 1.0 ULP precision.
+      # [FIXME] when reducing `d`, FP16 needs FP32 precision to achieve 1.0 ULP precision.
       d = _reduce_d(x.cast(dtypes.float32), q.cast(dtypes.float32)).cast(dtypes.float16)
     else:
       d = mla(q, x.const(-3.1414794921875), x)
@@ -234,15 +234,13 @@ def sin_poly_large(d:UOp, q:UOp) -> UOp:
   r = sin_poly(d)
   return r.e(BinaryOps.MUL, _ifand(2).e(TernaryOps.WHERE, r.const(-1), r.const(1)))
 # *** toplevel functions for xsin/xlog2/xexp2 ***
-def xsin(d:UOp, fast:bool=False, switch_over:float=39800.0) -> UOp:
+def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   """
   Implements a 1.0 ULP approximation for UnaryOps.SIN.
   - fast=True assumes x <= switch_over.
   - switch_over is the threshold for switching to payne_hanek_reduction.
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
-  if d.dtype == dtypes.float16:
-    switch_over = 9500.0
   reduction_algo = cody_waite_reduction if fast else payne_hanek_reduction
   # mask +-inf/nan as zero
   x = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
@@ -301,11 +299,10 @@ def xlog2(d:UOp) -> UOp:
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   fp64_p = d.dtype == dtypes.float64
   FLT_MIN = d.const(1e-6 if d.dtype == dtypes.float16 else 1e-4)
-  Y_FLT_MIN = d.const(math.log2({dtypes.float64: 1e-228, dtypes.float32: 1e-38, dtypes.float16: 1e-6}[d.dtype]))
   d_orig = d
   denormal_map = d.e(BinaryOps.CMPLT, FLT_MIN)
-  for _ in range(4):
-    d = denormal_map.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(2 ** 16)), d)
+  for _ in range(8):
+    d = denormal_map.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(2 ** 8)), d)
 
   e = ilogb2k(d.e(BinaryOps.MUL, d.const(1.0 / 0.75))).cast(d.dtype)
   m = ldexp3k(d, e.e(UnaryOps.NEG))
@@ -328,12 +325,10 @@ def xlog2(d:UOp) -> UOp:
   r = d_orig.e(BinaryOps.CMPNE, d.const(math.inf)).e(TernaryOps.WHERE, r, r.const(math.inf))
   # log2(x=-0.01) = NaN. where x < 0
   r = d_orig.e(BinaryOps.CMPLT, d.const(-0.0)).e(TernaryOps.WHERE, r.const(math.nan), r)
-  # log2(0) = -Inf
-  r = d_orig.e(BinaryOps.CMPNE, d.const(0.0)).e(TernaryOps.WHERE, r, r.const(-math.inf))
-  # y=log2(x) must be existing in the range of [log2(FLT_MIN), log2(Inf)]. otherwise the input was poisoned.
-  # one exception is that x=0.0, it becomes -inf.
-  r_inf_mapped = d_orig.e(BinaryOps.CMPNE, d_orig.const(0.0)).e(TernaryOps.WHERE, r.const(math.nan), r.const(-math.inf))
-  r = r.e(BinaryOps.CMPLT, Y_FLT_MIN).e(TernaryOps.WHERE, r_inf_mapped, r)
+  # log2(0) = -Inf, but we will compare using the value of y because 1e-200==0 is true.
+  # log2_zero = the value of unmasked xlog2(0.0).
+  log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79, None: -math.inf}[d.dtype]
+  r = r.e(BinaryOps.CMPNE, r.const(log2_zero)).e(TernaryOps.WHERE, r, r.const(-math.inf))
   # log(NaN) = NaN, using for all real number x, either of x < Inf, x == Inf becomes True.
   r = d_orig.e(BinaryOps.CMPLT, d_orig.const(math.inf)).e(
     TernaryOps.WHERE, r, d_orig.e(BinaryOps.CMPNE, d_orig.const(math.inf)).e(
