@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
+from tinygrad.lazy import LazyBuffer
 from hypothesis import given, settings, strategies as strat
 from test.helpers import is_dtype_supported, rand_for_dtype
 
@@ -24,7 +25,9 @@ def get_available_cast_dtypes(dtype: DType) -> List[DType]:
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
   na = a.numpy()
-  if DEBUG >= 2: print(na, na.dtype, a.lazydata.base.realized)
+  lb = a.lazydata
+  assert isinstance(lb, LazyBuffer)
+  if DEBUG >= 2: print(na, na.dtype, lb.base.realized)
   try:
     assert na.dtype == np_dtype
     np.testing.assert_allclose(na, target)
@@ -106,7 +109,7 @@ class TestDType(unittest.TestCase):
   def test_dtypes_fields(self):
     fields = dtypes.fields()
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
-    self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in fields.values() if _to_np_dtype(value) is not None))
+    self.assertTrue(all(issubclass(np_dtype, np.generic) for value in fields.values() if (np_dtype:=_to_np_dtype(value)) is not None))
 
   def test_resulting_and_init_dtypes_match(self):
     dtypes = list(map(np.dtype, ["bool", "uint8", "int8", "int16", "int32", "int64", "float32", "float64"]))
@@ -663,6 +666,7 @@ class TestAutoCastType(unittest.TestCase):
         a = Tensor([1, 2, 3], dtype=dtype, requires_grad=True)
         b = (a * 5).sum()
         b.backward()  # if there is dtype mismatch, lazy should assert
+        assert a.grad is not None
         assert a.grad.dtype == a.dtype
         np.testing.assert_allclose(a.grad.numpy(), [5, 5, 5])
 
@@ -673,6 +677,7 @@ class TestAutoCastType(unittest.TestCase):
     # test acc of sum in the backward is upcasted to float
     t = Tensor([5, -5], dtype=dtypes.half, requires_grad=True)
     t.reshape(2, 1).expand(2, 10001).max().backward()
+    assert t.grad is not None
     np.testing.assert_allclose(t.grad.numpy(), [1, 0])
 
   @unittest.skipIf(Device.DEFAULT=="PYTHON", "very slow")
@@ -689,6 +694,7 @@ class TestAutoCastType(unittest.TestCase):
     t = Tensor([60000] * N*N, dtype=dtypes.half, requires_grad=True).reshape(N, N)
     np.testing.assert_allclose(t.mean().numpy(), 60000)
     t.square().mean().backward()
+    assert t.grad is not None
     np.testing.assert_allclose(t.grad.numpy().flatten(), [60000 * 2 / (N*N)] * N*N)
 
 class TestImplicitFunctionTypeChange(unittest.TestCase):

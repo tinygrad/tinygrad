@@ -53,7 +53,7 @@ class TestCopySpeed(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT != "GPU", "only test this on GPU")
   def testCopyCPUto6GPUs(self):
     from tinygrad.runtime.ops_gpu import CLDevice
-    if len(CLDevice.device_ids) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
+    if CLDevice.device_ids is not None and len(CLDevice.device_ids) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
     t = Tensor.rand(N, N, device="clang").realize()
     print(f"buffer: {t.nbytes()*1e-9:.2f} GB")
     for _ in range(3):

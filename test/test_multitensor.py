@@ -795,7 +795,7 @@ class TestBatchNorm(unittest.TestCase):
 
   @given(strat.sampled_from((False, True)))
   def test_batchnorm(self, is_training):
-    devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
+    devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     x = Tensor.arange(4096).reshape(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
 
     with Tensor.train(is_training):
@@ -818,7 +818,7 @@ class TestBatchNorm(unittest.TestCase):
   def test_synced_vs_unsynced_bn(self):
     from examples.hlb_cifar10 import UnsyncedBatchNorm
     from tinygrad.nn import BatchNorm2d
-    devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
+    devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     x = Tensor.ones(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
 
     with Tensor.train():
