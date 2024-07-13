@@ -332,4 +332,10 @@ def matcher_np(match_quality_matrix:np.ndarray) -> np.ndarray:
   set_low_quality_matches_(matches, all_matches, match_quality_matrix)
   return matches
 
-def matcher_iou_func(box:np.ndarray, anchor:np.ndarray): return matcher_np(box_iou_np(box, anchor))
+def matcher_iou_func(box:np.ndarray, anchor:np.ndarray) -> np.ndarray: return matcher_np(box_iou_np(box, anchor))
+
+def resize_boxes_np(boxes:np.ndarray, original_size: List[int], new_size: List[int]) -> np.ndarray:
+  ratio_height, ratio_width = [s / s_orig for s, s_orig in zip(new_size, original_size)]
+
+  return np.stack((boxes[:, 0]*ratio_width, boxes[:, 1]*ratio_height, \
+    boxes[:, 2]*ratio_width, boxes[:, 3]*ratio_height), axis=1)
