@@ -173,7 +173,7 @@ class TestFromFuzzer(unittest.TestCase):
       next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
       ulp = next_float - 1.0
       ulp = unit * ulp
-      np.testing.assert_allclose(Tensor([n]).cast(dtype=dtype).sin().numpy(), np.sin(np.array([n])).astype(_to_np_dtype(dtype)), atol=ulp, rtol=1e-5)
+      np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
     _test_value(-35.0)
     _test_value(-25.0)
     _test_value(25.0)
@@ -181,8 +181,8 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(35.0)
     _test_value(0.0)
     _test_value(np.pi / 2)
-     # worst case of ulp 3.5
-    _test_value(np.pi * 2, unit=3.5)
+     # worst case of ulp 1.5
+    _test_value(np.pi * 2, unit=1.5)
 
 if __name__ == '__main__':
   unittest.main()
