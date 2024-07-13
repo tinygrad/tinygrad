@@ -327,7 +327,7 @@ def xlog2(d:UOp) -> UOp:
   r = d_orig.e(BinaryOps.CMPLT, d.const(-0.0)).e(TernaryOps.WHERE, r.const(math.nan), r)
   # log2(0) = -Inf, but we will compare using the value of y because 1e-200==0 is true.
   # log2_zero = the value of unmasked xlog2(0.0).
-  log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79}[d.dtype]
+  log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79, None: -math.inf}[d.dtype]
   r = r.e(BinaryOps.CMPNE, r.const(log2_zero)).e(TernaryOps.WHERE, r, r.const(-math.inf))
   # log(NaN) = NaN, using for all real number x, either of x < Inf, x == Inf becomes True.
   r = d_orig.e(BinaryOps.CMPLT, d_orig.const(math.inf)).e(
