@@ -195,11 +195,11 @@ def fetch_openimages(output_fn, subset: str):
 
   image_list = get_image_list(class_map, annotations)
 
-  # with concurrent.futures.ThreadPoolExecutor() as executor:
-  #   futures = [executor.submit(download_image, bucket, subset, image_id, data_dir) for image_id in image_list]
-  #   for future in (t := tqdm(concurrent.futures.as_completed(futures), total=len(image_list))):
-  #     t.set_description(f"Downloading images")
-  #     future.result()
+  with concurrent.futures.ThreadPoolExecutor() as executor:
+    futures = [executor.submit(download_image, bucket, subset, image_id, data_dir) for image_id in image_list]
+    for future in (t := tqdm(concurrent.futures.as_completed(futures), total=len(image_list))):
+      t.set_description(f"Downloading images")
+      future.result()
 
   print("Converting annotations to desired format...")
   if 'train' in subset: export_to_custdict(class_map, annotations, image_list, output_fn)
@@ -239,5 +239,5 @@ def iterate(coco, bs=8):
     yield np.array(X), targets
 
 if __name__ == '__main__':
+  openimages('validation')
   openimages('train')
-  # openimages('validation')
