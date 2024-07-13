@@ -4,7 +4,7 @@ import functools, itertools, heapq, math
 from collections import defaultdict
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, MetaOps, BufferOps, exec_alu
 from tinygrad.helpers import DEBUG, getenv, flatten, all_same, dedup, TRANSCENDENTAL
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -15,11 +15,13 @@ if TYPE_CHECKING:
 # *** simplification logic ***
 
 class UPat:
-  def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
-               name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False):
+  def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None,
+               arg:Optional[Union[UnaryOps, BinaryOps, TernaryOps, MetaOps, ReduceOps, BufferOps, int]]=None,
+               src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None,
+               allow_any_len:bool=False):
     self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
     self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
-    self.arg = arg
+    self.arg: Optional[Union[UnaryOps, BinaryOps, TernaryOps, MetaOps, ReduceOps, BufferOps, int]] = arg
     self.src: Any = None
     if isinstance(src, list):
       # try all permutations if it's a list
