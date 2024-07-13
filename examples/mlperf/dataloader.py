@@ -422,7 +422,7 @@ def loader_process_retinanet_val(q_in, q_out, seed, X:Tensor):
 def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_first_batch=False, anchor_np=[1,2,3,4]):
   from extra.datasets.openimages import get_train_files, get_val_files, get_train_data, get_val_data
   files = get_val_files() if val else get_train_files()
-  data_dict = get_val_data if val else get_train_data()
+  data_dict = get_val_data() if val else get_train_data()
   if val:
     path_img_dict = {}
     for item in data_dict['images']:
@@ -572,7 +572,7 @@ if __name__ == "__main__":
 
   def load_retinanet(val):
     from extra.datasets.openimages import get_train_files, get_val_files
-    from extra.models.retinanet import anchor_generator
+    from examples.mlperf.helpers import anchor_generator
     feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
     ANCHORS = anchor_generator((10,3,800,800), feature_shapes)
     ANCHOR_NP = ANCHORS[0].numpy()

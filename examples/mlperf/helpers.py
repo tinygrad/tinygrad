@@ -1,3 +1,4 @@
+from typing import List, Tuple
 from collections import OrderedDict
 import unicodedata
 import numpy as np
@@ -238,6 +239,61 @@ def get_fake_data_bert(GPUS:list[str], BS:int):
     "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
     "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
   }
+
+def cust_meshgrid(x:Tensor, y:Tensor) -> Tuple(Tensor, Tensor):
+  xs = x.shape[0]
+  ys = y.shape[0]
+  temp = [y]*xs
+  y = Tensor.stack(*temp)
+  x = x.reshape(xs, 1).expand((xs,ys))
+  return x, y
+
+def anchor_generator(image_list_shape, feature_maps) -> List[Tensor]:
+  def grid_anchors(grid_sizes: List[List[int]], strides: List[List[Tensor]]) -> List[Tensor]:
+    anchors = []
+    assert cell_anchors is not None
+
+    for size, stride, base_anchors in zip(grid_sizes, strides, cell_anchors):
+      grid_height, grid_width = size
+      stride_height, stride_width = stride
+      shifts_x = Tensor.arange(0, grid_width, dtype=dtypes.float) * stride_width
+      shifts_y = Tensor.arange(0, grid_height, dtype=dtypes.float) * stride_height
+      shift_y, shift_x = cust_meshgrid(shifts_y, shifts_x)
+      shift_x = shift_x.reshape(-1)
+      shift_y = shift_y.reshape(-1)
+      shifts = Tensor.stack(shift_x, shift_y, shift_x, shift_y, dim=1)
+
+      # For every (base anchor, output anchor) pair,
+      # offset each zero-centered base anchor by the center of the output anchor.
+      anchors.append((shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4))
+    return anchors
+
+  def generate_anchors(scales: List[int], aspect_ratios: List[float], dtype=dtypes.float):
+    scales = Tensor(list(scales), dtype=dtype)
+    aspect_ratios = Tensor(list(aspect_ratios), dtype=dtype)
+    h_ratios = aspect_ratios.sqrt()
+    w_ratios = 1 / h_ratios
+    ws = (w_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
+    hs = (h_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
+    base_anchors = Tensor.stack(-ws, -hs, ws, hs, dim=1) / 2
+    return base_anchors.round()
+  sizes = ((32, 40, 50), (64, 80, 101), (128, 161, 203), (256, 322, 406), (512, 645, 812))
+  aspect_ratios = ((0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0))
+
+  cell_anchors = [generate_anchors(size, aspect_ratio)
+                          for size, aspect_ratio in zip(sizes, aspect_ratios)]
+  grid_sizes = [feature_map for feature_map in feature_maps]
+  image_size = image_list_shape[-2:]
+  strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
+              Tensor(image_size[1] // g[1], dtype=dtypes.int64)] for g in grid_sizes]
+  anchors_over_all_feature_maps = grid_anchors(grid_sizes, strides)
+  anchors: List[List[Tensor]] = []
+
+  for _ in range(image_list_shape[0]):
+    anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
+    anchors.append(anchors_in_image)
+  anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
+  return anchors
 
 def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
   def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
