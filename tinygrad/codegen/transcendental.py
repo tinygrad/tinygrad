@@ -299,11 +299,10 @@ def xlog2(d:UOp) -> UOp:
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   fp64_p = d.dtype == dtypes.float64
   FLT_MIN = d.const(1e-6 if d.dtype == dtypes.float16 else 1e-4)
-  Y_FLT_MIN = d.const(math.log2({dtypes.float64: 1e-228, dtypes.float32: 1e-38, dtypes.float16: 1e-6}[d.dtype]))
   d_orig = d
   denormal_map = d.e(BinaryOps.CMPLT, FLT_MIN)
-  for _ in range(4):
-    d = denormal_map.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(2 ** 16)), d)
+  for _ in range(8):
+    d = denormal_map.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(2 ** 8)), d)
 
   e = ilogb2k(d.e(BinaryOps.MUL, d.const(1.0 / 0.75))).cast(d.dtype)
   m = ldexp3k(d, e.e(UnaryOps.NEG))
@@ -326,12 +325,10 @@ def xlog2(d:UOp) -> UOp:
   r = d_orig.e(BinaryOps.CMPNE, d.const(math.inf)).e(TernaryOps.WHERE, r, r.const(math.inf))
   # log2(x=-0.01) = NaN. where x < 0
   r = d_orig.e(BinaryOps.CMPLT, d.const(-0.0)).e(TernaryOps.WHERE, r.const(math.nan), r)
-  # log2(0) = -Inf
-  r = d_orig.e(BinaryOps.CMPNE, d.const(0.0)).e(TernaryOps.WHERE, r, r.const(-math.inf))
-  # y=log2(x) must be existing in the range of [log2(FLT_MIN), log2(Inf)]. otherwise the input was poisoned.
-  # one exception is that x=0.0, it becomes -inf.
-  r_inf_mapped = d_orig.e(BinaryOps.CMPNE, d_orig.const(0.0)).e(TernaryOps.WHERE, r.const(math.nan), r.const(-math.inf))
-  r = r.e(BinaryOps.CMPLT, Y_FLT_MIN).e(TernaryOps.WHERE, r_inf_mapped, r)
+  # log2(0) = -Inf, but we will compare using the value of y because 1e-200==0 is true.
+  # log2_zero = the value of unmasked xlog2(0.0).
+  log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79, None: -math.inf}[d.dtype]
+  r = r.e(BinaryOps.CMPNE, r.const(log2_zero)).e(TernaryOps.WHERE, r, r.const(-math.inf))
   # log(NaN) = NaN, using for all real number x, either of x < Inf, x == Inf becomes True.
   r = d_orig.e(BinaryOps.CMPLT, d_orig.const(math.inf)).e(
     TernaryOps.WHERE, r, d_orig.e(BinaryOps.CMPNE, d_orig.const(math.inf)).e(
