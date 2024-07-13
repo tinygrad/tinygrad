@@ -19,7 +19,7 @@ from tinygrad.function import Function
 from tinygrad.lazy import LazyBuffer, view_supported_devices
 
 class KernelCountException(Exception): pass
-def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
+def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
   if isinstance(t, Tensor): t = [t]
   seen = set()
   if to_prerealize:
@@ -28,14 +28,14 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
         for i,out in enumerate(s.outputs):
           seen.add(out)
   sched = create_schedule(flatten([r.lazydata.lbs for r in t]), seen)
-  if filter_loadops: sched = [s for s in sched if s.ast.op is MetaOps.SINK]
+  if filter_sink: sched = [s for s in sched if s.ast.op is MetaOps.SINK]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
       print("kernel", i+1)
       print_tree(s.ast)
   if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
-  # test the (non loadops) ops linearize
+  # test the (sink) ops linearize
   for s in sched:
     if s.ast.op is not MetaOps.SINK: continue
     l = Kernel(s.ast)
@@ -87,7 +87,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_constants_are_embedded(self):
     a = Tensor.empty(3,3) * 2
-    check_schedule(a, 2, filter_loadops=False)
+    check_schedule(a, 2, filter_sink=False)
 
   def test_binop_elu_fusion(self):
     a = Tensor.empty(10)
@@ -433,12 +433,12 @@ class TestSchedule(unittest.TestCase):
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.contiguous()
-    check_schedule(out, 1, filter_loadops=False)
+    check_schedule(out, 1, filter_sink=False)
 
   def test_contiguous_while_not_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.permute(0,2,3,1).contiguous()
-    check_schedule(out, 2, filter_loadops=False)
+    check_schedule(out, 2, filter_sink=False)
 
   def test_fold_with_contiguous(self):
     a = Tensor.randn(16, 16, 16).realize()
@@ -449,7 +449,7 @@ class TestSchedule(unittest.TestCase):
   def test_double_from(self):
     x = Tensor([1,2,3,4])
     out = x.to('npy')
-    check_schedule(out, 0, filter_loadops=False)
+    check_schedule(out, 0, filter_sink=False)
 
   def test_pow_const_tensor_simplified(self):
     x = Tensor([1,2,3,4])
@@ -466,7 +466,7 @@ class TestSchedule(unittest.TestCase):
   def test_zero_size(self):
     x = Tensor.empty(2, 3, 0)
     out = x + 1
-    check_schedule(out, 0, filter_loadops=False)
+    check_schedule(out, 0, filter_sink=False)
 
   def test_reduce_permute_nofuse(self):
     x = Tensor.empty(32, 32, 32)
@@ -552,7 +552,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor(2) + Tensor(2)
     y = Tensor(2) + Tensor(2)
     out = x.contiguous() + y.contiguous()
-    with self.assertRaises(KernelCountException): check_schedule(out, 2, filter_loadops=False)
+    with self.assertRaises(KernelCountException): check_schedule(out, 2, filter_sink=False)
 
   # multireduce spec
   def test_reduce_same_size(self):

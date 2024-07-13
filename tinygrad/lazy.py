@@ -66,20 +66,20 @@ class LazyBuffer:
   def lbs(self) -> List[LazyBuffer]: return [self]
 
   @staticmethod
-  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
+  def metaop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
     assert isinstance(src, tuple)
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
   def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     assert isinstance(val, (int,float,bool)), f"{val=} has {type(val)=}, not a ConstType"
     shape = self.shape if shape is None else shape
-    return LazyBuffer.loadop(MetaOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
+    return LazyBuffer.metaop(MetaOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
 
   def is_realized(self) -> bool: return self.base.realized is not None
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
     assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
-    return LazyBuffer.loadop(MetaOps.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,), src=(x, self.base))
+    return LazyBuffer.metaop(MetaOps.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,), src=(x, self.base))
 
   def can_view(self): return self.st.consecutive and not self.is_unrealized_const() and self.device.split(":")[0] in view_supported_devices
 
@@ -125,7 +125,7 @@ class LazyBuffer:
 
     # const doesn't have to be copied (issues with disk tensor)
     if self.is_unrealized_const():
-      return LazyBuffer.loadop(MetaOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
+      return LazyBuffer.metaop(MetaOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.st.shape) < prod(self.base.st.shape): return self.contiguous()._copy(device)
