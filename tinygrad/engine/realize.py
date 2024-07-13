@@ -2,32 +2,35 @@ from typing import List, Dict, Optional, cast, Generator, Tuple
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata
-from tinygrad.ops import BufferOps, LoadOps, LazyOp
+from tinygrad.ops import MetaOps, LazyOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.renderer import Renderer, Program
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import ScheduleItem
 
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
-  k = Linearizer(*ast, opts=renderer)
+def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
+  if DEBUG >= 5:
+    from tinygrad.engine.graph import print_tree
+    print_tree(ast)
+  k = Kernel(ast, opts=renderer)
   k.required_optimizations()
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
-      kb, k_opt = Linearizer(*ast, opts=renderer), k
+      kb, k_opt = Kernel(ast, opts=renderer), k
       kb.required_optimizations()
       rawbufs = bufs_from_lin(kb, allocate=False)
       k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
       if getenv("BEAM_COMPARE", 1):
         # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
-        lins: List[Tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
+        lins: List[Tuple[str, Kernel]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
         if used_tensor_cores:
-          lins.append(("hc", Linearizer(*ast, opts=renderer)))
+          lins.append(("hc", Kernel(ast, opts=renderer)))
           lins[-1][1].hand_coded_optimizations()
         timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
@@ -124,8 +127,8 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
-def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
+method_cache: Dict[Tuple[str, LazyOp, int, bool], CompiledRunner] = {}
+def get_runner(dname:str, ast:LazyOp) -> CompiledRunner:
   ckey = (dname, ast, BEAM.value, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (dname.split(":")[0], ast, BEAM.value, True)
@@ -163,20 +166,20 @@ class ExecItem:
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY or getenv("USE_COPY_KERNEL")
-  if si.ast[0].op is BufferOps.STORE:
+  assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is MetaOps.COPY or getenv("USE_COPY_KERNEL")
+  if si.ast.op is MetaOps.SINK:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals], si.metadata)
-  out, ast = si.outputs[0], si.ast[0]
-  if ast.op is LoadOps.COPY:
+  out = si.outputs[0]
+  if si.ast.op is MetaOps.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
-    return ExecItem(kernel_type(ast.arg, out.device, si.inputs[0].device), list(si.bufs))
-  if ast.op is LoadOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))
-  if ast.op is LoadOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if ast.op is LoadOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
-  raise RuntimeError(f"don't know how to lower {ast}")
+    return ExecItem(kernel_type(si.ast.arg, out.device, si.inputs[0].device), list(si.bufs))
+  if si.ast.op is MetaOps.CUSTOM: return ExecItem(CustomOp(si.ast.arg), list(si.bufs))
+  if si.ast.op is MetaOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
+  if si.ast.op is MetaOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
+  raise RuntimeError(f"don't know how to lower {si.ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule):
@@ -184,7 +187,7 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
     try: yield lower_schedule_item(si)
     except Exception as e:
       if DEBUG >= 2:
-        print(f"error lowering {si.ast[0].op}")
+        print(f"error lowering {si.ast.op}")
         print("tensor operations:")
         pprint.pprint(si.metadata, indent=2)
       raise e

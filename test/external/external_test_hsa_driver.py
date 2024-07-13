@@ -2,7 +2,7 @@ import ctypes, unittest
 from tinygrad.helpers import init_c_struct_t
 from tinygrad.device import Device, Buffer, BufferXfer
 from tinygrad.dtype import dtypes
-from tinygrad.runtime.driver.hsa import AQLQueue
+from tinygrad.runtime.support.hsa import AQLQueue
 from tinygrad.runtime.graph.hsa import VirtAQLQueue, HSAGraph
 from tinygrad.engine.realize import ExecItem
 
