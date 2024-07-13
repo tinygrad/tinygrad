@@ -15,15 +15,16 @@ from tinygrad.shape.symbolic import sym_infer
 def get_sched_resnet():
   mdl = ResNet50()
   optim = (nn.optim.LARS if getenv("LARS") else nn.optim.SGD)(nn.state.get_parameters(mdl))
+  BS = getenv("BS", 64)
 
   # run model twice to get only what changes, these are the kernels of the model
   seen = set()
   for _ in range(2):
-    out = mdl(Tensor.empty(64, 3, 224, 224))
+    out = mdl(Tensor.empty(BS, 3, 224, 224))
     targets = [out.lazydata]
     if getenv("BACKWARD"):
       optim.zero_grad()
-      out.sparse_categorical_crossentropy(Tensor.empty(64, dtype=dtypes.int)).backward()
+      out.sparse_categorical_crossentropy(Tensor.empty(BS, dtype=dtypes.int)).backward()
       targets += [x.lazydata for x in optim.schedule_step()]
     sched = create_schedule(targets, seen)
     print(f"schedule length {len(sched)}")
