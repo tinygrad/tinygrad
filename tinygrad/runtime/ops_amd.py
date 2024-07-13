@@ -268,7 +268,7 @@ class AMDCopyQueue(HWCopyQueue):
     device.sdma_queue.doorbell[0] = device.sdma_queue.put_value
 
 SHT_PROGBITS, SHF_ALLOC = 0x1, 0x2
-class AMDProgram:
+class AMDProgram(HCQCompatProgram):
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
@@ -321,7 +321,7 @@ class AMDProgram:
 
   def fill_kernargs(self, kernargs_ptr, args, vals):
     if (given:=len(args)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
-    to_mv(kernargs_ptr, len(args) * 8).cast('Q')[:] = array.array('Q', args)
+    to_mv(kernargs_ptr, len(args) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in args])
     to_mv(kernargs_ptr + len(args) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
     return 0
 
