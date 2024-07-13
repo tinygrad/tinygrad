@@ -217,6 +217,12 @@ jobs:
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot fastvits model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      - if: ${{ matrix.task == 'optimage' }}
+        name: Compile EfficientNet to C and test it
+        run: |
+          CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
+          clang -O2 recognize.c -lm -o recognize
+          cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -531,12 +537,6 @@ jobs:
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py --durations=20
-      - name: Compile EfficientNet to C and test it
-        if: matrix.backend=='clang'
-        run: |
-          PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
-          clang -O2 recognize.c -lm -o recognize
-          cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
