@@ -179,7 +179,7 @@ class TestIndexing(unittest.TestCase):
     # self.assertRaises(TypeError, delitem)
 
   # TODO: LLVM is quite fast, why are other compiled backends slow?
-  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU", "METAL"], "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU", "METAL", "NV", "AMD"], "slow")
   def test_advancedindex(self):
     # integer array indexing
 

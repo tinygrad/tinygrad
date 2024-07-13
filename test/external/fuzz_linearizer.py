@@ -6,7 +6,7 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.uops import UOp
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_linearizer_actions, bufs_from_lin
@@ -53,7 +53,7 @@ def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
       rawbuf.copyin(mv)
   return rawbuf
 
-def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
+def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None):
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
   if var_vals is None: var_vals = {v: v.min for v in lin.ast[0].vars()}
 
@@ -72,7 +72,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
   return "PASS"
 
-def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
+def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
   # TODO: for bfloat16 it compiles linearizer, but it does not run because numpy cannot generate bf16 buffer.
   has_bf16 = any(b.dtype == dtypes.bfloat16 for b in lin.membufs)
 
@@ -87,10 +87,10 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
 
   if var_vals is None:
     # TODO: handle symbolic max case
-    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast[0].vars()}
+    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast.vars()}
 
   if ground_truth is None and not has_bf16:
-    unoptimized = Linearizer(*lin.ast)
+    unoptimized = Kernel(lin.ast)
     unoptimized.required_optimizations()
     if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
       return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth,)
@@ -117,11 +117,11 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
 
   return ("PASS", rawbufs, var_vals, ground_truth,)
 
-def fuzz_linearizer(lin: Linearizer, rtol=1e-2, atol=1e-2):
+def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
   SEED = getenv("SEED", 42)
   random.seed(SEED)
   np.random.seed(SEED)
-  for op in lin.ast: print_tree(op)
+  print_tree(lin.ast)
   print(lin.colored_shape())
   seen_uops = {}
   last_lins = [lin]
@@ -177,9 +177,9 @@ def fuzz_linearizer(lin: Linearizer, rtol=1e-2, atol=1e-2):
     if FUZZ_ALL_ACTIONS: print(f"depth={depth} total_lins={len(last_lins)} {failures=}")
   return failures
 
-def _is_simple(lin: Linearizer) -> bool:
-  if len(lin.ast) > 1: return False
-  ast:LazyOp = lin.ast[0]
+def _is_simple(lin: Kernel) -> bool:
+  if len(lin.ast.src) > 1: return False
+  ast:LazyOp = lin.ast.src[0]
   if ast.src[0] and ast.src[0].op is UnaryOps.CAST and ast.src[0].src[0] and ast.src[0].src[0].op is BufferOps.LOAD: return True
   return False
 

@@ -6,7 +6,7 @@ from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import _graph_schedule, ScheduleItem
-from tinygrad.ops import LoadOps
+from tinygrad.ops import MetaOps
 from tinygrad.tensor import Tensor, _to_np_dtype
 
 ctx_vars = { MULTIOUTPUT: (0, 1) }
@@ -32,7 +32,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
   for key in ts:
     for out in (ps:=prescheduled[key])[0]:
       # freeze assign state before exec
-      if out.op is LoadOps.ASSIGN:
+      if out.op is MetaOps.ASSIGN:
         prerealized[out] = out.buffer.as_buffer()
         assign_targets[out.srcs[1]] = out
     for x in ps[2]:
@@ -50,7 +50,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
     for key in ts:
       for out in (ps:=prescheduled[key])[0]:
         rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype)
-        if out.op is LoadOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
+        if out.op is MetaOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in ps[2]:
         if x not in rawbufs:
           # override the assign_target after ASSIGN

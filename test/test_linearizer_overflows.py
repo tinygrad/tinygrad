@@ -2,7 +2,7 @@
 import unittest
 from tinygrad import dtypes, Device
 from tinygrad.helpers import CI
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.engine.search import time_linearizer, bufs_from_lin
 
@@ -12,7 +12,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
 def _test_overflow(ast, opts):
-  lin = Linearizer(ast)
+  lin = Kernel(ast)
   for opt in opts: lin.apply_opt(opt)
   lin.linearize()
   bufs = bufs_from_lin(lin)
