@@ -283,8 +283,8 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
   procs, data_out_count = [], [0] * batch_count
   shm_name_x, shm_name_y = "unet3d_x", "unet3d_y"
   sz = (batch_size * batch_count, 1, 128, 128, 128)
-  if shm_path_x := os.path.exists(f"/dev/shm/{shm_name_x}"): os.unlink(shm_path_x)
-  if shm_path_y := os.path.exists(f"/dev/shm/{shm_name_y}"): os.unlink(shm_path_y)
+  if os.path.exists(f"/dev/shm/{shm_name_x}"): os.unlink(f"/dev/shm/{shm_name_x}")
+  if os.path.exists(f"/dev/shm/{shm_name_y}"): os.unlink(f"/dev/shm/{shm_name_y}")
   shm_x = shared_memory.SharedMemory(name=shm_name_x, create=True, size=prod(sz))
   shm_y = shared_memory.SharedMemory(name=shm_name_y, create=True, size=prod(sz))
 
