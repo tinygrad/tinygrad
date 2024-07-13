@@ -416,6 +416,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(x, 3)
 
   def test_resnet_block(self):
+    old_training = Tensor.training
     Tensor.training = False
 
     in_planes, planes = 64, 64
@@ -429,6 +430,7 @@ class TestSchedule(unittest.TestCase):
     out = bn2(conv2(out))
     out = (out + x).relu()
     check_schedule(out, 2, [conv1.weight, conv2.weight])
+    Tensor.training = old_training
 
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
