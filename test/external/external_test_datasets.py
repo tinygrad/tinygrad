@@ -37,7 +37,7 @@ class ExternalTestDatasets(unittest.TestCase):
       np.save(preproc_lbl_pth, preproc_lbl, allow_pickle=False)
 
     return preproc_pth, list(preproc_pth.glob("*_x.npy")), list(preproc_pth.glob("*_y.npy"))
-  
+
   def _create_kits19_ref_dataloader(self, preproc_img_pths, preproc_lbl_pths, val):
     if val:
       dataset = PytVal(preproc_img_pths, preproc_lbl_pths)
@@ -66,7 +66,7 @@ class ExternalTestDatasets(unittest.TestCase):
       np.testing.assert_equal(tinygrad_sample[1][:, 0].numpy(), ref_sample[1])
 
   def test_kits19_validation_set(self):
-    preproc_pth, preproc_img_pths, preproc_lbl_pths = self._create_samples(True)
+    _, preproc_img_pths, preproc_lbl_pths = self._create_samples(True)
     ref_dataset = self._create_kits19_ref_dataloader(preproc_img_pths, preproc_lbl_pths, True)
     tinygrad_dataset = self._create_kits19_tinygrad_dataloader(Path(tempfile.gettempdir()), True, use_old_dataloader=True)
 
