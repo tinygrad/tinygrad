@@ -439,12 +439,12 @@ def train_retinanet():
     return (((x.permute((0,3,1,2)) / 255.0) - image_mean)/image_std).cast(dtypes.default_float)
 
   @TinyJit
-  def train_step(X, boxes_temp, labels_temp, matched_idxs):
+  def train_step(X, boxes, labels, matched_idxs):
     Tensor.training = True
     optimizer.zero_grad()
     _,r,c = model(normalize(X), True)
-    loss_reg = mdl_reg_loss(r.cast(dtypes.float32), matched_idxs, boxes_temp)
-    loss_class = mdl_class_loss(c.cast(dtypes.float32), matched_idxs, labels_temp)
+    loss_reg = mdl_reg_loss(r.cast(dtypes.float32), matched_idxs, boxes)
+    loss_class = mdl_class_loss(c.cast(dtypes.float32), matched_idxs, labels)
     loss = loss_reg+loss_class
     (loss*LOSS_SCALAR).backward()
     for t in optimizer.params: t.grad = t.grad.contiguous() / LOSS_SCALAR
