@@ -368,6 +368,7 @@ def train_retinanet():
   BENCHMARK = config['BENCHMARK'] = getenv("BENCHMARK", 10000)
   EVAL_ONLY = config['EVAL_ONLY'] = getenv('EVAL_ONLY')
   CHKPT_PATH = config['CHKPT_PATH'] = getenv('CHKPT_PATH', 'ckpts/retinanet_6xother_B60_E0.safe')
+  TRAIN_ONLY = config['TRAIN_ONLY'] = getenv('TRAIN_ONLY')
   
   if WANDB:
     import wandb
@@ -527,64 +528,65 @@ def train_retinanet():
       print(f" *** Model saved to {fn} ***")
    
     # ***********EVAL******************
-    bt = time.time()
-    if getenv("RESET_STEP", 1): train_step.reset()
-    Tensor.training = False
-    BEAM.value = EVAL_BEAM
-    print(colored(f'{epoch} START EVAL', 'cyan'))
-    coco_val = COCO(openimages('validation'))
-    coco_eval = COCOeval(coco_val, iouType="bbox")
-    eval_times = []
-    coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+    if not TRAIN_ONLY:
+      bt = time.time()
+      if getenv("RESET_STEP", 1): train_step.reset()
+      Tensor.training = False
+      BEAM.value = EVAL_BEAM
+      print(colored(f'{epoch} START EVAL', 'cyan'))
+      coco_val = COCO(openimages('validation'))
+      coco_eval = COCOeval(coco_val, iouType="bbox")
+      eval_times = []
+      coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
-    batch_loader = batch_load_retinanet(batch_size=BS_EVAL, shuffle=False, seed=SEED, val=True)
-    it = iter(tqdm(batch_loader, total=len(val_files)//BS_EVAL, desc=f"epoch_val {epoch}"))
-    cnt, proc = 0, data_get_val(it)
+      batch_loader = batch_load_retinanet(batch_size=BS_EVAL, shuffle=False, seed=SEED, val=True)
+      it = iter(tqdm(batch_loader, total=len(val_files)//BS_EVAL, desc=f"epoch_val {epoch}"))
+      cnt, proc = 0, data_get_val(it)
 
-    while proc is not None:
-      GlobalCounters.reset()
-      st = time.time()
-      
-      img_ids = proc[1]
-      orig_shapes = proc[2]
-      with Tensor.inference_mode():
-        out, proc = val_step(proc[0]), proc[3]
+      while proc is not None:
+        GlobalCounters.reset()
+        st = time.time()
+        
+        img_ids = proc[1]
+        orig_shapes = proc[2]
+        with Tensor.inference_mode():
+          out, proc = val_step(proc[0]), proc[3]
 
-      try: next_proc = data_get_val(it)
-      except StopIteration: next_proc = None
+        try: next_proc = data_get_val(it)
+        except StopIteration: next_proc = None
 
-      out = out.numpy()
-      predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
-      coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(),
-                         "score": score} for i, prediction in enumerate(predictions)
-                         for box, score, label in zip(*prediction.values())]
+        out = out.numpy()
+        predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
+        coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(),
+                          "score": score} for i, prediction in enumerate(predictions)
+                          for box, score, label in zip(*prediction.values())]
 
-      with redirect_stdout(None):
-        coco_eval.cocoDt = coco_val.loadRes(coco_results) if coco_results else COCO()
-        coco_eval.params.imgIds = img_ids
-        coco_eval.evaluate()
-      evaluated_imgs.extend(img_ids)
-      coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-      eval_times.append(time.time()-st)
-      cnt=cnt+1
-      proc, next_proc = next_proc, None
-      # if cnt>30: break
+        with redirect_stdout(None):
+          coco_eval.cocoDt = coco_val.loadRes(coco_results) if coco_results else COCO()
+          coco_eval.params.imgIds = img_ids
+          coco_eval.evaluate()
+        evaluated_imgs.extend(img_ids)
+        coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+        eval_times.append(time.time()-st)
+        cnt=cnt+1
+        proc, next_proc = next_proc, None
+        # if cnt>30: break
 
-    coco_eval.params.imgIds = evaluated_imgs
-    coco_eval._paramsEval.imgIds = evaluated_imgs
-    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
-    coco_eval.accumulate()
-    coco_eval.summarize()
-    eval_acc = coco_eval.stats[0]
-    eval_time = time.time()-bt
-    print(colored(f'{epoch} EVAL_ACC {eval_acc} || {eval_time}', 'green'))
-    if WANDB:
-        wandb.log({"eval/acc": eval_acc, "eval/forward_time": eval_time, "epoch": epoch})
-    if getenv("RESET_STEP", 1): val_step.reset()
+      coco_eval.params.imgIds = evaluated_imgs
+      coco_eval._paramsEval.imgIds = evaluated_imgs
+      coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+      coco_eval.accumulate()
+      coco_eval.summarize()
+      eval_acc = coco_eval.stats[0]
+      eval_time = time.time()-bt
+      print(colored(f'{epoch} EVAL_ACC {eval_acc} || {eval_time}', 'green'))
+      if WANDB:
+          wandb.log({"eval/acc": eval_acc, "eval/forward_time": eval_time, "epoch": epoch})
+      if getenv("RESET_STEP", 1): val_step.reset()
 
-    if eval_acc>MAP_TARGET:
-      print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch, eval_acc)
-      break
+      if eval_acc>MAP_TARGET:
+        print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch, eval_acc)
+        break
 
 def train_unet3d():
   # TODO: Unet3d
