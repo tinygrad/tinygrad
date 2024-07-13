@@ -240,6 +240,52 @@ def get_fake_data_bert(GPUS:list[str], BS:int):
     "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
   }
 
+def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
+  def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+  area1 = box_area(boxes1)
+  area2 = box_area(boxes2)
+  
+  lt = np.maximum(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
+  rb = np.minimum(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
+  wh = (rb-lt).clip(min=0)
+  inter = wh[:, :, 0] * wh[:, :, 1]
+  union = area1[:, None] + area2 - inter
+  return inter / union
+
+def matcher_np(match_quality_matrix:np.ndarray) -> np.ndarray:
+  assert match_quality_matrix.size != 0, 'Need valid matrix'
+
+  def set_low_quality_matches_(matches:np.ndarray, all_matches:np.ndarray, match_quality_matrix:np.ndarray):
+    # For each gt, find the prediction with which it has highest quality
+    highest_quality_foreach_gt= match_quality_matrix.max(axis=1)
+    # Find highest quality match available, even if it is low, including ties
+    gt_pred_pairs_of_highest_quality = np.nonzero(match_quality_matrix == highest_quality_foreach_gt[:, None])
+    pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
+    matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
+
+  # match_quality_matrix is M (gt) x N (predicted)
+  # Max over gt elements (dim 0) to find best gt candidate for each prediction
+  matched_vals, matches = match_quality_matrix.max(axis=0), match_quality_matrix.argmax(axis=0)
+  all_matches = np.copy(matches)
+
+  # Assign candidate matches with low quality to negative (unassigned) values
+  below_low_threshold = matched_vals < 0.4
+  between_thresholds = (matched_vals >= 0.4) & (matched_vals < 0.5)
+  matches[below_low_threshold] = -1
+  matches[between_thresholds] = -2
+
+  assert all_matches is not None
+  set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+  return matches
+
+def matcher_iou_func(box:np.ndarray, anchor:np.ndarray) -> np.ndarray: return matcher_np(box_iou_np(box, anchor))
+
+def resize_boxes_np(boxes:np.ndarray, original_size: List[int], new_size: List[int]) -> np.ndarray:
+  ratio_height, ratio_width = [s / s_orig for s, s_orig in zip(new_size, original_size)]
+
+  return np.stack((boxes[:, 0]*ratio_width, boxes[:, 1]*ratio_height, \
+    boxes[:, 2]*ratio_width, boxes[:, 3]*ratio_height), axis=1)
+
 def cust_meshgrid(x:Tensor, y:Tensor):
   xs = x.shape[0]
   ys = y.shape[0]
@@ -277,11 +323,10 @@ def anchor_generator(image_list_shape, feature_maps) -> List[Tensor]:
     hs = (h_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
     base_anchors = Tensor.stack(-ws, -hs, ws, hs, dim=1) / 2
     return base_anchors.round()
+  
   sizes = ((32, 40, 50), (64, 80, 101), (128, 161, 203), (256, 322, 406), (512, 645, 812))
   aspect_ratios = ((0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0))
-
-  cell_anchors = [generate_anchors(size, aspect_ratio)
-                          for size, aspect_ratio in zip(sizes, aspect_ratios)]
+  cell_anchors = [generate_anchors(size, aspect_ratio) for size, aspect_ratio in zip(sizes, aspect_ratios)]
   grid_sizes = [feature_map for feature_map in feature_maps]
   image_size = image_list_shape[-2:]
   strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
@@ -294,48 +339,3 @@ def anchor_generator(image_list_shape, feature_maps) -> List[Tensor]:
     anchors.append(anchors_in_image)
   anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
   return anchors
-
-def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
-  def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-  area1 = box_area(boxes1)
-  area2 = box_area(boxes2)
-  
-  lt = np.maximum(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
-  rb = np.minimum(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
-  wh = (rb-lt).clip(min=0)
-  inter = wh[:, :, 0] * wh[:, :, 1]
-  union = area1[:, None] + area2 - inter
-  return inter / union
-
-def matcher_np(match_quality_matrix:np.ndarray) -> np.ndarray:
-  assert match_quality_matrix.size != 0, 'Need valid matrix'
-
-  def set_low_quality_matches_(matches:np.ndarray, all_matches:np.ndarray, match_quality_matrix:np.ndarray):
-
-    highest_quality_foreach_gt= match_quality_matrix.max(axis=1)
-    gt_pred_pairs_of_highest_quality = np.nonzero(match_quality_matrix == highest_quality_foreach_gt[:, None])
-    pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
-    matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
-
-  # match_quality_matrix is M (gt) x N (predicted)
-  # Max over gt elements (dim 0) to find best gt candidate for each prediction
-  matched_vals, matches = match_quality_matrix.max(axis=0), match_quality_matrix.argmax(axis=0)
-  all_matches = np.copy(matches)
-
-  # Assign candidate matches with low quality to negative (unassigned) values
-  below_low_threshold = matched_vals < 0.4
-  between_thresholds = (matched_vals >= 0.4) & (matched_vals < 0.5)
-  matches[below_low_threshold] = -1
-  matches[between_thresholds] = -2
-
-  assert all_matches is not None
-  set_low_quality_matches_(matches, all_matches, match_quality_matrix)
-  return matches
-
-def matcher_iou_func(box:np.ndarray, anchor:np.ndarray) -> np.ndarray: return matcher_np(box_iou_np(box, anchor))
-
-def resize_boxes_np(boxes:np.ndarray, original_size: List[int], new_size: List[int]) -> np.ndarray:
-  ratio_height, ratio_width = [s / s_orig for s, s_orig in zip(new_size, original_size)]
-
-  return np.stack((boxes[:, 0]*ratio_width, boxes[:, 1]*ratio_height, \
-    boxes[:, 2]*ratio_width, boxes[:, 3]*ratio_height), axis=1)
