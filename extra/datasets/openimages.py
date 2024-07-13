@@ -134,19 +134,20 @@ def export_to_custdict(class_map, annotations, image_list, output_path, classes=
 
   for i, path in enumerate(image_list):
     new_annotations[path] = {'ImageID':i, 'bbox':[], 'CatID':[]}
-
   categories_map = pd.DataFrame([(i, c) for i, c in enumerate(classes)], columns=["category_id", "category_name"])
-
   class_map = class_map.merge(categories_map, left_on="DisplayName", right_on="category_name", how="inner")
-  class_unique = class_map['LabelName'].unique()
-  class_unique.sort()
+
   class_dict = {}
-  for i, c in enumerate(class_unique):
-    class_dict[c] = i
+  cat_ids = []
+  for i, row in class_map.iterrows():
+    ln, cn, ci = [row[k] for k in ['LabelName', 'DisplayName', 'category_id']]
+    class_dict[ln] = [ci, cn]
+    cat_ids.append(ln)
+    
 
   for i, row in tqdm(annotations.iterrows(), total=len(annotations)):
     xmin, ymin, xmax, ymax, path, cat_id = [row[k] for k in ["XMin", "YMin", "XMax", "YMax", "ImageID", "LabelName"]]
-    if path in new_annotations.keys() and cat_id in class_unique:
+    if path in new_annotations.keys() and cat_id in cat_ids:
       if 'size' not in new_annotations[path]:
         with Image.open(BASEDIR / f"train/data/{path}.jpg") as img:
           width, height = img.size
@@ -155,7 +156,7 @@ def export_to_custdict(class_map, annotations, image_list, output_path, classes=
         width, height = new_annotations[path]['size']
       x,y,w,h = xmin * width, ymin * height, (xmax - xmin) * width, (ymax - ymin) * height
       new_annotations[path]['bbox'].append([x, y, w, h])
-      catIdx = class_dict[cat_id]
+      catIdx = class_dict[cat_id][0]
       new_annotations[path]['CatID'].append(catIdx)
 
   with open(output_path, "w") as fp:
@@ -239,3 +240,4 @@ def iterate(coco, bs=8):
 
 if __name__ == '__main__':
   openimages('train')
+  # openimages('validation')
