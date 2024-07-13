@@ -4,7 +4,6 @@ import difflib, pickle, multiprocessing, os
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
 
-ASSERT_PROCESS_REPLAY = getenv("ASSERT_PROCESS_REPLAY", 1)
 page_size = 100
 table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}_{VERSION}"
 
@@ -41,7 +40,8 @@ def process_replay(offset:int):
   cur.close()
 
 if __name__ == "__main__":
-  if "[run_process_replay]" in os.getenv("COMMIT_MESSAGE", "") or "[run_process_replay]" in os.getenv("PR_TITLE", ""): ASSERT_PROCESS_REPLAY = 1
+  ASSERT_PROCESS_REPLAY = (k:="[run_process_replay]") not in os.getenv("COMMIT_MESSAGE", k) and k not in os.getenv("PR_TITLE", k)
+  print(ASSERT_PROCESS_REPLAY)
   conn = db_connection()
   cur = conn.cursor()
   row_count = cur.execute(f"select count(*) from '{table_name}'").fetchone()[0]
