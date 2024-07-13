@@ -34,10 +34,9 @@ class UPat:
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
 
   @staticmethod
-  def compile(u: UOp, name:Optional[str]=None, permute:bool=False) -> UPat:
+  def compile(u: UOp, name:Optional[str]=None) -> UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
-    if u.op is UOps.PERMUTE: return UPat.compile(u.src[0], name=name or u.arg, permute=True)
-    return UPat(u.op, u.arg, (list if u.commutative() or permute else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
+    return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
@@ -344,12 +343,12 @@ constant_folder = PatternMatcher([
     UOp.cvar("compval")), UOp.cvar("multconst"), UOp.const(None, 0)),
     lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # sum collapse to mul (with possible GEP)
-  (UOp(UOps.PHI, src=(UOp(UOps.DEFINE_ACC, src=(UOp.cvar(), UOp(UOps.RANGE).name("loop"))).permute().name("phi_input"),
-    UOp.alu(BinaryOps.ADD, UOp.var("val1"), UOp.var("val2")))), sum_collapse),
-  (UOp(UOps.PHI, src=(UOp(UOps.GEP, src=(UOp(UOps.DEFINE_ACC, src=(UOp.cvar(), UOp(UOps.RANGE).name("loop"))).permute(),)).name("phi_input"),
-    UOp.alu(BinaryOps.ADD, UOp.var("val1"), UOp.var("val2")))), sum_collapse),
+  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),
+                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),)),
+                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # deal with UNMUL
-  (UOp.alu(BinaryOps.MUL, UOp.cvar("c1"), UOp(UOps.UNMUL, src=(UOp.cvar("c2"), UOp.var("v"))).permute()),
+  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(UOps.UNMUL, src=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
    lambda c1,c2,v: v if c1.arg == c2.arg else None),
   (UOp(UOps.UNMUL, src=(UOp.const(None, 0).name('zero'), UOp.var())), lambda zero: zero),
   (UOp(UOps.UNMUL).name('unmul').cast().name('root'), lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.src[0].cast(root.dtype), unmul.src[1]))),
