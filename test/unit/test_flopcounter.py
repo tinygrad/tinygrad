@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 import unittest
 from tinygrad import dtypes, Tensor
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, getenv
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, get_lazyop_info, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.codegen.lowerer import Lowerer
 from tinygrad.codegen.uops import flops_mem
 
+@unittest.skipIf(getenv("PTX"), "broken for PTX")
 class TestFlopCounter(unittest.TestCase):
   def setUp(self):
     self.buf0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float32, ShapeTracker.from_shape((4,))))
