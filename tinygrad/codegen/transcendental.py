@@ -155,7 +155,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
 
   fraction_map = f.lt(0.5)
   # if fraction >= 0.5, r -= pi/2, q += 1
-  r = fraction_map.where(r, r - math.pi / 2)
+  r = fraction_map.where(r, r - (math.pi / 2))
   q = fraction_map.where(q, q + 1)
   return r, q
 
