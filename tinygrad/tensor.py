@@ -511,9 +511,9 @@ class Tensor:
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
-  def eye(dim:int, **kwargs):
+  def eye(n:int, m:Optional[int]=None, **kwargs):
     """
-    Creates an identity matrix of the given dimension.
+    Returns a 2-D tensor with `n` rows and `m` columns, with ones on the diagonal and zeros elsewhere.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -521,8 +521,12 @@ class Tensor:
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor.eye(3).numpy())
     ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.eye(2, 4).numpy())
+    ```
     """
-    return Tensor.ones((dim,1),**kwargs).pad((None,(0,dim))).flatten().shrink(((0,dim*dim),)).reshape(dim, dim)
+    return Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)._slice((None,(0,n if m is None else m)))
 
   def full_like(self, fill_value:ConstType, **kwargs):
     """
