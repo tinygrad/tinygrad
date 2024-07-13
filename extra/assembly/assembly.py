@@ -1,5 +1,5 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
-from tinygrad.codegen.lowerer import UOps, MemOp, UOp
+from tinygrad.codegen.kernel import UOps, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import DEBUG

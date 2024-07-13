@@ -1,4 +1,4 @@
-from tinygrad.codegen.lowerer import Lowerer
+from tinygrad.codegen.kernel import Kernel
 from tqdm import tqdm, trange
 import math
 import random
@@ -45,7 +45,7 @@ if __name__ == "__main__":
   X,Y = [], []
   for i,x in enumerate(tqdm(dset)):
     ast, opts, tms = eval(x)
-    lin = Lowerer(ast)
+    lin = Kernel(ast)
     for o in opts: lin.apply_opt(o)
     if lin.shape_len >= MAX_DIMS: continue
     if min(tms) == float('inf'): continue
