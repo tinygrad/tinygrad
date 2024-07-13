@@ -5,36 +5,13 @@ from tinygrad.helpers import flatten, get_child
 from tinygrad.nn.state import safe_load, load_state_dict
 from tinygrad.nn import Conv2d
 from extra.models.resnet import ResNet
+from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
+from examples.mlperf.helpers import encode_boxes
 import numpy as np
 
 Conv2dNormal = Conv2d
 Conv2dNormal_priorprob = Conv2d
 Conv2dKaiming = Conv2d
-
-def cust_bin_cross_logits(inputs, targets): return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
-
-def sigmoid_focal_loss(inputs: Tensor, targets: Tensor, mask: Tensor,
-    alpha: float = 0.25, gamma: float = 2):
-  p = Tensor.sigmoid(inputs) * mask
-  ce_loss = cust_bin_cross_logits(inputs, targets)
-  p_t = p * targets + (1 - p) * (1 - targets)
-  loss = ce_loss * ((1 - p_t) ** gamma)
-
-  if alpha >= 0:
-    alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
-    loss = alpha_t * loss
-
-  loss = loss * mask
-  loss = loss.sum(-1)
-  loss = loss.sum(-1)
-  return loss
-
-def l1_loss(x1:Tensor, x2:Tensor) -> Tensor:
-  x2 = Tensor.where(x2>-1000, x2, 0) #nan replace with 0
-  # https://pytorch.org/docs/stable/_modules/torch/nn/functional.html#l1_loss
-  ans = (x1 - x2).abs().sum(-1)
-  ans = ans.sum(-1)
-  return ans
 
 def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
   def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
@@ -216,15 +193,15 @@ class ClassificationHead:
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     return out[0].cat(*out[1:], dim=1)
 
-  def loss(self, logits_class, matched_idxs, labels_temp):
+  def loss(self, logits_class, matched_idxs, labels):
     batch_size = logits_class.shape[0]
     foreground_idxs = matched_idxs >= 0
     num_foreground = foreground_idxs.sum(-1)
 
-    labels_temp = (labels_temp+1)*foreground_idxs-1
-    gt_classes_target = labels_temp.one_hot(logits_class.shape[-1])
+    labels = (labels + 1) * foreground_idxs - 1
+    gt_classes_target = labels.one_hot(logits_class.shape[-1])
     valid_idxs = matched_idxs != -2
-    return (sigmoid_focal_loss(logits_class, gt_classes_target, valid_idxs.reshape(batch_size,-1,1))/num_foreground).mean()
+    return (sigmoid_focal_loss(logits_class, gt_classes_target, valid_idxs.reshape(batch_size, -1, 1)) / num_foreground).mean()
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
@@ -235,16 +212,17 @@ class RegressionHead:
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     return out[0].cat(*out[1:], dim=1)
 
-  def loss(self, logits_reg, anchors, matched_idxs,boxes_temp):
-    batch_size = logits_reg.shape[0]
+  def loss(self, logits_reg, anchors, matched_idxs, boxes):
     foreground_idxs = matched_idxs >= 0
     num_foreground = foreground_idxs.sum(-1)
+    mask = foreground_idxs.reshape(logits_reg.shape[0], -1, 1)
 
-    matched_gt_boxes = boxes_temp * foreground_idxs.reshape(batch_size,-1,1)
-    bbox_reg = logits_reg * foreground_idxs.reshape(batch_size,-1,1)
-    anchors = anchors*foreground_idxs.reshape(batch_size,-1,1)
+    matched_gt_boxes = boxes * mask
+    bbox_reg = logits_reg * mask
+    anchors = anchors * mask
     target_regression = encode_boxes(matched_gt_boxes, anchors)
-    target_regression = target_regression * foreground_idxs.reshape(batch_size,-1,1)
+    target_regression = target_regression * mask
+    target_regression = (target_regression>-1000).where(target_regression, 0) #nan replace with 0
     return (l1_loss(bbox_reg, target_regression) / num_foreground).mean()
 
 class RetinaHead:

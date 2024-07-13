@@ -238,6 +238,16 @@ def get_fake_data_bert(GPUS:list[str], BS:int):
     "next_sentence_labels": Tensor.zeros((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
   }
 
+def encode_boxes(reference_boxes:Tensor, proposals:Tensor) -> Tensor:
+  ex_ctr = proposals[:, :, 0:2] + 0.5 * (proposals[:, :, 2:4] - proposals[:, :, 0:2])
+  gt_ctr = reference_boxes[:, :, 0:2] + 0.5 * (reference_boxes[:, :, 2:4] - reference_boxes[:, :, 0:2])
+
+  return Tensor.stack(
+    (gt_ctr[:, :, 0] - ex_ctr[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0]),
+    (gt_ctr[:, :, 1] - ex_ctr[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1]),
+    ((reference_boxes[:, :, 2] - reference_boxes[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0])).log(),
+    ((reference_boxes[:, :, 3] - reference_boxes[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1])).log(), dim=2)
+
 def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
   def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
   area1 = box_area(boxes1)
