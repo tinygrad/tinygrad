@@ -279,5 +279,7 @@ def matcher_np(match_quality_matrix:np.ndarray) -> np.ndarray:
 def matcher_iou_func(box:np.ndarray, anchor:np.ndarray) -> np.ndarray: return matcher_np(box_iou_np(box, anchor))
 
 def resize_boxes_np(boxes:np.ndarray, original_size: List[int], new_size: List[int]) -> np.ndarray:
-  rh, rw = [n / o for n, o in zip(new_size, original_size)]
-  return boxes * np.tile([rw, rh, rw, rh], (boxes.shape[0], 1))
+  ratio_height, ratio_width = [s / s_orig for s, s_orig in zip(new_size, original_size)]
+
+  return np.stack((boxes[:, 0]*ratio_width, boxes[:, 1]*ratio_height, \
+    boxes[:, 2]*ratio_width, boxes[:, 3]*ratio_height), axis=1)
