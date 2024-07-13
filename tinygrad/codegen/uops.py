@@ -11,7 +11,7 @@ from tinygrad.helpers import prod
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); VAR = auto(); PERMUTE = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
+  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
@@ -48,7 +48,6 @@ class UOp:
   def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return UOp(UOps.BITCAST, dtype, (self,))
   def name(self, name:Optional[str]): return UOp(UOps.VAR, src=(self,), arg=name)
-  def permute(self): return UOp(UOps.PERMUTE, src=(self,))
   def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
   def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)
@@ -58,6 +57,7 @@ class UOp:
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
   def __truediv__(self, x): return UOp.alu(BinaryOps.MUL, self, UOp.alu(UnaryOps.RECIP, ufix(self.dtype, x)))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
+  def __xor__(self, x): return UOp.alu(BinaryOps.XOR, self, ufix(self.dtype, x))
   def __and__(self, x): return UOp.alu(BinaryOps.AND, self, ufix(self.dtype, x))
   def __or__(self, x): return UOp.alu(BinaryOps.OR, self, ufix(self.dtype, x))
   def ne(self, x): return UOp.alu(BinaryOps.CMPNE, self, ufix(self.dtype, x))
