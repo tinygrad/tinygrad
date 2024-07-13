@@ -75,6 +75,7 @@ def openimages(subset: str):
 def get_train_files():
   if not (files:=glob.glob(p:=str(BASEDIR / "train/data/*"))): raise FileNotFoundError(f"No training files in {p}")
   return files
+
 def get_train_data():
   with open(BASEDIR / 'train/train_data.json') as f:
     data = json.load(f)
@@ -84,6 +85,7 @@ def get_train_data():
 def get_val_files():
   if not (files:=glob.glob(p:=str(BASEDIR / "validation/data/*"))): raise FileNotFoundError(f"No validation files in {p}")
   return files
+
 def get_val_data():
   with open(BASEDIR / 'validation/labels/openimages-mlperf.json') as f:
     data = json.load(f)
@@ -143,11 +145,10 @@ def export_to_custdict(class_map, annotations, image_list, output_path, classes=
     ln, cn, ci = [row[k] for k in ['LabelName', 'DisplayName', 'category_id']]
     class_dict[ln] = [ci, cn]
     cat_ids.append(ln)
-    
 
   for i, row in tqdm(annotations.iterrows(), total=len(annotations)):
     xmin, ymin, xmax, ymax, path, cat_id = [row[k] for k in ["XMin", "YMin", "XMax", "YMax", "ImageID", "LabelName"]]
-    if path in new_annotations.keys() and cat_id in cat_ids:
+    if path in image_list and cat_id in cat_ids:
       if 'size' not in new_annotations[path]:
         with Image.open(BASEDIR / f"train/data/{path}.jpg") as img:
           width, height = img.size
