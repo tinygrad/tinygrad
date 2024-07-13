@@ -133,19 +133,24 @@ def export_to_coco(class_map, annotations, image_list, dataset_path, output_path
 
 def export_to_custdict(class_map, annotations, image_list, output_path, classes=MLPERF_CLASSES):
   new_annotations = {}
-  
   for i, path in enumerate(image_list):
     new_annotations[path] = {'ImageID':i, 'bbox':[], 'CatID':[]}
 
   categories_map = pd.DataFrame([(i, c) for i, c in enumerate(classes)], columns=["category_id", "category_name"])
-
   class_map = class_map.merge(categories_map, left_on="DisplayName", right_on="category_name", how="inner")
   class_unique = class_map['LabelName'].unique()
 
   for i, row in tqdm(annotations.iterrows(), total=len(annotations)):
     xmin, ymin, xmax, ymax, path, cat_id = [row[k] for k in ["XMin", "YMin", "XMax", "YMax", "ImageID", "LabelName"]]
     if path in new_annotations.keys() and cat_id in class_unique:
-      new_annotations[path]['bbox'].append([xmin, ymin, xmax, ymax])
+      if 'size' not in new_annotations[path]:
+        with Image.open(BASEDIR / f"train/data/{path}.jpg") as img:
+          width, height = img.size
+        new_annotations[path]['size'] = (width, height)
+      else:
+        width, height = new_annotations[path]['size']
+      x,y,w,h = xmin * width, ymin * height, (xmax - xmin) * width, (ymax - ymin) * height
+      new_annotations[path]['bbox'].append([x, y, w, h])
       catIdx = int(class_map.loc[class_map['LabelName']==cat_id, 'category_id'].values[0])
       new_annotations[path]['CatID'].append(catIdx)
 
