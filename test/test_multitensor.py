@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import LoadOps, ReduceOps, BufferOps, BinaryOps
+from tinygrad.ops import MetaOps, ReduceOps, BufferOps, BinaryOps
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
@@ -452,7 +452,7 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast[0].op is not LoadOps.COPY]
+    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast.op is not MetaOps.COPY]
     assert set(out.device for sched in scheds for out in sched.outputs) == set(devices_4), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts)
@@ -527,21 +527,21 @@ class TestMultiTensor(unittest.TestCase):
       t = Tensor.zeros(16, 16).contiguous().shard(devices_4, axis).realize()
       t = t + 1
       for si in t.schedule():
-        ast = si.ast[0]
+        ast = si.ast.src[0]
         assert ast.op is BufferOps.STORE
         assert ast.src[0].op is BinaryOps.ADD
         assert ast.src[0].src[0].op is BufferOps.LOAD and ast.src[0].src[0]
         assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 1
       t = 2 * t
       for si in t.schedule():
-        ast = si.ast[0]
+        ast = si.ast.src[0]
         assert ast.op is BufferOps.STORE
         assert ast.src[0].op is BinaryOps.MUL
         assert ast.src[0].src[0].op is BufferOps.CONST and ast.src[0].src[0].arg.val == 2
         assert ast.src[0].src[1].op is BufferOps.LOAD
       t = t + t.full_like(3)
       for si in t.schedule():
-        ast = si.ast[0]
+        ast = si.ast.src[0]
         assert ast.op is BufferOps.STORE
         assert ast.src[0].op is BinaryOps.ADD
         assert ast.src[0].src[0].op is BufferOps.LOAD

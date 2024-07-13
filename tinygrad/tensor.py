@@ -12,7 +12,7 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA, Metadata, TRACEMETA
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import LoadOps, truncate
+from tinygrad.ops import MetaOps, truncate
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
 from tinygrad.engine.realize import run_schedule
@@ -49,16 +49,16 @@ def _from_np_dtype(npdtype:type) -> DType: return dtypes.fields()[np.dtype(npdty
 def _to_np_dtype(dtype:DType) -> Optional[type]: return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 
 def _fromnp(x: np.ndarray) -> LazyBuffer:
-  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
+  ret = LazyBuffer.loadop(MetaOps.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
   del ret.srcs
   return ret
 
 def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
-  if isinstance(x, bytes): ret, data = LazyBuffer.loadop(LoadOps.EMPTY, (len(x),), dtype, "PYTHON"), x
+  if isinstance(x, bytes): ret, data = LazyBuffer.loadop(MetaOps.EMPTY, (len(x),), dtype, "PYTHON"), x
   else:
-    ret = LazyBuffer.loadop(LoadOps.EMPTY, get_shape(x), dtype, "PYTHON")
+    ret = LazyBuffer.loadop(MetaOps.EMPTY, get_shape(x), dtype, "PYTHON")
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
@@ -122,8 +122,8 @@ class Tensor:
 
     # create a LazyBuffer from the different types of inputs
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-    elif isinstance(data, get_args(ConstType)): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
-    elif isinstance(data, Variable): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data.unbind()[1]), device, data)
+    elif isinstance(data, get_args(ConstType)): data = _loadop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
+    elif isinstance(data, Variable): data = _loadop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data.unbind()[1]), device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8)
     elif isinstance(data, (list, tuple)):
       if dtype is None:
@@ -131,9 +131,9 @@ class Tensor:
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
       if dtype == dtypes.bfloat16: data = Tensor(_fromnp(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
       else: data = _fromnp(np.array(data).astype(_to_np_dtype(dtype)))
-    elif data is None: data = _loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
+    elif data is None: data = _loadop(MetaOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, np.ndarray):
-      if data.shape == (): data = _loadop(LoadOps.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
+      if data.shape == (): data = _loadop(MetaOps.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
       else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)
 
     # by this point, it has to be a LazyBuffer
@@ -366,7 +366,7 @@ class Tensor:
     print(t.shape)
     ```
     """
-    return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
+    return Tensor._loadop(MetaOps.EMPTY, argfix(*shape), **kwargs)
 
   _seed: int = int(time.time())
   _rng_counter: Optional[Tensor] = None
@@ -407,7 +407,7 @@ class Tensor:
       # for bfloat16, numpy rand passes buffer in float
       if (dtype or dtypes.default_float) == dtypes.bfloat16:
         return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dtypes.bfloat16)
-      return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
+      return Tensor._loadop(MetaOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
 
     # threefry
     if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
@@ -511,9 +511,9 @@ class Tensor:
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
-  def eye(dim:int, **kwargs):
+  def eye(n:int, m:Optional[int]=None, **kwargs):
     """
-    Creates an identity matrix of the given dimension.
+    Returns a 2-D tensor with `n` rows and `m` columns, with ones on the diagonal and zeros elsewhere.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -521,8 +521,12 @@ class Tensor:
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor.eye(3).numpy())
     ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.eye(2, 4).numpy())
+    ```
     """
-    return Tensor.ones((dim,1),**kwargs).pad((None,(0,dim))).flatten().shrink(((0,dim*dim),)).reshape(dim, dim)
+    return Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)._slice((None,(0,n if m is None else m)))
 
   def full_like(self, fill_value:ConstType, **kwargs):
     """
