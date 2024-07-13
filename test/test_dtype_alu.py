@@ -197,11 +197,10 @@ class TestFromFuzzer(unittest.TestCase):
       ulp = unit * ulp
       np.testing.assert_allclose(Tensor([n], dtype=dtype).log2().numpy(), np.log2(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
     fmin = np.finfo(_to_np_dtype(dtype)).tiny
-    _test_value(fmin)
+    for scale in [1.0, 1e10, 1e20, 1e30]:
+      _test_value(fmin * scale)
+      _test_value(-fmin * scale)
     _test_value(0)
-    _test_value(-fmin)
-    if dtype == dtypes.float64:
-      _test_value(1e-208)
 
 if __name__ == '__main__':
   unittest.main()
