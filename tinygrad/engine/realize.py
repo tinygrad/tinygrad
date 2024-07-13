@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast, Generator, Tuple
 import time, pprint
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata
+from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context
 from tinygrad.ops import MetaOps, LazyOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
@@ -33,28 +33,26 @@ def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
         if used_tensor_cores:
           lins.append(("hc", Kernel(ast, opts=renderer)))
           lins[-1][1].hand_coded_optimizations()
-        all_timed = []
         if beam_compare == 2:
-          import numpy as np
-          all_outs: List[List[np.ndarray]] = []
-          rand_bufs = [np.random.normal(scale=0.1, size=buf.size).astype(np.dtype(buf.dtype.fmt).type) if dtypes.is_float(buf.dtype) else \
-                       np.random.randint(dtypes.min(buf.dtype), dtypes.max(buf.dtype), size=buf.size, dtype=np.dtype(buf.dtype.fmt).type) \
-                       for buf in rawbufs]
-        for nm, tk in lins:
-          if beam_compare == 2:
-            for buf,data in zip(rawbufs, rand_bufs): buf.ensure_allocated().copyin(data.data)
-            all_timed.append((nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True, disable_cache=True)))
-            all_outs.append([np.array(buf.as_buffer().cast(cast(str, buf.dtype.fmt))).copy() for buf in rawbufs[:len(ast.src)]])
-          else:
-            all_timed.append((nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)))
-        timed = sorted(all_timed, key=lambda x: x[2])
-        #timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+          from tinygrad import Tensor
+          all_outs: List[List[Tensor]] = []
+          with Context(DEBUG=0, BEAM=0, CAPTURING=0):
+            rand_bufs = [Tensor.normal(buf.size, std=0.1, dtype=buf.dtype).data() if dtypes.is_float(buf.dtype) else \
+                         Tensor.randint(buf.size, low=dtypes.min(buf.dtype), high=dtypes.max(buf.dtype), dtype=buf.dtype).data() \
+                         for buf in rawbufs]
+          for _, tk in lins:
+            for buf,data in zip(rawbufs, rand_bufs): buf.ensure_allocated().copyin(data)
+            time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True, disable_cache=True)
+            all_outs.append([Tensor(bytes(buf.as_buffer()), dtype=buf.dtype) for buf in rawbufs[:len(ast.src)]])
+        timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
         if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
         if beam_compare == 2:
+          import numpy as np
           for bufs in zip(*all_outs):
-            for b in bufs[1:]: np.testing.assert_allclose(bufs[0], b, atol=1e-2, rtol=1e-2)
+            gt = bufs[0].numpy()
+            for b in bufs[1:]: np.testing.assert_allclose(gt, b.numpy(), atol=1e-2, rtol=1e-2)
   # TODO: check the correctness inline once compare_linearizer is in core
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
