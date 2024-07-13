@@ -1,5 +1,4 @@
 import math
-from typing import List
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
 from tinygrad.nn.state import safe_load, load_state_dict
@@ -12,17 +11,6 @@ import numpy as np
 Conv2dNormal = Conv2d
 Conv2dNormal_priorprob = Conv2d
 Conv2dKaiming = Conv2d
-
-def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
-  def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-  area1 = box_area(boxes1)
-  area2 = box_area(boxes2)
-  lt = Tensor.maximum(boxes1[:, :2].unsqueeze(1), boxes2[:, :2])  # [N,M,2]
-  rb = Tensor.minimum(boxes1[:, 2:].unsqueeze(1), boxes2[:, 2:])  # [N,M,2]
-  wh = (rb - lt).maximum(0)  # [N,M,2]
-  inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
-  union = area1.unsqueeze(1) + area2 - inter
-  return inter / union
 
 def nms(boxes, scores, thresh=0.5):
   x1, y1, x2, y2 = np.rollaxis(boxes, 1)
@@ -49,17 +37,6 @@ def decode_bbox(offsets, anchors):
   pred_x1, pred_y1 = pred_cx - 0.5 * pred_w, pred_cy - 0.5 * pred_h
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
-
-def encode_boxes(reference_boxes, proposals):
-  ex_ctr = proposals[:, :, 0:2] + 0.5 * (proposals[:, :, 2:4] - proposals[:, :, 0:2])
-  gt_ctr = reference_boxes[:, :, 0:2] + 0.5 * (reference_boxes[:, :, 2:4] - reference_boxes[:, :, 0:2])
-
-  return Tensor.stack(
-    (gt_ctr[:, :, 0] - ex_ctr[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0]),
-    (gt_ctr[:, :, 1] - ex_ctr[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1]),
-    ((reference_boxes[:, :, 2] - reference_boxes[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0])).log(),
-    ((reference_boxes[:, :, 3] - reference_boxes[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1])).log()
-  , dim=2)
 
 def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
