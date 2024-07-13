@@ -2,6 +2,7 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '5'
+  RUN_PROCESS_REPLAY: 1
 
 on:
   push:
@@ -9,43 +10,8 @@ on:
       - master
   pull_request:
   workflow_dispatch:
-    inputs:
-       run_process_replay:
-         description: "Run process replay tests"
-         required: false
-         default: false
-         type: boolean
 
 jobs:
-  check_process_replay:
-    name: Check process replay
-    runs-on: ubuntu-latest
-    outputs:
-      run_process_replay: ${{ steps.set-env.outputs.run_process_replay }}
-      assert_process_replay: ${{ steps.set-env.outputs.assert_process_replay }}
-    timeout-minutes: 5
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-    - name: Set process replay
-      id: set-env
-      run: |
-        RAW_COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-        COMMIT_MESSAGE=$(printf '%q' "$RAW_COMMIT_MESSAGE")
-        RAW_PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
-        PR_TITLE=$(printf '%q' "$RAW_PR_TITLE")
-        echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
-        echo "ASSERT_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
-        echo "running process replay in diff-only mode"
-
-        if { echo "$COMMIT_MESSAGE" | grep -q "run_process_replay" || echo "$PR_TITLE" | grep -q "run_process_replay" || [ "${{ github.event.inputs.run_process_replay }}" = "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
-          echo "ASSERT_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
-          echo "enabled process replay (with assert)"
-        fi
-
   uops:
     name: uops tests
     runs-on: ubuntu-latest
@@ -158,9 +124,6 @@ jobs:
       fail-fast: false
       matrix:
         task: [optimage, onnx]
-    needs: check_process_replay
-    #env:
-      #RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
 
     name: ${{ matrix.task=='optimage'&&'GPU IMAGE+compile Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04
@@ -253,9 +216,6 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
-      - name: Run process replay tests
-        if: env.RUN_PROCESS_REPLAY == '1'
-        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -301,15 +261,13 @@ jobs:
   testmetal:
     name: Metal Tests
     runs-on: macos-14
-    needs: check_process_replay
-    env:
-      RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
-      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
     timeout-minutes: 20
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
       with:
@@ -351,8 +309,10 @@ jobs:
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run process replay tests
-      if: env.RUN_PROCESS_REPLAY == '1'
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      run: |
+        export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+        export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+        cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -392,10 +352,6 @@ jobs:
       fail-fast: false
       matrix:
         backend: [llvm, clang, gpu, ptx, amd, nv] #, triton]
-    needs: check_process_replay
-    env:
-      RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
-      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -404,6 +360,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -540,8 +498,10 @@ jobs:
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
-        if: env.RUN_PROCESS_REPLAY == '1'
-        run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+        run: |
+          export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+          export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+          cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test
