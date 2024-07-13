@@ -169,20 +169,21 @@ class Lowerer(Kernel):
       from tinygrad.engine.graph import print_tree
       print_tree(modified_ast)
 
-    self.uops:UOpGraph = UOpGraph(lazyop_to_uop(modified_ast, self.opts), self.opts)
+    uop_sink = lazyop_to_uop(modified_ast, self.opts)
 
     # extract global/local sizes
     if self.opts.has_local:
       self.global_size: Optional[List[int]] = [1,1,1]
       self.local_size: Optional[List[int]] = [1,1,1]
-      for u in self.uops.uops:
+      for u in uop_sink.parents:
         if u.op is UOps.SPECIAL:
           if u.arg[1][0] == 'l': self.local_size[u.arg[0]] = u.arg[2]
           else: self.global_size[u.arg[0]] = u.arg[2]
     else:
       self.global_size, self.local_size = None, None
 
-    # maybe graph the uops
+    # generate the UOpGraph
+    self.uops:UOpGraph = UOpGraph(uop_sink, self.opts)
     if DEBUG >= 5: self.uops.print()
     if getenv("GRAPHUOPS"):
       self.uops.graph()
