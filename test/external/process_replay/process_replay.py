@@ -5,7 +5,7 @@ from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
 
 page_size = 100
-table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}_{VERSION}"
+table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
 
 def process_replay(offset:int):
   conn = db_connection()
