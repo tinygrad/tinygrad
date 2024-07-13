@@ -49,11 +49,13 @@ def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
             time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True, disable_cache=True)
             all_outs.append([Tensor(bytes(buf.as_buffer()), dtype=buf.dtype) for buf in rawbufs[:len(ast.src)]])
           with Context(DEBUG=0, BEAM=0, CAPTURING=0):
-            import numpy as np
             for bufs in zip(*all_outs):
-              gt = bufs[0].numpy()
-              for b in bufs[1:]: np.testing.assert_allclose(gt, b.numpy(), atol=1e-2, rtol=1e-2)
-  # TODO: check the correctness inline once compare_linearizer is in core
+              for b in bufs[1:]:
+                if dtypes.is_float(bufs[0].dtype):
+                  diff_count = (((b-bufs[0]).abs() > 1e-3) * (((b-bufs[0])/bufs[0]).abs() > 1e-3)).sum().item()
+                else:
+                  diff_count = (b != bufs[0]).sum().item()
+                if diff_count != 0: raise RuntimeError(f"mismatch of {diff_count} items with type {b.dtype}, max {(b-bufs[0]).abs().max().item()}")
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
   return k
