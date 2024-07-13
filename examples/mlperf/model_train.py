@@ -348,6 +348,7 @@ def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
   import math
+  
   config = {}
   SEED = config['SEED'] = getenv("SEED", 42)
   Tensor.manual_seed(SEED)
@@ -377,41 +378,40 @@ def train_retinanet():
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
+  from extra.models import retinanet
+  from extra.models import resnet
+  from tinygrad.nn import BatchNorm2d
+  from examples.hlb_cifar10 import UnsyncedBatchNorm
+  from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
+  from tinygrad.nn.optim import Adam
+  from examples.mlperf.helpers import anchor_generator
   from extra.datasets.openimages import openimages, get_train_files, get_val_files
   from examples.mlperf.dataloader import batch_load_retinanet
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO
-  from tinygrad.nn import BatchNorm2d
+
   if not TEST:
     train_files = get_train_files()
     val_files = get_val_files()
-
-  from extra.models import retinanet
-  from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
-  from extra.models import resnet
-  from examples.hlb_cifar10 import UnsyncedBatchNorm
-  from tinygrad.nn.optim import Adam
 
   retinanet.Conv2dNormal = Conv2dNormal
   retinanet.Conv2dNormal_priorprob = functools.partial(Conv2dNormal, b=-math.log(99))
   retinanet.Conv2dKaiming = Conv2dKaiming
 
-  def cust_call(self, x:Tensor):
-    batch_mean = self.running_mean
-      # NOTE: this can be precomputed for static inference. we expand it here so it fuses
-    batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(dtypes.default_float)
-
   resnet.Conv2d = Conv2dHeNormal
   resnet.Linear = Linear
-  resnet.BatchNorm = functools.partial(BatchNorm2d, eps=0.0)
-  resnet.BatchNorm.__call__ = cust_call
-  if not SYNCBN: resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
+  if SYNCBN:
+    def cust_call_bn(self, x:Tensor):
+      batch_mean = self.running_mean
+      batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
+      return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(dtypes.default_float)
+    resnet.BatchNorm = functools.partial(BatchNorm2d, eps=0.0)
+    resnet.BatchNorm.__call__ = cust_call_bn
+  else:
+    resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
   resnet_model = resnet.ResNeXt50_32X4D()
   resnet_model.load_from_pretrained()
 
-  from examples.mlperf.helpers import anchor_generator
- 
   model = retinanet.RetinaNet(resnet_model)
   model.backbone.body.fc = None
 
@@ -450,6 +450,7 @@ def train_retinanet():
     for t in optimizer.params: t.grad = t.grad.contiguous() / LOSS_SCALAR
     optimizer.step()
     return loss.realize()
+
   @TinyJit
   def val_step(X):
     Tensor.training = False
@@ -539,7 +540,7 @@ def train_retinanet():
 
       batch_loader = batch_load_retinanet(batch_size=BS_EVAL, shuffle=False, seed=SEED, val=True)
       it = iter(tqdm(batch_loader, total=len(val_files)//BS_EVAL, desc=f"epoch_val {epoch}"))
-      cnt, proc = 0, data_get_val(it)
+      proc = data_get_val(it)
 
       while proc is not None:
         GlobalCounters.reset()
@@ -566,9 +567,7 @@ def train_retinanet():
         evaluated_imgs.extend(img_ids)
         coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
         eval_times.append(time.time()-st)
-        cnt=cnt+1
         proc, next_proc = next_proc, None
-        # if cnt>30: break
 
       coco_eval.params.imgIds = evaluated_imgs
       coco_eval._paramsEval.imgIds = evaluated_imgs
