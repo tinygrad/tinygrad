@@ -42,7 +42,8 @@ def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
           all_outs: List[List[Tensor]] = []
           with Context(DEBUG=0, BEAM=0, CAPTURING=0):
             rand_bufs = [Tensor.normal(buf.size, std=0.1, dtype=buf.dtype).data() if dtypes.is_float(buf.dtype) else \
-                         Tensor.randint(buf.size, low=dtypes.min(buf.dtype), high=dtypes.max(buf.dtype), dtype=buf.dtype).data() \
+                        (Tensor.randint(buf.size, low=0, high=2).cast(buf.dtype).data() if buf.dtype == dtypes.bool else \
+                         Tensor.randint(buf.size, low=dtypes.min(buf.dtype), high=dtypes.max(buf.dtype), dtype=buf.dtype).data()) \
                          for buf in rawbufs]
           for _, tk in lins[::-1]:
             for buf,data in zip(rawbufs, rand_bufs): buf.ensure_allocated().copyin(data)

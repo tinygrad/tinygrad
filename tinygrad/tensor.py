@@ -604,7 +604,7 @@ class Tensor:
     """
     if not isinstance(low, int) or not isinstance(high, int): raise TypeError(f"{low=} and {high=} must be integers")
     dtype = kwargs.pop("dtype", dtypes.int32)
-    if not dtypes.is_int(dtype) and dtype != dtypes.bool: raise TypeError(f"{dtype=} must be int")
+    if not dtypes.is_int(dtype): raise TypeError(f"{dtype=} must be int")
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
