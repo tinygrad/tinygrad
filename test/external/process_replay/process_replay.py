@@ -40,8 +40,8 @@ def process_replay(offset:int):
   cur.close()
 
 if __name__ == "__main__":
-  ASSERT_PROCESS_REPLAY = (k:="[run_process_replay]") not in os.getenv("COMMIT_MESSAGE", k) and k not in os.getenv("PR_TITLE", k)
-  print(ASSERT_PROCESS_REPLAY)
+  ASSERT_PROCESS_REPLAY = (k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)
+  print(f"asserting kernel diff = {ASSERT_PROCESS_REPLAY}")
   conn = db_connection()
   cur = conn.cursor()
   row_count = cur.execute(f"select count(*) from '{table_name}'").fetchone()[0]

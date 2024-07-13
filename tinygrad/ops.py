@@ -168,11 +168,16 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
   sts: Dict[LazyOp, ShapeTracker] = {}
   def dfs(op:LazyOp, st:ShapeTracker):
     if op in sts: return
+    # restore globals from the two stage reduce
+    if op.op is BufferOps.LOAD and op.arg.idx == -1:
+      dfs(local_reduce:=op.src[0].src[0], op.arg.st)
+      return sts.setdefault(op, sts[local_reduce])
     for x in op.src: dfs(x, st)
     # only reduceop is allowed to change shape, limited to turning n to 1
     if op.op in ReduceOps:
-      assert isinstance(op.arg, tuple)
-      st = ShapeTracker.from_shape(tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape)))
+      axis = op.arg[-1] if op.op is ReduceOps.WMMA else op.arg
+      assert isinstance(axis, tuple) and all(isinstance(i, int) for i in axis), f"reduceop must have axis {op.arg}"
+      st = ShapeTracker.from_shape(tuple(1 if i in axis else s for i,s in enumerate(sts[op.src[0]].shape)))
     else:
       # movementops are pushed to the edges with LOAD
       if op.op in BufferOps: st = op.arg.st
