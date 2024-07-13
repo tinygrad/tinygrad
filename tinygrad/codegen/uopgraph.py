@@ -30,9 +30,8 @@ class UPat:
     elif isinstance(src, UPat):
       # repeat if it's a UPat
       self.src = [itertools.repeat(src)]
-      allow_any_len = True
     self.name: Optional[str] = name
-    self.allow_any_len: bool = allow_any_len
+    self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
 
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
@@ -48,7 +47,7 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if pat.src is None: return [store]
   res: List[Dict[str, UOp]] = []
   for vp in pat.src:
-    if not pat.allow_any_len and len(uop.src) != len(vp): return []
+    if pat.allowed_len != 0 and len(uop.src) != pat.allowed_len: return []
     new_stores = [store.copy()]
     for uu, vv in zip(uop.src, vp): new_stores = [rstore for nstore in new_stores for rstore in _match(uu, vv, nstore)]
     res.extend(new_stores)
@@ -387,8 +386,8 @@ constant_folder = PatternMatcher([
   (UOp.var().lt(UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
   (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
-  (UOp.alu(TernaryOps.WHERE, UOp.var(), UOp.var("val"), UOp.var("val")), lambda val: val),
-  (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UOp.var().where(UOp.var("val"), UOp.var("val")), lambda val: val),
+  (UOp.cvar('gate').where(UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
@@ -460,7 +459,6 @@ constant_folder = PatternMatcher([
   (UOp.lt(-UOp.var('x'), UOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(UOp.const(c.dtype, -c.arg), x)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
-  (UPat(UOps.VECTORIZE, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
   (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
   (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.cvar("var"), UOp.var("barrier")),
@@ -493,8 +491,8 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
     if n in replace: return replace[n]
     replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
     if found := nodes.get(replace_source): replace[n] = found
-    else: nodes[replace_source] = replace[n] = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
-    return replace[n]
+    else: nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
+    return found
   return __inner_rewrite(sink)
 
 class UOpGraph:
