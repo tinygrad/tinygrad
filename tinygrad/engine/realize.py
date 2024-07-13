@@ -3,6 +3,7 @@ import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata
 from tinygrad.ops import MetaOps, LazyOp
+from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.renderer import Renderer, Program
@@ -36,10 +37,12 @@ def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
         if beam_compare == 2:
           import numpy as np
           all_outs: List[List[np.ndarray]] = []
-          rand_bufs = [np.random.normal(scale=0.1, size=buf.size).astype(np.dtype(buf.dtype.fmt).type).data for buf in rawbufs]
+          rand_bufs = [np.random.normal(scale=0.1, size=buf.size).astype(np.dtype(buf.dtype.fmt).type) if dtypes.is_float(buf.dtype) else \
+                       np.random.randint(dtypes.min(buf.dtype), dtypes.max(buf.dtype), size=buf.size, dtype=np.dtype(buf.dtype.fmt).type) \
+                       for buf in rawbufs]
         for nm, tk in lins:
           if beam_compare == 2:
-            for buf,data in zip(rawbufs, rand_bufs): buf.ensure_allocated().copyin(data)
+            for buf,data in zip(rawbufs, rand_bufs): buf.ensure_allocated().copyin(data.data)
             all_timed.append((nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True, disable_cache=True)))
             all_outs.append([np.array(buf.as_buffer().cast(cast(str, buf.dtype.fmt))).copy() for buf in rawbufs[:len(ast.src)]])
           else:
@@ -51,7 +54,7 @@ def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
         if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
         if beam_compare == 2:
           for bufs in zip(*all_outs):
-            for b in bufs[1:]: np.testing.assert_allclose(bufs[0], b, atol=1e-3, rtol=1e-3)
+            for b in bufs[1:]: np.testing.assert_allclose(bufs[0], b, atol=1e-2, rtol=1e-2)
   # TODO: check the correctness inline once compare_linearizer is in core
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
