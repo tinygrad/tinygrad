@@ -336,10 +336,10 @@ constant_folder = PatternMatcher([
   (UOp.var("add") + UOp(UOps.WMMA).name("wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # arange loop folding (early)
-  (UOp.alu(TernaryOps.WHERE, UOp.alu(BinaryOps.CMPLT, UOp.alu(BinaryOps.ADD, UOp.var("idx"), UOp.alu(BinaryOps.MUL,
+  (UOp.where(UOp.alu(BinaryOps.CMPLT, UOp.alu(BinaryOps.ADD, UOp.var("idx"), UOp.alu(BinaryOps.MUL,
     UOp.cvar("mval"), UOp(UOps.RANGE, src=(UOp.var("loop_start"), UOp.var("loop_end"))).name("rng"))),
     UOp.cvar("compval")), UOp.cvar("multconst"), UOp.const(None,0)), loop_collapse),
-  (UOp.alu(TernaryOps.WHERE, UOp.alu(BinaryOps.CMPLT, UOp.alu(BinaryOps.ADD, UOp.var("idx"), UOp.alu(UnaryOps.NEG,
+  (UOp.where(UOp.alu(BinaryOps.CMPLT, UOp.alu(BinaryOps.ADD, UOp.var("idx"), UOp.alu(UnaryOps.NEG,
     UOp(UOps.RANGE, src=(UOp.var("loop_start"), UOp.var("loop_end"))).name("rng"))),
     UOp.cvar("compval")), UOp.cvar("multconst"), UOp.const(None, 0)),
     lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
