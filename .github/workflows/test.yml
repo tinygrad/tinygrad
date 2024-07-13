@@ -247,6 +247,9 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test THREEFRY
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py --durations=20
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Run handcode_opt
+        run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 python3 examples/handcode_opt.py
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
         run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
