@@ -349,7 +349,7 @@ constant_folder = PatternMatcher([
   (UOp(UOps.PHI, src=(UOp(UOps.GEP, src=(UOp(UOps.DEFINE_ACC, src=(UOp.cvar(), UOp(UOps.RANGE).name("loop"))).permute(),)).name("phi_input"),
     UOp.alu(BinaryOps.ADD, UOp.var("val1"), UOp.var("val2")))), sum_collapse),
   # deal with UNMUL
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(UOps.UNMUL, src=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
+  (UOp.alu(BinaryOps.MUL, UOp.cvar("c1"), UOp(UOps.UNMUL, src=(UOp.cvar("c2"), UOp.var("v"))).permute()),
    lambda c1,c2,v: v if c1.arg == c2.arg else None),
   (UOp(UOps.UNMUL, src=(UOp.const(None, 0).name('zero'), UOp.var())), lambda zero: zero),
   (UOp(UOps.UNMUL).name('unmul').cast().name('root'), lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.src[0].cast(root.dtype), unmul.src[1]))),
@@ -369,13 +369,13 @@ constant_folder = PatternMatcher([
   (UOp.max(UOp.cvar('c'), -(UOp(UOps.RANGE).name('s'))), lambda c,s: -s if -(s.src[1].arg-1) >= c.arg else None),
   (UOp.max(UOp.cvar('c'), -(UOp(UOps.RANGE).name('s')+UOp.cvar('c2'))), lambda c,s,c2: -(s+c2) if -(s.src[1].arg-1+c2.arg) >= c.arg else None),
   # const rules
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
+  (UOp(UOps.GEP, src=(UOp.cvar("c"),)).name("root"), lambda root, c: UOp.const(root.dtype, c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
   (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST),)), UPat(name="x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
+  (UOp(UOps.PHI, src=(UOp(UOps.DEFINE_ACC).name("acc"), UOp.var("acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
+  (UOp(UOps.PHI, src=(UOp(UOps.DEFINE_ACC, src=(UOp.const())), UOp.var("x"))), lambda x: x),
+  (UOp(UOps.PHI, src=(UOp.const(), UOp.var("x"))), lambda x: x),
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
   (UPat(UOps.DEFINE_ACC, name="root", src=(UPat(UOps.CONST),)), lambda root: UOp.cast(root.src[0], root.dtype)),
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
