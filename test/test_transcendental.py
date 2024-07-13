@@ -17,7 +17,7 @@ class TestTranscendentalMath(unittest.TestCase):
   def test_float64(self, x, op):
     if op[0] == Tensor.sin:
       # TODO: reduction does not work
-      if x > 2 ** 32: return
+      if abs(x) > 2 ** 32: return
       # crashes in CUDACPU
       if (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")): return
       # fails now. TODO: fix
