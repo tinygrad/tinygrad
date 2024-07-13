@@ -26,16 +26,30 @@ def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
       kb.required_optimizations()
       rawbufs = bufs_from_lin(kb, allocate=False)
       k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-      if getenv("BEAM_COMPARE", 1):
+      if beam_compare:=getenv("BEAM_COMPARE", 1):
         # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
         lins: List[Tuple[str, Kernel]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
         if used_tensor_cores:
           lins.append(("hc", Kernel(ast, opts=renderer)))
           lins[-1][1].hand_coded_optimizations()
-        timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+        all_timed = []
+        all_outs: List[List[memoryview]] = []
+        for nm, tk in lins:
+          if beam_compare == 2:
+            import numpy as np
+            for buf in rawbufs: buf.ensure_allocated().copyin(np.random.rand(buf.size).astype(np.dtype(buf.dtype.fmt).type).data)
+            all_timed.append((nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True, disable_cache=True)))
+            all_outs.append([buf.as_buffer().cast(cast(str, buf.dtype.fmt)) for buf in rawbufs[:len(ast.src)]])
+          else:
+            all_timed.append((nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)))
+        timed = sorted(all_timed, key=lambda x: x[2])
+        #timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
         if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
+        if len(all_outs):
+          for bufs in zip(*all_outs):
+            for b in bufs: np.testing.assert_allclose(np.array(bufs[0]), np.array(b), rtol=1e-5)
   # TODO: check the correctness inline once compare_linearizer is in core
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
