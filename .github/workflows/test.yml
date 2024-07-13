@@ -141,10 +141,10 @@ jobs:
             intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
             intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
             intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: 3.12
       - name: Cache python packages
         uses: actions/cache@v4
         with:
@@ -224,10 +224,10 @@ jobs:
   #  steps:
   #  - name: Checkout Code
   #    uses: actions/checkout@v4
-  #  - name: Set up Python 3.11
+  #  - name: Set up Python 3.12
   #    uses: actions/setup-python@v5
   #    with:
-  #      python-version: 3.11
+  #      python-version: 3.12
   #  - name: Cache python packages
   #    uses: actions/cache@v4
   #    with:
@@ -268,10 +268,10 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-    - name: Set up Python 3.11
+    - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
-        python-version: 3.11
+        python-version: 3.12
     - name: Cache python packages
       uses: actions/cache@v4
       with:
@@ -322,10 +322,10 @@ jobs:
 #    steps:
 #    - name: Checkout Code
 #      uses: actions/checkout@v3
-#    - name: Set up Python 3.11
+#    - name: Set up Python 3.12
 #      uses: actions/setup-python@v4
 #      with:
-#        python-version: 3.11
+#        python-version: 3.12
 #    - name: Cache python packages
 #      uses: actions/cache@v4
 #      with:
@@ -362,10 +362,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: 3.12
       - name: Cache python packages
         uses: actions/cache@v4
         with:
@@ -510,10 +510,10 @@ jobs:
   #  steps:
   #    - name: Checkout Code
   #      uses: actions/checkout@v4
-  #    - name: Set up Python 3.11
+  #    - name: Set up Python 3.12
   #      uses: actions/setup-python@v5
   #      with:
-  #        python-version: 3.11
+  #        python-version: 3.12
   #    - name: Cache python packages
   #      uses: actions/cache@v4
   #      with:
