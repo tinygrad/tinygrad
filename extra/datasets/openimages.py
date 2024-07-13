@@ -139,6 +139,10 @@ def export_to_custdict(class_map, annotations, image_list, output_path, classes=
 
   class_map = class_map.merge(categories_map, left_on="DisplayName", right_on="category_name", how="inner")
   class_unique = class_map['LabelName'].unique()
+  class_unique.sort()
+  class_dict = {}
+  for i, c in enumerate(class_unique):
+    class_dict[c] = i
 
   for i, row in tqdm(annotations.iterrows(), total=len(annotations)):
     xmin, ymin, xmax, ymax, path, cat_id = [row[k] for k in ["XMin", "YMin", "XMax", "YMax", "ImageID", "LabelName"]]
@@ -151,7 +155,7 @@ def export_to_custdict(class_map, annotations, image_list, output_path, classes=
         width, height = new_annotations[path]['size']
       x,y,w,h = xmin * width, ymin * height, (xmax - xmin) * width, (ymax - ymin) * height
       new_annotations[path]['bbox'].append([x, y, w, h])
-      catIdx = int(class_map.loc[class_map['LabelName']==cat_id, 'category_id'].values[0])
+      catIdx = class_dict[cat_id]
       new_annotations[path]['CatID'].append(catIdx)
 
   with open(output_path, "w") as fp:
