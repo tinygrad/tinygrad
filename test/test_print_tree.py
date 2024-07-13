@@ -3,9 +3,7 @@ import unittest
 from tinygrad.engine.graph import print_tree
 
 from tinygrad import Tensor, dtypes
-from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UPat
-from tinygrad.ops import BinaryOps
+from tinygrad.codegen.uops import UOp
 
 import sys, io
 
@@ -19,7 +17,7 @@ class TestPrintTree(unittest.TestCase):
     return capturedOutput.getvalue()
 
   def test_print_uop(self):
-    x = Tensor.arange(10).schedule()[-1].ast[0]
+    x = Tensor.arange(10).schedule()[-1].ast.src[0]
     output =  self._capture_print(lambda: print_tree(x))
     assert output == '\
   0 ━┳ BufferOps.STORE MemBuffer(idx=0, dtype=dtypes.int, \
@@ -43,6 +41,7 @@ ker(views=(View(shape=(11, 19), strides=(0, 0), offset=0, mask=((0, 11), (9, 19)
   4  ┗━┳ UOps.ALU UnaryOps.NEG\n\
   5    ┗━━ UOps.CONST 2\n'
 
+    """
     x = UPat(UOp.alu(BinaryOps.ADD, UOp.var("x", dtypes.int), UOp.var("x", dtypes.int)))
     assert self._capture_print(lambda: print_tree(x)) == '\
   0 ━━ UOps.ALU            : dtypes.int                [<UOps.VAR: 2>, <UOps.VAR: 2>]   BinaryOps.ADD None\n'
@@ -62,6 +61,7 @@ ker(views=(View(shape=(11, 19), strides=(0, 0), offset=0, mask=((0, 11), (9, 19)
   9    ┃ ┗━━ None None\n\
  10    ┗━┳ UOps.GEP 3\n\
  11      ┗━━ None None\n'
+    """
 
 if __name__ == "__main__":
   unittest.main()

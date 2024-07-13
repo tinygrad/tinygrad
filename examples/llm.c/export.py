@@ -7,7 +7,7 @@ from train_gpt2 import GPT, GPTConfig
 from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GRAPH, GlobalCounters, ansilen, to_function_name
 from tinygrad.engine.schedule import create_schedule, memory_planner
 from tinygrad.engine.realize import get_linearizer, run_schedule
-from tinygrad.ops import BufferOps, LoadOps
+from tinygrad.ops import BufferOps, MetaOps
 
 TIMING = getenv("TIMING")
 

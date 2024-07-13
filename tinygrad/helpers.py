@@ -106,7 +106,7 @@ WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEF
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
 MULTIOUTPUT, PROFILE, TRANSCENDENTAL = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("TRANSCENDENTAL", 1)
 USE_TC, TC_OPT = ContextVar("TC", 1), ContextVar("TC_OPT", 0)
-VERIFY_POST_FIXUP = ContextVar("VERIFY_POST_FIXUP", 0)
+FUSE_AS_ONE_KERNEL = ContextVar("FUSE_AS_ONE_KERNEL", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -197,7 +197,8 @@ def db_connection():
   global _db_connection
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
-    _db_connection = sqlite3.connect(CACHEDB)
+    _db_connection = sqlite3.connect(CACHEDB, timeout=30)
+    _db_connection.execute("PRAGMA journal_mode=WAL")
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
 

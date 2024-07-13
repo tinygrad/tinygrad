@@ -26,9 +26,9 @@ class ReduceOps(Enum):
   """A -> B (reduce)"""
   SUM = auto(); MAX = auto(); WMMA = auto() # noqa: E702
 class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
-class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
-
-Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
+class MetaOps(Enum):
+  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto(); SINK = auto() # noqa: E702
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps, BufferOps]
 
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
@@ -44,6 +44,11 @@ class ConstBuffer:
   val: ConstType | Variable
   dtype: DType
   st: ShapeTracker
+
+@dataclass(frozen=True)
+class KernelInfo:
+  local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
+  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to EXPAND)
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:
@@ -64,7 +69,10 @@ class LazyOp:
     if self.op is ReduceOps.WMMA: return self.arg[3]   # WMMA can change the type
     if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
     return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPNE} else self.src[-1].dtype
-
+  @functools.cached_property
+  def full_shape(self):
+    if len(self.src) == 0 and self.op in BufferOps: return self.arg.st.shape
+    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src]))
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(functools.reduce(lambda x,y: x+y, [s.key for s in self.src], str((self.op, self.arg)).encode())).digest()
@@ -155,7 +163,8 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
 # the living definition of LazyOps
-def verify_lazyop(*ast:LazyOp):
+def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
+  assert ast.op is MetaOps.SINK, "must be SINK"
   sts: Dict[LazyOp, ShapeTracker] = {}
   def dfs(op:LazyOp, st:ShapeTracker):
     if op in sts: return
@@ -170,8 +179,9 @@ def verify_lazyop(*ast:LazyOp):
       else: st = sts[op.src[0]]
       for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
     sts[op] = st
-  for i, out in enumerate(ast):
+  for i, out in enumerate(ast.src):
     assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
     assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
-    assert out.arg.st.size == ast[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
+    assert out.arg.st.size == ast.src[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
     dfs(out, out.arg.st)
+  return sts

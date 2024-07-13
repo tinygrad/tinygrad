@@ -532,9 +532,9 @@ def EyeLike(x: Tensor, dtype=None, k=0):
   else: dtype = DTYPE_MAP[int(dtype)]
   dim = min(x.shape)
   if x.shape[0] == x.shape[1]:
-    return Tensor.eye(dim=dim, dtype=dtype)
+    return Tensor.eye(dim, dtype=dtype)
   padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
-  return Tensor.eye(dim=dim, dtype=dtype).pad(padarg)
+  return Tensor.eye(dim, dtype=dtype).pad(padarg)
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
