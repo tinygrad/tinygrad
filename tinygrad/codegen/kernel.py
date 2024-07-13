@@ -733,6 +733,8 @@ class Kernel:
     if DEBUG >= 3:
       print(self.name)
       print_tree(modified_ast)
+    # TODO: fix these
+    if not self.group_for_reduces and not self.tensor_core: verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)
 
