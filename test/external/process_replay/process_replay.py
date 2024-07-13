@@ -8,6 +8,7 @@ page_size = 100
 table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
 
 def process_replay(offset:int):
+  ASSERT_PROCESS_REPLAY = (k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)
   conn = db_connection()
   cur = conn.cursor()
   cur.execute(f"SELECT val FROM '{table_name}' LIMIT ? OFFSET ?", (page_size, offset))
@@ -40,8 +41,6 @@ def process_replay(offset:int):
   cur.close()
 
 if __name__ == "__main__":
-  ASSERT_PROCESS_REPLAY = (k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)
-  print(f"asserting kernel diff = {ASSERT_PROCESS_REPLAY}")
   conn = db_connection()
   cur = conn.cursor()
   row_count = cur.execute(f"select count(*) from '{table_name}'").fetchone()[0]
