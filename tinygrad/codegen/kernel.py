@@ -733,6 +733,8 @@ class Kernel:
     if DEBUG >= 3:
       print(self.name)
       print_tree(modified_ast)
+    # TODO: fix group_for_reduces in verify_lazyop
+    if not self.group_for_reduces: verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)
 
