@@ -35,6 +35,7 @@ assert val == 5
 print("******** second, the Device ***********")
 
 DEVICE = "CLANG"   # NOTE: you can change this!
+# DEVICE = "INTEL"   # NOTE: you can change this!
 
 import struct
 from tinygrad.dtype import dtypes
@@ -61,6 +62,7 @@ for u in lin.uops: print(u)
 
 # compile a program (and print the source)
 fxn = CompiledRunner(lin.to_program())
+print("fxn.p.src") 
 print(fxn.p.src)
 # NOTE: fxn.clprg is the ClangProgram
 
@@ -94,6 +96,7 @@ for si in sched: print(si.ast[0].op)  # NOTE: the first two convert it to CLANG
 
 # DEBUGGING: print the compute ast as a tree
 from tinygrad.engine.graph import print_tree
+print("sched[-1].ast[0]")
 print_tree(sched[-1].ast[0])
 # NOTE: sched[-1].ast is the same as st_0 above
 
