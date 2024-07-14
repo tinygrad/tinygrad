@@ -6,8 +6,8 @@ Device.DEFAULT = "CLANG"
 from train_gpt2 import GPT, GPTConfig
 from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GRAPH, GlobalCounters, ansilen, to_function_name
 from tinygrad.engine.schedule import create_schedule, memory_planner
-from tinygrad.engine.realize import get_linearizer, run_schedule
-from tinygrad.ops import BufferOps, LoadOps
+from tinygrad.engine.realize import get_kernel, run_schedule
+from tinygrad.ops import BufferOps, MetaOps
 
 TIMING = getenv("TIMING")
 
@@ -46,7 +46,7 @@ if __name__ == "__main__":
   ast_dedup = dedup([si.ast for si in sched if si.ast[0].op is BufferOps.STORE])
   srcs = {}
   for ast in ast_dedup:
-    k = get_linearizer(Device["CLANG"].renderer, ast)
+    k = get_kernel(Device["CLANG"].renderer, ast)
     k.linearize()
     src = Device["CLANG"].renderer.render(to_function_name(k.name), k.uops)
     srcs[ast] = (k.name, src)

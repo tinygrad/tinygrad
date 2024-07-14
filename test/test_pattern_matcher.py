@@ -1,8 +1,9 @@
 import unittest
 from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
-from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp, UPat
+from tinygrad.ops import BinaryOps, TernaryOps
+from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat, _match
 
 class TestPatternMatcher(TestUOps):
   def test_simple_match(self):
@@ -46,6 +47,7 @@ class TestPatternMatcher(TestUOps):
     self.assertEqual(matcher.rewrite(c4), None)
     self.assertEqual(matcher.rewrite(c5), None)
 
+  @unittest.skip("this is not supported any more")
   def test_arg_set(self):
     matcher = PatternMatcher([(UPat(UOps.ALU, BinaryOps.MUL, (UPat(UOps.CONST, {-1, 1}), UPat(UOps.CONST, 2)), name="x"), lambda x: x)])
     y1 = UOp(UOps.CONST, dtypes.int, arg=1)
@@ -122,16 +124,25 @@ class TestPatternMatcher(TestUOps):
     self.assertEqual(matcher.rewrite(c4), None)
 
   def test_allow_len(self):
-    matcher = PatternMatcher([(UPat(UOps.ALU, name="x", src=(UPat(UOps.CONST),), allow_len={3}), lambda x: x)])
+    matcher = PatternMatcher([(UPat(UOps.ALU, name="x", src=(UPat(UOps.CONST),), allow_any_len=True, arg=TernaryOps.MULACC), lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     c3 = UOp(UOps.CONST, dtypes.float, arg=3.0)
-    c4 = UOp(UOps.ALU, dtypes.float, (c1,), UnaryOps.NEG)
+    #c4 = UOp(UOps.ALU, dtypes.float, (c1,), UnaryOps.NEG)
     c5 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
     c6 = UOp(UOps.ALU, dtypes.float, (c1,c2,c3), TernaryOps.MULACC)
-    self.assertEqual(matcher.rewrite(c4), c4)
+    #self.assertEqual(matcher.rewrite(c4), c4)
     self.assertEqual(matcher.rewrite(c5), None)
     self.assertEqual(matcher.rewrite(c6), c6)
+
+  def test_deep_src_permutations(self):
+    c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
+    c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
+    u1 = (c1 + c2) + c1
+    u2 = (c2 + c1) + c1
+    pat = UPat(UOps.ALU, src = (UPat(UOps.ALU, src=[UPat(name='a'), UPat(name='b')]), UPat(name='b')))
+    assert _match(u1, pat, {})
+    assert _match(u2, pat, {})
 
   @unittest.skip("no longer supported")
   def test_rewrite_graph_folds(self):
