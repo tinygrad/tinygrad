@@ -7,7 +7,8 @@ from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSIO
 page_size = 100
 table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
 
-def process_replay(offset:int):
+def process_replay(offset:int, early_stop):
+  if early_stop.is_set(): return
   ASSERT_PROCESS_REPLAY = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or \
       k in os.getenv("PR_TITLE", k)))
   MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
@@ -44,6 +45,7 @@ def process_replay(offset:int):
         if ASSERT_PROCESS_REPLAY: raise e
         if changed > MAX_DIFF_PCT:
           print(f"WARN: detected chanegs in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
+          early_stop.set()
           break
   conn.commit()
   cur.close()
@@ -55,4 +57,12 @@ if __name__ == "__main__":
   conn.commit()
   cur.close()
   offsets = range(0, row_count, page_size)
-  with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool: list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
+  early_stop = multiprocessing.Event()
+  with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+   results = []
+   for offset in tqdm(offsets, total=len(offsets)):
+     if early_stop.is_set(): break
+     results.append(pool.apply_async(process_replay, (offset, early_stop)))
+  for result in results: result.wait()
+  if early_stop.is_set(): pool.terminate()
+  pool.join()
