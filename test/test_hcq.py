@@ -306,8 +306,7 @@ class TestHCQ(unittest.TestCase):
     assert (0.3 if CI else 2) <= gb_s <= 50
 
   def test_timeline_signal_rollover(self):
-    # NV 64bit, AMD 32bit
-    TestHCQ.d0.timeline_value = (1 << 64) - 20 if Device.DEFAULT == "NV" else (1 << 32) - 20 # close value to reset
+    TestHCQ.d0.timeline_value = (1 << 31) - 20 # close value to reset
     TestHCQ.d0.hw_compute_queue_t().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
 

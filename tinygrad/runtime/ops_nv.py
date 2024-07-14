@@ -581,7 +581,7 @@ class NVDevice(HCQCompatCompiled):
     NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
     self.cmdq_wptr = 0
 
-    if self.timeline_value > (1 << 63): self._wrap_timeline_signal()
+    if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE: self._prof_process_events()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
