@@ -306,18 +306,17 @@ class TestHCQ(unittest.TestCase):
     assert (0.3 if CI else 2) <= gb_s <= 50
 
   def test_timeline_signal_rollover(self):
-    TestHCQ.d0.timeline_value = (1 << 31) - 20 # close value to reset
-    TestHCQ.d0.hw_compute_queue_t().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1).submit(TestHCQ.d0)
-    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
+    for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
+      with self.subTest(name=str(queue_type)):
+        TestHCQ.d0.timeline_value = (1 << 32) - 20 # close value to reset
+        queue_type().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1).submit(TestHCQ.d0)
+        TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
 
-    for _ in range(40):
-      q = TestHCQ.d0.hw_compute_queue_t()
-      q.wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
-      q.exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
-      q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
-      TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
-      TestHCQ.d0.timeline_value += 1
-      assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
+        for _ in range(40):
+          queue_type().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+          TestHCQ.d0.timeline_value += 1
+          TestHCQ.d0.synchronize()
 
 if __name__ == "__main__":
   unittest.main()
