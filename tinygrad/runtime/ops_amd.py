@@ -3,8 +3,8 @@ from typing import Tuple, List, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWComputeQueue, HWCopyQueue, hcq_profile, \
-                            Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE, mv_address
+                            HCQCompatProgram, Compiler, CompileError, BufferOptions
+from tinygrad.helpers import getenv, to_mv, round_up, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.support.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -268,7 +268,7 @@ class AMDCopyQueue(HWCopyQueue):
     device.sdma_queue.doorbell[0] = device.sdma_queue.put_value
 
 SHT_PROGBITS, SHF_ALLOC = 0x1, 0x2
-class AMDProgram:
+class AMDProgram(HCQCompatProgram):
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
@@ -289,8 +289,6 @@ class AMDProgram:
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
-    self.kernargs_alloc_size = self.kernargs_segment_size
-    self.kernargs_offset = 0
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.device.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
@@ -314,23 +312,22 @@ class AMDProgram:
 
     AMDComputeQueue().memory_barrier().submit(self.device)
 
+    super().__init__(kernargs_alloc_size=self.kernargs_segment_size)
+
   # NOTE: no programs are ever freed
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
+
+  def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
+    if (given:=len(bufs)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
+    if len(bufs): to_mv(kernargs_ptr, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
+    if len(vals): to_mv(kernargs_ptr + len(bufs) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if self.device.kernargs_ptr + self.kernargs_alloc_size > (self.device.kernargs.va_addr + self.device.kernargs.size):
       self.device.kernargs_ptr = self.device.kernargs.va_addr
 
-    if not hasattr(self, "args_struct_t"):
-      self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
-                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
-      if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
-        raise RuntimeError(f"AMDProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
-
-    args_st = self.args_struct_t.from_address(self.device.kernargs_ptr)
-    for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
-    for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
+    self.fill_kernargs(self.device.kernargs_ptr, args, vals)
 
     q = AMDComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
