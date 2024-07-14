@@ -319,7 +319,7 @@ class AMDProgram(HCQCompatProgram):
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
-  def fill_kernargs(self, kernargs_ptr:int, args:List[Any], vals:Tuple[int, ...]=()) -> int:
+  def fill_kernargs(self, kernargs_ptr:int, args:List[Any], vals:Tuple[int, ...]=()):
     if (given:=len(args)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
     if len(args): to_mv(kernargs_ptr, len(args) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in args])
     if len(vals): to_mv(kernargs_ptr + len(args) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
