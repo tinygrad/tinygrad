@@ -27,7 +27,7 @@ def process_replay(offset:int):
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
       except Exception as e:
-        logging.info("WARN: FAILED TO RECREATE KERNEL")
+        logging.warn("FAILED TO RECREATE KERNEL")
         logging.info(ast)
         logging.info(applied_opts)
         logging.info(e)
@@ -45,7 +45,7 @@ def process_replay(offset:int):
           logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ASSERT_DIFF: raise e
         if changed > MAX_DIFF_PCT:
-          logging.info(f"WARN: detected chanegs in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
+          logging.warn(f"WARN: detected chanegs in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
           early_stop.set()
           break
   conn.commit()
