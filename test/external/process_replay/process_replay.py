@@ -6,13 +6,18 @@ from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSIO
 
 page_size = 100
 table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
+early_stop = multiprocessing.Event()
 
 def process_replay(offset:int):
+  if early_stop.is_set(): return
   ASSERT_PROCESS_REPLAY = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or \
       k in os.getenv("PR_TITLE", k)))
+  MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
+  assert MAX_DIFF_PCT <= 100
   conn = db_connection()
   cur = conn.cursor()
   cur.execute(f"SELECT val FROM '{table_name}' LIMIT ? OFFSET ?", (page_size, offset))
+  changed = 0
   for row in cur.fetchall():
     ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
     with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache}):
@@ -31,6 +36,7 @@ def process_replay(offset:int):
       # try compare
       try: assert compare_src == good_src
       except AssertionError as e:
+        changed += 1
         print("PROCESS REPLAY DETECTED CHANGE")
         print(ast)
         print(applied_opts)
@@ -38,6 +44,10 @@ def process_replay(offset:int):
         for line in diff:
           print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ASSERT_PROCESS_REPLAY: raise e
+        if changed > MAX_DIFF_PCT:
+          print(f"WARN: detected chanegs in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
+          early_stop.set()
+          break
   conn.commit()
   cur.close()
 
