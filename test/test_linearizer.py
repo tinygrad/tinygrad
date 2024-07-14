@@ -125,6 +125,21 @@ class TestLinearizer(unittest.TestCase):
     y_tiny = x.var(axis=2, correction=0)
     np.testing.assert_allclose(y_tiny.numpy(), wanna_output, atol=1e-4, rtol=1e-4)
 
+  @unittest.expectedFailure
+  def test_indexing_multireduce(self):
+    arange = LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False))))),), arg=(1,))
+    # TODO: BufferOps.CONST (4, 16384, 256) != BinaryOps.ADD (16384, 1)
+    expanded_add = LazyOp(op=BinaryOps.ADD, src=(arange, LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None)
+    alu = LazyOp(op=BinaryOps.CMPNE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),)))), expanded_add), arg=None)
+    first_reduce = LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPNE, src=(alu, LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float)
+    second_reduce_input = LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 256, 1), offset=0, mask=None, contiguous=False),)))), first_reduce), arg=None)
+    r1 = LazyOp(op=ReduceOps.SUM, src=(second_reduce_input, ), arg=(1,))
+    store = LazyOp(op=BufferOps.STORE, src=(r1, ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 1, 256), strides=(256, 0, 1), offset=0, mask=None, contiguous=True),))))
+    x = Tensor.rand(16384, 256).realize()
+    idxs = Tensor([0,3,5,6]).realize()
+    real_index = x.numpy()[idxs.numpy()]
+    helper_linearizer_ast((store, ), [x, idxs], wanna_output=[real_index])
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_end_local(self):
