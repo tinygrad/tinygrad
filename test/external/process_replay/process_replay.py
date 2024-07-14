@@ -10,7 +10,7 @@ ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 assert MAX_DIFF_PCT < 100
 early_stop = multiprocessing.Event()
-logging.basicConfig(level=logging.INFO, format='%(processName)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 def process_replay(offset:int):
   if early_stop.is_set(): return
@@ -45,7 +45,7 @@ def process_replay(offset:int):
           logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ASSERT_DIFF: raise e
         if changed > MAX_DIFF_PCT:
-          logging.warn(f"WARN: detected chanegs in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
+          logging.warn(f"detected chanegs in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
           early_stop.set()
           break
   conn.commit()
