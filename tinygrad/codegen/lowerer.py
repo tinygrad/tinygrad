@@ -86,7 +86,7 @@ class IndependentLowerer:
     if opts.has_local:
       # define indexes for GPU-like execution
       self.idxs = get_grouped_dims("gidx", 0, full_shape[:global_dims], opts.global_max) + \
-                  get_grouped_dims("lidx", global_dims, full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
+                  get_grouped_dims("lidx", 0, full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
     else:
       # all loops are RANGES
       self.idxs = [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, False))
