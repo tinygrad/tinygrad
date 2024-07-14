@@ -18,7 +18,7 @@ class UnaryOps(Enum):
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto() # noqa: E702
 class TernaryOps(Enum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -26,9 +26,9 @@ class ReduceOps(Enum):
   """A -> B (reduce)"""
   SUM = auto(); MAX = auto(); WMMA = auto() # noqa: E702
 class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
-class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
-
-Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
+class MetaOps(Enum):
+  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto(); SINK = auto() # noqa: E702
+Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps, BufferOps]
 
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
@@ -44,6 +44,11 @@ class ConstBuffer:
   val: ConstType | Variable
   dtype: DType
   st: ShapeTracker
+
+@dataclass(frozen=True)
+class KernelInfo:
+  local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
+  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to EXPAND)
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:
@@ -64,7 +69,10 @@ class LazyOp:
     if self.op is ReduceOps.WMMA: return self.arg[3]   # WMMA can change the type
     if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
     return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPNE} else self.src[-1].dtype
-
+  @functools.cached_property
+  def full_shape(self):
+    if len(self.src) == 0 and self.op in BufferOps: return self.arg.st.shape
+    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src]))
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(functools.reduce(lambda x,y: x+y, [s.key for s in self.src], str((self.op, self.arg)).encode())).digest()
@@ -155,23 +163,30 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
 # the living definition of LazyOps
-def verify_lazyop(*ast:LazyOp):
+def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
+  assert ast.op is MetaOps.SINK, "must be SINK"
   sts: Dict[LazyOp, ShapeTracker] = {}
   def dfs(op:LazyOp, st:ShapeTracker):
     if op in sts: return
+    # restore globals from the two stage reduce
+    if op.op is BufferOps.LOAD and op.arg.idx == -1:
+      dfs(local_reduce:=op.src[0].src[0], op.arg.st)
+      return sts.setdefault(op, sts[local_reduce])
     for x in op.src: dfs(x, st)
     # only reduceop is allowed to change shape, limited to turning n to 1
     if op.op in ReduceOps:
-      assert isinstance(op.arg, tuple)
-      st = ShapeTracker.from_shape(tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape)))
+      axis = op.arg[-1] if op.op is ReduceOps.WMMA else op.arg
+      assert isinstance(axis, tuple) and all(isinstance(i, int) for i in axis), f"reduceop must have axis {op.arg}"
+      st = ShapeTracker.from_shape(tuple(1 if i in axis else s for i,s in enumerate(sts[op.src[0]].shape)))
     else:
       # movementops are pushed to the edges with LOAD
       if op.op in BufferOps: st = op.arg.st
       else: st = sts[op.src[0]]
       for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
     sts[op] = st
-  for i, out in enumerate(ast):
+  for i, out in enumerate(ast.src):
     assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
     assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
-    assert out.arg.st.size == ast[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
+    assert out.arg.st.size == ast.src[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
     dfs(out, out.arg.st)
+  return sts

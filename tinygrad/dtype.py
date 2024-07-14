@@ -57,6 +57,10 @@ class dtypes:
     if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
     return -float("inf") if dtypes.is_float(dtype) else False
   @staticmethod
+  def max(dtype:DType):
+    if dtypes.is_int(dtype): return (2**(dtype.itemsize*8-(0 if dtypes.is_unsigned(dtype) else 1)))-1
+    return float("inf") if dtypes.is_float(dtype) else True
+  @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bigint: Final[DType] = DType(-1, 0, "bigint", None, 1)   # arbitrary precision integer
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
@@ -110,6 +114,7 @@ def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default', 'bigint')) or v.__class__ is staticmethod)}
 INVERSE_DTYPES_DICT = {v.name:k for k,v in DTYPES_DICT.items()}
+INVERSE_DTYPES_DICT['bigint'] = 'bigint'
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
