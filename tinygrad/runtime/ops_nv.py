@@ -275,6 +275,7 @@ class NVProgram(HCQCompatProgram):
                             constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
 
     # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
+    self.constbuf_0_size = constant_buffers_data[0].nbytes if 0 in constant_buffers_data else 0
     if 0 in constant_buffers_data: constant_buffers_data.pop(0)
 
     off = round_up(self.program.nbytes, 128)
@@ -307,7 +308,6 @@ class NVProgram(HCQCompatProgram):
       off += round_up(data.nbytes, 128)
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    self.constbuf_0_size = constant_buffers_data[0].nbytes if 0 in constant_buffers_data else 0
     super().__init__(kernargs_alloc_size=round_up(self.constbuf_0_size, 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
 
   def __del__(self):
@@ -317,7 +317,7 @@ class NVProgram(HCQCompatProgram):
     # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
     if MOCKGPU: self.constbuffer_0[0:2] = [len(bufs), len(vals)]
     kernargs = [arg_half for arg in bufs for arg_half in nvdata64_le(arg.va_addr)] + list(vals)
-    to_mv(kernargs_ptr, self.kernargs_args_offset + len(kernargs) * 4).cast('I')[:] = array.array('I', self.constbuffer_0 + kernargs)
+    to_mv(kernargs_ptr, (len(self.constbuffer_0) + len(kernargs)) * 4).cast('I')[:] = array.array('I', self.constbuffer_0 + kernargs)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
