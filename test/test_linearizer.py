@@ -619,7 +619,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
       # TODO: fix reverse_dims
-      idxs = get_grouped_dims(prefix, 0, dims, max_sizes)
+      idxs = get_grouped_dims(prefix, dims, max_sizes)
       loop_idxs = dedup(flatten([[y for y in sorted(list(x.sparents)) if y.op is UOps.SPECIAL] for x in idxs]))
       sizes = [x.arg[2] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
