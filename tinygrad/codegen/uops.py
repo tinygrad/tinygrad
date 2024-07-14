@@ -475,5 +475,5 @@ class UOpGraph:
         flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
       elif u.op is UOps.WMMA and u not in dont_count:
         assert u.arg[1] is not None
-        flops += 2 * prod(u.arg[1]) // 32 * mults
+        flops += 2 * prod(u.arg[1]) // 32 * mults # change this to 8, because warp size is smaller
     return flops, mem
