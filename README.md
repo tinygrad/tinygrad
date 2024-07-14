@@ -175,4 +175,4 @@ python3 -m pytest test/                 # whole test suite
 
 #### Process replay tests
 
-[Process replay](https://github.com/tinygrad/tinygrad/blob/master/test/external/process_replay/process_replay.py) compares your PR's generated kernels against master. If your PR is a refactor or speedup without any expected behavior change, It should include [run_process_replay] in the PR title. [example](https://github.com/tinygrad/tinygrad/pull/4995). Note that you should keep your branch up-to-date with master.
+[Process replay](https://github.com/tinygrad/tinygrad/blob/master/test/external/process_replay/process_replay.py) compares your PR's generated kernels against master. If your PR is a refactor or speedup without any expected behavior change, It should include [run_process_replay] in the PR title, [example](https://github.com/tinygrad/tinygrad/pull/4995). Note that you should keep your branch up-to-date with master.
