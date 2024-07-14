@@ -494,11 +494,11 @@ constant_folder = PatternMatcher([
   (UOp(UOps.CAST).name("root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (UOp(UOps.VECTORIZE).name("root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
-  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
-  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.cvar("var"), UOp.var("barrier")),
+  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.var("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
+  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.bool, True), UOp.var("var"), UOp.var("barrier")),
    lambda buf,idx,var,barrier: UOp.load(buf, idx, barrier, dtype=var.dtype)),
   (UOp.load(UOp.var(), UOp.var(), UOp.const(dtypes.bool, False), UOp.var("var")), lambda var: var),
-  (UOp.load(UOp.var(), UOp.var(), UOp.const(dtypes.bool, False), UOp.cvar("var"), UOp.var()), lambda var: var),
+  (UOp.load(UOp.var(), UOp.var(), UOp.const(dtypes.bool, False), UOp.var("var"), UOp.var()), lambda var: var),
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(dtypes.bool, True)), UOp.store),
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(dtypes.bool, False)), lambda: UOp(UOps.NOOP)),
   # remove NOOPs from SINK
