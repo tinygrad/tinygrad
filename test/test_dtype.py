@@ -239,11 +239,35 @@ class TestUint8DType(TestDType):
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
+def _test_bitcasted(t: Tensor, dt: DType, expected):
+  np.testing.assert_allclose(t.bitcast(dt).numpy(), expected)
+
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self):
+    # _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8)
+    t = Tensor.empty((128, 128), dtype=dtypes.uint8, device="CLANG") # uint8
+    # all zeroes
+    _test_bitcasted(t, dtypes.float16, 0.0)
+    _test_bitcasted(t, dtypes.uint16, 0)
+    _test_bitcasted(t, dtypes.float32, 0.0)
+    _test_bitcasted(t, dtypes.uint32, 0)
+    # pi in float16 stored via int16
+    t.bitcast(dtypes.uint16).realize().assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16, device="CLANG")).realize()
+    _test_bitcasted(t, dtypes.float16, 3.140625)
+    _test_bitcasted(t, dtypes.float32, 50.064727)
+    _test_bitcasted(t, dtypes.uint16, 0x4248)
+    _test_bitcasted(t, dtypes.uint32, 0x42484248)
+    # pi in float32 stored via float32
+    t.bitcast(dtypes.float32).realize().assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32, device="CLANG")).realize()
+    _test_bitcasted(t, dtypes.float32, 3.1415927)
+    _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
+
     with self.assertRaises(RuntimeError):
-      _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16)
+
+    with self.assertRaises(RuntimeError):
+      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True).bitcast(dtypes.float16)
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
