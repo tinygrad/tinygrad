@@ -682,7 +682,7 @@ class Kernel:
             permaxis += list(range(wd+len(warp_dims), tcd))
             for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
             permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
-            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape)
+            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device == "AMD":
             reduce_axes = [self.shape_len-self.upcasted]
@@ -733,8 +733,7 @@ class Kernel:
     if DEBUG >= 3:
       print(self.name)
       print_tree(modified_ast)
-    # TODO: fix group_for_reduces in verify_lazyop
-    if not self.group_for_reduces: verify_lazyop(modified_ast)
+    verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)
 
@@ -761,7 +760,7 @@ class Kernel:
     self.linearize()
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
     if getenv("RUN_PROCESS_REPLAY"):
-      table_name = f"process_replay_{getenv('GITHUB_SHA', 'HEAD')}"
+      table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
     info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed
     ops, mem = flops_mem(self.uops.uops)

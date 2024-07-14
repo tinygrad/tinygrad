@@ -112,6 +112,9 @@ class BitwiseAnd(Function):
 class BitwiseOr(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.OR, y)
 
+class Threefry(Function):
+  def forward(self, x:LazyBuffer, seed:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.THREEFRY, seed)
+
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.ADD, y)
 
