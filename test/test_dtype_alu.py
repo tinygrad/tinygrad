@@ -5,7 +5,7 @@ import operator
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import UnaryOps
@@ -191,7 +191,11 @@ class TestFromFuzzer(unittest.TestCase):
     next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
     ulp = next_float - 1.0
     ulp = 1.0 * ulp
-    np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
+
+    # this is fine
+    # with Context(TRANSCENDENTAL=0): np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
+    with Context(TRANSCENDENTAL=1):
+      np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
 
   @given(strat.sampled_from(dtypes_float))
   def test_log2(self, dtype):
