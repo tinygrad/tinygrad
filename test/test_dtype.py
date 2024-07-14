@@ -245,21 +245,17 @@ def _test_bitcasted(t: Tensor, dt: DType, expected):
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self):
-    # _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8)
-    t = Tensor.empty((128, 128), dtype=dtypes.uint8, device="CLANG") # uint8
-    # all zeroes
+    t = Tensor.empty((128, 128), dtype=dtypes.uint8) # uint8
     _test_bitcasted(t, dtypes.float16, 0.0)
     _test_bitcasted(t, dtypes.uint16, 0)
     _test_bitcasted(t, dtypes.float32, 0.0)
     _test_bitcasted(t, dtypes.uint32, 0)
-    # pi in float16 stored via int16
-    t.bitcast(dtypes.uint16).realize().assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16, device="CLANG")).realize()
+    t.bitcast(dtypes.uint16).realize().assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
     _test_bitcasted(t, dtypes.float16, 3.140625)
     _test_bitcasted(t, dtypes.float32, 50.064727)
     _test_bitcasted(t, dtypes.uint16, 0x4248)
     _test_bitcasted(t, dtypes.uint32, 0x42484248)
-    # pi in float32 stored via float32
-    t.bitcast(dtypes.float32).realize().assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32, device="CLANG")).realize()
+    t.bitcast(dtypes.float32).realize().assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
 
