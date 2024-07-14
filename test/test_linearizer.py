@@ -647,7 +647,7 @@ class TestLinearizer(unittest.TestCase):
     # _assert_grouped_dims("gidx", (128,3,4), (16,4,256), False, [16,4,24])
 
     # collapse on onto the left most axis
-    _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), False, [6,4,5])
+    _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), False, [2,3,20])
     # _assert_grouped_dims("gidx", (2,3,4,5), (32,16,16), True, [20,3,2])
     # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (32,16,16), True, [20,3,Variable("start_pos",1,2)])
 
@@ -655,7 +655,7 @@ class TestLinearizer(unittest.TestCase):
     # _assert_grouped_dims("gidx", (2,3,4,5), (4,16,16), False, [2,12,5])
     # _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), True, [5,12,2])
 
-    _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (16,16,16), False, [Variable("start_pos",1,2)*3,4,5])
+    _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (16,16,16), False, [Variable("start_pos",1,2),3,20])
 
     # # dim too large and not factorable
     # with self.assertRaises(AssertionError):

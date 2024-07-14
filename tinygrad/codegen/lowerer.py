@@ -55,6 +55,7 @@ else:
 
 def get_grouped_dims(prefix, start_dim, dims, max_sizes:Optional[Tuple[int, ...]]) -> List[UOp]:
   # TODO: this should be per dim max
+  if prefix.startswith("g"): dims = dims[::-1]
   maxdim = len(max_sizes) if max_sizes is not None else 0
   local_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (),
     (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(dims[:-(maxdim-1)]),) + dims[-(maxdim-1):] if len(dims) > maxdim else dims)]
@@ -65,7 +66,7 @@ def get_grouped_dims(prefix, start_dim, dims, max_sizes:Optional[Tuple[int, ...]
       nli.append(dd % s)
       dd //= s
     local_idxs = nli + local_idxs[-(maxdim-1):]
-  return local_idxs
+  return local_idxs[::-1] if prefix.startswith("g") else local_idxs
 
 class IndependentLowerer:
   def lower(self, ast:LazyOp, opts:Renderer) -> UOp:
