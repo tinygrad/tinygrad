@@ -415,7 +415,7 @@ def train_retinanet():
   model = retinanet.RetinaNet(resnet_model)
   model.backbone.body.fc = None
 
-  if EVAL_ONLY:
+  if EVAL_ONLY and getenv('EVAL_LOAD', 1):
     model.load_checkpoint(CHKPT_PATH)
 
   for k, v in get_state_dict(model).items():
@@ -520,8 +520,8 @@ def train_retinanet():
       if TEST and cnt>BENCHMARK:
         return
     train_time = time.perf_counter() - bt
-    print(colored(f'EPOCH {epoch} trained in a total of {train_time / 60:4.2f} minutes', 'red'))
     if not EVAL_ONLY:
+      print(colored(f'EPOCH {epoch} trained in a total of {train_time / 60:4.2f} minutes', 'red'))
       if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
       fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
       state_dict = get_state_dict(model)
