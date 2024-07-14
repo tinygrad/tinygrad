@@ -9,9 +9,7 @@ table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
 early_stop = multiprocessing.Event()
 
 def process_replay(offset:int):
-  if early_stop.is_set():
-    print("HIT EARLY STOP")
-    return
+  if early_stop.is_set(): return
   ASSERT_PROCESS_REPLAY = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or \
       k in os.getenv("PR_TITLE", k)))
   MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
@@ -60,5 +58,4 @@ if __name__ == "__main__":
   conn.commit()
   cur.close()
   offsets = range(0, row_count, page_size)
-  with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-    list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
+  with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool: list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
