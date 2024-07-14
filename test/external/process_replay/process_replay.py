@@ -10,6 +10,8 @@ table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
 def process_replay(offset:int):
   ASSERT_PROCESS_REPLAY = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or \
       k in os.getenv("PR_TITLE", k)))
+  MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
+  assert MAX_DIFF_PCT <= 100
   conn = db_connection()
   cur = conn.cursor()
   cur.execute(f"SELECT val FROM '{table_name}' LIMIT ? OFFSET ?", (page_size, offset))
@@ -40,8 +42,8 @@ def process_replay(offset:int):
         for line in diff:
           print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ASSERT_PROCESS_REPLAY: raise e
-        if changed > 20:
-          print("WARN: detected chanegs in over 20% of kernels. skipping further diff generation.")
+        if changed > MAX_DIFF_PCT:
+          print(f"WARN: detected chanegs in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
           break
   conn.commit()
   cur.close()
