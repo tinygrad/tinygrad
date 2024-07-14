@@ -35,6 +35,7 @@ assert val == 5
 print("******** second, the Device ***********")
 
 DEVICE = "CLANG"   # NOTE: you can change this!
+# DEVICE = "INTEL"   # NOTE: you can change this!
 
 import struct
 from tinygrad.dtype import dtypes
@@ -62,6 +63,7 @@ for u in lin.uops: print(u)
 
 # compile a program (and print the source)
 fxn = CompiledRunner(lin.to_program())
+print("fxn.p.src") 
 print(fxn.p.src)
 # NOTE: fxn.clprg is the ClangProgram
 
