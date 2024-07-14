@@ -13,6 +13,7 @@ def process_replay(offset:int):
   conn = db_connection()
   cur = conn.cursor()
   cur.execute(f"SELECT val FROM '{table_name}' LIMIT ? OFFSET ?", (page_size, offset))
+  changed = 0
   for row in cur.fetchall():
     ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
     with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache}):
@@ -31,6 +32,7 @@ def process_replay(offset:int):
       # try compare
       try: assert compare_src == good_src
       except AssertionError as e:
+        changed += 1
         print("PROCESS REPLAY DETECTED CHANGE")
         print(ast)
         print(applied_opts)
@@ -38,6 +40,9 @@ def process_replay(offset:int):
         for line in diff:
           print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ASSERT_PROCESS_REPLAY: raise e
+        if changed > 20:
+          print("WARN: detected chanegs in over 20% of kernels. skipping further diff generation.")
+          break
   conn.commit()
   cur.close()
 
