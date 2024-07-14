@@ -455,7 +455,7 @@ def train_retinanet():
   def val_step(X):
     Tensor.training = False
     out = model(normalize(X), False)
-    return out.cast(dtypes.float32).realize()
+    return out.cast(dtypes.float32).to(GPUS[0]).realize()
 
   feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
   ANCHORS = anchor_generator((BS,3,800,800), feature_shapes)
