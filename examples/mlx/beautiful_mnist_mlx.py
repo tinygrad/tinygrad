@@ -3,6 +3,7 @@ from tinygrad.nn.datasets import mnist
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
+from functools import partial
 
 class Model(nn.Module):
   def __init__(self):
@@ -33,17 +34,22 @@ if __name__ == "__main__":
   Y_test = mx.array(Y_test.numpy())
 
   model = Model()
-
-  def loss_fn(model, x, y): return nn.losses.cross_entropy(model(x), y).mean()
-  loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
   optimizer = optim.Adam(1e-3)
+  def loss_fn(model, x, y): return nn.losses.cross_entropy(model(x), y).mean()
+
+  state = [model.state, optimizer.state]
+  @partial(mx.compile, inputs=state, outputs=state)
+  def step(samples):
+    # Compiled functions will also treat any inputs not in the parameter list as constants.
+    X,Y = X_train[samples], Y_train[samples]
+    loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
+    loss, grads = loss_and_grad_fn(model, X, Y)
+    optimizer.update(model, grads)
+    return loss
 
   test_acc = float('nan')
   for i in (t:=trange(70)):
-    samples = mx.random.randint(0, X_train.shape[0], (512,))
-    X,Y = X_train[samples], Y_train[samples]
-    loss, grads = loss_and_grad_fn(model, X, Y)
-    optimizer.update(model, grads)
-    #mx.eval(model.parameters(), optimizer.state)
+    samples = mx.random.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
+    loss = step(samples)
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
