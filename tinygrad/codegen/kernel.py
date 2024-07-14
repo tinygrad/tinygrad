@@ -739,6 +739,12 @@ class Kernel:
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
+
+    # fix global and dim if it has more dims than max allowed
+    if self.opts.has_local:
+      if (global_max := self.opts.global_max) is not None and (g := self.global_dims) > (gm := len(global_max)):
+        self.reshape_and_permute(lambda s: (prod(s[:g-gm+1]),) + s[g-gm+1:], None)
+
     return fixup_ast(self.ast)
 
   # **** this is the lowerer ****
