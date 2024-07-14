@@ -319,10 +319,10 @@ class AMDProgram(HCQCompatProgram):
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
-  def fill_kernargs(self, kernargs_ptr:int, args:List[Any], vals:Tuple[int, ...]=()):
-    if (given:=len(args)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
-    if len(args): to_mv(kernargs_ptr, len(args) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in args])
-    if len(vals): to_mv(kernargs_ptr + len(args) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
+  def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
+    if (given:=len(bufs)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
+    if len(bufs): to_mv(kernargs_ptr, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
+    if len(vals): to_mv(kernargs_ptr + len(bufs) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if self.device.kernargs_ptr + self.kernargs_alloc_size > (self.device.kernargs.va_addr + self.device.kernargs.size):

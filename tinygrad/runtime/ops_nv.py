@@ -313,10 +313,10 @@ class NVProgram(HCQCompatProgram):
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_sz, BufferOptions(cpu_access=True))
 
-  def fill_kernargs(self, kernargs_ptr:int, args:List[Any], vals:Tuple[int, ...]=()):
+  def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
-    if MOCKGPU: self.constbuffer_0[0:2] = [len(args), len(vals)]
-    kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.va_addr)] + list(vals)
+    if MOCKGPU: self.constbuffer_0[0:2] = [len(bufs), len(vals)]
+    kernargs = [arg_half for arg in bufs for arg_half in nvdata64_le(arg.va_addr)] + list(vals)
     to_mv(kernargs_ptr, self.kernargs_args_offset + len(kernargs) * 4).cast('I')[:] = array.array('I', self.constbuffer_0 + kernargs)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):

@@ -281,7 +281,7 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
 class HCQCompatProgram:
   def __init__(self, kernargs_alloc_size, kernargs_args_offset=0):
     self.kernargs_alloc_size, self.kernargs_args_offset = kernargs_alloc_size, kernargs_args_offset
-  def fill_kernargs(self, kernargs_ptr:int, args:List[Any], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
+  def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
 
 class HCQCompatCompiled(Compiled):
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, comp_queue_t, copy_queue_t, timeline_signals):
