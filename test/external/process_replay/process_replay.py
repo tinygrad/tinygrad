@@ -26,7 +26,7 @@ def process_replay(offset:int):
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
       except Exception as e:
-        print("FAILED TO RECREATE KERNEL")
+        print("WARN: FAILED TO RECREATE KERNEL")
         print(ast)
         print(applied_opts)
         print(e)
