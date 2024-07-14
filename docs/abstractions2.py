@@ -56,8 +56,8 @@ st_0 = LazyOp(BufferOps.STORE, (alu,), MemBuffer(0, dtypes.int32, ShapeTracker.f
 sink = LazyOp(MetaOps.SINK, (st_0,))
 
 # convert the computation to a "linearized" format (print the format)
-from tinygrad.engine.realize import get_linearizer, CompiledRunner
-lin = get_linearizer(Device[DEVICE].renderer, sink).linearize()
+from tinygrad.engine.realize import get_kernel, CompiledRunner
+lin = get_kernel(Device[DEVICE].renderer, sink).linearize()
 for u in lin.uops: print(u)
 
 # compile a program (and print the source)
