@@ -289,7 +289,6 @@ class AMDProgram(HCQCompatProgram):
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
-    # self.kernargs_alloc_size = self.kernargs_segment_size
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.device.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
