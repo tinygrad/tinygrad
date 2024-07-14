@@ -1,21 +1,28 @@
 from __future__ import annotations
+import itertools, functools
+from dataclasses import replace
 from collections import defaultdict
-import itertools
-from typing import DefaultDict, Optional, List, Tuple, cast, Dict, Union
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
+from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
+from tinygrad.engine.graph import print_tree
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, \
+                         verify_lazyop, KernelInfo, get_lazyop_info
 from tinygrad.device import Device
-from tinygrad.renderer import Renderer, TensorCore
-from tinygrad.dtype import dtypes, ImageDType, DType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
+from tinygrad.renderer import Renderer, TensorCore, Program
+from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
+                             get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
-from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.shape.view import strides_for_shape
+from tinygrad.codegen.uops import UOps, flops_mem
+from tinygrad.codegen.uopgraph import UOpGraph
+from tinygrad.codegen.lowerer import lazyop_to_uop
 from dataclasses import dataclass
 from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
@@ -47,37 +54,45 @@ class TensorCoreOptions:
       elif removed_axis == axes[tc_dim]: axes_exist[tc_dim] = False
     self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
 
-@dataclass(frozen=True)
-class LocalBuffer:
-  name: str
-  size: int
-  dtype: DType = dtypes.float32
-  realized: None = None
-  def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
-
 class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
+    if len(ast) > 1 or ast[0].op is BufferOps.STORE:
+      assert all(x.op is BufferOps.STORE for x in ast)
+      self.ast = LazyOp(MetaOps.SINK, ast)
+    else:
+      assert len(ast) == 1 and ast[0].op is MetaOps.SINK
+      self.ast = ast[0]
+
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    verify_lazyop(*ast)
-    self.ast = ast
-    self.lazyops = flatten([op.lazyops for op in self.ast])
+    try: lazyop_sts_map = verify_lazyop(self.ast)
+    except AssertionError as e:
+      print("INVALID AST")
+      for op in ast: print_tree(op)
+      raise e
+    self.lazyops = self.ast.lazyops
 
     cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
     def ordered_lazyops(op):
       if op not in cached_ordered_lazyops: cached_ordered_lazyops[op] = dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
       return cached_ordered_lazyops[op]
-    self.reduceops = dedup([x for out in self.ast for x in ordered_lazyops(out) if x.op in ReduceOps])
+    self.reduceops = dedup([x for x in ordered_lazyops(self.ast) if x.op in ReduceOps])
 
-    self.outbufs, self.vars = [x.arg for x in self.ast], flatten([x.vars() for x in self.ast])
-    loadops = [BufferOps.LOAD, BufferOps.CONST]
-    self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = self.outbufs + dedup([x.arg for x in self.lazyops if x.op in loadops])
+    self.vars = self.ast.vars()
+    self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.lazyops if x.op in BufferOps])
 
     # get earlybufs, before any reduceops
-    self.earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
-    self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
+    earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
+    self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
+    # NOTE: full_shape can be wrong if there's a tree of reduces
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.st for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs)]
+    self.sts: List[ShapeTracker] = [x.st for x in self.bufs]
+
+    # add the shapetrackers for each reduce
+    # we use this to track which axes are reduced in each reduce
+    for x in self.reduceops:
+      self.sts.append(lazyop_sts_map[x])
+      self.sts.append(lazyop_sts_map[x.src[0]])
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
@@ -89,7 +104,6 @@ class Kernel:
     self.group_for_reduces: int = 0
     self.upcasted: int = 0
     self.local_dims: int = 0
-    self.local_alias: DefaultDict[LazyOp, Dict[int, LocalBuffer]] = defaultdict(dict)
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     # the local aliased buffers for A and B
@@ -110,15 +124,14 @@ class Kernel:
     ret.opts, ret.ast, ret.lazyops = self.opts, self.ast, self.lazyops
 
     # things downstream of the AST
-    ret.reduceops, ret.outbufs, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
-      self.reduceops, self.outbufs, self.vars, [x for x in self.bufs if not isinstance(x, LocalBuffer)], self.earlybufs, self.full_buf_index
-    ret.sts = self.sts[:len(ret.bufs)] # NOTE: must redo the local buffers with TC in beam
+    ret.reduceops, ret.vars, ret.bufs, ret.full_buf_index = \
+      self.reduceops, self.vars, self.bufs, self.full_buf_index
+    ret.sts = self.sts[:len(ret.bufs)+len(ret.reduceops)*2] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
-    ret.tensor_core, ret.tensor_core_opts, ret.local_alias, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, defaultdict(dict), \
-        self.bufs_for_tensor_core
+    ret.tensor_core, ret.tensor_core_opts, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, self.bufs_for_tensor_core
 
     # uncached since linearize didn't run
     ret.applied_opts_cache = None
@@ -229,7 +242,7 @@ class Kernel:
     move_axis = axis if top else axis+1
     if move_axis < insert_before: insert_before += 1
     self.reshape_and_permute(
-      lambda x: list(x[0:axis]) + (([amount, x[axis]//amount] if top else [x[axis]//amount, amount]) if x[axis] > 1 else [1,1]) + list(x[axis+1:]),
+      lambda x: x[0:axis] + (((amount, x[axis]//amount) if top else (x[axis]//amount, amount)) if x[axis] > 1 else (1,1)) + x[axis+1:],
       [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
 
   # ******************** complex simplifiers ********************
@@ -281,25 +294,6 @@ class Kernel:
     # do the reshapes
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
-  # ******************** helpers ********************
-
-  def alias_buffer(self, op:LazyOp, i:int, pattern:List[int]) -> None:
-    assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
-
-    bst = 1
-    real_strides = self.sts[i].real_strides()
-    shp, stride = [(s if p != 0 else 1) for s,p in zip(self.sts[i].shape, pattern)], [0]*len(pattern)
-    for priority in range(1, max(pattern)+1):  # priority. 0 is non local and ignored
-      for j,p in enumerate(pattern):
-        if priority == p and real_strides[j] != 0:
-          stride[j] = bst
-          bst *= shp[j]
-
-    self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].real_size()))   # real_size ignores the 0's
-    if DEBUG >= 4: print("aliasing buffer", self.sts[i])
-    self.local_alias[op][i] = cast(LocalBuffer, self.bufs[-1])
-
   # ******************** high level optimizers ********************
 
   def _create_tc_opts(self, reduceop:LazyOp, tc:TensorCore, axis:int, opt_level:int) -> Optional[TensorCoreOptions]:
@@ -347,12 +341,31 @@ class Kernel:
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
-        self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
-        for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
-          if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
-        for (tc_dim, tc_amt) in tc.threads:
-          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-
+        if self.opts.device == "AMD":
+          # NOTE: AMD requires locals first
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
+            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
+        elif self.opts.device == "METAL":
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
+            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+        elif self.opts.device in {"CUDA", "NV"}:
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[0], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
+          # NOTE: MERGE is needed because we can't deal with two upcasted dimensions
+          self.apply_opt(Opt(OptOps.MERGE, self.shape_len-2), append_opt=False)
         # assert tensor core
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
         return True
@@ -373,7 +386,7 @@ class Kernel:
       1: allows kernels with multiple reduce axes and also multiplication of UnaryOps.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
-    if tc_opt is None: tc_opt = self.opts.tc_opt
+    if tc_opt is None: tc_opt = TC_OPT.value
     if not self.opts.tensor_cores and use_tensor_cores != 2: return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
@@ -406,7 +419,7 @@ class Kernel:
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
       check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
-      check((use_tensor_cores:=self.opts.tc) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
+      check((use_tensor_cores:=USE_TC.value) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
       self.applied_opts.append(opt)
       return
@@ -436,6 +449,7 @@ class Kernel:
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
+      check(len(self.reduceops) == 1, "can't group with multiple reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
@@ -466,6 +480,12 @@ class Kernel:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
+    elif opt.op is OptOps.MERGE:
+      check(axis >= self.shape_len-self.upcasted, "only merge upcasted")
+      check(self.full_shape[axis:axis+2] == self.output_shape[axis:axis+2], "can't merge reduces")
+      self.reshape_and_permute(None, tuple(range(axis)) + (axis+1, axis) + tuple(range(axis+2, self.shape_len)))
+      self.reshape_and_permute(lambda x: x[0:axis] + (x[axis] * x[axis+1],) + x[axis+2:], None)
+      self.upcasted -= 1
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.shape_len - self.upcasted, "cannot pad upcasted")
@@ -618,3 +638,132 @@ class Kernel:
           will_delete_shape = local_sz == self.full_shape[axis]
           self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
           if will_delete_shape: deleted_shape += 1
+
+  # **** kernel outputs ****
+
+  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
+  @functools.cached_property
+  def name(self) -> str:
+    # kernel name (before late upcast)
+    name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
+                 (f"{len(self.ast.src)}_" if len(self.ast.src) > 1 else "_") + \
+                 colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+
+    # name the function something unique
+    Kernel.kernel_cnt[(function_name := to_function_name(name))] += 1
+    suffix = f"{'n'+str(Kernel.kernel_cnt[function_name]-1)}" if Kernel.kernel_cnt[function_name] > 1 else ""
+    return name+colored(suffix, 'BLACK')
+
+  def get_optimized_ast(self) -> LazyOp:
+    # set the shapetrackers to the optimized ones, fixup reduceop
+    # transformed to the final LazyOp
+    @functools.lru_cache(None)
+    def fixup_ast(op:LazyOp, apply_to_st=None) -> LazyOp:
+      if op.op in BufferOps:
+        idx = self.bufs.index(op.arg)
+        arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
+      elif op.op in ReduceOps:
+        reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
+        arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
+                    if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
+        if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
+          rsrc = op.src[0]
+          if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
+          assert rsrc.op is BinaryOps.MUL
+
+          def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
+            wd = self.global_dims
+            tcd = self.shape_len-self.upcasted
+            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
+            assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, "tcd dims wrong"
+            new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
+            permaxis = list(range(wd))
+            for x,y in pattern_1: permaxis.append(y + (wd if x == 0 else tcd))
+            permaxis += list(range(wd+len(warp_dims), tcd))
+            for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
+            permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
+            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
+
+          if self.opts.device == "AMD":
+            reduce_axes = [self.shape_len-self.upcasted]
+            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
+            fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
+            fix_st2 = None
+          elif self.opts.device == "METAL":
+            reduce_axes = [self.shape_len-self.upcasted]
+            upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1)
+            fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
+            fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
+          elif self.opts.device in {"CUDA", "NV"}:
+            reduce_axes = [self.shape_len-self.upcasted, self.shape_len-self.upcasted+1]
+            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted+2, self.shape_len-self.upcasted+2)
+            # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
+            fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
+              ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
+            fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
+              ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
+          else:
+            raise RuntimeError("unsupported device for tensor cores")
+
+          assert apply_to_st is None, "double tensor core? not supported"
+          wmma_sz = [prod(l) for l in tc.thread_local_sizes]
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, upcast_axis, tuple(reduce_axes))
+          ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
+          new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
+          return LazyOp(op.op, (ret,), new_reduce_axes) if len(new_reduce_axes) else ret
+        if self.group_for_reduces:
+          start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+          sts = ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])) # noqa: E501
+          local_buffer = MemBuffer(-1, start.dtype, sts)
+          local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
+          local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
+          return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+      elif op.op is MetaOps.SINK:
+        arg = KernelInfo(self.local_dims, self.upcasted)
+      else:
+        arg = op.arg
+      return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+    return fixup_ast(self.ast)
+
+  # **** this is the lowerer ****
+
+  def linearize(self) -> Kernel:
+    modified_ast = self.get_optimized_ast()
+
+    if DEBUG >= 3:
+      print(self.name)
+      print_tree(modified_ast)
+    verify_lazyop(modified_ast)
+
+    uop_sink = lazyop_to_uop(modified_ast, self.opts)
+
+    # extract global/local sizes
+    if self.opts.has_local:
+      self.global_size: Optional[List[int]] = [1,1,1]
+      self.local_size: Optional[List[int]] = [1,1,1]
+      for u in uop_sink.parents:
+        if u.op is UOps.SPECIAL:
+          if u.arg[1][0] == 'l': self.local_size[u.arg[0]] = u.arg[2]
+          else: self.global_size[u.arg[0]] = u.arg[2]
+    else:
+      self.global_size, self.local_size = None, None
+
+    # generate the UOpGraph
+    self.uops:UOpGraph = UOpGraph(uop_sink, self.opts)
+    if DEBUG >= 5: self.uops.print()
+    if getenv("GRAPHUOPS"):
+      self.uops.graph()
+      if getenv("GRAPHUOPS") == 2: exit(0)
+    return self
+
+  def to_program(self) -> Program:
+    self.linearize()
+    src = self.opts.render(name:=to_function_name(self.name), self.uops)
+    if getenv("RUN_PROCESS_REPLAY"):
+      table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
+      diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+    info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed
+    ops, mem = flops_mem(self.uops.uops)
+    run_count = prod((self.global_size or []) + (self.local_size or []))
+    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
+                   self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

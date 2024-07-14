@@ -39,7 +39,7 @@ DEVICE = "CLANG"   # NOTE: you can change this!
 import struct
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import LazyOp, BufferOps, MemBuffer, BinaryOps
+from tinygrad.ops import LazyOp, BufferOps, MemBuffer, BinaryOps, MetaOps
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values
@@ -53,10 +53,11 @@ ld_1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.int32, ShapeTracker.from_s
 ld_2 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.int32, ShapeTracker.from_shape((1,))))
 alu = LazyOp(BinaryOps.ADD, (ld_1, ld_2))
 st_0 = LazyOp(BufferOps.STORE, (alu,), MemBuffer(0, dtypes.int32, ShapeTracker.from_shape((1,))))
+sink = LazyOp(MetaOps.SINK, (st_0,))
 
 # convert the computation to a "linearized" format (print the format)
-from tinygrad.engine.realize import get_linearizer, CompiledRunner
-lin = get_linearizer(Device[DEVICE].renderer, (st_0,)).linearize()
+from tinygrad.engine.realize import get_kernel, CompiledRunner
+lin = get_kernel(Device[DEVICE].renderer, sink).linearize()
 for u in lin.uops: print(u)
 
 # compile a program (and print the source)
@@ -73,13 +74,13 @@ assert out.as_buffer().cast('I')[0] == 5
 
 print("******** third, the LazyBuffer ***********")
 
-from tinygrad.lazy import LazyBuffer, LoadOps
+from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule
 
 # allocate some values + load in values
-a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
-b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
+a = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
+b = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
 a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 del a.srcs
@@ -90,11 +91,11 @@ out = a.e(BinaryOps.ADD, b)
 
 # schedule the computation as a list of kernels
 sched = create_schedule([out])
-for si in sched: print(si.ast[0].op)  # NOTE: the first two convert it to CLANG
+for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CLANG
 
 # DEBUGGING: print the compute ast as a tree
 from tinygrad.engine.graph import print_tree
-print_tree(sched[-1].ast[0])
+print_tree(sched[-1].ast)
 # NOTE: sched[-1].ast is the same as st_0 above
 
 # run that schedule

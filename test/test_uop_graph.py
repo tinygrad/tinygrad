@@ -3,7 +3,8 @@ from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp, PatternMatcher, graph_rewrite
+from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, graph_rewrite
 #from tinygrad.engine.graph import print_tree
 
 simple_pm = PatternMatcher([
@@ -119,16 +120,57 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
-  def test_cast_vectorized_fold(self):
+  def test_const_vectorize_fold(self):
+    c0 = UOp(UOps.CONST, dtypes.half, arg=0.0)
+    out = UOp(UOps.VECTORIZE, dtypes.half.vec(2), (c0, c0))
+    g = UOpGraph([out])
+    self.assertEqual(len(g.uops), 1)
+    out = g.uops[-1]
+    self.assertEqual(out.op, UOps.CONST)
+    self.assertEqual(out.arg, 0.0)
+
+  def test_noop_vectorize_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.float.vec(2), (d0, idx))
-    cast = UOp(UOps.CAST, dtypes.float.vec(2), (ld,))
-    x = UOp(UOps.GEP, dtypes.float, (cast, ), arg=0)
+    vec = UOp(UOps.VECTORIZE, dtypes.float.vec(2), (ld,))
+    x = UOp(UOps.GEP, dtypes.float, (vec, ), arg=0)
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
     out = UOp(UOps.STORE, None, (d0, idx, alu))
     g = UOpGraph([out])
-    self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
+    self.assertEqual(len([x for x in g.uops if x.op is UOps.VECTORIZE]), 0)
+
+  def test_gep_vec_fold(self):
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, False))
+    d2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (2, False))
+    idx = UOp.const(dtypes.int, 0)
+    def _test_vec(geps):
+      vec = UOp(UOps.VECTORIZE, dtypes.float.vec(4), geps)
+      out = UOp(UOps.STORE, None, (d0, idx, vec))
+      return UOpGraph([out]).uops[-1].src[-1]
+
+    # possible
+    val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
+    xyzw = tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(4))
+    self.assert_equiv_uops(_test_vec(xyzw), val)
+
+    # unaligned
+    val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
+    wzyx = tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in reversed(range(4)))
+    self.assertIs(_test_vec(wzyx).op, UOps.VECTORIZE)
+
+    # different_size
+    val = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
+    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), i) for i in range(2))
+    self.assertIs(_test_vec(xy+xy).op, UOps.VECTORIZE)
+
+    # different vals
+    val1 = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
+    val2 = UOp(UOps.LOAD, dtypes.float.vec(2), (d2, idx))
+    xy1 = tuple(UOp(UOps.GEP, dtypes.float, (val1, ), i) for i in range(2))
+    xy2 = tuple(UOp(UOps.GEP, dtypes.float, (val2, ), i) for i in range(2))
+    self.assertIs(_test_vec(xy1+xy2).op, UOps.VECTORIZE)
 
   def test_cast_alu_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=(0, True))
@@ -211,6 +253,21 @@ class TestUOpGraph(TestUOps):
     bad_gate = UOp.const(dtypes.int, 1)
     uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
     with self.assertRaises(AssertionError): uops.linearize()
+
+  def test_switched_range_order(self):
+    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    c0 = UOp.const(dtypes.int, 0)
+    c2 = UOp.const(dtypes.int, 2)
+    cf = UOp.const(dtypes.float, 0.0)
+    r1 = UOp(UOps.RANGE, dtypes.int, (c0, c2), (1, 0, False))
+    r2 = UOp(UOps.RANGE, dtypes.int, (c0, c2), (1, 1, False))
+    alu = UOp(UOps.ALU, dtypes.int, (r2, r1), BinaryOps.MUL)
+    store = UOp(UOps.STORE, None, (glbl, alu, cf))
+    uops = UOpGraph([store]).uops
+    ranges = [x for x in uops if x.op is UOps.RANGE]
+    endranges = [x for x in uops if x.op is UOps.ENDRANGE]
+    # ranges are closed in the right order
+    self.assertEqual(endranges[-1].src[0], ranges[0])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

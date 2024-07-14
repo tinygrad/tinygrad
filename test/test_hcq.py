@@ -1,6 +1,6 @@
-import unittest, ctypes, struct, array
+import unittest, ctypes, struct
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import to_mv, CI, getenv
+from tinygrad.helpers import CI, getenv
 from tinygrad.device import Buffer, BufferOptions, HCQCompatCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner
@@ -18,18 +18,12 @@ class TestHCQ(unittest.TestCase):
 
     TestHCQ.runner = get_runner(TestHCQ.d0.dname, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
-    TestHCQ.addr = struct.pack("QQ", TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr)
-    TestHCQ.addr2 = struct.pack("QQ", TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr)
-    TestHCQ.kernargs_off = TestHCQ.runner.clprg.kernargs_offset
-    TestHCQ.kernargs_size = TestHCQ.runner.clprg.kernargs_alloc_size
-    ctypes.memmove(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_off, TestHCQ.addr, len(TestHCQ.addr))
-    ctypes.memmove(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size+TestHCQ.kernargs_off, TestHCQ.addr2, len(TestHCQ.addr2))
 
-    if Device.DEFAULT == "NV":
-      # nv need to copy constbuffer there as well
-      if MOCKGPU: TestHCQ.runner.clprg.constbuffer_0[0:2] = [2, 0] # hack for nv mockgpu only. it needs to get count of args and vals.
-      to_mv(TestHCQ.d0.kernargs_ptr, 0x160).cast('I')[:] = array.array('I', TestHCQ.runner.clprg.constbuffer_0)
-      to_mv(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, 0x160).cast('I')[:] = array.array('I', TestHCQ.runner.clprg.constbuffer_0)
+    TestHCQ.kernargs_ba_ptr = TestHCQ.d0.kernargs_ptr
+    TestHCQ.kernargs_ab_ptr = TestHCQ.d0.kernargs_ptr + TestHCQ.runner.clprg.kernargs_alloc_size
+
+    TestHCQ.runner.clprg.fill_kernargs(TestHCQ.kernargs_ba_ptr, [TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
+    TestHCQ.runner.clprg.fill_kernargs(TestHCQ.kernargs_ab_ptr, [TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf])
 
   def setUp(self):
     TestHCQ.d0.synchronize()
@@ -107,7 +101,7 @@ class TestHCQ(unittest.TestCase):
 
   # Test exec
   def test_exec_one_kernel(self):
-    TestHCQ.d0.hw_compute_queue_t().exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+    TestHCQ.d0.hw_compute_queue_t().exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
                                    .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
@@ -118,8 +112,8 @@ class TestHCQ(unittest.TestCase):
   def test_exec_2_kernels_100_times(self):
     q = TestHCQ.d0.hw_compute_queue_t()
     q.wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-     .exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
-     .exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr + TestHCQ.kernargs_size, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+     .exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+     .exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ab_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
     for _ in range(100):
@@ -130,7 +124,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_exec_update(self):
     q = TestHCQ.d0.hw_compute_queue_t()
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+    q.exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
     q.update_exec(0, (1,1,1), (1,1,1))
@@ -144,22 +138,61 @@ class TestHCQ(unittest.TestCase):
   # Test copy
   def test_copy(self):
     TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                .copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8) \
+                                .copy(TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr, 8) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
+    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 0.0, f"got val {val}"
+    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
 
-  def test_copy_100_times(self):
+  def test_copy_long(self):
+    sz = 64 << 20
+    buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
+    ctypes.memset(buf2._buf.va_addr, 1, sz)
+
+    TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                .copy(buf1._buf.va_addr, buf2._buf.va_addr, sz) \
+                                .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+
+    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
+    mv_buf1 = buf1.as_buffer().cast('Q')
+    for i in range(sz//8): assert mv_buf1[i] == 0x0101010101010101, f"offset {i*8} differs, not all copied, got {hex(mv_buf1[i])}"
+
+  def test_update_copy(self):
     q = TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                    .copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8) \
+                                    .copy(0x0, 0x0, 8) \
                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
-    for _ in range(100):
-      q.update_wait(0, value=TestHCQ.d0.timeline_value - 1).update_signal(2, value=TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
-      q.submit(TestHCQ.d0)
-      TestHCQ.d0.timeline_value += 1
+    q.update_copy(1, dest=TestHCQ.b.lazydata.buffer._buf.va_addr, src=TestHCQ.a.lazydata.buffer._buf.va_addr) \
+     .submit(TestHCQ.d0)
+
+    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
+    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
+
+  def test_update_copy_long(self):
+    sz = 64 << 20
+    buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
+    ctypes.memset(buf2._buf.va_addr, 1, sz)
+
+    q = TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                    .copy(0x0, 0x0, sz) \
+                                    .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+
+    q.update_copy(1, buf1._buf.va_addr, buf2._buf.va_addr) \
+     .submit(TestHCQ.d0)
+
+    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
+    mv_buf1 = buf1.as_buffer().cast('Q')
+    for i in range(sz//8): assert mv_buf1[i] == 0x0101010101010101, f"offset {i*8} differs, not all copied, got {hex(mv_buf1[i])}"
 
   # Test bind api
   def test_bind(self):
@@ -203,7 +236,7 @@ class TestHCQ(unittest.TestCase):
 
     sig_st, sig_en = TestHCQ.d0._alloc_signal(), TestHCQ.d0._alloc_signal()
     TestHCQ.d0.hw_compute_queue_t().timestamp(sig_st) \
-                                   .exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+                                   .exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
                                    .timestamp(sig_en) \
                                    .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
@@ -273,19 +306,17 @@ class TestHCQ(unittest.TestCase):
     assert (0.3 if CI else 2) <= gb_s <= 50
 
   def test_timeline_signal_rollover(self):
-    # NV 64bit, AMD 32bit
-    TestHCQ.d0.timeline_value = (1 << 64) - 20 if Device.DEFAULT == "NV" else (1 << 32) - 20 # close value to reset
-    TestHCQ.d0.hw_compute_queue_t().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1).submit(TestHCQ.d0)
-    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
+    for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
+      with self.subTest(name=str(queue_type)):
+        TestHCQ.d0.timeline_value = (1 << 32) - 20 # close value to reset
+        queue_type().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1).submit(TestHCQ.d0)
+        TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
 
-    for _ in range(40):
-      q = TestHCQ.d0.hw_compute_queue_t()
-      q.wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
-      q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
-      q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
-      TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
-      TestHCQ.d0.timeline_value += 1
-      assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
+        for _ in range(40):
+          queue_type().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+          TestHCQ.d0.timeline_value += 1
+          TestHCQ.d0.synchronize()
 
 if __name__ == "__main__":
   unittest.main()
