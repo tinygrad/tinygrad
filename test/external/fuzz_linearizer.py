@@ -9,7 +9,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.uops import UOp
 from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.engine.search import get_linearizer_actions, bufs_from_lin
+from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.graph import print_tree
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
@@ -142,7 +142,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
   for depth in range(getenv("DEPTH", 1 if FUZZ_ALL_ACTIONS else 10)):
     next_lins = []
     for lin in last_lins:
-      actions = get_linearizer_actions(lin, include_0=False)
+      actions = get_kernel_actions(lin, include_0=False)
       if not actions: continue
       if depth == 0 and getenv("FUZZ_REQUIRE_TC", 0):
         tc_acts = {i: k for k in actions.values() if k.applied_opts[0].op == OptOps.TC}

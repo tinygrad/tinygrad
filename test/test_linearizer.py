@@ -564,10 +564,10 @@ class TestLinearizer(unittest.TestCase):
         if golden_result is None: golden_result = np.frombuffer(real_bufs[0].as_buffer(), _to_np_dtype(real_bufs[0].dtype))
         np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.15)
 
-      # check that get_linearizer_actions produces all 9 options
-      from tinygrad.engine.search import get_linearizer_actions
-      tc_actions = [k for i, k in get_linearizer_actions(Kernel(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
-      assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
+      # check that get_kernel_actions produces all 9 options
+      from tinygrad.engine.search import get_kernel_actions
+      tc_actions = [k for i, k in get_kernel_actions(Kernel(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
+      assert len(tc_actions) == 9, f"get_kernel_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_phi(self):
