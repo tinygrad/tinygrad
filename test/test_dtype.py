@@ -241,10 +241,6 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
-  def test_shape_change_bitcast(self):
-    with self.assertRaises(RuntimeError):
-      _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
-
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
     b = a.bitcast(dtypes.int32)
@@ -254,6 +250,52 @@ class TestBitCast(unittest.TestCase):
     a = Tensor.zeros(100, 4, dtype=dtypes.int32).contiguous() + 0x3f800000
     b = a.bitcast(dtypes.float32)
     assert b.numpy()[0,0] == 1.
+
+@unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
+class TestShapeChangingBitcast(unittest.TestCase):
+  # def test_shape_change_bitcast(self):
+  #   with self.assertRaises(RuntimeError):
+  #     _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+
+  # def test_shape_change_bitcast_int32_int16(self):
+  #   _test_bitcast(Tensor([100000], dtype=dtypes.int32), dtypes.int16, [100000])
+
+  def test_invalid_shape_change_bitcast(self):
+    with self.assertRaises(RuntimeError):
+      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
+      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16)
+
+    with self.assertRaises(RuntimeError):
+      # should fail because backprop through bitcast is undefined
+      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True).bitcast(dtypes.float16)
+
+  def test_bitcast_int8_to_int16(self):
+    t = Tensor([2,64,128,256], dtype=dtypes.int8).realize()
+    _test_bitcast(t, dtypes.int16)
+  def test_bitcast_int16_to_uint8(self):
+    _test_bitcast(Tensor([256, 512, 1024, 2048], dtype=dtypes.int16), dtypes.uint8)
+  def test_bitcast_float32_to_uint8(self):
+    _test_bitcast(Tensor([1.5, 2.5, 3.5, 4.5], dtype=dtypes.float32), dtypes.uint8)
+
+  def test_various_shape_changes(self):
+    t = Tensor.empty((128, 128), dtype=dtypes.uint8)
+    # all zeroes
+    # _test_bitcast(t, dtypes.float16, 0.0)
+    # _test_bitcast(t, dtypes.uint16, 0)
+    # _test_bitcast(t, dtypes.float32, 0.0)
+    # _test_bitcast(t, dtypes.uint32, 0)
+    # pi in float16 stored via int16
+    # t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
+    #t = Tensor.full((128,64), 0x4248, dtype=dtypes.uint16)
+    # print("T",t.numpy())
+    # _test_bitcast(t, dtypes.float16)
+    # _test_bitcast(t, dtypes.float32, 50.064727)
+    # _test_bitcast(t, dtypes.uint16, 0x4248)
+    # _test_bitcast(t, dtypes.uint32, 0x42484248)
+    # # pi in float32 stored via float32
+    # t.bitcast(dtypes.float32).assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
+    # _test_bitcast(t, dtypes.float32, 3.1415927)
+    # _test_bitcast(t, dtypes.uint32, 0x40490FDB)
 
 class TestInt16DType(TestDType): DTYPE = dtypes.int16
 

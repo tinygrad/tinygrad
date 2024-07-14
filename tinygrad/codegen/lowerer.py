@@ -130,7 +130,9 @@ class IndependentLowerer:
                   (x.arg.idx, x.arg.idx < self.output_count))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
-        return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
+        load = UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
+        print("BITCAST LOAD")
+        return load
       # NOTE: only store the local reduceop in the first thread
       if x.arg.idx != -1:
         has_valid = True
@@ -141,7 +143,13 @@ class IndependentLowerer:
     in_uops = tuple(self.to_uop(y) for y in x.src)
     if x.op is MetaOps.SINK: return UOp(UOps.SINK, src=in_uops)
     if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg.scalar(), in_uops)
-    if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
+    if x.op is UnaryOps.BITCAST:
+      if size_before:=x.src[0].dtype.itemsize < (size_after:=x.dtype.itemsize):
+        factor = size_after // size_before
+        print(f"LOWERER bitcast with {factor = }")
+        # load = UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()))
+
+      return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
       dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
       if x.op is ReduceOps.WMMA:

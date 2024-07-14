@@ -153,6 +153,11 @@ class CStyleLanguage(Renderer):
           assert len(src) == 1 or (uop is UOps.VECTORIZE and len(src) > 1), "Invalid source length for operation"
           if uop is UOps.BITCAST:
             precast = ssa('precast')
+            print(f"BITCAST FROM {src[0].dtype} to {dtype}")
+            if (lhs:=src[0].dtype.itemsize) < (rhs:=dtype.itemsize):
+              print(f"SHAPE CHANGING BITCAST from {lhs} to {rhs}")
+              
+
             kk(f"{self.render_dtype(cast(DType, src[0].dtype))} {precast} = {r[src[0]]};")
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
