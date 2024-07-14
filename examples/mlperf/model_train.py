@@ -366,7 +366,7 @@ def train_retinanet():
   TEST            = config['TEST']        = getenv('TEST', 0)
   BENCHMARK       = config['BENCHMARK']   = getenv("BENCHMARK", 10000)
   EVAL_ONLY       = config['EVAL_ONLY']   = getenv('EVAL_ONLY')
-  CHKPT_PATH      = config['CHKPT_PATH']  = getenv('CHKPT_PATH', 'ckpts/retinanet_6xother_B60_E0.safe')
+  CHKPT_PATH      = config['CHKPT_PATH']  = getenv('CHKPT_PATH', 'ckpts/retinanet_6xtiny_B96_E3.safe')
   TRAIN_ONLY      = config['TRAIN_ONLY']  = getenv('TRAIN_ONLY')
 
   Tensor.manual_seed(SEED)
@@ -507,7 +507,7 @@ def train_retinanet():
       cl = time.perf_counter()
 
       tqdm.write(
-        f"{cnt:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{cnt:5} {(cl - st) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
         f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, "
         f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       if WANDB: wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
@@ -540,34 +540,50 @@ def train_retinanet():
 
       batch_loader = batch_load_retinanet(batch_size=BS_EVAL, shuffle=False, seed=SEED, val=True)
       it = iter(tqdm(batch_loader, total=len(val_files)//BS_EVAL, desc=f"epoch_val {epoch}"))
-      proc = data_get_val(it)
+      cnt, proc = 0, data_get_val(it)
 
       while proc is not None:
+        cnt+=1
         GlobalCounters.reset()
-        st = time.time()
+        st = time.perf_counter()
         
         img_ids = proc[1]
         orig_shapes = proc[2]
         with Tensor.inference_mode():
           out, proc = val_step(proc[0]), proc[3]
+        pt = time.perf_counter()
 
         try: next_proc = data_get_val(it)
         except StopIteration: next_proc = None
+        nt = time.perf_counter()
 
         out = out.numpy()
+        npt = time.perf_counter()
+        
         predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
         coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(),
                           "score": score} for i, prediction in enumerate(predictions)
                           for box, score, label in zip(*prediction.values())]
+        dt = time.perf_counter()
 
         with redirect_stdout(None):
           coco_eval.cocoDt = coco_val.loadRes(coco_results) if coco_results else COCO()
           coco_eval.params.imgIds = img_ids
           coco_eval.evaluate()
+        ct = time.perf_counter()
+
         evaluated_imgs.extend(img_ids)
         coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
         eval_times.append(time.time()-st)
         proc, next_proc = next_proc, None
+        
+        tqdm.write(
+          f"{cnt:5} {(ct - st) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms model, {(dt - npt) * 1000.0:7.2f} ms postproc, "
+          f"{(nt - pt) * 1000.0:6.2f} ms fetch data, {(npt - nt) * 1000.0:7.2f} ms np, {(ct - dt) * 1000.0:7.2f} ms eval, "
+          f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9/(pt-st):9.2f} GFLOPS")
+        if WANDB: wandb.log({"eval/step_time": ct - st, "eval/model_time": pt - st, "eval/post_proc": dt - npt, "eval/data": nt - pt, 
+                             "eval/np": npt - nt, "eval/evaluate": ct - dt, "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (pt - st), 
+                             "epoch": epoch + (cnt + 1) / (len(val_files)//BS_EVAL)})
 
       coco_eval.params.imgIds = evaluated_imgs
       coco_eval._paramsEval.imgIds = evaluated_imgs
@@ -575,7 +591,7 @@ def train_retinanet():
       coco_eval.accumulate()
       coco_eval.summarize()
       eval_acc = coco_eval.stats[0]
-      eval_time = time.time()-bt
+      eval_time = time.perf_counter()-bt
       print(colored(f'{epoch} EVAL_ACC {eval_acc} || {eval_time}', 'green'))
       if WANDB:
           wandb.log({"eval/acc": eval_acc, "eval/forward_time": eval_time, "epoch": epoch})
