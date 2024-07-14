@@ -489,8 +489,8 @@ def train_retinanet():
       batch_loader = batch_load_retinanet(batch_size=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP)
       it = iter(tqdm(batch_loader, total=len(train_files)//BS, desc=f"epoch {epoch}"))
       cnt, proc = 0, data_get(it)
-
     st = time.perf_counter()
+    bt = st
     while not EVAL_ONLY and proc is not None:
       GlobalCounters.reset()
       loss, proc = train_step(proc[0], proc[1], proc[2], proc[3]), proc[4]
@@ -519,13 +519,15 @@ def train_retinanet():
       cnt+=1
       if TEST and cnt>BENCHMARK:
         return
+    train_time = time.perf_counter() - bt
+    print(colored(f'EPOCH {epoch} trained in a total of {train_time / 60:4.2f} minutes', 'red'))
     if not EVAL_ONLY:
       if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
       fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
       state_dict = get_state_dict(model)
       safe_save(state_dict, fn)
       print(f" *** Model saved to {fn} ***")
-   
+
     # ***********EVAL******************
     if not TRAIN_ONLY:
       bt = time.time()
@@ -592,7 +594,7 @@ def train_retinanet():
       coco_eval.summarize()
       eval_acc = coco_eval.stats[0]
       eval_time = time.perf_counter()-bt
-      print(colored(f'{epoch} EVAL_ACC {eval_acc} || {eval_time}', 'green'))
+      print(colored(f'{epoch} EVAL_ACC {eval_acc} || {eval_time / 60:4.2f}', 'green'))
       if WANDB:
           wandb.log({"eval/acc": eval_acc, "eval/total_time": eval_time, "epoch": epoch})
       if getenv("RESET_STEP", 1): val_step.reset()
