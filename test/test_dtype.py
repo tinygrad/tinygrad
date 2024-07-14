@@ -241,8 +241,27 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
-  def test_shape_change_bitcast(self):
-      _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+  @staticmethod
+  def chop_binary(binary_value, chunk_size):
+    # chunk_size is in bits
+    # binary value is an int, float, etc
+    # chunk_size is the number of bits to chop off per chunk
+    # returns a list of size byte_size(binary_value) // chunk_size
+    # needs np.int16 so it is interpreted as the int16 value and not as an int32 value and then regularly casted to int16
+    return [np.int16(binary_value >> i & (2**chunk_size-1)) for i in range(0, 32, chunk_size)]
+
+  # int32 max value is 2**31-1
+  @given(strat.integers(min_value=0, max_value=(2**31)-1), strat.integers(min_value=1, max_value=1))
+  def test_shape_change_bitcast_int32_int16(self, value, shape):
+      value = np.int32(value) # make sure python doesn't convert to other types
+      # print binary value
+      print(f"binary value: {value:b}, shape: {shape}")
+      # extract first and second half of values -> expected
+      extr = self.chop_binary(value, 16)
+      # print cropped binary values
+      print(f"first half: {extr[0]:b}, second half: {extr[1]:b}")
+      
+      _test_bitcast(Tensor([value]*shape, dtype=dtypes.int32), dtypes.int16, extr * shape)
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
