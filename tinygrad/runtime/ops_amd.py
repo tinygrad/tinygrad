@@ -4,7 +4,7 @@ import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, err
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWComputeQueue, HWCopyQueue, hcq_profile, \
                             HCQCompatProgram, Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE, mv_address
+from tinygrad.helpers import getenv, to_mv, round_up, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.support.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -319,11 +319,10 @@ class AMDProgram(HCQCompatProgram):
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
-  def fill_kernargs(self, kernargs_ptr, args, vals):
+  def fill_kernargs(self, kernargs_ptr:int, args:List[Any], vals:Tuple[int, ...]=()) -> int:
     if (given:=len(args)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
-    to_mv(kernargs_ptr, len(args) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in args])
-    to_mv(kernargs_ptr + len(args) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
-    return 0
+    if len(args): to_mv(kernargs_ptr, len(args) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in args])
+    if len(vals): to_mv(kernargs_ptr + len(args) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if self.device.kernargs_ptr + self.kernargs_alloc_size > (self.device.kernargs.va_addr + self.device.kernargs.size):

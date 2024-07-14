@@ -1,4 +1,4 @@
-import collections, array, time
+import collections, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, to_mv, PROFILE
 from tinygrad.device import Buffer, BufferOptions, Compiled, Device
@@ -28,14 +28,9 @@ class HCQGraph(MultiGraphRunner):
       self.kargs_addrs[j] = kernargs_ptrs[ji.prg.device]
       kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
 
-      args_offset = ji.prg.clprg.fill_kernargs(self.kargs_addrs[j], [b._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars])
-      self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + args_offset, len(ji.bufs) * 8).cast('Q')
-      self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + args_offset + len(ji.bufs) * 8, len(ji.prg.p.vars) * 4).cast('I')
-      # for i in range(len(ji.bufs)): self.ji_args_bufs[j][i] = cast(Buffer, ji.bufs[i])._buf.va_addr
-      # for i in range(len(ji.prg.p.vars)): self.ji_args_vars[j][i] = var_vals[ji.prg.p.vars[i]]
-
-      # # NV needs constbuffer to be set
-      # if ji.prg.device.dname.startswith("NV"): to_mv(self.kargs_addrs[j], 0x160).cast('I')[:] = array.array('I', ji.prg.clprg.constbuffer_0)
+      ji.prg.clprg.fill_kernargs(self.kargs_addrs[j], [b._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars])
+      self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset, len(ji.bufs) * 8).cast('Q')
+      self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset + len(ji.bufs) * 8, len(ji.prg.p.vars) * 4).cast('I')
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any
