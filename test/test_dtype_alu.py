@@ -16,7 +16,7 @@ settings.register_profile("my_profile", max_examples=200, deadline=None, derando
 settings.load_profile("my_profile")
 print(settings.default)
 
-dtypes_float = (dtypes.float32, dtypes.float16)
+dtypes_float = (dtypes.float16, dtypes.float32, dtypes.float64)
 dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
 dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
@@ -67,7 +67,7 @@ def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
   sched = create_schedule([out.lazydata])
-  ast = sched[-1].ast[0]
+  ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
@@ -164,7 +164,43 @@ class TestFromFuzzer(unittest.TestCase):
   @given(strat.sampled_from(dtypes_float))
   def test_sin(self, dtype):
     if not is_dtype_supported(dtype): return
-    np.testing.assert_allclose(Tensor([25]).cast(dtype=dtype).sin().numpy(), np.sin(np.array([25])), rtol=3e-4)
+    if dtype == dtypes.float64:
+      # crashes in CUDACPU
+      if (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")): return
+      # fails now. TODO: fix
+      if Device.DEFAULT == "NV": return
+    def _test_value(n: float, unit: float=1.0):
+      next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
+      ulp = next_float - 1.0
+      ulp = unit * ulp
+      np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
+    _test_value(-35.0)
+    _test_value(-25.0)
+    _test_value(25.0)
+    _test_value(30.0) # 30.0 == switch_over
+    _test_value(35.0)
+    _test_value(0.0)
+    _test_value(np.pi / 2)
+     # worst case of ulp 1.5
+    _test_value(np.pi * 2, unit=1.5)
+  @given(strat.sampled_from(dtypes_float))
+  def test_log2(self, dtype):
+    if not is_dtype_supported(dtype): return
+    if dtype == dtypes.float64:
+      # crashes in CUDACPU
+      if (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")): return
+      # fails now. TODO: fix
+      if Device.DEFAULT == "NV": return
+    def _test_value(n: float, unit: float=1.0):
+      next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
+      ulp = next_float - 1.0
+      ulp = unit * ulp
+      np.testing.assert_allclose(Tensor([n], dtype=dtype).log2().numpy(), np.log2(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
+    fmin = np.finfo(_to_np_dtype(dtype)).tiny
+    for scale in [1.0, 1e10, 1e20, 1e30]:
+      _test_value(fmin * scale)
+      _test_value(-fmin * scale)
+    _test_value(0)
 
 if __name__ == '__main__':
   unittest.main()

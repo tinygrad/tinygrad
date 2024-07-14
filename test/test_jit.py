@@ -2,12 +2,14 @@
 import unittest, functools
 import numpy as np
 
+from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
 from tinygrad.helpers import CI, Context
 from tinygrad.dtype import dtypes
+from extra.models.unet import ResBlock
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
@@ -18,6 +20,19 @@ def _simple_test(add, extract=lambda x: x, N=10):
   assert_jit_cache_len(add, 1)
 
 class TestJit(unittest.TestCase):
+
+  @settings(deadline=2e4)
+  @unittest.skipUnless(Device.DEFAULT in ["LLVM", "CLANG"], f"no support on {Device.DEFAULT}")
+  @given(strat.sampled_from([Tensor.exp2, Tensor.log2, Tensor.sin]))
+  def test_approx_jit_timeout(self, op):
+    with Context(TRANSCENDENTAL=2):
+      model = [ResBlock(16, 24, 16) for _ in range(4)]
+      @TinyJit
+      def fw_approx(t, t2):
+        for l in model: t = l(t, t2)
+        return op(t).realize()
+      fw_approx(Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24))
+
   def test_simple_jit(self):
     @TinyJit
     def add(a, b): return (a+b).realize()
