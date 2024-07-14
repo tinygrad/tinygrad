@@ -478,7 +478,7 @@ def train_retinanet():
     ym = Tensor.ones(bs, 120087, dtype=dtypes.int64).contiguous()
     return x.shard(GPUS, axis=0), yb.shard(GPUS, axis=0), yl.shard(GPUS, axis=0), ym.shard(GPUS, axis=0), 0
 
-  for epoch in range(EPOCHS):
+  for epoch in range(1, EPOCHS+1):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # **********TRAIN***************
     Tensor.training = True
@@ -512,7 +512,7 @@ def train_retinanet():
         f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       if WANDB: wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
                    "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (cnt + 1) / (len(train_files)//BS)})
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch - 1 + (cnt + 1) / (len(train_files)//BS)})
 
       st = cl
       proc, next_proc = next_proc, None  # return old cookie
@@ -583,7 +583,7 @@ def train_retinanet():
           f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9/(pt-st):9.2f} GFLOPS")
         if WANDB: wandb.log({"eval/step_time": ct - st, "eval/model_time": pt - st, "eval/post_proc": dt - npt, "eval/data": nt - pt, 
                              "eval/np": npt - nt, "eval/evaluate": ct - dt, "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (pt - st), 
-                             "epoch": epoch + (cnt + 1) / (len(val_files)//BS_EVAL)})
+                             "epoch": epoch - 1 + (cnt + 1) / (len(val_files)//BS_EVAL)})
 
       coco_eval.params.imgIds = evaluated_imgs
       coco_eval._paramsEval.imgIds = evaluated_imgs
@@ -594,7 +594,7 @@ def train_retinanet():
       eval_time = time.perf_counter()-bt
       print(colored(f'{epoch} EVAL_ACC {eval_acc} || {eval_time}', 'green'))
       if WANDB:
-          wandb.log({"eval/acc": eval_acc, "eval/forward_time": eval_time, "epoch": epoch})
+          wandb.log({"eval/acc": eval_acc, "eval/total_time": eval_time, "epoch": epoch})
       if getenv("RESET_STEP", 1): val_step.reset()
 
       if eval_acc>MAP_TARGET:
