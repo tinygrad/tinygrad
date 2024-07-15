@@ -410,13 +410,13 @@ class AMDDevice(HCQCompatCompiled):
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
 
   @classmethod
-  def _read_signal(self, sig): return sig.value
+  def _read_signal(self, signal): return signal.value
 
   @classmethod
-  def _read_timestamp(self, sig): return sig.start_ts
+  def _read_timestamp(self, signal): return signal.start_ts
 
   @classmethod
-  def _set_signal(self, sig, value): sig.value = value
+  def _set_signal(self, signal, value): signal.value = value
 
   @classmethod
   def _alloc_signal(self, value=0, **kwargs) -> hsa.amd_signal_t:
@@ -428,7 +428,7 @@ class AMDDevice(HCQCompatCompiled):
     return ret
 
   @classmethod
-  def _free_signal(self, sig): self.signals_pool.append(sig)
+  def _free_signal(self, signal): self.signals_pool.append(signal)
 
   @classmethod
   def _wait_signal(self, signal:hsa.amd_signal_t, value=0, timeout=10000):

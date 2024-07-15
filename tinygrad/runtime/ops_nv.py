@@ -322,7 +322,7 @@ class NVProgram(HCQCompatProgram):
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
-      raise RuntimeError("Invalid global/local dims")
+      raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
 
     if self.device.kernargs_ptr >= (self.device.kernargs_page.va_addr + self.device.kernargs_page.size - self.kernargs_alloc_size):
       self.device.kernargs_ptr = self.device.kernargs_page.va_addr
@@ -552,13 +552,13 @@ class NVDevice(HCQCompatCompiled):
     NVDevice.devices.append(self)
 
   @classmethod
-  def _read_signal(self, sig): return sig[0]
+  def _read_signal(self, signal): return signal[0]
 
   @classmethod
-  def _read_timestamp(self, sig): return sig[1]
+  def _read_timestamp(self, signal): return signal[1]
 
   @classmethod
-  def _set_signal(self, sig, value): sig[0] = value
+  def _set_signal(self, signal, value): signal[0] = value
 
   @classmethod
   def _alloc_signal(self, value=0, **kwargs) -> memoryview:
@@ -566,7 +566,7 @@ class NVDevice(HCQCompatCompiled):
     return sig
 
   @classmethod
-  def _free_signal(self, sig): self.signals_pool.append(sig)
+  def _free_signal(self, signal): self.signals_pool.append(signal)
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000):
