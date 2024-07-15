@@ -353,7 +353,7 @@ def train_retinanet():
   config = {}
   SEED            = config['SEED']        = getenv("SEED", 42)
   HOSTNAME        = config['HOST']        = getenv('SLURM_STEP_NODELIST', 'tiny')
-  EPOCHS          = config['EPOCHS']      = 5
+  EPOCHS          = config['EPOCHS']      = getenv('EPOCHS',4)
   BS              = config['BS']          = getenv('BS', 32)
   BS_EVAL         = config['BS_EVAL']     = getenv('BS_EVAL', BS if BS<32 else 32)
   LR              = config['LR']          = 0.000085
@@ -366,7 +366,7 @@ def train_retinanet():
   TEST            = config['TEST']        = getenv('TEST', 0)
   BENCHMARK       = config['BENCHMARK']   = getenv("BENCHMARK", 10000)
   EVAL_ONLY       = config['EVAL_ONLY']   = getenv('EVAL_ONLY')
-  CHKPT_PATH      = config['CHKPT_PATH']  = getenv('CHKPT_PATH', 'ckpts/retinanet_6xtiny_B96_E3.safe')
+  CHKPT_PATH      = config['CHKPT_PATH']  = getenv('CHKPT_PATH', 'ckpts/retinanet_6xtiny_B96_E4.safe')
   TRAIN_ONLY      = config['TRAIN_ONLY']  = getenv('TRAIN_ONLY')
 
   Tensor.manual_seed(SEED)
