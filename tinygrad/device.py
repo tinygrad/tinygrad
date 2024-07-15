@@ -192,7 +192,7 @@ class Compiled:
 
     This method ensures that all previously queued operations on the device have been completed before proceeding.
     """
-    pass  # override this in your device
+    # override this in your device implementation
 
 # **************** for HCQ Compatible Devices ****************
 
