@@ -674,8 +674,8 @@ class Kernel:
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd = self.global_dims
             tcd = self.shape_len-self.upcasted
-            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
-            assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, "tcd dims wrong"
+            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
+            assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd))
             for x,y in pattern_1: permaxis.append(y + (wd if x == 0 else tcd))
