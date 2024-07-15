@@ -146,6 +146,11 @@ class TestLinearizer(unittest.TestCase):
     real_index = x.numpy()[idxs.numpy()].reshape(1024, )
     helper_linearizer_ast((store, ), [x, idxs], wanna_output=[real_index])
 
+
+  def test_indexing_multireduce_readable(self):
+    arange_start_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
+
+
   def test_indexing_shape_unfused(self):
     x = Tensor.rand(16384, 256).realize()
     idxs = Tensor([0,3,5,6]).realize()
