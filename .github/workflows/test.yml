@@ -119,6 +119,17 @@ jobs:
     - name: Repo line count <8500 lines
       run: MAX_LINE_COUNT=8500 python sz.py
 
+  docs:
+    name: build-docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+      - run: pip install -e .[docs]
+      - run: mkdocs build --strict
+
   testopencl:
     strategy:
       fail-fast: false
