@@ -66,7 +66,7 @@ class TestRealWorld(unittest.TestCase):
     with Context(RUN_PROCESS_REPLAY = 2 if RUN_PROCESS_REPLAY else 0):
       model = [ResBlock(16, 24, 16) for _ in range(4)]
       derandomize_model(model)
-      # @TinyJit
+      @TinyJit
       def test(t, t2):
         for l in model: t = l(t, t2)
         return t.realize()
