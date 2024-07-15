@@ -2,7 +2,7 @@
 
 ## Overview
 
-The main aspect of HCQ-compatible runtimes is how they interact with devices. In HCQ, all interactions with devices occur in a hardware-friendly manner using [command queues](#commandqueues). This approach allows commands to be issued directly to devices, bypassing runtime overhead such as HIP, or CUDA. Additionally, by using the HCQ API, these runtimes can benefit from various optimizations and features, including [HCQGraph](#hcqgraph) and built-in profiling capabilities.
+The main aspect of HCQ-compatible runtimes is how they interact with devices. In HCQ, all interactions with devices occur in a hardware-friendly manner using [command queues](#commandqueues). This approach allows commands to be issued directly to devices, bypassing runtime overhead such as HIP or CUDA. Additionally, by using the HCQ API, these runtimes can benefit from various optimizations and features, including [HCQGraph](#hcqgraph) and built-in profiling capabilities.
 
 ### Command Queues
 
@@ -112,6 +112,15 @@ The `HCQCompatAllocator` base class simplifies allocator logic by leveraging [co
 Backends must adhere to the `HCQCompatAllocRes` protocol when returning allocation results.
 
 ::: tinygrad.device.HCQCompatAllocRes
+    options:
+        members: true
+        show_source: false
+
+### HCQ Compatible Program
+
+The `HCQCompatProgram` is a helper base class for defining programs compatible with HCQ-compatible devices. Currently, the arguments consist of pointers to buffers, followed by `vals` fields. The convention expects a packed struct containing the passed pointers, followed by `vals` located at `kernargs_args_offset`.
+
+::: tinygrad.device.HCQCompatProgram
     options:
         members: true
         show_source: false
