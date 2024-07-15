@@ -365,16 +365,6 @@ class HCQCompatProgram:
 class HCQCompatCompiled(Compiled):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
-
-  HCQ API is a lower level API for defining backends. HCQ-compatible devices are required to define 2 queue types:
-  1. Compute queue (`HWComputeQueue`): for compute workloads
-  2. Copy queue (`HWCopyQueue`): for transfer operations
-
-  HCQ-compatible devices should also support signals which are accessible from CPU for synchronization. For global synchronization, devices use
-  progressive per-device timeline signals. By convention, self.timeline_value points to the next value to signal. To wait for all previous
-  operations on the device to complete, use: `self._wait_signal(self.timeline_signal, self.timeline_value - 1)`
-
-  This class implements the necessary shared methods and attributes (like profiling functionality) for this kind of devices.
   """
 
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, comp_queue_t, copy_queue_t, timeline_signals):
@@ -389,24 +379,52 @@ class HCQCompatCompiled(Compiled):
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
   @classmethod
-  def _read_signal(self, sig): raise NotImplementedError("need _read_signal") # reads a value for a signal
+  def _read_signal(cls, signal:Any) -> Any:
+    """
+    Read a value for a signal.
+    """
+    raise NotImplementedError("_read_signal needs to be implemented")
 
   @classmethod
-  def _read_timestamp(self, sig): raise NotImplementedError("need _read_timestamp") # reads a timestamp for a signal
+  def _read_timestamp(cls, signal:Any) -> float:
+    """
+    Read a timestamp for a signal.
+    """
+    raise NotImplementedError("_read_timestamp needs to be implemented")
 
   @classmethod
-  def _set_signal(self, sig, value): raise NotImplementedError("need _set_signal") # sets a value for a signal
+  def _set_signal(cls, sig:Any, value:Any) -> None:
+    """
+    Set a value for a signal.
+    """
+    raise NotImplementedError("_set_signal needs to be implemented")
 
   @classmethod
-  def _alloc_signal(self, value=0, **kwargs): raise NotImplementedError("need _alloc_signal") # allocates a new signal
+  def _alloc_signal(cls, value:Any = 0, **kwargs) -> Any:
+    """
+    Allocate a new signal.
+    """
+    raise NotImplementedError("_alloc_signal needs to be implemented")
 
   @classmethod
-  def _free_signal(self, sig): raise NotImplementedError("need _free_signal") # frees a signal
+  def _free_signal(cls, sig: Any) -> None:
+    """
+    Free a signal.
+    """
+    raise NotImplementedError("_free_signal needs to be implemented")
 
   @classmethod
-  def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
+  def _wait_signal(cls, signal: Any, value: Any = 0, timeout: int = 10000) -> None:
+    """
+    Wait for a signal to reach a specific value. Signals
+    """
+    raise NotImplementedError("_wait_signal needs to be implemented")
 
-  def _gpu2cpu_time(self, gpu_time, is_copy): raise NotImplementedError("need _gpu2cpu_time")
+  def _gpu2cpu_time(self, gpu_time: float, is_copy: bool) -> float:
+    """
+    Convert GPU time to CPU time. `is_copy` flag indicating if this is a copy queue.
+    """
+    raise NotImplementedError("_gpu2cpu_time needs to be implemented")
 
   def _prof_setup(self):
     if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
