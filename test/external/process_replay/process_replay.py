@@ -20,7 +20,7 @@ def process_replay(offset:int):
   changed = 0
   for row in cur.fetchall():
     ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
-    with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache if k != "DEBUG"}):
+    with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
       # try linearize
       try:
         k = Kernel(ast, opts=opts)
