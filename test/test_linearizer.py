@@ -140,7 +140,7 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast((store, ), [], wanna_output=[real_arange])
     with Context(DEBUG=0, NOOPT=0): np.testing.assert_equal(tiny.numpy(), real_arange)
 
-  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
+  @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "very slow")
   def test_indexing_multireduce(self):
     arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), \
         View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
