@@ -1,6 +1,6 @@
 ## Neural Network classes
 
-::: tinygrad.nn.BatchNorm2d
+::: tinygrad.nn.BatchNorm
 ::: tinygrad.nn.Conv1d
 ::: tinygrad.nn.Conv2d
 ::: tinygrad.nn.ConvTranspose1d
