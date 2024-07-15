@@ -70,7 +70,7 @@ class LazyOp:
     if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
     return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPNE} else self.src[-1].dtype
   @functools.cached_property
-  def full_shape(self):
+  def full_shape(self) -> Tuple[sint, ...]:
     if len(self.src) == 0 and self.op in BufferOps: return self.arg.st.shape
     return tuple(max(x) for x in zip(*[x.full_shape for x in self.src]))
   @functools.cached_property

@@ -12,7 +12,7 @@ from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, M
 from tinygrad.renderer import TensorCore
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import Variable
+# from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
@@ -763,24 +763,24 @@ class TestLinearizer(unittest.TestCase):
     # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (32,16,16), True, [20,3,Variable("start_pos",1,2)])
 
     # collapse on left-most available axis (the left most is too small)
-    # _assert_grouped_dims("gidx", (2,3,4,5), (4,16,16), False, [2,12,5])
+    _assert_grouped_dims("gidx", (2,3,4,5), (4,16,16), False, [2,12,5])
     # _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), True, [5,12,2])
 
-    _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (16,16,16), False, [Variable("start_pos",1,2)*3,4,5])
+    # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (16,16,16), False, [Variable("start_pos",1,2)*3,4,5])
 
     # # dim too large and not factorable
     # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", 0, (23,), (16,16,16), False,)
+    #   get_grouped_dims("gidx", (23,), (16,16,16), False,)
     # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", 0, (128,3,4), (16,4,23), False,)
+    #   get_grouped_dims("gidx", (128,3,4), (16,4,23), False,)
 
-    # # too large for sizes
-    # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", 0, (2,3,4,5,6), (16,16,16), False,)
+    # too large for sizes
+    with self.assertRaises(RuntimeError):
+      get_grouped_dims("gidx", (2,3,4,5,6), (16,16,16))
 
     # # variable too large
     # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", 0, (Variable("start_pos",0,16),3,4), (16,16,16), False,)
+    #   get_grouped_dims("gidx", (Variable("start_pos",0,16),3,4), (16,16,16), False,)
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
