@@ -74,13 +74,12 @@ class IndependentLowerer:
     ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
     # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = ast.full_shape
-    first_reduce = [x!=y for x,y in zip(ast.src[0].arg.st.shape[:len(full_shape)-ki.upcasted]+(0,),
-                                        full_shape[:len(full_shape)-ki.upcasted]+(1,))].index(True)
+    first_upcasted = len(full_shape)-ki.upcasted
+    first_reduce = [x!=y for x,y in zip(ast.src[0].arg.st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
     local_loads = [x for x in ast.lazyops if x.op is BufferOps.LOAD and x.arg.idx == -1]
     # NOTE: this is taking the first one...there may be subtlelies here with multireduces
     group_for_reduces = sum([x!=y for x,y in zip(
-      local_loads[0].arg.st.shape[first_reduce:len(full_shape)-ki.upcasted],
-      ast.src[0].arg.st.shape[first_reduce:len(full_shape)-ki.upcasted])]) if len(local_loads) else 0
+      local_loads[0].arg.st.shape[first_reduce:first_upcasted], ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
     global_dims = first_reduce-ki.local_dims
 
     if opts.has_local:
@@ -94,10 +93,10 @@ class IndependentLowerer:
 
     # reduce loops
     self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True))
-      for i,g in enumerate(full_shape[first_reduce+group_for_reduces:len(full_shape)-ki.upcasted], start=first_reduce+group_for_reduces)]
+      for i,g in enumerate(full_shape[first_reduce+group_for_reduces:first_upcasted], start=first_reduce+group_for_reduces)]
 
     # upcast loops
-    for i,g in enumerate(full_shape[len(full_shape)-ki.upcasted:], start=len(full_shape)-ki.upcasted):
+    for i,g in enumerate(full_shape[first_upcasted:], start=first_upcasted):
       assert isinstance(g, int), "needs to be int to upcast/unroll"
       self.idxs.append(UOp(UOps.EXPAND, dtypes.bigint, tuple(UOp.const(dtypes.bigint, j) for j in range(0, g)), i))
 
