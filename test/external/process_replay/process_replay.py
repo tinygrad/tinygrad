@@ -57,9 +57,10 @@ def process_replay(offset:int):
   return difftimes
 
 def timeit(fn, *args, **kwargs):
-  start = time.time()
+  start = time.perf_counter()
   fn(*args, **kwargs)
-  return time.time() - start
+  return time.perf_counter() - start
+
 if __name__ == "__main__":
   conn = db_connection()
   cur = conn.cursor()
@@ -69,6 +70,8 @@ if __name__ == "__main__":
   offsets = range(0, row_count, PAGE_SIZE)
   with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
     timediffs = sum(tqdm(pool.imap(process_replay, offsets), total=len(offsets)), [])
+    pool.close()
+    pool.join()
   better, worse = partition(sorted(timediffs, key=lambda x: x[2]),lambda x:x[2]<0)
   for (name,lintime, dt) in better[:10]: print(f"better:{lintime:.3f} - {-dt:.3f}s {name}")
   for (name, lintime, dt) in worse[-1:-10:-1]: print(f"worse: {lintime:.3f} + {dt:.3f}s {name}")
