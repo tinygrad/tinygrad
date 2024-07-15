@@ -140,6 +140,9 @@ class Allocator:
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
+  """
+  The LRU Allocator is responsible for caching buffers. It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
+  """
   def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
   def alloc(self, size:int, options:Optional[BufferOptions]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
@@ -182,7 +185,13 @@ class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
     self.renderer = renderer or Renderer()
-  def synchronize(self): pass  # override this in your device
+  def synchronize(self):
+    """
+    Synchronize all pending operations on the device.
+
+    This method ensures that all previously queued operations on the device have been completed before proceeding.
+    """
+    pass  # override this in your device
 
 # **************** for HCQ Compatible Devices ****************
 

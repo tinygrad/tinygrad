@@ -20,7 +20,9 @@ nav:
     - Environment Variables: env_vars.md
   - Developer:
     - developer.md
-    - HCQ: runtime/hcq.md
+    - Runtime:
+      - runtime/overview.md
+      - HCQ: runtime/hcq.md
   - tinybox: tinybox.md
 #- tinygrad: reference/
 

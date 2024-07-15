@@ -47,13 +47,9 @@ Lists of `ExecItem` can be condensed into a single ExecItem with the Graph API (
 
 ## Runtime
 
-Runtimes in tinygrad are responsible for device-specific interactions. They handle tasks such as: initializing devices, allocating memory, loading/scheduling programs onto devices and etc.
+Runtimes are responsible for device-specific interactions. They handle tasks such as initializing devices, allocating memory, loading/launching programs, and more. You can find more information about the runtimes API on the [runtime overview page](runtime/overview.md).
 
-All runtime implementations can be found in the [runtime](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime) directory.
-
-The base class for all devices is Compiled. To initialize a device, you need to provide a set of classes which define how to operate on your device.
-
-::: tinygrad.device.Compiled
+All runtime implementations can be found in the [runtime directory](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime).
 
 ### HCQ Compatible Runtimes
 
