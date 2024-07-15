@@ -123,6 +123,7 @@ class TestLinearizer(unittest.TestCase):
     np.testing.assert_allclose(y_tiny.numpy(), wanna_output, atol=1e-4, rtol=1e-4)
 
   # *** buildup to fused indexing
+  @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "very slow")
   def test_arange_expanded(self):
     # Tensor.arange(16384) expanded such that output shape is (4, 16384, 256, 1)
     # basically it's pushing the expand through this reduce:
