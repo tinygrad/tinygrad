@@ -674,6 +674,7 @@ class Kernel:
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd = self.global_dims
             tcd = self.shape_len-self.upcasted
+            print(f"wd: {wd} tcd: {tcd}")
             print(st1.shape[wd:])
             assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
             print(f"test {st1.shape[tcd:tcd+4]}")
@@ -709,7 +710,7 @@ class Kernel:
           elif self.opts.device == "GPU":
             reduce_axes = [self.shape_len-self.upcasted]
             upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted) # how to vary?
-            fix_st1 = functools.partial(fix_st, (4,), (4, 4), ((0, 1), (1, 0)), (8,), (8,))
+            fix_st1 = functools.partial(fix_st, (4,), (4, 4), (), (8,), (8,))
             fix_st2 = None
           else:
             raise RuntimeError("unsupported device for tensor cores")
