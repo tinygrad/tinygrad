@@ -20,7 +20,7 @@ def process_replay(offset:int):
   changed = 0
   for row in cur.fetchall():
     ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
-    with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache}):
+    with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache}, DEBUG=0):
       # try linearize
       try:
         k = Kernel(ast, opts=opts)
@@ -45,7 +45,7 @@ def process_replay(offset:int):
           logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ASSERT_DIFF: raise e
         if changed > MAX_DIFF_PCT:
-          logging.warn(f"detected chanegs in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
+          logging.warn(f"detected changes in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
           early_stop.set()
           break
   conn.commit()
