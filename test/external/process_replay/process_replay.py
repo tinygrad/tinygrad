@@ -62,6 +62,7 @@ if __name__ == "__main__":
   row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
   conn.commit()
   cur.close()
+  offsets = range(0, row_count, PAGE_SIZE)
   with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
     timediffs = sum(tqdm(pool.imap(process_replay, offsets), total=len(offsets)), [])
   better, worse = partition(sorted(timediffs, key=lambda x: x[2]),lambda x:x[2]<0)
