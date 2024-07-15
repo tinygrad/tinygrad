@@ -1929,7 +1929,7 @@ class Tensor:
     """
     assert isinstance(size, (tuple,list)) and all(isinstance(s, int) for s in size) and len(size) > 0 and len(size) <= self.ndim
     assert mode == "linear", "only linear interpolate supported right now"
-    x, expand = self, [s for s in self.shape]
+    x, expand = self, list(s for s in self.shape)
     for i in range(-len(size), 0):
       scale = (self.shape[i] - (1 if align_corners else 0)) / (size[i] - (1 if align_corners else 0))
       arr, reshape = Tensor.arange(size[i]).cast(dtypes.float32), [1 for _ in range(self.ndim)]
