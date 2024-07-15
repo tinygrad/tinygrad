@@ -143,21 +143,16 @@ class TestLinearizer(unittest.TestCase):
     store = LazyOp(op=BufferOps.STORE, src=(r1, ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4, 1, 1, 256))))
     x = Tensor.rand(16384, 256).realize()
     idxs = Tensor([0,3,5,6]).realize()
-    real_index = x.numpy()[idxs.numpy()].reshape((1024, ))
+    real_index = x.numpy()[idxs.numpy()].reshape(1024, )
     helper_linearizer_ast((store, ), [x, idxs], wanna_output=[real_index])
 
-    """
-    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
-    arange = LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1, dtype=dtypes.int, st=arange_input_st)),), arg=(1,))
-    # TODO: BufferOps.CONST (4, 16384, 256) != BinaryOps.ADD (16384, 1)
-    expanded_add = LazyOp(op=BinaryOps.ADD, src=(arange, LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None)
-    output_st = ShapeTracker.from_shape((4, 16384, 256))
-    store = LazyOp(op=BufferOps.STORE, src=(expanded_add, ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=output_st))
+  def test_indexing_shape_unfused(self):
     x = Tensor.rand(16384, 256).realize()
     idxs = Tensor([0,3,5,6]).realize()
-    real_index = x.numpy()[idxs.numpy()]
-    helper_linearizer_ast((store, ), [x, idxs], wanna_output=[real_index])
-    """
+    arange = Tensor.arange(16384).realize()
+    real_index = x.numpy()[idxs.numpy()].reshape(1024, )
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 256, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPNE, src=(LazyOp(op=BinaryOps.CMPNE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 1, 0), offset=0, mask=None, contiguous=False),))))), arg=None), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float)), arg=None),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 1, 256), strides=(256, 0, 1), offset=0, mask=None, contiguous=True),))))
+    helper_linearizer_ast((ast, ), [x, idxs, arange], wanna_output=[real_index])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
