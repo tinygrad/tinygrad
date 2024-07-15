@@ -336,9 +336,8 @@ constant_folder = PatternMatcher([
    lambda x: UOp(x.op, dtypes.int32, x.src, x.arg)),
   # VECTORIZE/GEP
   (UOp(UOps.GEP, src=(UOp(UOps.VECTORIZE).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
-  (UOp(UOps.VECTORIZE, dtypes.float.vec(2), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))), lambda x: x),
-  (UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(4))), lambda x: x),
-  (UOp(UOps.VECTORIZE, dtypes.float.vec(8), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(8))), lambda x: x),
+  *[(UOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=j)
+      for j in range(i))), lambda x: x) for i in [2, 4, 8]],
   # tensor core with a 0 input is acc
   (UOp(UOps.WMMA, src=(UOp.const(None, 0.0), UOp.var(), UOp.var('acc'))), lambda acc: acc),
   (UOp(UOps.WMMA, src=(UOp.var(), UOp.const(None, 0.0), UOp.var('acc'))), lambda acc: acc),
@@ -360,9 +359,7 @@ constant_folder = PatternMatcher([
     UOp.cvar("compval")), UOp.cvar("multconst"), UOp.const(None, 0)),
     lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # sum collapse to mul (with possible GEP)
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),
-                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=[UPat(UOps.VECTORIZE), UPat(UOps.RANGE, name="loop")]),
+  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=[UPat({UOps.VECTORIZE, UOps.CONST}), UPat(UOps.RANGE, name="loop")]),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=[UPat(UOps.VECTORIZE), UPat(UOps.RANGE, name="loop")]),)),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
@@ -387,33 +384,19 @@ constant_folder = PatternMatcher([
   (UOp.max(UOp.cvar('c'), -(UOp(UOps.RANGE).name('s'))), lambda c,s: -s if -(s.src[1].arg-1) >= c.arg else None),
   (UOp.max(UOp.cvar('c'), -(UOp(UOps.RANGE).name('s')+UOp.cvar('c2'))), lambda c,s,c2: -(s+c2) if -(s.src[1].arg-1+c2.arg) >= c.arg else None),
   # const rules
-  # TODO: Write a UPat for vec(8) types
   (UOp(UOps.GEP, src=(UOp.cvar("c"),)).name("root"), lambda root, c: UOp.const(root.dtype, c.arg)),
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.VECTORIZE, src=(
-    UPat(UOps.CONST, name="c1"), UPat(UOps.CONST, name="c2"))))), lambda root, c1, c2: UOp.const(root.dtype, c1.arg if root.arg == 0 else c2.arg)),
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.VECTORIZE, src=(
-    UPat(UOps.CONST, name="c1"), UPat(UOps.CONST, name="c2"), UPat(UOps.CONST, name="c3"), UPat(UOps.CONST, name="c4"))))),
-    lambda root, c1, c2, c3, c4: UOp.const(root.dtype, [c1.arg, c2.arg, c3.arg, c4.arg][root.arg])),
+  *[(UPat(UOps.GEP, name="root", src=(UPat(UOps.VECTORIZE, name="v", src=[UPat(UOps.CONST) for _ in range(i)]))),
+     lambda root, v: UOp.const(root.dtype, v.src[root.arg].arg)) for i in [2, 4, 8]],
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi on a DEFINE_ACC without loops, CONST, or a vectorized CONST is a noop. this is for correctness, not just speed
   (UOp(UOps.PHI, src=(UOp(UOps.DEFINE_ACC).name("acc"), UOp.var("acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
   (UOp(UOps.PHI, src=(UOp(UOps.DEFINE_ACC, src=(UOp.cvar(),)), UOp.var("x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(2)]))), UPat(name="x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(4)]))), UPat(name="x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(8)]))), UPat(name="x"))), lambda x: x),
   (UOp(UOps.PHI, src=(UOp.cvar(), UOp.var("x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(2)]), UPat(name="x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(4)]), UPat(name="x"))), lambda x: x),
-  (UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(8)]), UPat(name="x"))), lambda x: x),
+  *[(UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(i)]), UPat(name="x"))), lambda x: x) for i in [2, 4, 8]],
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
-  # TODO: Write a UPat for vec(8) types
   (UOp(UOps.DEFINE_ACC, src=(UOp.var(),)).name("root"), lambda root: UOp.cast(root.src[0], root.dtype)),
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[
-    UPat(UOps.CONST, name="c1"), UPat(UOps.CONST, name="c2")]))))), lambda root, c1, c2: UOp.const(root.dtype, c1.arg)),
-  (UPat(UOps.GEP, name="root", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[
-    UPat(UOps.CONST, name="c1"), UPat(UOps.CONST, name="c2"), UPat(UOps.CONST, name="c3"), UPat(UOps.CONST, name="c4")]))))),
-    lambda root, c1, c2, c3, c4: UOp.const(root.dtype, c1.arg)),
+  *[(UPat(UOps.GEP, name="root", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, name="v", src=[UPat(UOps.CONST) for _ in range(i)]))))),
+     lambda root, v: UOp.const(root.dtype, v.src[root.arg].arg)) for i in [2, 4, 8]],
   (UOp(UOps.GEP, src=(UOp.cvar("x"),)).name("root"), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
   (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
