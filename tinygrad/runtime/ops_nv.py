@@ -322,7 +322,7 @@ class NVProgram(HCQCompatProgram):
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
-      raise RuntimeError("Invalid global/local dims")
+      raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
 
     if self.device.kernargs_ptr >= (self.device.kernargs_page.va_addr + self.device.kernargs_page.size - self.kernargs_alloc_size):
       self.device.kernargs_ptr = self.device.kernargs_page.va_addr
