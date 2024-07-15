@@ -72,6 +72,6 @@ if __name__ == "__main__":
     timediffs = sum(tqdm(pool.imap(process_replay, offsets), total=len(offsets)), [])
     pool.close()
     pool.join()
-  better, worse = partition(sorted(timediffs, key=lambda x: x[2]),lambda x:x[2]<0)
+  better, worse = partition(sorted(timediffs, key=lambda x: x[2]),lambda x:x[2]>0)
   for (name,lintime, dt) in better[:10]: print(f"better:{lintime:.3f} - {-dt:.3f}s {name}")
   for (name, lintime, dt) in worse[-1:-10:-1]: print(f"worse: {lintime:.3f} + {dt:.3f}s {name}")
