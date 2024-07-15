@@ -2,7 +2,7 @@ from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol
+from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
 from tinygrad.dtype import DType, ImageDType
@@ -388,7 +388,7 @@ class HCQCompatCompiled(Compiled):
   """
 
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime,
-               comp_queue_t:HWComputeQueue, copy_queue_t:HWCopyQueue, timeline_signals:Tuple[Any, Any]):
+               comp_queue_t:Type[HWComputeQueue], copy_queue_t:Type[HWCopyQueue], timeline_signals:Tuple[Any, Any]):
     self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
@@ -486,7 +486,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
   """
 
   def __init__(self, device:HCQCompatCompiled, batch_size:int=(2 << 20), batch_cnt:int=32):
-    self.device = device
+    self.device:Any = device
     self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
@@ -534,7 +534,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
 
         ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
-  def transfer(self, dest:HCQCompatAllocRes, src:HCQCompatAllocRes, sz:int, src_dev:HCQCompatCompiled, dest_dev:HCQCompatCompiled):
+  def transfer(self, dest:HCQCompatAllocRes, src:HCQCompatAllocRes, sz:int, src_dev, dest_dev):
     src_dev._gpu_map(dest)
 
     with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
