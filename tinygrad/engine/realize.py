@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast, Generator, Tuple
 import time, pprint
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context
+from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, RUN_PROCESS_REPLAY,  all_int, CAPTURING, Metadata, Context
 from tinygrad.ops import MetaOps, LazyOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
@@ -19,7 +19,7 @@ def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
     print_tree(ast)
   k = Kernel(ast, opts=renderer)
   k.required_optimizations()
-  if not NOOPT:
+  if not NOOPT and not RUN_PROCESS_REPLAY.value == 2:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin

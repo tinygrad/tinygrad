@@ -3,11 +3,6 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 import torch
-from tinygrad.helpers import RUN_PROCESS_REPLAY, NOOPT
-
-if RUN_PROCESS_REPLAY:
-  RUN_PROCESS_REPLAY.value = 2
-  NOOPT.value = 1
 
 def get_question_samp(bsz, seq_len, vocab_size, seed):
   np.random.seed(seed)
