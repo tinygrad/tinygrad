@@ -406,7 +406,7 @@ class HCQCompatCompiled(Compiled):
     raise NotImplementedError("_read_signal needs to be implemented")
 
   @classmethod
-  def _read_timestamp(cls, signal:Any) -> float:
+  def _read_timestamp(cls, signal:Any) -> int:
     """
     Read a timestamp for a signal.
     """
