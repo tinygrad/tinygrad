@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import difflib, pickle, multiprocessing, os, logging
+import difflib, pickle, multiprocessing, os, logging, time
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm, partition, timeit
+from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm, partition
 
 PAGE_SIZE = 100
 TABLE_NAME = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
@@ -56,6 +56,10 @@ def process_replay(offset:int):
   cur.close()
   return difftimes
 
+def timeit(fn, *args, **kwargs):
+  start = time.time()
+  fn(*args, **kwargs)
+  return time.time() - start
 if __name__ == "__main__":
   conn = db_connection()
   cur = conn.cursor()
