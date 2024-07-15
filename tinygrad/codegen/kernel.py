@@ -10,7 +10,7 @@ from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
-                             get_contraction, to_function_name, diskcache_put, ContextVar, timeit
+                             get_contraction, to_function_name, diskcache_put, ContextVar, timeit, RUN_PROCESS_REPLAY
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
@@ -759,9 +759,9 @@ class Kernel:
   def to_program(self) -> Program:
     self.linearize()
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"):
+    if RUN_PROCESS_REPLAY:
       def lin(): self.linearize().uops.linearize()
-      lt = min(timeit(lin) for _ in range(5)) if getenv("RUN_PROCESS_REPLAY") > 1 else None
+      lt = min(timeit(lin) for _ in range(5)) if RUN_PROCESS_REPLAY.value > 1 else None
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}, lt))
     info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed

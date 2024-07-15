@@ -2,8 +2,14 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import RUN_PROCESS_REPLAY, NOOPT
 from extra.models.rnnt import LSTM
 import torch
+
+
+if RUN_PROCESS_REPLAY:
+  RUN_PROCESS_REPLAY.value = 2
+  NOOPT.value = 1
 
 class TestRNNT(unittest.TestCase):
   def test_lstm(self):

@@ -2,8 +2,7 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '5'
-  RUN_PROCESS_REPLAY: 2
-  NOOPT: 1
+  RUN_PROCESS_REPLAY: 1
 
 on:
   push:
