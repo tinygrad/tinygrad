@@ -97,7 +97,7 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> List[Buffer]:
   return cast(List[Buffer], rawbufs)
 
 # get dictionary of all possible actions
-def get_linearizer_actions(lin:Kernel, include_0=True) -> Dict[int, Kernel]:
+def get_kernel_actions(lin:Kernel, include_0=True) -> Dict[int, Kernel]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
   for i,a in enumerate(actions):
     if a.axis is not None and a.op is not OptOps.TC:
@@ -140,7 +140,7 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True)
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:
-      acted_lins: List[Kernel] = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
+      acted_lins: List[Kernel] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
       timed_lins: List[Tuple[Kernel, float]] = []
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):

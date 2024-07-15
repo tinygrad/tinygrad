@@ -564,10 +564,10 @@ class TestLinearizer(unittest.TestCase):
         if golden_result is None: golden_result = np.frombuffer(real_bufs[0].as_buffer(), _to_np_dtype(real_bufs[0].dtype))
         np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.15)
 
-      # check that get_linearizer_actions produces all 9 options
-      from tinygrad.engine.search import get_linearizer_actions
-      tc_actions = [k for i, k in get_linearizer_actions(Kernel(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
-      assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
+      # check that get_kernel_actions produces all 9 options
+      from tinygrad.engine.search import get_kernel_actions
+      tc_actions = [k for i, k in get_kernel_actions(Kernel(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
+      assert len(tc_actions) == 9, f"get_kernel_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_phi(self):
@@ -619,7 +619,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
       # TODO: fix reverse_dims
-      idxs = get_grouped_dims(prefix, 0, dims, max_sizes)
+      idxs = get_grouped_dims(prefix, dims, max_sizes)
       loop_idxs = dedup(flatten([[y for y in sorted(list(x.sparents)) if y.op is UOps.SPECIAL] for x in idxs]))
       sizes = [x.arg[2] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"

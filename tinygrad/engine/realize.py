@@ -13,7 +13,7 @@ from tinygrad.engine.schedule import ScheduleItem
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_linearizer(renderer:Renderer, ast:LazyOp) -> Kernel:
+def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
   if DEBUG >= 5:
     from tinygrad.engine.graph import print_tree
     print_tree(ast)
@@ -157,7 +157,7 @@ def get_runner(dname:str, ast:LazyOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
-    prg: Program = get_linearizer(Device[dname].renderer, ast).to_program()
+    prg: Program = get_kernel(Device[dname].renderer, ast).to_program()
     if hasattr(prg.uops, "_fuzz_paths"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return UOpsFuzzerRunner(replace(prg, dname=dname))

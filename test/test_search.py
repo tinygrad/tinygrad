@@ -65,13 +65,13 @@ class TestBEAM(unittest.TestCase):
     capturing.clear()
     self.assertNotEqual(k_beam_0[-1].prg.p.src, k_beam_1[-1].prg.p.src)
 
-  def test_get_linearizer_actions(self):
+  def test_get_kernel_actions(self):
     from test.test_linearizer import helper_realized_ast
     a = Tensor.rand(4, 3)
     b = Tensor.rand(3)
     realized_ast, _ = helper_realized_ast(a @ b)
-    from tinygrad.engine.search import get_linearizer_actions
-    lins = get_linearizer_actions(Kernel(realized_ast), False).values()
+    from tinygrad.engine.search import get_kernel_actions
+    lins = get_kernel_actions(Kernel(realized_ast), False).values()
 
     # ensure amt=0 are not duplicated
     if Opt(OptOps.UPCAST, 0, 0) in actions:
