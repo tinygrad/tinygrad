@@ -18,7 +18,11 @@ nav:
     - dtypes: dtypes.md
     - nn (Neural Networks): nn.md
     - Environment Variables: env_vars.md
-  - Developer: developer.md
+  - Developer:
+    - developer.md
+    - Runtime:
+      - runtime/overview.md
+      - HCQ: runtime/hcq.md
   - tinybox: tinybox.md
 #- tinygrad: reference/
 
