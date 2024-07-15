@@ -1687,6 +1687,9 @@ class Tensor:
     t = Tensor.arange(25).reshape(1, 1, 5, 5)
     print(t.avg_pool2d().numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.avg_pool2d(padding=1).numpy())
+    ```
     """
     padding_, axis = self._padding2d(padding, len(k_ := make_pair(kernel_size))), tuple(range(-len(k_), 0))
     def pool(x:Tensor) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
@@ -1703,6 +1706,9 @@ class Tensor:
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(25).reshape(1, 1, 5, 5)
     print(t.max_pool2d().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.max_pool2d(padding=1).numpy())
     ```
     """
     padding_ = self._padding2d(padding, len(k_ := make_pair(kernel_size)))
