@@ -1,10 +1,10 @@
-import sys, glob
+import sys
 import json
 import numpy as np
 from PIL import Image
 import pathlib
 import boto3, botocore
-from tinygrad.helpers import fetch, getenv
+from tinygrad.helpers import fetch, getenv, diskcache
 from tqdm import tqdm
 import pandas as pd
 import concurrent.futures
@@ -71,20 +71,18 @@ def openimages(subset: str):
 
   return ann_file
 
-# @diskcache
-def get_train_files():
-  if not (files:=glob.glob(p:=str(BASEDIR / "train/data/*"))): raise FileNotFoundError(f"No training files in {p}")
-  return files
+@diskcache
+def get_retinanet_train_files():
+  return list(map(str, BASEDIR.glob('train/data/*')))
 
 def get_train_data():
   with open(BASEDIR / 'train/train_data.json') as f:
     data = json.load(f)
   return data
 
-# @functools.lru_cache(None)
-def get_val_files():
-  if not (files:=glob.glob(p:=str(BASEDIR / "validation/data/*"))): raise FileNotFoundError(f"No validation files in {p}")
-  return files
+@diskcache
+def get_retinanet_val_files():
+  return list(map(str, BASEDIR.glob('validation/data/*')))
 
 def get_val_data():
   with open(BASEDIR / 'validation/labels/openimages-mlperf.json') as f:
@@ -240,5 +238,7 @@ def iterate(coco, bs=8):
     yield np.array(X), targets
 
 if __name__ == '__main__':
-  openimages('validation')
-  openimages('train')
+  files = get_retinanet_train_files()
+  print(files)
+  # openimages('validation')
+  # openimages('train')

@@ -385,14 +385,14 @@ def train_retinanet():
   from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
   from tinygrad.nn.optim import Adam
   from examples.mlperf.helpers import anchor_generator
-  from extra.datasets.openimages import openimages, get_train_files, get_val_files
+  from extra.datasets.openimages import openimages, get_retinanet_train_files, get_retinanet_val_files
   from examples.mlperf.dataloader import batch_load_retinanet
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO
 
   if not TEST:
-    train_files = get_train_files()
-    val_files = get_val_files()
+    train_files = get_retinanet_train_files()
+    val_files = get_retinanet_val_files()
 
   retinanet.Conv2dNormal = Conv2dNormal
   retinanet.Conv2dNormal_priorprob = functools.partial(Conv2dNormal, b=-math.log(99))
