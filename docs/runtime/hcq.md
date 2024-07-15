@@ -16,7 +16,7 @@ HWComputeQueue().wait(signal_to_wait, value_to_wait) \
                 .submit(your_device)
 ```
 
-Your runtime should implement the required functions that are defined in the `HWCommandQueue`, `HWComputeQueue`, and `HWCopyQueue` classes.
+Each runtime should implement the required functions that are defined in the `HWCommandQueue`, `HWComputeQueue`, and `HWCopyQueue` classes.
 
 ::: tinygrad.device.HWCommandQueue
     options:
@@ -40,6 +40,18 @@ Your runtime should implement the required functions that are defined in the `HW
         show_source: false
 
 ::: tinygrad.device.HWCopyQueue
+    options:
+        members: [
+            "copy",
+            "update_copy",
+        ]
+        show_source: false
+
+#### Implementing custom commands
+
+To implement custom commands in the queue, use the @hcq_command decorator for your command implementations.
+
+::: tinygrad.device.hcq_command
     options:
         members: [
             "copy",

@@ -198,13 +198,13 @@ class Compiled:
 
 def hcq_command(func):
   """
-  Decorator for HWCommandQueue commands.
+  Decorator for HWCommandQueue commands. Enables command indexing and stores metadata for command updates.
 
-  Enables command indexing and stores metadata for command updates.
-
-  Usage:
-  @hcq_command
-  def command_method(self, ...): ...
+  For example:
+    ```python
+      @hcq_command
+      def command_method(self, ...): ...
+    ```
   """
   def __wrapper(self, *args, **kwargs):
     self.cmds_offset.append(len(self.q))
@@ -229,8 +229,9 @@ class HWCommandQueue:
     """
     Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.
 
-    :param signal: The signal to set
-    :param value: The value to set the signal to
+    Args:
+      signal: The signal to set
+      value: The value to set the signal to
     """
     self._signal(signal, value)
   def _signal(self, signal, value): raise NotImplementedError("backend should overload this function")
@@ -240,8 +241,9 @@ class HWCommandQueue:
     """
     Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.
 
-    :param signal: The signal to wait on
-    :param value: The value to wait for
+    Args:
+      signal: The signal to wait on
+      value: The value to wait for
     """
     self._wait(signal, value)
   def _wait(self, signal, value): raise NotImplementedError("backend should overload this function")
@@ -251,7 +253,8 @@ class HWCommandQueue:
     """
     Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.
 
-    :param signal: The signal to store the timestamp
+    Args:
+      signal: The signal to store the timestamp
     """
     self._timestamp(signal)
   def _timestamp(self, signal): raise NotImplementedError("backend should overload this function")
@@ -260,9 +263,10 @@ class HWCommandQueue:
     """
     Updates a previously queued signal command.
 
-    :param cmd_idx: Index of the signal command to update
-    :param signal: New signal to set (if None, keeps the original)
-    :param value: New value to set (if None, keeps the original)
+    Args:
+      cmd_idx: Index of the signal command to update
+      signal: New signal to set (if None, keeps the original)
+      value: New value to set (if None, keeps the original)
     """
     if self.cmds_meta[cmd_idx] != "signal": raise RuntimeError("called update_signal not on a signal command")
     self._update_signal(cmd_idx, signal, value)
@@ -273,9 +277,10 @@ class HWCommandQueue:
     """
     Updates a previously queued wait command.
 
-    :param cmd_idx: Index of the wait command to update
-    :param signal: New signal to wait on (if None, keeps the original)
-    :param value: New value to wait for (if None, keeps the original)
+    Args:
+      cmd_idx: Index of the wait command to update
+      signal: New signal to wait on (if None, keeps the original)
+      value: New value to wait for (if None, keeps the original)
     """
     if self.cmds_meta[cmd_idx] != "wait": raise RuntimeError("called update_wait not on a wait command")
     self._update_wait(cmd_idx, signal, value)
@@ -286,7 +291,8 @@ class HWCommandQueue:
     """
     Submits the command queue to a specific device for execution.
 
-    :param device: The device to submit the queue to
+    Args:
+      device: The device to submit the queue to
     """
     self._submit(device)
     return self
@@ -306,10 +312,11 @@ class HWComputeQueue(HWCommandQueue):
     """
     Enqueues an execution command for a kernel program.
 
-    :param prg: The program to execute
-    :param kernargs: The pointer to kernel arguments
-    :param global_size: The global work size
-    :param local_size: The local work size
+    Args:
+      prg: The program to execute
+      kernargs: The pointer to kernel arguments
+      global_size: The global work size
+      local_size: The local work size
     """
     self._exec(prg, kernargs, global_size, local_size)
   def _exec(self, prg, kernargs, global_size, local_size): raise NotImplementedError("backend should overload this function")
@@ -318,9 +325,10 @@ class HWComputeQueue(HWCommandQueue):
     """
     Updates a previously queued execution command.
 
-    :param cmd_idx: Index of the execution command to update
-    :param global_size: New global work size
-    :param local_size: New local work size
+    Args:
+      cmd_idx: Index of the execution command to update
+      global_size: New global work size
+      local_size: New local work size
     """
     if self.cmds_meta[cmd_idx] != "exec": raise RuntimeError("called update_exec not on an exec command")
     self._update_exec(cmd_idx, global_size, local_size)
@@ -333,9 +341,10 @@ class HWCopyQueue(HWCommandQueue):
     """
     Enqueues a copy command to transfer data.
 
-    :param dest: The destination of the copy
-    :param src: The source of the copy
-    :param copy_size: The size of data to copy
+    Args:
+      dest: The destination of the copy
+      src: The source of the copy
+      copy_size: The size of data to copy
     """
     self._copy(dest, src, copy_size)
   def _copy(self, dest, src, copy_size): raise NotImplementedError("backend should overload this function")
@@ -344,9 +353,10 @@ class HWCopyQueue(HWCommandQueue):
     """
     Updates a previously queued copy command.
 
-    :param cmd_idx: Index of the copy command to update
-    :param dest: New destination of the copy (if None, keeps the original)
-    :param src: New source of the copy (if None, keeps the original)
+    Args:
+      cmd_idx: Index of the copy command to update
+      dest: New destination of the copy (if None, keeps the original)
+      src: New source of the copy (if None, keeps the original)
     """
     if self.cmds_meta[cmd_idx] != "copy": raise RuntimeError("called update_copy not on an copy command")
     self._update_copy(cmd_idx, dest, src)
