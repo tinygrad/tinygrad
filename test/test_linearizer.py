@@ -132,7 +132,8 @@ class TestLinearizer(unittest.TestCase):
     tiny = Tensor.arange(16384).reshape(16384, 1).expand(4, 16384, 256).reshape(4, 16384, 256, 1)
     real_arange = np.broadcast_to(np.arange(16384).reshape(16384, 1), (4, 16384, 256)).reshape(4, 16384, 256, 1)
     # NOTE: this is stupidly recomputing because it's not fused, but it proves a point.
-    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
+    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), \
+        View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
     arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
     arange_axis = (3,)
     arange = LazyOp(ReduceOps.SUM, (LazyOp(BufferOps.CONST, (), ConstBuffer(1, dtypes.int, arange_input_st)), ), arange_axis)
@@ -143,33 +144,25 @@ class TestLinearizer(unittest.TestCase):
     with Context(DEBUG=0, NOOPT=0): np.testing.assert_equal(tiny.numpy(), real_arange)
 
   def test_indexing_multireduce(self):
-    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
+    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), \
+        View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
+    # TODO: do this arange broadcast in the scheduler
     arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
     arange_axis = (3,)
     arange = LazyOp(ReduceOps.SUM, (LazyOp(BufferOps.CONST, (), ConstBuffer(1, dtypes.int, arange_input_st)), ), arange_axis)
-    arange_output_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
-    arange = arange-LazyOp.const(1, dtypes.int, arange_output_shape)
-    idxs = Tensor([0,3,5,6])
-    idxs_load = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.int, ShapeTracker.from_shape((4,)+(1,)*(len(arange_output_shape)-1)).expand(arange_output_shape)))
-    cmp = arange.eq(idxs_load)
-    dataset = Tensor.rand(16384, 256)
-    dataset_load = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dataset.dtype, ShapeTracker.from_shape(dataset.shape).reshape((1, 16384, 256, 1)).expand(arange_output_shape)))
-    reduce_input = dataset_load*LazyOp(UnaryOps.CAST, (cmp,), dataset.dtype)
+    arange_out_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
+    arange = arange-LazyOp.const(1, dtypes.int, arange_out_shape)
+    # p2: the indexing
+    dataset = Tensor.rand(16384, 256).realize()
+    data1 = MemBuffer(1, dataset.dtype, ShapeTracker.from_shape(dataset.shape).reshape((1, 16384, 256, 1)).expand(arange_out_shape))
+    idxs = Tensor([0,3,5,6]).realize()
+    data2 = MemBuffer(2, dtypes.int, ShapeTracker.from_shape((4,)+(1,)*(len(arange_out_shape)-1)).expand(arange_out_shape))
+    reduce_input = LazyOp(BufferOps.LOAD, (), data1)*LazyOp(UnaryOps.CAST, (arange.eq(LazyOp(BufferOps.LOAD, (), data2)),), dataset.dtype)
     out = LazyOp(ReduceOps.SUM, (reduce_input, ), (1,))
-    output_shape = tuple(1 if i in out.arg else s for i,s in enumerate(arange_output_shape))
+    output_shape = tuple(1 if i in out.arg else s for i,s in enumerate(arange_out_shape))
     store = LazyOp(BufferOps.STORE, (out, ), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape)))
-    x = Tensor.rand(16384, 256).realize()
-    idxs = Tensor([0,3,5,6]).realize()
-    real_index = x.numpy()[idxs.numpy()].reshape(4, 1, 256, 1)
-    helper_linearizer_ast((store, ), [x, idxs], wanna_output=[real_index])
-
-  def test_indexing_shape_unfused(self):
-    x = Tensor.rand(16384, 256).realize()
-    idxs = Tensor([0,3,5,6]).realize()
-    arange = Tensor.arange(16384).realize()
-    real_index = x.numpy()[idxs.numpy()].reshape(1024, )
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 256, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPNE, src=(LazyOp(op=BinaryOps.CMPNE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 1, 0), offset=0, mask=None, contiguous=False),))))), arg=None), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float)), arg=None),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 1, 256), strides=(256, 0, 1), offset=0, mask=None, contiguous=True),))))
-    helper_linearizer_ast((ast, ), [x, idxs, arange], wanna_output=[real_index])
+    real_index = dataset.numpy()[idxs.numpy()].reshape(4, 1, 256, 1)
+    helper_linearizer_ast((store, ), [dataset, idxs], wanna_output=[real_index])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -215,7 +208,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(4, 1).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a + b[0]).sum() + b[0]
-    lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()[0]])[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     # LOAD -> RANGE -> LOAD -> PHI
     assert lin.uops[ranges[0]-2].op is UOps.LOAD
@@ -225,7 +218,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a.reshape(2, 1).expand(2, 3) + b[0]).sum() + b[0]
-    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()[0]])[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     if getenv("PTX"):
     # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> PHI
@@ -1139,7 +1132,6 @@ def _helper_linearizer_opt_ast(realized_ast:LazyOp, real_bufs:List[Buffer], opts
     for i, (buf,shape) in enumerate(outbufs):
       np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).reshape(shape), wanna_output[i], atol=atol, rtol=rtol)
 
-  if NOOPT: return lins
   # Check correctness of handcoded optimiztions.
   k = Kernel(realized_ast)
   lins.append(k)
@@ -1795,7 +1787,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
       # can optimize further post PADTO
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
-    ], wanna_output=[(a.numpy()@b.numpy()+c.numpy()@d.numpy()).reshape(-1)])
+    ], wanna_output=[(a.numpy()@b.numpy()+c.numpy()@d.numpy()).reshape(N, N, 1)])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
