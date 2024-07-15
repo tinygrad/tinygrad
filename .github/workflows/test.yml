@@ -79,7 +79,7 @@ jobs:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
     - name: Install dependencies
-      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[linting,testing,docs]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with ruff
@@ -94,6 +94,8 @@ jobs:
       run: |
         python docs/abstractions2.py
         python docs/abstractions3.py
+    - name: Test Docs Build
+      run: mkdocs build --strict
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test README
@@ -118,17 +120,6 @@ jobs:
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
     - name: Repo line count <8500 lines
       run: MAX_LINE_COUNT=8500 python sz.py
-
-  docs:
-    name: build-docs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-      - run: pip install -e .[docs]
-      - run: mkdocs build --strict
 
   testopencl:
     strategy:
