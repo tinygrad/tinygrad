@@ -378,10 +378,10 @@ class HCQCompatCompiled(Compiled):
 
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, comp_queue_t, copy_queue_t, timeline_signals):
     self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
-    self.timeline_value: int = 1
+    self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
-    self.sig_prof_records: List[Tuple[Any, Any, str, bool]] = []
-    self.raw_prof_records: List[Tuple[int, int, str, bool]] = []
+    self.sig_prof_records:List[Tuple[Any, Any, str, bool]] = []
+    self.raw_prof_records:List[Tuple[int, int, str, bool]] = []
     if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -402,7 +402,7 @@ class HCQCompatCompiled(Compiled):
     raise NotImplementedError("_read_timestamp needs to be implemented")
 
   @classmethod
-  def _set_signal(cls, sig:Any, value:Any) -> None:
+  def _set_signal(cls, signal:Any, value:Any) -> None:
     """
     Set a value for a signal.
     """
@@ -416,20 +416,20 @@ class HCQCompatCompiled(Compiled):
     raise NotImplementedError("_alloc_signal needs to be implemented")
 
   @classmethod
-  def _free_signal(cls, sig: Any) -> None:
+  def _free_signal(cls, signal:Any) -> None:
     """
     Free a signal.
     """
     raise NotImplementedError("_free_signal needs to be implemented")
 
   @classmethod
-  def _wait_signal(cls, signal: Any, value: Any = 0, timeout: int = 10000) -> None:
+  def _wait_signal(cls, signal:Any, value:Any = 0, timeout:int = 10000) -> None:
     """
     Wait for a signal to reach a specific value. Signals
     """
     raise NotImplementedError("_wait_signal needs to be implemented")
 
-  def _gpu2cpu_time(self, gpu_time: float, is_copy: bool) -> float:
+  def _gpu2cpu_time(self, gpu_time:float, is_copy:bool) -> float:
     """
     Convert GPU time to CPU time. `is_copy` flag indicating if this is a copy queue.
     """

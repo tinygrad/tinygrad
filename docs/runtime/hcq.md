@@ -83,6 +83,27 @@ timestamp = your_device._read_timestamp()
 
 Each HCQ-compatible device must allocate two signals for global synchronization purposes. These signals are passed to the `HCQCompatCompiled` base class during initialization: an active timeline signal `self.timeline_signal` and a shadow timeline signal `self._shadow_timeline_signal` which helps to handle signal value overflow issues. You can find more about synchronization in the [synchronization section](#synchronization)
 
+### HCQ Compatible Allocator
+
+The `HCQCompatAllocator` base class simplifies allocator logic by leveraging [command queues](#commandqueues) abstractions. This class efficiently handles copy and transfer operations, leaving only the alloc and free functions to be implemented by individual backends.
+
+::: tinygrad.device.HCQCompatAllocator
+    options:
+        members: [
+            "_alloc",
+            "_free",
+        ]
+        show_source: false
+
+#### HCQ Allocator Result Protocol
+
+Backends must adhere to the `HCQCompatAllocRes` protocol when returning allocation results.
+
+::: tinygrad.device.HCQCompatAllocRes
+    options:
+        members: true
+        show_source: false
+
 ### Synchronization
 
 HCQ-compatible devices use a global timeline signal for synchronizing all operations. This mechanism ensures proper ordering and completion of tasks across the device. By convention, `self.timeline_value` points to the next value to signal. So, to wait for all previous operations on the device to complete, wait for `self.timeline_value - 1` value. The following Python code demonstrates the typical usage of signals to synchronize execution to other operations on the device:
