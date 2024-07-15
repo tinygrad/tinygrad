@@ -408,7 +408,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(8)]), UPat(name="x"))), lambda x: x),
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
   # TODO: Write a UPat for vec(8) types
-  (UOp(UOps.DEFINE_ACC, src=(UOp.cvar(),)).name("root"), lambda root: UOp.cast(root.src[0], root.dtype)),
+  (UOp(UOps.DEFINE_ACC, src=(UOp.var(),)).name("root"), lambda root: UOp.cast(root.src[0], root.dtype)),
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[
     UPat(UOps.CONST, name="c1"), UPat(UOps.CONST, name="c2")]))))), lambda root, c1, c2: UOp.const(root.dtype, c1.arg)),
   (UPat(UOps.GEP, name="root", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, src=[
