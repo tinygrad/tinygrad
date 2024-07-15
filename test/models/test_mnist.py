@@ -10,7 +10,8 @@ from extra.datasets import fetch_mnist
 
 # load the mnist dataset
 X_train, Y_train, X_test, Y_test = fetch_mnist()
-if RUN_PROCESS_REPLAY.value == 1:
+
+if RUN_PROCESS_REPLAY:
   RUN_PROCESS_REPLAY.value = 2
   NOOPT.value = 1
 
