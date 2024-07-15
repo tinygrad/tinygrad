@@ -1046,10 +1046,10 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 1
     assert k.upcasted == 1
 
-def helper_linearizer_ast(_ast:Tuple[LazyOp, ...], inputs:List[Tensor], *args, **kwargs):
-  if not isinstance(_ast, LazyOp): ast = LazyOp(MetaOps.SINK, _ast)
+def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp], inputs:List[Tensor], *args, **kwargs):
+  if not isinstance(ast, LazyOp): ast = LazyOp(MetaOps.SINK, ast)
   inbufs = [x.lazydata.buffer for x in inputs]
-  outbufs = [Buffer(Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
+  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Union[Tensor, List[Tensor]], *args, **kwargs):
