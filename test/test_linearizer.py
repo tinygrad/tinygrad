@@ -125,53 +125,43 @@ class TestLinearizer(unittest.TestCase):
     y_tiny = x.var(axis=2, correction=0)
     np.testing.assert_allclose(y_tiny.numpy(), wanna_output, atol=1e-4, rtol=1e-4)
 
-  def test_indexing_multireduce(self):
-    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
-    arange_input_st = arange_input_st.reshape((1, 16384, 16384, 1)).expand((4, 16384, 16384, 256))
-    arange_axis = (2,)
-    arange = LazyOp(ReduceOps.SUM, (LazyOp(BufferOps.CONST, (), ConstBuffer(1, dtypes.int, arange_input_st)), ), arange_axis)
-    output_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
-    neg_1 = LazyOp(BufferOps.CONST, (), ConstBuffer(-1, dtypes.int, st=ShapeTracker.from_shape(()).reshape((1,)*len(output_shape)).expand(output_shape)))
-    final_arange = arange+neg_1
-    # store = LazyOp(BufferOps.STORE, (final_arange, ), MemBuffer(0, dtypes.int, st=ShapeTracker.from_shape(output_shape)))
-    # real_arange = np.arange(16384)
-    # helper_linearizer_ast((store, ), [], wanna_output=[real_arange])
-    alu = LazyOp(op=BinaryOps.CMPNE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),)).reshape((4, 16384, 1, 256)))), final_arange), arg=None)
-    first_reduce = LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPNE, src=(alu, LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)).reshape((4, 16384, 1, 256))))), arg=None),), arg=dtypes.float)
-    second_reduce_input = LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 16384, 256), strides=(0, 256, 1), offset=0, mask=None, contiguous=False),)).reshape((4, 16384, 1, 256)))), first_reduce), arg=None)
-    r1 = LazyOp(op=ReduceOps.SUM, src=(second_reduce_input, ), arg=(1,))
-    store = LazyOp(op=BufferOps.STORE, src=(r1, ), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4, 1, 1, 256))))
-    x = Tensor.rand(16384, 256).realize()
-    idxs = Tensor([0,3,5,6]).realize()
-    real_index = x.numpy()[idxs.numpy()].reshape(1024, )
-    helper_linearizer_ast((store, ), [x, idxs], wanna_output=[real_index])
-
-  def test_arange_simple(self):
-    # normal arange kernel, no expand
-    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
-    arange_axis = (1,)
-    arange = LazyOp(ReduceOps.SUM, (LazyOp(BufferOps.CONST, (), ConstBuffer(1, dtypes.int, arange_input_st)), ), arange_axis)
-    arange_output_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
-    out = arange-LazyOp.const(1, dtypes.int, arange_output_shape)
-    store = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, dtypes.int, st=ShapeTracker.from_shape(arange_output_shape)))
-    real_arange = np.arange(16384)
-    helper_linearizer_ast((store, ), [], wanna_output=[real_arange])
-
+  # *** buildup to fused indexing
   def test_arange_expanded(self):
     # Tensor.arange(16384) expanded such that output shape is (4, 16384, 256, 1)
     # basically it's pushing the expand through this reduce:
     tiny = Tensor.arange(16384).reshape(16384, 1).expand(4, 16384, 256).reshape(4, 16384, 256, 1)
-    # NOTE: this is stupidly recomputing because it's not fused, but it proves a point.
     real_arange = np.broadcast_to(np.arange(16384).reshape(16384, 1), (4, 16384, 256)).reshape(4, 16384, 256, 1)
+    # NOTE: this is stupidly recomputing because it's not fused, but it proves a point.
+    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
+    arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
+    arange_axis = (3,)
+    arange = LazyOp(ReduceOps.SUM, (LazyOp(BufferOps.CONST, (), ConstBuffer(1, dtypes.int, arange_input_st)), ), arange_axis)
+    output_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
+    out = arange-LazyOp.const(1, dtypes.int, output_shape)
+    store = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, dtypes.int, st=ShapeTracker.from_shape(output_shape)))
+    helper_linearizer_ast((store, ), [], wanna_output=[real_arange])
+    with Context(DEBUG=0, NOOPT=0): np.testing.assert_equal(tiny.numpy(), real_arange)
+
+  def test_indexing_multireduce(self):
     arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
     arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
     arange_axis = (3,)
     arange = LazyOp(ReduceOps.SUM, (LazyOp(BufferOps.CONST, (), ConstBuffer(1, dtypes.int, arange_input_st)), ), arange_axis)
     arange_output_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
-    out = arange-LazyOp.const(1, dtypes.int, arange_output_shape)
-    store = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, dtypes.int, st=ShapeTracker.from_shape(arange_output_shape)))
-    helper_linearizer_ast((store, ), [], wanna_output=[real_arange])
-    with Context(DEBUG=0, NOOPT=0): np.testing.assert_equal(tiny.numpy(), real_arange)
+    arange = arange-LazyOp.const(1, dtypes.int, arange_output_shape)
+    idxs = Tensor([0,3,5,6])
+    idxs_load = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.int, ShapeTracker.from_shape((4,)+(1,)*(len(arange_output_shape)-1)).expand(arange_output_shape)))
+    cmp = arange.eq(idxs_load)
+    dataset = Tensor.rand(16384, 256)
+    dataset_load = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dataset.dtype, ShapeTracker.from_shape(dataset.shape).reshape((1, 16384, 256, 1)).expand(arange_output_shape)))
+    reduce_input = dataset_load*LazyOp(UnaryOps.CAST, (cmp,), dataset.dtype)
+    out = LazyOp(ReduceOps.SUM, (reduce_input, ), (1,))
+    output_shape = tuple(1 if i in out.arg else s for i,s in enumerate(arange_output_shape))
+    store = LazyOp(BufferOps.STORE, (out, ), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape)))
+    x = Tensor.rand(16384, 256).realize()
+    idxs = Tensor([0,3,5,6]).realize()
+    real_index = x.numpy()[idxs.numpy()].reshape(4, 1, 256, 1)
+    helper_linearizer_ast((store, ), [x, idxs], wanna_output=[real_index])
 
   def test_indexing_shape_unfused(self):
     x = Tensor.rand(16384, 256).realize()

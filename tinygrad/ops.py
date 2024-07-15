@@ -90,6 +90,8 @@ class LazyOp:
   def __add__(self, x:LazyOp): return LazyOp(BinaryOps.ADD, (self, x))
   def __sub__(self, x:LazyOp): return LazyOp(BinaryOps.ADD, (self, -x))
   def __mul__(self, x:LazyOp): return LazyOp(BinaryOps.MUL, (self, x))
+  def ne(self, x:LazyOp): return LazyOp(BinaryOps.CMPNE, (self, x))
+  def eq(self, x:LazyOp): return -(self.ne(x))
   def __neg__(self): return LazyOp(UnaryOps.NEG, (self,))
   # TODO: temp
   @staticmethod
