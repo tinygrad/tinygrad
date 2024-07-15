@@ -668,13 +668,15 @@ class Kernel:
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
-          if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
+          if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0] 
           assert rsrc.op is BinaryOps.MUL
 
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd = self.global_dims
             tcd = self.shape_len-self.upcasted
-            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
+            print(st1.shape[wd:])
+            assert st1.shape[wd:] == warp_dims, "warp dims wrong"
+            print(f"test {st1.shape[tcd:tcd+4]}")
             assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, "tcd dims wrong"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd))
@@ -702,6 +704,11 @@ class Kernel:
               ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
             fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
               ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
+          elif self.opts.device == "GPU":
+            reduce_axes = [self.shape_len-self.upcasted]
+            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted) # how to vary?
+            fix_st1 = functools.partial(fix_st, (4,), (4, 4), (8,), (8,), (8,))
+            fix_st2 = None
           else:
             raise RuntimeError("unsupported device for tensor cores")
 
