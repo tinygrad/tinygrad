@@ -675,7 +675,7 @@ class Kernel:
             wd = self.global_dims
             tcd = self.shape_len-self.upcasted
             print(st1.shape[wd:])
-            assert st1.shape[wd:] == warp_dims, "warp dims wrong"
+            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
             print(f"test {st1.shape[tcd:tcd+4]}")
             assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, "tcd dims wrong"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
