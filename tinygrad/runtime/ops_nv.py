@@ -546,7 +546,7 @@ class NVDevice(HCQCompatCompiled):
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
-                     functools.partial(NVProgram, self), NVComputeQueue, NVCopyQueue, timeline_signals=[self._alloc_signal(), self._alloc_signal()])
+                     functools.partial(NVProgram, self), NVComputeQueue, NVCopyQueue, timeline_signals=(self._alloc_signal(), self._alloc_signal()))
 
     self._setup_gpfifos()
     NVDevice.devices.append(self)
