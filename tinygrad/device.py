@@ -141,7 +141,8 @@ class Allocator:
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   """
-  The LRU Allocator is responsible for caching buffers. It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
+  The LRU Allocator is responsible for caching buffers.
+  It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
   def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
   def alloc(self, size:int, options:Optional[BufferOptions]=None):
