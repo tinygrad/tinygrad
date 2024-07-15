@@ -514,6 +514,16 @@ class Kernel:
       if len(unit_stride_axes_mul_4) and all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:  # noqa: E501
         self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
 
+  def late_required_optimizations(self):
+    # fix global and local dim if it has more dims then max allowed
+    if self.opts.has_local:
+      if (global_max := self.opts.global_max) is not None and (g := self.global_dims) > (gm := len(global_max)):
+        self.reshape_and_permute(lambda s: (prod(s[:g-gm+1]),) + s[g-gm+1:], None)
+        g = gm
+      if (local_max := self.opts.local_max) is not None and (l := self.local_dims + self.group_for_reduces) > (lm := len(local_max)):
+        self.reshape_and_permute(lambda s: s[:g] + (prod(s[g:g+l-lm+1]),) + s[g+l-lm+1:], None)
+        self.local_dims = lm - self.group_for_reduces
+
   def hand_coded_optimizations(self):
     self.required_optimizations()
 
@@ -728,6 +738,7 @@ class Kernel:
   # **** this is the lowerer ****
 
   def linearize(self) -> Kernel:
+    self.late_required_optimizations()
     modified_ast = self.get_optimized_ast()
 
     if DEBUG >= 3:

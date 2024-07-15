@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import List, Tuple, cast, Optional, Any, Dict
+from typing import List, Tuple, cast, Any, Dict
 import functools
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -53,20 +53,6 @@ else:
     assert uvalid.dtype == dtypes.bool
     return uidx, uvalid
 
-def get_grouped_dims(prefix, dims, max_sizes:Optional[Tuple[int, ...]]) -> List[UOp]:
-  # TODO: this should be per dim max
-  maxdim = len(max_sizes) if max_sizes is not None else 0
-  local_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (),
-    (i, f"{prefix}{i}", s)) for i,s in enumerate((prod(dims[:-(maxdim-1)]),) + dims[-(maxdim-1):] if len(dims) > maxdim else dims)]
-  if maxdim != 0 and len(dims) > maxdim:
-    dd = local_idxs[0]
-    nli = []
-    for s in dims[:-(maxdim-1)]:
-      nli.append(dd % s)
-      dd //= s
-    local_idxs = nli + local_idxs[-(maxdim-1):]
-  return local_idxs
-
 class IndependentLowerer:
   def lower(self, ast:LazyOp, opts:Renderer) -> UOp:
     self.output_count = len(ast.src)
@@ -84,8 +70,8 @@ class IndependentLowerer:
 
     if opts.has_local:
       # define indexes for GPU-like execution
-      self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max) + \
-                  get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
+      self.idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (), (i, f"gidx{i}", s)) for i,s in enumerate(full_shape[:global_dims])] + \
+              [UOp(UOps.SPECIAL, dtypes.bigint, (), (i, f"lidx{i}", s)) for i,s in enumerate(full_shape[global_dims:first_reduce+group_for_reduces])]
     else:
       # all loops are RANGES
       self.idxs = [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, False))

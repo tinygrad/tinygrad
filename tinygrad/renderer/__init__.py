@@ -50,7 +50,7 @@ class Renderer:
   supports_float4: bool = True
   has_local: bool = True
   has_shared: bool = True
-  # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
+  # NOTE: these two should be in (x,y,z) order
   global_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   local_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
