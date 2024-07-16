@@ -11,6 +11,7 @@ import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 import tinygrad.runtime.autogen.libc as libc
+from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
@@ -267,7 +268,6 @@ class AMDCopyQueue(HWCopyQueue):
     device.sdma_queue.write_ptr[0] = device.sdma_queue.put_value
     device.sdma_queue.doorbell[0] = device.sdma_queue.put_value
 
-SHT_PROGBITS, SHF_ALLOC = 0x1, 0x2
 class AMDProgram(HCQCompatProgram):
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
@@ -275,17 +275,13 @@ class AMDProgram(HCQCompatProgram):
 
     if DEBUG >= 6: print(disasm(lib))
 
-    _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
-    sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]
+    image, sections, relocs = elf_loader(self.lib)
+    assert len(relocs) == 0, "no reloc expected in amd"
 
-    lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == SHT_PROGBITS), 0x1000)
-    self.lib_gpu = self.device._gpu_alloc(lib_gpu_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
-    lib_gpu_view = to_mv(self.lib_gpu.va_addr, lib_gpu_size)
+    self.lib_gpu = self.device.allocator.alloc(image.nbytes, BufferOptions(cpu_access=True))
+    lib_gpu_view = to_mv(self.lib_gpu.va_addr, image.nbytes)
 
-    for _, sh_type, sh_flags, sh_addr, sh_offset, sh_size, _, _, _ in sections:
-      if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC: lib_gpu_view[sh_addr:sh_addr+sh_size] = self.lib[sh_offset:sh_offset+sh_size]
-
-    entry_point = min(sh[3] for sh in sections if sh[1] == SHT_PROGBITS and sh[2] & SHF_ALLOC)
+    entry_point = min(shdr.sh_addr for _,shdr,_ in sections.values() if shdr.sh_type == libc.SHT_PROGBITS and shdr.sh_flags & libc.SHF_ALLOC)
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
