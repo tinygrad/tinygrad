@@ -230,7 +230,7 @@ class NVProgram(HCQCompatProgram):
     constant_buffers_data = {}
 
     if MOCKGPU:
-      self.program, self.registers_usage = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), 0x10
+      image, self.registers_usage = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), 0x10
       constant_buffers_data[0] = memoryview(bytearray(0x190))
     else:
       image, sections, relocs = elf_loader(self.lib, force_section_align=128)
@@ -238,15 +238,15 @@ class NVProgram(HCQCompatProgram):
       # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
       self.lib_gpu = self.device.allocator.alloc(image.nbytes + 0x1000, BufferOptions(cpu_access=True))
 
-      for sh_name, (idx, shdr, content) in sections.items():
-        if shdr.sh_type == libc.SHT_NOBITS and shdr.sh_flags & libc.SHF_ALLOC: self.shmem_usage = shdr.sh_size
-        elif sh_name == ".text." + self.name:
-          self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr + shdr.sh_addr, shdr.sh_size, shdr.sh_info >> 24
-        elif match := re.match(r'\.nv\.constant(\d+)', sh_name):
-          constant_buffers_data[int(match.group(1))] = (self.lib_gpu.va_addr + shdr.sh_addr, shdr.sh_size)
-        elif sh_name == ".nv.info":
-          for off in range(0, shdr.sh_size, 12):
-            typ, _, val = struct.unpack_from("III", content, off)
+      for sh in sections:
+        if sh.header.sh_type == libc.SHT_NOBITS and sh.header.sh_flags & libc.SHF_ALLOC: self.shmem_usage = sh.header.sh_size
+        if sh.name == ".text." + self.name:
+          self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr + sh.header.sh_addr, sh.header.sh_size, sh.header.sh_info >> 24
+        elif match := re.match(r'\.nv\.constant(\d+)', sh.name):
+          constant_buffers_data[int(match.group(1))] = (self.lib_gpu.va_addr + sh.header.sh_addr, sh.header.sh_size)
+        elif sh.name == ".nv.info":
+          for off in range(0, sh.header.sh_size, 12):
+            typ, _, val = struct.unpack_from("III", sh.content, off)
             if typ & 0xffff == 0x1204: self.device._ensure_has_local_memory(val + 0x240)
 
       # Apply relocs
@@ -254,35 +254,35 @@ class NVProgram(HCQCompatProgram):
         # These types are CUDA-specific, applying them here
         if typ == 2: image[apply_image_offset:apply_image_offset+8] = struct.pack('<Q', self.lib_gpu.va_addr + rel_sym_offset) # R_CUDA_64
 
-      ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
+    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
-      self.constbuffer_0 = [0] * 88
-      self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
+    self.constbuffer_0 = [0] * 88
+    self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
 
-      smem_config = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
-      self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
-                              invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
-                              cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3,
-                              shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
-                              max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
-                              barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
-                              program_address_lower=self.program_addr&0xffffffff, program_address_upper=self.program_addr>>32, sass_version=0x89,
-                              program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40,
-                              constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
+    smem_config = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
+    self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
+                            invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
+                            cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3,
+                            shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
+                            max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
+                            barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
+                            program_address_lower=self.program_addr&0xffffffff, program_address_upper=self.program_addr>>32, sass_version=0x89,
+                            program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40,
+                            constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
 
-      for i,(addr,sz) in constant_buffers_data.items():
-        if i == 0: continue
-        self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (addr) >> 32)
-        self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (addr) & 0xffffffff)
-        self.qmd.__setattr__(f'constant_buffer_size_shifted4_{i}', sz)
-        self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
+    for i,(addr,sz) in constant_buffers_data.items():
+      if i == 0: continue
+      self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (addr) >> 32)
+      self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (addr) & 0xffffffff)
+      self.qmd.__setattr__(f'constant_buffer_size_shifted4_{i}', sz)
+      self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
 
-      # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
-      self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
-      self.constbuf_0_size = constant_buffers_data.get(0, (0, 0))[1]
+    # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
+    self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
+    self.constbuf_0_size = constant_buffers_data.get(0, (0, 0))[1]
 
-      # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-      super().__init__(kernargs_alloc_size=round_up(self.constbuf_0_size, 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
+    # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
+    super().__init__(kernargs_alloc_size=round_up(self.constbuf_0_size, 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
