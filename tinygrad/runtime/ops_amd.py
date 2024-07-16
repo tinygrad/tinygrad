@@ -276,7 +276,7 @@ class AMDProgram(HCQCompatProgram):
     if DEBUG >= 6: print(disasm(lib))
 
     image, sections, _ = elf_loader(self.lib)
-    self.lib_gpu = self.device.allocator.alloc(image.nbytes, BufferOptions(cpu_access=True))
+    self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000), BufferOptions(cpu_access=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
     entry_point = min(sh.header.sh_addr for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC)
