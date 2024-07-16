@@ -15,6 +15,7 @@ if __name__ == "__main__":
   Tensor.training = False
 
   onnx_model = onnx.load(onnx_path := fetch(OPENPILOT_MODEL))
+  run_onnx = get_run_onnx(onnx_model)
 
   Tensor.manual_seed(100)
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
@@ -46,7 +47,6 @@ if __name__ == "__main__":
   onnx_output = onnx_session.run([onnx_model.graph.output[0].name], new_inputs_np)
   ort_out = onnx_output[0]
 
-  run_onnx = get_run_onnx(onnx_model)
   tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
 
   np.testing.assert_allclose(ort_out, tinygrad_out, atol=2e-3, rtol=1e-2)
