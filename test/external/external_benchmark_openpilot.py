@@ -25,7 +25,7 @@ def benchmark_model(m, devices, validate_outs=False):
   excluded = {inp.name for inp in onnx_model.graph.initializer}
   input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}  # noqa: E501
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input if inp.name not in excluded}
-  np_inputs = {k:torch.randn(shp).numpy().astype(input_types[k]) for k,shp in input_shapes.items()}
+  np_inputs = {k:Tensor.randn(shp).numpy().astype(input_types[k]) for k,shp in input_shapes.items()}
   assert len(input_shapes) < 30, f"too many input shapes {len(input_shapes)}"
 
   # print input names
