@@ -68,162 +68,6 @@ class PatternMatcher:
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
-def expand_nodes(parents:Set[UOp], expands:List[UOp], base:UOp) -> List[UOp]:
-  # just in case, dedup expands
-  expands = dedup(expands)
-
-  # get children and define_accs
-  children = defaultdict(list)
-  define_accs = []
-  for p in parents:
-    if p.op is UOps.PHI:
-      wmma_reduce_axes = flatten([x.arg[7] for x in p.parents if x.op is UOps.WMMA])
-      parent_expands_for_acc = [x.arg[0][0] for x in p.parents if x in expands and x.arg[0][0] not in wmma_reduce_axes]
-      define_accs.append((p.src[0], parent_expands_for_acc))
-    for x in p.src:
-      children[x].append(p)
-
-  # get nodes on the path from root to the expand node
-  on_path: Dict[UOp, None] = {}
-  search = expands[:]
-  while len(search):
-    t = search.pop(0)
-    for cc in children[t]:
-      if cc in on_path: continue
-      on_path[cc] = None
-      search.append(cc)
-
-  # toposort the nodes on the path
-  # TODO: library!
-  in_degree: DefaultDict[UOp, int] = defaultdict(int)
-  for n in on_path:
-    for x in children[n]:
-      in_degree[x] += 1
-  toposort: List[UOp] = []
-  search2 = [p for p in on_path if in_degree[p] == 0]
-  seen: Set[UOp] = set()
-  while len(search2):
-    n = search2.pop(0)
-    if n in seen: continue
-    toposort.append(n)
-    for x in children[n]:
-      in_degree[x] -= 1
-      if in_degree[x] == 0:
-        search2.append(x)
-
-  # get replacements by index
-  replacements: Dict[int, List[int]] = {}
-  for r in expands:
-    if r.arg[0][0] in replacements: assert len(replacements[r.arg[0][0]]) == len(r.src)
-    else: replacements[r.arg[0][0]] = list(range(0, len(r.src)))
-
-  # get nodes on the path from root to the expand node
-  rps = list(itertools.product(*replacements.values()))
-
-  acc_number = 0
-  replaces: List[Dict[UOp, UOp]] = []
-  acc_cache: Dict[Tuple[Tuple[UOp, int, int], ...], UOp] = {}
-  for rp in rps:
-    rpk = dict(zip(replacements.keys(), rp))
-    replace = {r:r.src[rpk[r.arg[0][0]]] for r in expands}
-    for d, acc_parents in define_accs:
-      acc_index = tuple((d,x,rpk[x]) for x in acc_parents)
-      if acc_index in acc_cache:
-        replace[d] = acc_cache[acc_index]
-      else:
-        replace[d] = acc_cache[acc_index] = UOp(d.op, d.dtype, d.src, d.arg + (acc_number,))
-        acc_number += 1
-    replaces.append(replace)
-
-  for cc in toposort:
-    if cc.op is UOps.BARRIER:
-      super_replace = UOp(cc.op, cc.dtype, sum([tuple(replace.get(x, x) for x in cc.src) for replace in replaces], ()), cc.arg)
-      for replace in replaces:
-        replace[cc] = super_replace
-    else:
-      for replace in replaces:
-        tcc = replace.get(cc, cc)  # NOTE: handle expands that are already replaced
-        replace[cc] = UOp(tcc.op, tcc.dtype, tuple(replace.get(x, x) for x in tcc.src), tcc.arg)
-  return [x.get(base, base) for x in replaces]
-
-# ***** reduce+image+contract handling *****
-
-def expand_wmma(wmma):
-  expands = [x for x in wmma.parents if x.op is UOps.EXPAND and (x.arg[0][0] in wmma.arg[-1] or x.arg[0][0] in wmma.arg[-2])]
-  if len(expands) == 0: return None
-  new_uops = expand_nodes(wmma.sparents, expands, wmma)
-  # TODO: assert that these are all the same. they have to be
-  return new_uops[0]
-
-acc_number = 0
-def replace_reduce(root):
-  global acc_number
-  expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
-
-  # add other expands for float4. TODO: should be a faster way
-  expand_args = [x.arg[0][0] for x in expands]
-  new_expands = [x for x in root.parents if x.op is UOps.EXPAND and x.arg[0][0] in expand_args]
-  expands = dedup(expands + new_expands)
-
-  if len(expands):
-    new_uops = expand_nodes(root.parents, expands, root.src[0])
-  else:
-    new_uops = [root.src[0]]
-
-  const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
-  acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x not in expands), (acc_number,))
-  acc_number += 1
-  ret = acc
-  for xx in new_uops: ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
-  return UOp(UOps.PHI, ret.dtype, (acc, ret))
-
-def replace_contract(root:UOp):
-  parents, dtype = root.parents, cast(DType, root.dtype)
-  expands: List[UOp] = [x for x in parents if x.op is UOps.EXPAND and x.arg[0][0] in root.arg]
-  assert all_same(expand_lens := [dtype.count] + [len(x.src) for x in expands]), expand_lens
-  ret = expand_nodes(parents, expands, root.src[0])
-  if len(ret) == 1: ret = ret*dtype.count   # TODO: why is this needed?
-  return UOp(UOps.VECTORIZE, dtype, tuple(ret))
-
-def fix_image_idx(ls:UOp):
-  if ls.src[1].dtype is None or ls.src[1].dtype.count != 1: return None
-  if not isinstance(ls.src[0].dtype, ImageDType): return None
-  assert ls.op is not UOps.STORE or cast(DType, ls.src[2].dtype).count == 4, "image store must be float4"
-  idxy = ls.src[1]
-  #if not idxy.divides(4): raise RuntimeError("image index must divide 4")
-  base_shape = ls.src[0].dtype.shape
-  idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
-  image_idx = UOp(UOps.VECTORIZE, cast(DType, idxy.dtype).vec(2), (idx, idy))
-  if ls.op is UOps.LOAD and cast(DType, ls.dtype).count == 1:
-    cconst = (UOp(UOps.VECTORIZE, cast(DType, ls.dtype).vec(4), src=(ls.src[3], ls.src[3], ls.src[3], ls.src[3])),) if len(ls.src) >= 3 else ()
-    loaded = UOp(ls.op, cast(DType, ls.dtype).vec(4), (ls.src[0], image_idx) + ls.src[2:3] + cconst, ls.arg)
-    subidx = idxy%4
-    ret = UOp.const(ls.dtype, 0)
-    for i in range(4): ret = UOp.alu(TernaryOps.WHERE, subidx.ne(i), ret, UOp(UOps.GEP, ls.dtype, (loaded,), i))
-    return ret
-  return UOp(ls.op, ls.dtype, (ls.src[0], image_idx) + ls.src[2:], ls.arg)
-
-def cast_reduce(cst):
-  if cst.dtype.scalar() == cst.dtype: return None  # not for normal CAST. TODO: the merging one shouldn't be CAST
-  if not all_same([(x.arg, x.src[1:]) for x in cst.src]): return None
-  fst_red = cst.src[0]
-  red = UOp(UOps.VECTORIZE, cst.dtype, tuple(x.src[0] for x in cst.src))
-  return UOp(UOps.REDUCE, red.dtype, (red,) + fst_red.src[1:], fst_red.arg)
-
-contractor = PatternMatcher([
-  # contracts
-  (UOp(UOps.CONTRACT).name("root"), replace_contract),
-  # VECTORIZE after REDUCEs -> one REDUCE (breaks TestConv.test_two_binops_no_rerun)
-  (UPat(UOps.VECTORIZE, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
-])
-
-reducer = PatternMatcher([
-  (UOp(UOps.REDUCE).name("root"), replace_reduce),
-  (UOp(UOps.WMMA).name("wmma"), expand_wmma),
-  # image indexing. TODO: why can't this just go after the float stuff?
-  (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
-])
-
 # ***** float4 handling *****
 
 def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None):
@@ -519,9 +363,18 @@ def do_expand(root:UOp):
       else:
         new_src.append(src)
     new_srcs.append(UOp(root.op, root.dtype, tuple(new_src), root.arg))
-  return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
+  if root.op is UOps.EXPAND:
+    # NOTE: the insertion location matters here
+    if root.arg[-1][0] < expand_args[0][0]:
+      return UOp(UOps.EXPAND, root.dtype, tuple(flatten(zip(*[x.src for x in new_srcs]))), root.arg+expand_args)
+    elif expand_args[-1][0] < root.arg[0][0]:
+      return UOp(UOps.EXPAND, root.dtype, tuple(flatten([x.src for x in new_srcs])), expand_args+root.arg)
+    else:
+      raise RuntimeError(f"can't merge {root.arg} w {expand_args}")
+  else:
+    return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
-def do_reduce_expand(root):
+def do_reduce_with_expand(root):
   global acc_number
   expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
   expands_reduce = [x for x in expands if root.src[0].op is UOps.EXPAND and all(y in root.src[0].arg for y in x.arg)]
@@ -553,19 +406,13 @@ def do_contract(con:UOp):
   return UOp(UOps.EXPAND, con.dtype, tuple(srcs), ex.arg[1:])
 
 expander = PatternMatcher([
-  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.GEP, UOps.WMMA, UOps.VECTORIZE, UOps.REDUCE}, name="root"), do_expand),
-  (UOp(UOps.REDUCE).name("root"), do_reduce_expand),
+  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.GEP, UOps.WMMA, UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND}, name="root"), do_expand),
+  (UOp(UOps.REDUCE).name("root"), do_reduce_with_expand),
   (UOp(UOps.CONTRACT).name("con"), do_contract),
-  # simple remove EXPAND from SINK
-  #(UOp(UOps.SINK, src=(UOp(UOps.EXPAND).name("ex"),)), lambda ex: UOp(UOps.SINK, None, ex.src)),
   # remove EXPANDs from SINK
   (UOp(UOps.SINK).name("root"),
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg)
     if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
-  #(UOp(UOps.CONTRACT, src=(UOp(UOps.EXPAND).name("ex"),)).name("con"),
-  # lambda con,ex: UOp(UOps.VECTORIZE, con.dtype, ex.src) if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg[0][0] in con.arg else None),
-  # CONTRACT alone repeats the element VECTORIZED
-  #(UOp(UOps.CONTRACT).name("con"), lambda con: UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)),
 ])
 
 # *** uop graph ***
@@ -652,19 +499,7 @@ class UOpGraph:
 
     # expand
     UOpGraph.cnt += 1
-    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
-      sink = graph_rewrite(sink, expander)
-
-    """
-      # do contracts/reduces
-      sink = graph_rewrite(sink, contractor)
-      sink = graph_rewrite(sink, reducer)
-
-      # do upcasts (after reduce unrolls and rewrites)
-      expands = list(sorted(x for x in sink.sparents if x.op is UOps.EXPAND))
-      new_nodes = expand_nodes(sink.sparents, expands, sink)
-      sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
-    """
+    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, expander)
 
     # do graph rewrite (2)
     sink = graph_rewrite(sink, self.folder)
