@@ -522,13 +522,13 @@ class NVDevice(HCQCompatCompiled):
     NVDevice.devices.append(self)
 
   @classmethod
-  def _read_signal(self, sig): return sig[0]
+  def _read_signal(self, signal): return sig[0]
 
   @classmethod
-  def _read_timestamp(self, sig): return sig[1]
+  def _read_timestamp(self, signal): return sig[1]
 
   @classmethod
-  def _set_signal(self, sig, value): sig[0] = value
+  def _set_signal(self, signal, value): sig[0] = value
 
   @classmethod
   def _alloc_signal(self, value=0, **kwargs) -> memoryview:
@@ -536,7 +536,7 @@ class NVDevice(HCQCompatCompiled):
     return sig
 
   @classmethod
-  def _free_signal(self, sig): self.signals_pool.append(sig)
+  def _free_signal(self, signal): self.signals_pool.append(sig)
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000):
@@ -551,7 +551,7 @@ class NVDevice(HCQCompatCompiled):
     NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
     self.cmdq_wptr = 0
 
-    if self.timeline_value > (1 << 63): self._wrap_timeline_signal()
+    if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE: self._prof_process_events()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
