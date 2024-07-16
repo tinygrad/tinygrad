@@ -611,8 +611,8 @@ class UOpGraph:
 
     scope_end: Dict[UOp, UOp] = {}
     self._uops = []
-    scope_stack = []
-    popped_scope_stack = []
+    scope_stack: List[UOp] = []
+    popped_scope_stack: List[Tuple[UOp, UOp, List[UOp]]] = []
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
@@ -637,9 +637,9 @@ class UOpGraph:
             if u.op is UOps.RANGE and u in range_group: assert (s:=scope_stack.pop(-1)) is u, "Trying to end one scope while in another!"
             scope_end[u] = x
             while len(popped_scope_stack) > 0:
-              s = popped_scope_stack[-1]
-              if s[0] is u:
-                for c in s[2]: self._uops.append(c)
+              ps = popped_scope_stack[-1]
+              if ps[0] is u:
+                for c in ps[2]: self._uops.append(c)
                 scope_stack.append(popped_scope_stack.pop(-1)[1])
               else: break
       for u in children[x]:
