@@ -678,10 +678,10 @@ class Kernel:
             assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd))
-            for x,y in pattern_1: permaxis.append(y + (wd if x == 0 else tcd))
+            permaxis += [y + (wd if x == 0 else tcd) for x,y in pattern_1]
             permaxis += list(range(wd+len(warp_dims), tcd))
-            for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
-            permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
+            permaxis += [y + (wd if x == 0 else tcd) for x,y in pattern_2]
+            permaxis += list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device == "AMD":
