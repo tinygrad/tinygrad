@@ -620,7 +620,7 @@ class UOpGraph:
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
-      if x.op is UOps.RANGE:
+      if x.op is UOps.RANGE and x in range_group:
         while len(scope_stack) > 0:
           s = scope_stack[-1]
           if s not in range_group[x]:
@@ -638,7 +638,7 @@ class UOpGraph:
         if x in ss:
           ss.remove(x)
           if len(ss) == 0:
-            if u.op is UOps.RANGE: assert (s:=scope_stack.pop(-1)) is u, "Trying to end one scope while in another!"
+            if u.op is UOps.RANGE and u in range_group: assert (s:=scope_stack.pop(-1)) is u, "Trying to end one scope while in another!"
             scope_end[u] = x
             while len(popped_scope_stack) > 0:
               s = popped_scope_stack[-1]
