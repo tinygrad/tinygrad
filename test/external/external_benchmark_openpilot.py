@@ -22,20 +22,6 @@ if __name__ == "__main__":
   new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in input_shapes.items()}
   new_inputs_np = {k:inp.numpy() for k,inp in new_inputs.items()}
 
-  ort_options = ort.SessionOptions()
-  ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-  ort_options.log_severity_level = 3
-  onnx_session = ort.InferenceSession(onnx_path, ort_options)
-  onnx_output = onnx_session.run([onnx_model.graph.output[0].name], new_inputs_np)
-  ort_out = onnx_output[0]
-
-  run_onnx = get_run_onnx(onnx_model)
-  tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
-
-  # validate
-  np.testing.assert_allclose(ort_out, tinygrad_out, atol=2e-3, rtol=1e-2)
-  print(colored("outputs validated!", "green"))
-
   # benchmark
   tms = []
   for _ in range(10):
@@ -51,3 +37,17 @@ if __name__ == "__main__":
     ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     tms.append(time.perf_counter_ns() - st)
   print(f"jitted: {min(tms)*1e-6:7.2f} ms")
+
+  # validate
+  ort_options = ort.SessionOptions()
+  ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+  ort_options.log_severity_level = 3
+  onnx_session = ort.InferenceSession(onnx_path, ort_options)
+  onnx_output = onnx_session.run([onnx_model.graph.output[0].name], new_inputs_np)
+  ort_out = onnx_output[0]
+
+  run_onnx = get_run_onnx(onnx_model)
+  tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
+
+  np.testing.assert_allclose(ort_out, tinygrad_out, atol=2e-3, rtol=1e-2)
+  print(colored("outputs validated!", "green"))
