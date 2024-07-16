@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -416,7 +416,8 @@ def do_reduce_with_expand(root):
   const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
   ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
   acc_number += 1
-  if root.src[0].op is UOps.EXPAND:
+  if len(expands_reduce):
+    assert root.src[0].op is UOps.EXPAND
     for xx in root.src[0].src:
       ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
   else:
@@ -460,6 +461,8 @@ expander = PatternMatcher([
   (UOp(UOps.BARRIER, src=(UOp(UOps.EXPAND).name("ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
   # image indexing (needs to be here)
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
+  # empty EXPAND is NOOP
+  (UOp(UOps.EXPAND, src=(UOp.var('x'),), arg=()), lambda x: x),
 ])
 
 # *** uop graph ***
@@ -609,7 +612,7 @@ class UOpGraph:
         == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       self.print()
-      self.graph()
+      if not CI: self.graph()
       raise e
 
     # strip the SINK
