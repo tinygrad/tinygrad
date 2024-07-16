@@ -280,19 +280,25 @@ class TestOps(unittest.TestCase):
     (t*(t < 0)).sum().backward()
     np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
 
+  # TODO: fix backward of these functions
   def test_trunc(self):
+    helper_test_op([()], lambda x: x.trunc(), forward_only=True)
     helper_test_op([(45,35)], lambda x: x.trunc(), forward_only=True)
     helper_test_op(None, lambda x: x.trunc(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_floor(self):
+    helper_test_op([()], lambda x: x.floor(), forward_only=True)
     helper_test_op([(45,35)], lambda x: x.floor(), forward_only=True)
     helper_test_op(None, lambda x: x.floor(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_ceil(self):
+    helper_test_op([()], lambda x: x.ceil(), forward_only=True)
     helper_test_op([(45,35)], lambda x: x.ceil(), forward_only=True)
     helper_test_op(None, lambda x: x.ceil(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_round(self):
+    helper_test_op([()], lambda x: x.round(), forward_only=True)
     helper_test_op([(45,35)], lambda x: x.round(), forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[2.5, -1.5]], forward_only=True)
+
   def test_lerp(self):
     helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
     helper_test_op(None, lambda x,y,z: x.lerp(y,z), vals=[[1.,2.,3.], [4.,5.,6.], 0.5])
@@ -1694,6 +1700,42 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,2,111,28)],
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
+
+  def test_interpolate_linear(self):
+    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"))
+
+  def test_interpolate_linear_corners_aligned(self):
+    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear", align_corners=True),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True))
+
+  def test_interpolate_bilinear(self):
+    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="bilinear"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"), atol=1e-4)
+
+  def test_interpolate_bilinear_corners_aligned(self):
+    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="bilinear", align_corners=True),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True), atol=1e-4)
+
+  def test_interpolate_trilinear(self):
+    for in_sz, out_sz in [((5,2,8),(3,6,4))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="trilinear"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"), atol=1e-4)
+
+  def test_interpolate_trilinear_corners_aligned(self):
+    for in_sz, out_sz in [((5,2,8),(3,6,4))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="trilinear", align_corners=True),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True), atol=1e-4)
 
   def test_cat(self):
     for dim in range(-2, 3):
