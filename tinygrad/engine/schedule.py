@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
+    merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -122,8 +123,9 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   if GRAPH: log_lazybuffer(buf, scheduled)
   # view
   if buf.base != buf:
+    if FUSE_AS_ONE_KERNEL: pass
     # fuse some pads
-    if len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
+    elif len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
       simple_pads.add(buf.base)
     # realize all expands
@@ -230,7 +232,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
-    if forced_realize and (r.srcs[0].base.op is not MetaOps.CONST or any(x.shape != r.shape for x in children[r])):
+    if forced_realize and not FUSE_AS_ONE_KERNEL and (r.srcs[0].base.op is not MetaOps.CONST or any(x.shape != r.shape for x in children[r])):
       tr = r
       if can_chase:
         # can chase this down to contiguous children
