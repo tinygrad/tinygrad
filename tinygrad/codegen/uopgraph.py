@@ -343,8 +343,6 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (UOp(UOps.SINK).name("root"),
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
-  # image indexing.
-  (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
 ])
 
 constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.patterns)
@@ -413,7 +411,6 @@ def do_reduce_with_expand(root):
   if len(expands_non_reduce): ret = ret * prod([sz for _,sz in flatten([x.arg for x in expands_non_reduce])])
   return ret
 
-
 def do_contract(con:UOp):
   ex = con.src[0]
   assert con.dtype is not None
@@ -433,13 +430,18 @@ def do_contract(con:UOp):
   return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x[0] != con.arg[0]))
 
 expander = PatternMatcher([
-  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.GEP, UOps.WMMA, UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND}, name="root"), do_expand),
+  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.GEP, UOps.WMMA,
+         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
   (UOp(UOps.REDUCE).name("root"), do_reduce_with_expand),
   (UOp(UOps.CONTRACT).name("con"), do_contract),
   # remove EXPANDs from SINK
   (UOp(UOps.SINK).name("root"),
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg)
     if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
+  # BARRIERs aren't actually expanded
+  (UOp(UOps.BARRIER, src=(UOp(UOps.EXPAND).name("ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
+  # image indexing (needs to be here)
+  (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
 ])
 
 # *** uop graph ***
