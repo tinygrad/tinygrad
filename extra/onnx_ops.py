@@ -13,7 +13,6 @@ def half_to_float_to_half(func):
     return tuple(r.cast(dtypes.float16) if isinstance(r, Tensor) else r for r in ret)
   return wrapper
 
-
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
                   "Elu", "Celu", "Xor", "Round"}
@@ -613,12 +612,10 @@ def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=N
   x = x + skip + bias
   return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
 
-@half_to_float_to_half
 def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   # this is tanh approamixated
   return (x + bias).gelu()
 
-@half_to_float_to_half
 def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
   assert (segment_ids is None) is (segment_embedding is None)
