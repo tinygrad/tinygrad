@@ -2,7 +2,7 @@ import yaml
 from typing import Tuple, Set, Dict
 from tinygrad import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
-from tinygrad.codegen.linearizer import UOps
+from tinygrad.codegen.kernel import UOps
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
 

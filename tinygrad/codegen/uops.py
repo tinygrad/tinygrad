@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Any, Set, cast, List
+from typing import Optional, Tuple, Any, Set, cast, List, Union
 import functools
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -35,7 +35,8 @@ class UOp:
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def commutative(self) -> bool:
-    return self.op is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
+    return self.op is UOps.ALU and \
+      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
   @functools.cached_property
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
@@ -56,23 +57,25 @@ class UOp:
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
   def __truediv__(self, x): return UOp.alu(BinaryOps.MUL, self, UOp.alu(UnaryOps.RECIP, ufix(self.dtype, x)))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
+  def __xor__(self, x): return UOp.alu(BinaryOps.XOR, self, ufix(self.dtype, x))
+  def __and__(self, x): return UOp.alu(BinaryOps.AND, self, ufix(self.dtype, x))
+  def __or__(self, x): return UOp.alu(BinaryOps.OR, self, ufix(self.dtype, x))
   def ne(self, x): return UOp.alu(BinaryOps.CMPNE, self, ufix(self.dtype, x))
   def eq(self, x): return -self.ne(x)
   def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
   def ge(self, x): return -self.lt(x)
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
   def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
-  def __getattribute__(self, attr):
-    if attr == "const": return functools.partial(UOp.const, self.dtype)
-    return super().__getattribute__(attr)
+  def where(self, x, y): return UOp.alu(TernaryOps.WHERE, self, x, y)
+  def recip(self): return UOp.alu(UnaryOps.RECIP, self)
+  def const(self:Union[UOp, DType, None], b:ConstType|Variable): return UOp._const(self.dtype if isinstance(self, UOp) else self, b)
   @staticmethod
   @functools.lru_cache(maxsize=None)
-  def const(dtype:Optional[DType], b:ConstType|Variable):
+  def _const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
-  def e(self, arg, *src:UOp): return UOp.alu(arg, self, *src)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod

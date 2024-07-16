@@ -3,7 +3,7 @@ from typing import Optional, Union, Any, Tuple, List, Dict
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG, RING
 from tinygrad.dtype import DType, ConstType
-from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
+from tinygrad.ops import BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
@@ -98,7 +98,7 @@ class MultiLazyBuffer:
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)
 
   # elementwise is simple
-  def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer, arg:Optional[Any]=None) -> MultiLazyBuffer:
+  def e(self, op:Union[MetaOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer, arg:Optional[Any]=None) -> MultiLazyBuffer:
     msrcs = (self,)+in_srcs
     assert all(isinstance(x, MultiLazyBuffer) for x in msrcs), f"all buffers must be MultiLazyBuffer {msrcs}"
     assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
