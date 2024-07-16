@@ -276,7 +276,7 @@ class AMDProgram(HCQCompatProgram):
     if DEBUG >= 6: print(disasm(lib))
 
     image, sections, _ = elf_loader(self.lib)
-    self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000), BufferOptions(cpu_access=True))
+    self.lib_gpu = self.device._gpu_alloc(round_up(image.nbytes, 0x1000), kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
     entry_point = min(sh.header.sh_addr for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC)
@@ -309,7 +309,7 @@ class AMDProgram(HCQCompatProgram):
     super().__init__(kernargs_alloc_size=self.kernargs_segment_size)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
+    if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
   def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     if (given:=len(bufs)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
