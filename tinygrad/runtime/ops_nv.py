@@ -229,7 +229,7 @@ class NVProgram(HCQCompatProgram):
     self.program_addr, self.program_sz, self.registers_usage, self.shmem_usage = 0, 0, 0, 0
     self.constbufs: Dict[int, Tuple[int, int]] = {0: (0, 0x160)} # Dict[constbuf index, Tuple[va_addr, size]]
 
-    if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], []
+    if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
