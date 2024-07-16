@@ -1,5 +1,4 @@
 import csv, pathlib, time, numpy as np
-from os import getenv
 from tinygrad.device import CompileError
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
@@ -83,4 +82,4 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
 
 if __name__ == "__main__":
   devices = [Device.DEFAULT, "CLANG"]
-  benchmark_model("https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx")
+  benchmark_model("https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx", devices)
