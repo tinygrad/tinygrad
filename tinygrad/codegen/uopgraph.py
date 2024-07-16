@@ -607,7 +607,7 @@ class UOpGraph:
       for l, ss in scope_children.items():
         if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       # order ranges by their "group"
-      if u.op is UOps.RANGE: priority += sum([r.arg[0] for r in range_group[u] if r.op is UOps.RANGE])
+      if u.op is UOps.RANGE and u in range_group: priority += sum([r.arg[0] for r in range_group[u] if r.op is UOps.RANGE])
       heapq.heappush(queue, (priority, u))
 
     for u in children:
