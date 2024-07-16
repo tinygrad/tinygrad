@@ -80,7 +80,7 @@ class TestIndexing(unittest.TestCase):
       sched = X.schedule()
       assert len(sched) == 1, f"{len(sched)} != 1"
       run_schedule(sched)
-      # TODO: is number this correct?
+      # TODO: is this number correct?
       #assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
     np.testing.assert_allclose(real_index, X.numpy())
 

@@ -87,13 +87,17 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
     input = buf.srcs[0]
+    axis = buf.arg
     if not st.contiguous:
       assert input.base.op is MetaOps.CONST, f"reduceop late fixup not supported for input {buf.srcs[0].base.op}"
       assert isinstance(input.base.arg, get_args(ConstType)), "todo: symbolic arange"
       assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
       assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expend {buf.st.shape} >= {st.shape}"
-      st = input.st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
-      cache[(buf, st)] = ret = LazyOp(buf.op, (LazyOp(BufferOps.CONST, (), ConstBuffer(input.base.arg, input.base.dtype, st)),), (3,))
+      pre_reduce = st.shape+tuple(s for i,s in enumerate(input.st.shape) if i in axis)
+      axis = tuple(i+len(st.shape)-1 for i in axis)
+      mid_reshape = tuple(1 if s not in input.st.shape else s for s in pre_reduce)
+      st = input.st.reshape(mid_reshape).expand(pre_reduce)
+      cache[(buf, st)] = ret = LazyOp(buf.op, (LazyOp(BufferOps.CONST, (), ConstBuffer(input.base.arg, input.base.dtype, st)),), axis)
       return ret
     st = ShapeTracker.from_shape(input.shape)
 
@@ -103,6 +107,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   return ret
 
 # TODO: the next two functions are dumb, why does the arange reshape anyway
+# can i do this in reduce_for_op?
 
 # add 1s to some sts, because the arange goes from (16384, 1) to (16384,)...
 def _fixup_ones(op:LazyOp, st:ShapeTracker, sts:Dict[LazyOp, ShapeTracker]) -> LazyOp:
