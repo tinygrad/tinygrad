@@ -403,6 +403,8 @@ def do_expand(root:UOp):
         mul *= m
       new_new_srcs.append(new_srcs[src_idx].src[root_idx])
     new_srcs = new_new_srcs
+  # filter the WMMA reduce arg (is this right?)
+  if root.op is UOps.WMMA: expand_args = tuple([x for x in expand_args if x[0] not in root.arg[-1]])
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
 acc_number = 0
@@ -443,7 +445,7 @@ def do_contract(con:UOp):
   return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x[0] != con.arg[0]))
 
 expander = PatternMatcher([
-  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA,
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
   (UOp(UOps.REDUCE).name("root"), do_reduce_with_expand),
   (UOp(UOps.CONTRACT).name("con"), do_contract),
