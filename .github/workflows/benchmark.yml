@@ -432,3 +432,17 @@ jobs:
           train_resnet.txt
           train_resnet_one_gpu.txt
           train_cifar_six_gpu.txt
+
+  testqualcommbenchmark:
+    name: comma Benchmark
+    runs-on: [self-hosted, Linux, comma]
+    defaults:
+      run:
+        shell: bash -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Symlink models and datasets
+      run: |
+        mkdir -p weights
