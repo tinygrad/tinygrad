@@ -43,6 +43,7 @@ class Node:
     if b == 1: return self
     return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
+  def __lshift__(self, b:int): return self*2**b
 
   # *** complex ops ***
 
