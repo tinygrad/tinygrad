@@ -26,6 +26,7 @@
 ::: tinygrad.Tensor.cumsum
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
+::: tinygrad.Tensor.interpolate
 
 ## Unary Ops (math)
 
