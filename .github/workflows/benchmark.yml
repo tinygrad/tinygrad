@@ -443,6 +443,3 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Symlink models and datasets
-      run: |
-        mkdir -p weights
