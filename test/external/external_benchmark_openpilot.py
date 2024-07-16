@@ -81,5 +81,5 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
-  devices = [Device.DEFAULT, "CLANG"]
+  devices = [Device.DEFAULT]
   benchmark_model("https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx", devices)
