@@ -172,7 +172,6 @@ def replace_reduce(root):
 
   const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
   acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x not in expands), (acc_number,))
-  # assert any(s.op is UOps.RANGE for s in acc.src), "no ranges created!"
   acc_number += 1
   ret = acc
   for xx in new_uops: ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
@@ -586,7 +585,6 @@ class UOpGraph:
     in_degree: Dict[UOp, int] = {}
     get_children_dfs(sink, children, in_degree)
 
-    # scope_children = {}
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
       if x.op is UOps.SINK: return set()

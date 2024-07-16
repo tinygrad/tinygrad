@@ -12,7 +12,7 @@ class DType:
   name: str
   fmt: Optional[str]
   count: int
-  def __repr__(self): return f"dtypes.{'_'*(c:=self.count!=1)}{'bigint' if self.name == 'bigint' else INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.count)*c}"
+  def __repr__(self): return f"dtypes.{'_'*(c:=self.count!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.count)*c}"
   def vec(self, sz:int):
     assert sz > 1 and self.count == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
