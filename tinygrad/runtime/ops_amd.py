@@ -277,11 +277,12 @@ class AMDProgram(HCQCompatProgram):
 
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.device.allocator.alloc(image.nbytes, BufferOptions(cpu_access=True))
+    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
     entry_point = min(sh.header.sh_addr for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC)
-    self.group_segment_size = image.cast("I")[entry_point//4]
-    self.private_segment_size = image.cast("I")[entry_point//4 + 1]
-    self.kernargs_segment_size = image.cast("I")[entry_point//4 + 2]
+    self.group_segment_size = image[:-(len(image)%4)].cast("I")[entry_point//4]
+    self.private_segment_size = image[:-(len(image)%4)].cast("I")[entry_point//4 + 1]
+    self.kernargs_segment_size = image[:-(len(image)%4)].cast("I")[entry_point//4 + 2]
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.device.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
