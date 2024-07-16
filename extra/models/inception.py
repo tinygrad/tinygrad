@@ -127,9 +127,7 @@ class InceptionAux:
   def __init__(self, in_ch:int, num_classes:int):
     self.conv0 = BasicConv2d(in_ch, 128, kernel_size=1)
     self.conv1 = BasicConv2d(128, 768, kernel_size=5)
-    # self.conv1.stddev = 0.01
     self.fc = Linear(768, num_classes)
-    # self.fc.stddev = 0.001
 
   def __call__(self, x:Tensor) -> Tensor:
     x = x.avg_pool2d(kernel_size=5, stride=3, padding=1).sequential([self.conv0, self.conv1])
@@ -138,8 +136,8 @@ class InceptionAux:
 
 class Inception3:
   def __init__(self, num_classes:int=1008, cls_map:Optional[Dict]=None):
-    def get_cls(key1:str,key2:str,default):
-      return default if cls_map is None else cls_map.get(key1, cls_map.get(key2,default))
+    def get_cls(key1:str, key2:str, default):
+      return default if cls_map is None else cls_map.get(key1, cls_map.get(key2, default))
 
     self.transform_input = False
     self.Conv2d_1a_3x3 = BasicConv2d(3, 32, kernel_size=(3,3), stride=2)
@@ -160,8 +158,7 @@ class Inception3:
     self.Mixed_7a = get_cls("D1","D",InceptionD)(768)
     self.Mixed_7b = get_cls("E1","E",InceptionE)(1280)
     self.Mixed_7c = get_cls("E2","E",InceptionE)(2048)
-    self.avgpool = lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8), padding=1) # TODO: is this right for -> AdaptiveAvgPool2d((1, 1))
-    self.dropout = 0.0
+    self.avgpool = lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8), padding=1)
     self.fc = Linear(2048, num_classes)
 
   def __call__(self, x:Tensor) -> Tensor:
@@ -170,9 +167,11 @@ class Inception3:
       self.Conv2d_2a_3x3,
       self.Conv2d_2b_3x3,
       self.maxpool1,
+
       self.Conv2d_3b_1x1,
       self.Conv2d_4a_3x3,
       self.maxpool2,
+
       self.Mixed_5b,
       self.Mixed_5c,
       self.Mixed_5d,
@@ -181,10 +180,12 @@ class Inception3:
       self.Mixed_6c,
       self.Mixed_6d,
       self.Mixed_6e,
+
       self.Mixed_7a,
       self.Mixed_7b,
       self.Mixed_7c,
       self.avgpool,
+
       lambda y: y.reshape(x.shape[0],-1),
       self.fc,
     ])
@@ -242,8 +243,6 @@ def default_fid():
 
 class FidInceptionV3:
   def __init__(self):
-    self.output_blocks = [2048]
-
     inception = Inception3(cls_map={
       "A":  FidInceptionA,
       "C":  FidInceptionC,
