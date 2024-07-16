@@ -276,15 +276,12 @@ class AMDProgram(HCQCompatProgram):
     if DEBUG >= 6: print(disasm(lib))
 
     image, sections, relocs = elf_loader(self.lib)
-    assert len(relocs) == 0, "no reloc expected in amd"
-
     self.lib_gpu = self.device.allocator.alloc(image.nbytes, BufferOptions(cpu_access=True))
-    lib_gpu_view = to_mv(self.lib_gpu.va_addr, image.nbytes)
 
     entry_point = min(shdr.sh_addr for _,shdr,_ in sections.values() if shdr.sh_type == libc.SHT_PROGBITS and shdr.sh_flags & libc.SHF_ALLOC)
-    self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
-    self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
-    self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
+    self.group_segment_size = image.cast("I")[entry_point//4]
+    self.private_segment_size = image.cast("I")[entry_point//4 + 1]
+    self.kernargs_segment_size = image.cast("I")[entry_point//4 + 2]
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.device.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
@@ -310,9 +307,8 @@ class AMDProgram(HCQCompatProgram):
 
     super().__init__(kernargs_alloc_size=self.kernargs_segment_size)
 
-  # NOTE: no programs are ever freed
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
+    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
 
   def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     if (given:=len(bufs)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')

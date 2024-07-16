@@ -5,10 +5,7 @@ from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc
 
 @dataclass(frozen=True)
-class ElfSection:
-  name: str
-  header: libc.Elf64_Shdr
-  content: bytes
+class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
 
 def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[ElfSection], Any]:
   def _elf_parse_names(tabs): return {sum(len(w) + 1 for w in tabs.split(b'\0')[:i]): w.decode('utf-8')  for i, w in enumerate(tabs.split(b'\0'))}

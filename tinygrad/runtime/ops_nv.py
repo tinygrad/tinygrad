@@ -158,7 +158,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
   def _exec(self, prg, kernargs, global_size, local_size):
     cmd_idx = len(self) - 1
 
-    ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
+    ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     self.cmd_idx_to_qmd[cmd_idx] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
     self.cmd_idx_to_local_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
@@ -226,33 +226,30 @@ class NVProgram(HCQCompatProgram):
         print(subprocess.check_output(["cuobjdump", "-elf", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.shmem_usage = 0
-    constant_buffers_data = {}
+    self.shmem_usage, self.registers_usage = 0, 0
+    self.constbufs: Dict[int, Tuple[int, int]] = {0: (0, 0x160)} # Dict[constbuf index, Tuple[va_addr, size]]
 
-    if MOCKGPU:
-      image, self.registers_usage = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), 0x10
-      constant_buffers_data[0] = memoryview(bytearray(0x190))
-    else:
-      image, sections, relocs = elf_loader(self.lib, force_section_align=128)
+    if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], []
+    else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
 
-      # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
-      self.lib_gpu = self.device.allocator.alloc(image.nbytes + 0x1000, BufferOptions(cpu_access=True))
+    # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
+    self.lib_gpu = self.device.allocator.alloc(image.nbytes + 0x1000, BufferOptions(cpu_access=True))
 
-      for sh in sections:
-        if sh.header.sh_type == libc.SHT_NOBITS and sh.header.sh_flags & libc.SHF_ALLOC: self.shmem_usage = sh.header.sh_size
-        if sh.name == ".text." + self.name:
-          self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr + sh.header.sh_addr, sh.header.sh_size, sh.header.sh_info >> 24
-        elif match := re.match(r'\.nv\.constant(\d+)', sh.name):
-          constant_buffers_data[int(match.group(1))] = (self.lib_gpu.va_addr + sh.header.sh_addr, sh.header.sh_size)
-        elif sh.name == ".nv.info":
-          for off in range(0, sh.header.sh_size, 12):
-            typ, _, val = struct.unpack_from("III", sh.content, off)
-            if typ & 0xffff == 0x1204: self.device._ensure_has_local_memory(val + 0x240)
+    for sh in sections:
+      if sh.header.sh_type == libc.SHT_NOBITS and sh.header.sh_flags & libc.SHF_ALLOC: self.shmem_usage = sh.header.sh_size
+      if sh.name == ".text." + self.name:
+        self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr + sh.header.sh_addr, sh.header.sh_size, sh.header.sh_info >> 24
+      elif match := re.match(r'\.nv\.constant(\d+)', sh.name):
+        self.constbufs[int(match.group(1))] = (self.lib_gpu.va_addr + sh.header.sh_addr, sh.header.sh_size)
+      elif sh.name == ".nv.info":
+        for off in range(0, sh.header.sh_size, 12):
+          typ, _, val = struct.unpack_from("III", sh.content, off)
+          if typ & 0xffff == 0x1204: self.device._ensure_has_local_memory(val + 0x240)
 
-      # Apply relocs
-      for apply_image_offset, rel_sym_offset, typ, addend in relocs:
-        # These types are CUDA-specific, applying them here
-        if typ == 2: image[apply_image_offset:apply_image_offset+8] = struct.pack('<Q', self.lib_gpu.va_addr + rel_sym_offset) # R_CUDA_64
+    # Apply relocs
+    for apply_image_offset, rel_sym_offset, typ, addend in relocs:
+      # These types are CUDA-specific, applying them here
+      if typ == 2: image[apply_image_offset:apply_image_offset+8] = struct.pack('<Q', self.lib_gpu.va_addr + rel_sym_offset) # R_CUDA_64
 
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
@@ -270,7 +267,7 @@ class NVProgram(HCQCompatProgram):
                             program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40,
                             constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
 
-    for i,(addr,sz) in constant_buffers_data.items():
+    for i,(addr,sz) in self.constbufs.items():
       if i == 0: continue
       self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (addr) >> 32)
       self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (addr) & 0xffffffff)
@@ -279,10 +276,9 @@ class NVProgram(HCQCompatProgram):
 
     # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
     self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
-    self.constbuf_0_size = constant_buffers_data.get(0, (0, 0))[1]
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    super().__init__(kernargs_alloc_size=round_up(self.constbuf_0_size, 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
+    super().__init__(kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
