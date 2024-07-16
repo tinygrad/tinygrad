@@ -191,7 +191,7 @@ class ClangRenderer(CStyleLanguage):
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
-  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], thread_local_sizes=[[2,8], [16], [8]], thread_local_aliases=[[[0], [-1,1], [-2]], [[1], [-1], [0]], [[1], [0], [-1]]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]] # noqa: E5
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], thread_local_sizes=[[2,8], [16], [8]], thread_local_aliases=[[[0], [-1,1], [-2]], [[1], [-1], [0]], [[1], [0], [-1]]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float)]] # noqa: E5
   def __init__(self): self.tensor_cores = OpenCLRenderer.tensor_cores if True else [] # either find nice way of detecting support or have that logic be in the device
   # language options
   kernel_prefix = "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
