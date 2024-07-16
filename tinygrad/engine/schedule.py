@@ -45,11 +45,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     buf = buf.base
   # all buffers here are base now
   assert buf.op is not None
-  if FUSE_AS_ONE_KERNEL and buf in reduce_for_op:
-    st = st.reshape((4, 16384, 256, 1))
-    #raise Exception(st.shape, reduce_for_op[buf].shape)
 
-  # consts are always fused and geeerated
+  # consts are always fused and generated
   if buf.op is MetaOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
@@ -92,10 +89,10 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     reduce_input = buf.srcs[0]
     axis = buf.arg
     if not st.contiguous:
-      assert reduce_input.base.op is MetaOps.CONST, f"reduceop late fixup not supported for reduce_input {buf.srcs[0].base.op}"
+      assert reduce_input.base.op is MetaOps.CONST, f"reduceop late fixup not supported for input {buf.srcs[0].base.op}"
       assert isinstance(reduce_input.base.arg, get_args(ConstType)), "todo: symbolic arange"
       assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
-      assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expend {buf.st.shape} >= {st.shape}"
+      assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
       st = st.reshape((4, 16384, 256))
       pre_reduce = st.shape+tuple(s for i,s in enumerate(reduce_input.st.shape) if i in axis)
       axis = tuple(i+len(st.shape)-1 for i in axis)
