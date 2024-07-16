@@ -37,7 +37,7 @@ class ScheduleItem:
 # *** DAG transformation: List[LazyBuffer] -> ScheduleItem ***
 
 def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
-                      realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer], cache) -> LazyOp:
+                      realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer], reduce_for_op:Dict[LazyBuffer, LazyBuffer], cache) -> LazyOp:
   """recursively create a lazyop"""
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
@@ -45,8 +45,11 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     buf = buf.base
   # all buffers here are base now
   assert buf.op is not None
+  if FUSE_AS_ONE_KERNEL and buf in reduce_for_op:
+    st = st.reshape((4, 16384, 256, 1))
+    #raise Exception(st.shape, reduce_for_op[buf].shape)
 
-  # consts are always fused and generated
+  # consts are always fused and geeerated
   if buf.op is MetaOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
@@ -77,12 +80,12 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
   if buf.op is MetaOps.CONTIGUOUS:
     assert buf in outputs
-    return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, cache)
+    return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_for_op, cache)
   if buf.op is MetaOps.ASSIGN:
     assert buf in outputs
     assert buf.srcs[1].base is buf.srcs[1], "assign must be to base"
     assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
-    return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, cache)
+    return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_for_op, cache)
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
@@ -93,6 +96,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
       assert isinstance(reduce_input.base.arg, get_args(ConstType)), "todo: symbolic arange"
       assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
       assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expend {buf.st.shape} >= {st.shape}"
+      st = st.reshape((4, 16384, 256))
       pre_reduce = st.shape+tuple(s for i,s in enumerate(reduce_input.st.shape) if i in axis)
       axis = tuple(i+len(st.shape)-1 for i in axis)
       mid_reshape = tuple(1 if s not in reduce_input.st.shape else s for s in pre_reduce)
@@ -100,10 +104,12 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
       cache[(buf, st)] = ret = LazyOp(buf.op, (LazyOp(BufferOps.CONST, (), ConstBuffer(reduce_input.base.arg, reduce_input.base.dtype, st)),), axis)
       return ret
     st = ShapeTracker.from_shape(reduce_input.shape)
+    if FUSE_AS_ONE_KERNEL and st.shape == (4, 16384, 256):
+      st = st.reshape((4, 16384, 256, 1))
 
   # otherwise we fuse it like normal
   cache[(buf, st)] = ret = \
-    LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, cache) for x in buf.srcs), buf.arg)
+    LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, reduce_for_op, cache) for x in buf.srcs), buf.arg)
   return ret
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer]):
@@ -119,8 +125,9 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], re
   inputs: List[LazyBuffer] = []
   for i, out in enumerate(outs):
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
+    if FUSE_AS_ONE_KERNEL and output_st.shape == (4, 1, 256): output_st = output_st.reshape((4, 1, 256, 1))
     output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
-    lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, cache=cache)
+    lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_for_op, cache=cache)
     output_view, vv = output_view.simplify().unbind()
     if vv: var_vals.update(vv)
     ast.append(LazyOp(BufferOps.STORE, (lop,), MemBuffer(i, out.dtype, output_view)))
@@ -244,7 +251,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
-    if forced_realize and not FUSE_AS_ONE_KERNEL and (r.srcs[0].base.op is not MetaOps.CONST or any(x.shape != r.shape for x in children[r])):
+    if forced_realize:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
@@ -261,7 +268,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
-      realizes[tr] = None
+      if not FUSE_AS_ONE_KERNEL and (r.srcs[0].base.op is not MetaOps.CONST or any(x.shape != r.shape for x in children[r])): realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
