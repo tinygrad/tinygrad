@@ -563,8 +563,6 @@ class UOpGraph:
 
     # do graph rewrite
     sink = graph_rewrite(sink, self.folder)
-    from tinygrad.engine.graph import print_tree
-    print_tree(sink)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
     UOpGraph.cnt += 1
