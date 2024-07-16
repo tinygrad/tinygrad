@@ -234,6 +234,7 @@ class NVProgram(HCQCompatProgram):
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.lib_gpu = self.device.allocator.alloc(image.nbytes + 0x1000, BufferOptions(cpu_access=True))
+    if MOCKGPU: self.program_addr, self.program_sz = self.lib_gpu.va_addr, image.nbytes
 
     for sh in sections:
       if sh.header.sh_type == libc.SHT_NOBITS and sh.header.sh_flags & libc.SHF_ALLOC: self.shmem_usage = sh.header.sh_size
