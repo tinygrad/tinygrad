@@ -106,32 +106,6 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, cache) for x in buf.srcs), buf.arg)
   return ret
 
-# TODO: the next two functions are dumb, why does the arange reshape anyway
-# can i do this in reduce_for_op?
-
-# add 1s to some sts, because the arange goes from (16384, 1) to (16384,)...
-def _fixup_ones(op:LazyOp, st:ShapeTracker, sts:Dict[LazyOp, ShapeTracker]) -> LazyOp:
-  replace_src, replace_arg = list(_fixup_ones(x, st, sts) for x in op.src), op.arg
-  if op.op in {BufferOps.LOAD, BufferOps.CONST}: st = op.arg.st
-  elif op.op in ReduceOps:
-    st = ShapeTracker.from_shape(tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape)))
-  else:
-    st = sts[op.src[0]]
-    assert all(prod(sts[x].shape) == prod(st.shape) for x in op.src)
-    if any(sts[x].shape != st.shape for x in op.src):
-      st = max((sts[x] for x in op.src), key=lambda x:len(x.shape))
-      for i,x in enumerate(op.src):
-        if sts[x].shape != st.shape: replace_src[i] = _recursive_reshape(x, st.shape)
-  sts[op] = st
-  if op.op is BufferOps.STORE and st.shape != op.arg.st.shape: replace_arg = replace(op.arg, st=op.arg.st.reshape(st.shape))
-  return replace(op, src=tuple(replace_src), arg=replace_arg)
-
-# recursively push through reshapes
-def _recursive_reshape(op:LazyOp, new_shape:Tuple[sint, ...]) -> LazyOp:
-  assert op.op not in ReduceOps, "cannot push reshape through a reduce"
-  if op.op in BufferOps: return replace(op, arg=replace(op.arg, st=op.arg.st.reshape(new_shape)))
-  return replace(op, src=tuple(_recursive_reshape(x, new_shape) for x in op.src))
-
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
   if (out:=outs[0]).op is MetaOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
@@ -149,9 +123,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], re
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, cache=cache)
     output_view, vv = output_view.simplify().unbind()
     if vv: var_vals.update(vv)
-    lop = LazyOp(BufferOps.STORE, (lop, ), MemBuffer(i, out.dtype, output_view))
-    lop = _fixup_ones(lop, output_view, {})
-    ast.append(lop)
+    ast.append(LazyOp(BufferOps.STORE, (lop,), MemBuffer(i, out.dtype, output_view)))
   return LazyOp(MetaOps.SINK, tuple(ast)), inputs, var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])
 
 # *** DAG creation: decide which LazyBuffers should realize ***
