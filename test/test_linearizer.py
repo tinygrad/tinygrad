@@ -101,13 +101,42 @@ class TestLinearizer(unittest.TestCase):
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
+  def test_simple_sum_multireduce(self):
+    x = Tensor.randn(3, 27, 8, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((3, 27, 8))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
+    store = LazyOp(BufferOps.STORE, (first_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 27, 1))))
+    wanna_output = x.numpy().sum(-1).reshape(-1)
+    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
+    assert False, "success"
+
+  def test_simple_double_sum_multireduce(self):
+    x = Tensor.randn(3, 32, 27, 32, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((3, 32, 27, 32))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (1,3,))
+    store = LazyOp(BufferOps.STORE, (first_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 1, 27, 1))))
+    wanna_output = x.numpy().sum((1,3)).reshape(-1)
+    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
+    assert False, "success"
+
+  def test_sum_multireduce(self):
+    x = Tensor.randn(32, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((1, 32)).expand((32, 32))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (1,))
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((32, 1))))
+    squares = (second_x-first_reduce)
+    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (0,))
+    store = LazyOp(BufferOps.STORE, (squares_sum,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((1, 1))))
+    wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1)
+    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
+
   @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "ocelot/remu doesn't have multiple wave syncs yet")
-  @unittest.skip("still broken")
+  # @unittest.skip("still broken")
   def test_var_multireduce(self):
     Tensor.manual_seed(0)
-    x = Tensor.randn(3, 27, 32).realize()
+    x = Tensor.randn(3, 27, 32, dtype=dtypes.float).realize()
     # push reduce (3, 27, 32) -> (3, 27, 1) -> (3, 27, 32) expand to LOAD
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((3, 27, 32, 1)).expand((3, 27, 32, 32))))
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((3, 27, 1, 32)).expand((3, 27, 32, 32))))
     first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (3,))
     mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(0.03125, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((3, 27, 32, 1)))) # noqa: E501
     # store = LazyOp(BufferOps.STORE, (mean,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 27, 32, 1))))
@@ -115,11 +144,12 @@ class TestLinearizer(unittest.TestCase):
     second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((3, 27, 32, 1))))
     squares = (second_x-mean)*(second_x-mean)
     squares_sum = LazyOp(ReduceOps.SUM, (squares,), (2,))
-    store = LazyOp(BufferOps.STORE, (squares_sum,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 27, 1, 1))))
-    wanna_output = x.numpy().var(axis=2, ddof=0)
+    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(0.03125, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((3, 27, 1, 1)))) # noqa: E501
+    store = LazyOp(BufferOps.STORE, (variance,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 27, 1, 1))))
+    wanna_output = x.numpy().var(axis=2, ddof=0).reshape((3,27,1,1))
     helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
     # tinygrad ref
-    y_tiny = x.var(axis=2, correction=0)
+    y_tiny = x.var(axis=2, correction=0).reshape(3,27,1,1)
     np.testing.assert_allclose(y_tiny.numpy(), wanna_output, atol=1e-4, rtol=1e-4)
 
   # *** buildup to fused indexing

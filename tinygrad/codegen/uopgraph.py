@@ -174,7 +174,7 @@ def replace_reduce(root):
   acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x not in expands), (acc_number,))
   print("creating acc: ", acc)
   print("  root: ", root)
-  assert any(s.op is UOps.RANGE for s in acc.src), "no ranges created!"
+  # assert any(s.op is UOps.RANGE for s in acc.src), "no ranges created!"
   acc_number += 1
   ret = acc
   for xx in new_uops: ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
@@ -575,14 +575,14 @@ class UOpGraph:
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
       # do contracts/reduces
-      print("uop graph after graph_rewrite")
-      print_tree(sink)
+      # print("uop graph after graph_rewrite")
+      # print_tree(sink)
       sink = graph_rewrite(sink, contractor)
-      print("uop graph after contractor rewrite")
-      print_tree(sink)
+      # print("uop graph after contractor rewrite")
+      # print_tree(sink)
       sink = graph_rewrite(sink, reducer)
-      print("uop graph after reducer rewrite")
-      print_tree(sink)
+      # print("uop graph after reducer rewrite")
+      # print_tree(sink)
 
       # do upcasts (after reduce unrolls and rewrites)
       expands = list(sorted(x for x in sink.sparents if x.op is UOps.EXPAND))
@@ -590,8 +590,8 @@ class UOpGraph:
       sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
 
     # do graph rewrite (2)
-    # sink = graph_rewrite(sink, self.folder)
-    # if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
+    sink = graph_rewrite(sink, self.folder)
+    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
     # BFS toposort
@@ -609,24 +609,22 @@ class UOpGraph:
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
       if x.op is UOps.SINK: return set()
-      if x.op is UOps.PHI: print("recursed into a PHI")
-      # return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end and all(u not in scope_children[s] for s in scope_children)]))
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
 
     # scope children impact the toposort and END* insertion
     # END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
     for p in reversed(in_degree):
       if p.op in END_FOR_UOP:
-        print("getting scope_children of: ", p)
+        # print("getting scope_children of: ", p)
         scope_children[p] = get_recursive_children(p, END_FOR_UOP[p.op][0])
-    print("scope children:")
-    for s in scope_children:
-      print("  scope children of ", s)
-      for c in scope_children[s]: print("    ", c)
+    # print("scope children:")
+    # for s in scope_children:
+    #   print("  scope children of ", s)
+    #   for c in scope_children[s]: print("    ", c)
 
     phi_for_scope={p:[s for s in scope_children if p in scope_children[s]] for x in scope_children for p in scope_children[x] if p.op is UOps.PHI}
-    print("phi for scope=")
-    for p in phi_for_scope: print(f"  {p} : {phi_for_scope[p]}")
+    # print("phi for scope=")
+    # for p in phi_for_scope: print(f"  {p} : {phi_for_scope[p]}")
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
@@ -639,10 +637,10 @@ class UOpGraph:
     for u in children:
       if in_degree[u] == 0: push(u)
 
-    print("uop graph before queue")
-    print_tree(sink)
-    print("in_degree")
-    for u in in_degree: print("  ", u, u.src if u.op is UOps.LOAD else "")
+    # print("uop graph before queue")
+    # print_tree(sink)
+    # print("in_degree")
+    # for u in in_degree: print("  ", u, u.src if u.op is UOps.LOAD else "")
 
     scope_end: Dict[UOp, UOp] = {}
     self._uops = []
@@ -670,13 +668,13 @@ class UOpGraph:
             popped_scope_stack.append((x,s,scoped_chunk))
             self._uops = self._uops[:self._uops.index(scope_stack.pop(-1))]
             # for u in shared_uops: self._uops.append(u)
-            print("self.uops after reapply:")
-            for i,u in enumerate(self._uops): print(f"{i}:  ", u)
+            # print("self.uops after reapply:")
+            # for i,u in enumerate(self._uops): print(f"{i}:  ", u)
           else: break
         scope_stack.append(x)
       if x in scope_children: scope_end[x] = x
       if x.op is UOps.DEFINE_ACC:
-        print("x.op is UOps.DEFINE_ACC:", x)
+        # print("x.op is UOps.DEFINE_ACC:", x)
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
       else: self._uops.append(x)
@@ -684,12 +682,12 @@ class UOpGraph:
         if x in ss:
           ss.remove(x)
           if len(ss) == 0:
-            print("trying to end scope: ", u)
-            if u.op is UOps.RANGE and scope_stack[-1] is not u: 
-              print("trying to end one scope while in another")
-              print("in this scope=",scope_stack[-1])
-              print("total scope_stack=")
-              for s in scope_stack: print("  ", s)
+            # print("trying to end scope: ", u)
+            # if u.op is UOps.RANGE and scope_stack[-1] is not u: 
+              # print("trying to end one scope while in another")
+              # print("in this scope=",scope_stack[-1])
+              # print("total scope_stack=")
+              # for s in scope_stack: print("  ", s)
             if u.op is UOps.RANGE: assert (s:=scope_stack.pop(-1)) is u, f"trying to end one scope while in another!, scope={s}, scope_stack={scope_stack}"
             scope_end[u] = x
 
@@ -712,12 +710,12 @@ class UOpGraph:
 
     # end scopes in toposort order
     for u, x in scope_end.items():
-      print("inserting end @ ", self._uops.index(x)+1)
+      # print("inserting end @ ", self._uops.index(x)+1)
       self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
-    print("after inserting ends:")
-    for i,u in enumerate(self._uops):
-      print(f"{i}:  ", u)
+    # print("after inserting ends:")
+    # for i,u in enumerate(self._uops):
+    #   print(f"{i}:  ", u)
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     try:

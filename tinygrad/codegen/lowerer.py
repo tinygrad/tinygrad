@@ -115,7 +115,7 @@ class IndependentLowerer:
     return ret
 
   def _to_uop(self, x:LazyOp) -> UOp:
-    print("to uop: ", x.op, "[", [s.op for s in x.src], "]", x.arg)
+    # print("to uop: ", x.op, "[", [s.op for s in x.src], "]", x.arg)
     if x.op in BufferOps:
       idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
       # print("idx for bufferop: ", x.op, x.arg)
