@@ -16,9 +16,8 @@ def benchmark(mnm, nm, fxn):
   print(f"{mnm:15s} {nm:25s} {min(tms)*1e-6:7.2f} ms")
   return min(tms), ret
 
-#BASE = pathlib.Path(__file__).parents[2] / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
-def benchmark_model(m, devices, validate_outs=False):
+def benchmark_model(m, devices):
   fn = fetch(m)
   onnx_model = onnx.load(fn)
   output_names = [out.name for out in onnx_model.graph.output]
@@ -58,20 +57,20 @@ def benchmark_model(m, devices, validate_outs=False):
     except Exception as e: print(f"{m:16s}onnxruntime_{backend.lower()} {type(e).__name__:>25}")
     del ort_sess
 
-  if validate_outs:
-    for device in devices:
-      rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
-      Device.DEFAULT = device
-      inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = get_run_onnx(onnx_model)
-      tinygrad_out = tinygrad_model(inputs)
+  # validate outputs
+  for device in devices:
+    rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
+    Device.DEFAULT = device
+    inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
+    tinygrad_model = get_run_onnx(onnx_model)
+    tinygrad_out = tinygrad_model(inputs)
 
-      ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
-      onnx_out = ort_sess.run(output_names, np_inputs)
-      onnx_out = dict([*list(zip(output_names, onnx_out))])
+    ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
+    onnx_out = ort_sess.run(output_names, np_inputs)
+    onnx_out = dict([*list(zip(output_names, onnx_out))])
 
-      assert_allclose(tinygrad_out, onnx_out, rtol=rtol, atol=atol)
-      print(f"{m:16s}outputs validated on {device=} with rtol={rtol:.1e}, atol={atol:.1e}")
+    assert_allclose(tinygrad_out, onnx_out, rtol=rtol, atol=atol)
+    print(f"{m:16s}outputs validated on {device=} with rtol={rtol:.1e}, atol={atol:.1e}")
 
 def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
   assert len(tiny_out) == len(onnx_out) and tiny_out.keys() == onnx_out.keys()
