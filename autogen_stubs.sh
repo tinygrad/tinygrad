@@ -210,8 +210,59 @@ generate_libc() {
   clang2py \
     $(dpkg -L libc6-dev | grep sys/mman.h) \
     $(dpkg -L libc6-dev | grep sys/syscall.h) \
+    /usr/include/elf.h \
     /usr/include/unistd.h \
     -o $BASE/libc.py
+
+  # sed 's/#\s*define\s*\([^ \t]*\)(\([^)]*\))\s*\(.*\)/def \1(\2): return \3/' /usr/include/elf.h >> $BASE/libc.py # #define name(x) (smth) -> def name(x): return (smth)
+  # sed -i '/#\s*define\s\+\([^ \t]\+\)\s\+\([^ ]\+\)/s//\1 = \2/' $BASE/amd_gpu.py # #define name val -> name = val
+
+  # sed -r '/^#define\s+([^ ()\t]+)\s+([^ ()\t]+)/ s/^#define\s+([^ ()\t]+)\s*([^()/]*).*$/\1 = \2/; s/1U/1/g; s/0ULL/0/g; t; d' /usr/include/elf.h >> $BASE/libc.py # #define name (val) -> name = val
+
+  sed -E '
+    # Remove single-line comments
+    s/[[:space:]]*\/\*.*\*\///g
+
+    # Remove multi-line comments
+    /\/\*/,/\*\//d
+
+    /.*DT_MIPS_NUM.*/d
+
+    # Remove lines ending with backslash (multi-line macros)
+    /\\$/d
+
+    # Convert C integer literals (remove U suffix)
+    s/\b([0-9]+)U\b/\1/g
+
+    # Convert C types to Python ctypes
+    s/\bunsigned char\b/ctypes.c_ubyte/g
+    s/\bsigned char\b/ctypes.c_byte/g
+    s/\bunsigned short\b/ctypes.c_ushort/g
+    s/\bshort\b/ctypes.c_short/g
+    s/\bunsigned int\b/ctypes.c_uint/g
+    s/\bint\b/ctypes.c_int/g
+    s/\bunsigned long\b/ctypes.c_ulong/g
+    s/\blong\b/ctypes.c_long/g
+    s/\bfloat\b/ctypes.c_float/g
+    s/\bdouble\b/ctypes.c_double/g
+
+    # Function-like macros with parameters
+    /^#define[[:space:]]+([[:alnum:]_]+)[[:space:]]*\(([^)]*)\)[[:space:]]+(.+)/ {
+      s//def \1(\2): return \3/
+      p
+      d
+    }
+
+    # Simple #define statements (including those with parentheses)
+    /^#define[[:space:]]+([[:alnum:]_]+)[[:space:]]+(.+)/ {
+      s//\1 = \2/
+      p
+      d
+    }
+
+    # Drop all other lines
+    d
+  ' /usr/include/elf.h >> $BASE/libc.py
 
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
   sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
