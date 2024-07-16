@@ -416,8 +416,7 @@ def do_reduce_with_expand(root):
   const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
   ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
   acc_number += 1
-  if len(expands_reduce):
-    assert root.src[0].op is UOps.EXPAND
+  if root.src[0].op is UOps.EXPAND:
     for xx in root.src[0].src:
       ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
   else:
@@ -435,7 +434,11 @@ def do_contract(con:UOp):
   if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg[0][0] in con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
   # complex CONTRACT may only remove one axis from EXPAND
   assert len(con.arg) == 1, "contract arg one is all that's supported"
-  split_index = [x[0] for x in ex.arg].index(con.arg[0])
+  try:
+    split_index = [x[0] for x in ex.arg].index(con.arg[0])
+  except ValueError:
+    # CONTRACT without EXPAND (still) repeats the element VECTORIZED
+    return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
   assert con.dtype.count == ex.arg[split_index][1], "contract arg must match"
   number_after = prod([x[1] for x in ex.arg[split_index+1:]])
   to_join = [ex.src[i:i+number_after] for i in range(0, len(ex.src), number_after)]
@@ -606,7 +609,7 @@ class UOpGraph:
         == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       self.print()
-      if getenv("GRAPHUOPS"): self.graph()
+      self.graph()
       raise e
 
     # strip the SINK
