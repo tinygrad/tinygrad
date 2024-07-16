@@ -226,22 +226,19 @@ class NVProgram(HCQCompatProgram):
         print(subprocess.check_output(["cuobjdump", "-elf", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.program_addr, self.program_sz, self.registers_usage, self.shmem_usage = 0, 0, 0, 0
-    self.constbufs: Dict[int, Tuple[int, int]] = {0: (0, 0x160)} # Dict[constbuf index, Tuple[va_addr, size]]
-
     if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.lib_gpu = self.device.allocator.alloc(image.nbytes + 0x1000, BufferOptions(cpu_access=True))
-    if MOCKGPU: self.program_addr, self.program_sz = self.lib_gpu.va_addr, image.nbytes
 
+    self.program_addr, self.program_sz, self.registers_usage, self.shmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0
+    self.constbufs: Dict[int, Tuple[int, int]] = {0: (0, 0x160)} # Dict[constbuf index, Tuple[va_addr, size]]
     for sh in sections:
-      if sh.header.sh_type == libc.SHT_NOBITS and sh.header.sh_flags & libc.SHF_ALLOC: self.shmem_usage = sh.header.sh_size
-      if sh.name == ".text." + self.name:
+      if sh.name == f".nv.shared.{self.name}": self.shmem_usage = sh.header.sh_size
+      if sh.name == f".text.{self.name}":
         self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, sh.header.sh_info>>24
-      elif match := re.match(r'\.nv\.constant(\d+)', sh.name):
-        self.constbufs[int(match.group(1))] = (self.lib_gpu.va_addr + sh.header.sh_addr, sh.header.sh_size)
+      elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
       elif sh.name == ".nv.info":
         for off in range(0, sh.header.sh_size, 12):
           typ, _, val = struct.unpack_from("III", sh.content, off)
