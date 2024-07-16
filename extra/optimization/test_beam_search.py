@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from tinygrad.helpers import BEAM, Timing, CI
+from tinygrad.helpers import Timing, CI, Context, RUN_PROCESS_REPLAY
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
@@ -11,10 +11,10 @@ def rand(*shape):
 
 class TestBeamSearch(unittest.TestCase):
   def setUp(self):
-    self.old_beam = BEAM.value
-    BEAM.value = 2
+    self.ctx = Context(BEAM=2, RUN_PROCESS_REPLAY=2 if RUN_PROCESS_REPLAY else 0)
+    self.ctx.__enter__()
   def tearDown(self):
-    BEAM.value = self.old_beam
+    self.ctx.__exit__()
 
   def test_variable_ast_beam(self):
     a = rand(3, 3).reshape((Variable("a", 1, 10).bind(3), 3))
