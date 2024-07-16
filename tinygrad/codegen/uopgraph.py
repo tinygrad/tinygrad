@@ -486,58 +486,86 @@ constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.
 # *** uop expander ***
 
 def do_expand(root:UOp):
-  expands = [x for x in root.src if x.op is UOps.EXPAND]
-  if len(expands) == 0: return None
-  expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
+  if root.op is UOps.REDUCE:
+    if root.src[0].op is not UOps.EXPAND: return None
+    reduce_expand_args = flatten([x.arg for x in root.src[1:] if x.op is UOps.EXPAND])
+    expand_args = tuple(x for x in root.src[0].arg if x not in reduce_expand_args)
+    if len(expand_args) == 0: return None
+    dont_expand_args = tuple(x for x in root.src[0].arg if x in reduce_expand_args)
+  else:
+    expands = [x for x in root.src if x.op is UOps.EXPAND]
+    if len(expands) == 0: return None
+    expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
+    dont_expand_args = ()
   new_srcs = []
   for choices in itertools.product(*[range(x[1]) for x in expand_args]):
     rpk = dict(zip([x[0] for x in expand_args], choices))
     new_src = []
     for src in root.src:
       if src.op is UOps.EXPAND:
-        idx, mul = 0, 1
-        for a,l in src.arg[::-1]:
-          idx += rpk[a] * mul
-          mul *= l
-        new_src.append(src.src[idx])
+        lnew_src = []
+        for lchoices in itertools.product(*[range(x[1]) for x in dont_expand_args]):
+          lrpk = {**rpk, **dict(zip([x[0] for x in dont_expand_args], lchoices))}
+          idx, mul = 0, 1
+          for a,l in src.arg[::-1]:
+            idx += lrpk[a] * mul
+            mul *= l
+          lnew_src.append(src.src[idx])
+        if len(dont_expand_args):
+          new_src.append(UOp(UOps.EXPAND, root.dtype, tuple(lnew_src), dont_expand_args))
+        else:
+          assert len(lnew_src) == 1
+          new_src.append(lnew_src[0])
       else:
         new_src.append(src)
     new_srcs.append(UOp(root.op, root.dtype, tuple(new_src), root.arg))
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
-def do_reduce(root):
+def do_reduce_expand(root):
   global acc_number
   expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
   expands_reduce = [x for x in expands if root.src[0].op is UOps.EXPAND and all(y in root.src[0].arg for y in x.arg)]
   expands_non_reduce = [x for x in expands if x not in expands_reduce]
-  #print(expands_reduce)
-  #print(expands_non_reduce)
-  #print(root)
   assert len(expands_non_reduce) == 0
   const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
   ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
   acc_number += 1
-  if len(expands_reduce):
-    # not right
+  if len(expands):
+    assert root.src[0].op is UOps.EXPAND
     for xx in root.src[0].src:
       ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
   else:
-    # no EXPANDS
     ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, root.src[0])
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
 
+def do_contract(con:UOp):
+  ex = con.src[0]
+  # CONTRACT without EXPAND repeats the element VECTORIZED
+  if ex.op is not UOps.EXPAND: return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
+  # simple CONTRACT and EXPAND cancel out
+  if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg[0][0] in con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
+  # complex CONTRACT may only remove one axis from EXPAND
+  assert len(con.arg) == 1, "contract arg one is all that's supported"
+  assert ex.arg[0][0] == con.arg[0], "simplest thing only"
+  srcs = []
+  for i in range(0, len(ex.src)//con.dtype.count):
+    srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(ex.src[i+j] for j in range(0, len(ex.src), len(ex.src)//con.dtype.count))))
+  return UOp(UOps.EXPAND, con.dtype, tuple(srcs), ex.arg[1:])
+
 expander = PatternMatcher([
-  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.GEP}, name="root"), do_expand),
-  (UOp(UOps.REDUCE).name("root"), do_reduce),
+  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.GEP, UOps.WMMA, UOps.VECTORIZE, UOps.REDUCE}, name="root"), do_expand),
+  (UOp(UOps.REDUCE).name("root"), do_reduce_expand),
+  (UOp(UOps.CONTRACT).name("con"), do_contract),
+  # simple remove EXPAND from SINK
+  #(UOp(UOps.SINK, src=(UOp(UOps.EXPAND).name("ex"),)), lambda ex: UOp(UOps.SINK, None, ex.src)),
   # remove EXPANDs from SINK
   (UOp(UOps.SINK).name("root"),
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg)
     if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
-  # CONTRACT and EXPAND cancel out
-  (UOp(UOps.CONTRACT, src=(UOp(UOps.EXPAND).name("ex"),)).name("con"),
-   lambda con,ex: UOp(UOps.VECTORIZE, con.dtype, ex.src) if len(ex.arg) == 1 and ex.arg[0][0] in con.arg else None),
+  #(UOp(UOps.CONTRACT, src=(UOp(UOps.EXPAND).name("ex"),)).name("con"),
+  # lambda con,ex: UOp(UOps.VECTORIZE, con.dtype, ex.src) if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg[0][0] in con.arg else None),
   # CONTRACT alone repeats the element VECTORIZED
-  (UOp(UOps.CONTRACT).name("con"), lambda con: UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)),
+  #(UOp(UOps.CONTRACT).name("con"), lambda con: UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)),
 ])
 
 # *** uop graph ***
