@@ -269,5 +269,35 @@ class TestUOpGraph(TestUOps):
     # ranges are closed in the right order
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
+from tinygrad.codegen.uopgraph import expander, constant_folder
+
+class TestExpander(unittest.TestCase):
+  def test_expand_add_broadcast(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    sink = graph_rewrite(e1+3, expander)
+    sink = graph_rewrite(sink, constant_folder)
+    assert sink.op == UOps.EXPAND and len(sink.src) == 4
+    self.assertListEqual([x.arg for x in sink.src], [3,4,5,6])
+
+  def test_expand_same_axis(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4*x) for x in range(4)), ((1,4),))
+    sink = graph_rewrite(e1+e2, expander)
+    sink = graph_rewrite(sink, constant_folder)
+    assert sink.op == UOps.EXPAND and len(sink.src) == 4
+    self.assertListEqual([x.arg for x in sink.src], [0,5,10,15])
+
+  def test_expand_different_axis(self, flip=False):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4*x) for x in range(4)), ((1,4),))
+    e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
+    sink = graph_rewrite((e2+e1) if flip else (e1+e2), expander)
+    sink = graph_rewrite(sink, constant_folder)
+    assert sink.op == UOps.EXPAND and len(sink.src) == 16
+    assert sink.arg == ((1, 4), (2, 4))
+    self.assertListEqual([x.arg for x in sink.src], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+
+  def test_expand_different_axis_flip(self): self.test_expand_different_axis(True)
+
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

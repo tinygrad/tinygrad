@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
-from tinygrad.helpers import DEBUG, getenv, flatten, all_same, dedup, TRANSCENDENTAL
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -367,13 +367,12 @@ def do_expand(root:UOp):
     # NOTE: the insertion location matters here
     if root.arg[-1][0] < expand_args[0][0]:
       return UOp(UOps.EXPAND, root.dtype, tuple(flatten(zip(*[x.src for x in new_srcs]))), root.arg+expand_args)
-    elif expand_args[-1][0] < root.arg[0][0]:
+    if expand_args[-1][0] < root.arg[0][0]:
       return UOp(UOps.EXPAND, root.dtype, tuple(flatten([x.src for x in new_srcs])), expand_args+root.arg)
-    else:
-      raise RuntimeError(f"can't merge {root.arg} w {expand_args}")
-  else:
-    return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
+    raise RuntimeError(f"can't merge {root.arg} w {expand_args}")
+  return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
+acc_number = 0
 def do_reduce_with_expand(root):
   global acc_number
   expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
@@ -393,6 +392,7 @@ def do_reduce_with_expand(root):
 
 def do_contract(con:UOp):
   ex = con.src[0]
+  assert con.dtype is not None
   # CONTRACT without EXPAND repeats the element VECTORIZED
   if ex.op is not UOps.EXPAND: return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # simple CONTRACT and EXPAND cancel out
