@@ -40,11 +40,15 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer], cache) -> LazyOp:
   """recursively create a lazyop"""
   if (buf, st) in cache: return cache[(buf, st)]
+  view: Optional[LazyBuffer] = None
+  st_prev = st
   if buf != buf.base:
     st = buf.st + st
+    view = buf
     buf = buf.base
   # all buffers here are base now
   assert buf.op is not None
+  arg = buf.arg
 
   # consts are always fused and generated
   if buf.op is MetaOps.CONST:
@@ -86,12 +90,19 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
-    assert st.contiguous, "ReduceOps late fusion must be contiguous"
-    st = ShapeTracker.from_shape(buf.srcs[0].shape)
+    input_shape = buf.srcs[0].shape
+    if not st.contiguous:
+      assert view is not None, f"view doesn't exist on non-contiguous reduceop late fusion"
+      desired_reduce_st = st
+      assert len(desired_reduce_st.views) == 1, f"reduceop late fixup must have one view {desired_reduce_st}"
+      assert prod(buf.st.shape) < prod(desired_reduce_st.shape), f"reduceop late fixup must be an expend {buf.st.shape} >= {desired_reduce_st.shape}"
+      input_shape = (4, 16384, 256, 16384)
+      arg = (3, )
+    st = ShapeTracker.from_shape(input_shape)
 
   # otherwise we fuse it like normal
   cache[(buf, st)] = ret = \
-    LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, cache) for x in buf.srcs), buf.arg)
+    LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, cache) for x in buf.srcs), arg)
   return ret
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer]):
