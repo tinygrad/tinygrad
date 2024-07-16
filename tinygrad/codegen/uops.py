@@ -44,7 +44,7 @@ class UOp:
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
-    return f"{str(self.op):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.op for x in self.src]):32s} {self.arg}"
+    return f"{str(self.op):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.op for x in self.src]):64s} {self.arg}"
   def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return UOp(UOps.BITCAST, dtype, (self,))
   def name(self, name:Optional[str]): return UOp(UOps.VAR, src=(self,), arg=name)
