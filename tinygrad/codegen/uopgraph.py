@@ -433,7 +433,7 @@ def do_contract(con:UOp):
   return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x[0] != con.arg[0]))
 
 expander = PatternMatcher([
-  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.GEP, UOps.WMMA,
+  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
   (UOp(UOps.REDUCE).name("root"), do_reduce_with_expand),
   (UOp(UOps.CONTRACT).name("con"), do_contract),
