@@ -563,6 +563,8 @@ class UOpGraph:
 
     # do graph rewrite
     sink = graph_rewrite(sink, self.folder)
+    from tinygrad.engine.graph import print_tree
+    print_tree(sink)
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
     UOpGraph.cnt += 1
@@ -594,11 +596,9 @@ class UOpGraph:
 
     # scope children impact the toposort and END* insertion
     scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
-    # for p in reversed(in_degree):
-    #   if p.op in END_FOR_UOP:
-    #     scope_children[p] = get_recursive_children(p, END_FOR_UOP[p.op][0])
 
     phi_for_scope={p:[s for s in scope_children if p in scope_children[s]] for x in scope_children for p in scope_children[x] if p.op is UOps.PHI}
+    range_group = {r:phi_for_scope[p] for p in phi_for_scope for r in phi_for_scope[p]}
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
@@ -606,6 +606,8 @@ class UOpGraph:
       # prefer uops that are loop children
       for l, ss in scope_children.items():
         if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+      # order ranges by their "group"
+      if u.op is UOps.RANGE: priority += sum([r.arg[0] for r in range_group[u] if r.op is UOps.RANGE])
       heapq.heappush(queue, (priority, u))
 
     for u in children:
@@ -621,7 +623,7 @@ class UOpGraph:
       if x.op is UOps.RANGE:
         while len(scope_stack) > 0:
           s = scope_stack[-1]
-          if any(s not in phi_for_scope[p] for p in scope_children[x] if p.op is UOps.PHI):
+          if s not in range_group[x]:
             scoped_chunk = self._uops[self._uops.index(scope_stack[-1]):]
             popped_scope_stack.append((x,s,scoped_chunk))
             self._uops = self._uops[:self._uops.index(scope_stack.pop(-1))]
@@ -643,6 +645,7 @@ class UOpGraph:
               if s[0] is u:
                 for c in s[2]: self._uops.append(c)
                 scope_stack.append(popped_scope_stack.pop(-1)[1])
+              else: break
       for u in children[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
