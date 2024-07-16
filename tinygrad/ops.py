@@ -62,7 +62,8 @@ class LazyOp:
     ret = context[key] = all(a.cached_compare(b, context) for a,b in zip(self.src, x.src))
     return ret
   def __eq__(self, x): return self.cached_compare(x, context={})
-  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
+  def __repr__(self:LazyOp,indent=0):
+    return' '*indent+f"LazyOp({self.op}, arg={self.arg}, src=("+(('\n'+'\n'.join(x.__repr__(indent+2)+','for x in self.src)) if self.src else '')+"))"
   @functools.cached_property
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
@@ -90,12 +91,7 @@ class LazyOp:
   def __add__(self, x:LazyOp): return LazyOp(BinaryOps.ADD, (self, x))
   def __sub__(self, x:LazyOp): return LazyOp(BinaryOps.ADD, (self, -x))
   def __mul__(self, x:LazyOp): return LazyOp(BinaryOps.MUL, (self, x))
-  def ne(self, x:LazyOp): return LazyOp(BinaryOps.CMPNE, (self, x))
-  def eq(self, x:LazyOp): return -self.ne(x)
   def __neg__(self): return LazyOp(UnaryOps.NEG, (self,))
-  @staticmethod
-  def const(val, dtype:DType, shape:Tuple[sint, ...]):
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(val, dtype, ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)))
 
 # **************** independent FlopCounter ****************
 
