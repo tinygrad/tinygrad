@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -399,11 +399,14 @@ def do_contract(con:UOp):
   if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg[0][0] in con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
   # complex CONTRACT may only remove one axis from EXPAND
   assert len(con.arg) == 1, "contract arg one is all that's supported"
-  assert ex.arg[0][0] == con.arg[0], "simplest thing only"
+  split_index = [x[0] for x in ex.arg].index(con.arg[0])
+  assert con.dtype.count == ex.arg[split_index][1], "contract arg must match"
+  number_after = prod([x[1] for x in ex.arg[split_index+1:]])
+  to_join = [ex.src[i:i+number_after] for i in range(0, len(ex.src), number_after)]
   srcs = []
-  for i in range(0, len(ex.src)//con.dtype.count):
-    srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(ex.src[i+j] for j in range(0, len(ex.src), len(ex.src)//con.dtype.count))))
-  return UOp(UOps.EXPAND, con.dtype, tuple(srcs), ex.arg[1:])
+  for i in range(0, len(to_join), con.dtype.count):
+    srcs += [UOp(UOps.VECTORIZE, con.dtype, tuple(src)) for src in zip(*to_join[i:i+con.dtype.count])]
+  return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x[0] != con.arg[0]))
 
 expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.GEP, UOps.WMMA, UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND}, name="root"), do_expand),
