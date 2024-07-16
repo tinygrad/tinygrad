@@ -19,7 +19,6 @@ class TestLazyOp(unittest.TestCase):
     t = Tensor.rand(10) + Tensor.rand(10)
     s = create_schedule([t.lazydata])
     ast = s[-1].ast
-    print(ast)
     ast_remade = eval(str(ast))
     self.assertEqual(ast, ast_remade)
 
