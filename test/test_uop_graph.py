@@ -2,7 +2,7 @@ import unittest
 from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
-from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
+from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
 from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, graph_rewrite
 from tinygrad.engine.graph import print_tree  # noqa: F401 # pylint: disable=unused-import
@@ -276,22 +276,22 @@ class TestExpander(unittest.TestCase):
   def test_expand_add_broadcast(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     sink = graph_rewrite(e1+3, together)
-    assert sink.op == UOps.EXPAND and len(sink.src) == 4
+    assert sink.op is UOps.EXPAND and len(sink.src) == 4
     self.assertListEqual([x.arg for x in sink.src], [3,4,5,6])
 
   def test_contract_simple(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     con = UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), (1,))
     sink = graph_rewrite(con, together)
-    assert sink.op == UOps.VECTORIZE and len(sink.src) == 4
+    assert sink.op is UOps.VECTORIZE and len(sink.src) == 4
     self.assertListEqual([x.arg for x in sink.src], [0,1,2,3])
 
   def test_contract_axis_1(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(16)), ((1,4),(2,4)))
     con = UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), (1,))
     sink = graph_rewrite(con, together)
-    assert sink.op == UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((2,4),)
-    assert sink.src[0].op == UOps.VECTORIZE and len(sink.src[0].src) == 4
+    assert sink.op is UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((2,4),)
+    assert sink.src[0].op is UOps.VECTORIZE and len(sink.src[0].src) == 4
     self.assertListEqual([x.arg for x in sink.src[0].src], [0,4,8,12])
     self.assertListEqual([x.arg for x in sink.src[3].src], [3,7,11,15])
 
@@ -299,8 +299,8 @@ class TestExpander(unittest.TestCase):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(16)), ((1,4),(2,4)))
     con = UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), (2,))
     sink = graph_rewrite(con, together)
-    assert sink.op == UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((1,4),)
-    assert sink.src[0].op == UOps.VECTORIZE and len(sink.src[0].src) == 4
+    assert sink.op is UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((1,4),)
+    assert sink.src[0].op is UOps.VECTORIZE and len(sink.src[0].src) == 4
     self.assertListEqual([x.arg for x in sink.src[0].src], [0,1,2,3])
     self.assertListEqual([x.arg for x in sink.src[3].src], [12,13,14,15])
 
@@ -308,8 +308,8 @@ class TestExpander(unittest.TestCase):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(8)), ((1,2),(2,2),(3,2)))
     con = UOp(UOps.CONTRACT, dtypes.int.vec(2), (e1,), (2,))
     sink = graph_rewrite(con, together)
-    assert sink.op == UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((1,2),(3,2))
-    assert sink.src[0].op == UOps.VECTORIZE and len(sink.src[0].src) == 2
+    assert sink.op is UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((1,2),(3,2))
+    assert sink.src[0].op is UOps.VECTORIZE and len(sink.src[0].src) == 2
     self.assertListEqual([x.arg for x in sink.src[0].src], [0,2])
     self.assertListEqual([x.arg for x in sink.src[1].src], [1,3])
     self.assertListEqual([x.arg for x in sink.src[2].src], [4,6])
@@ -319,18 +319,40 @@ class TestExpander(unittest.TestCase):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4*x) for x in range(4)), ((1,4),))
     sink = graph_rewrite(e1+e2, together)
-    assert sink.op == UOps.EXPAND and len(sink.src) == 4
+    assert sink.op is UOps.EXPAND and len(sink.src) == 4
     self.assertListEqual([x.arg for x in sink.src], [0,5,10,15])
 
   def test_expand_different_axis(self, flip=False):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4*x) for x in range(4)), ((1,4),))
     e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
     sink = graph_rewrite((e2+e1) if flip else (e1+e2), together)
-    assert sink.op == UOps.EXPAND and len(sink.src) == 16
+    assert sink.op is UOps.EXPAND and len(sink.src) == 16
     assert sink.arg == ((1, 4), (2, 4))
     self.assertListEqual([x.arg for x in sink.src], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 
   def test_expand_different_axis_flip(self): self.test_expand_different_axis(True)
+
+  def test_reduce_known_axis(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    sink = UOp(UOps.REDUCE, dtypes.int, (3*e1,e1), ReduceOps.SUM)
+    sink = graph_rewrite(sink, together)
+    assert sink.op is UOps.CONST
+    self.assertEqual(sink.arg, 3*(0+1+2+3))
+
+  def test_reduce_const(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    sink = UOp(UOps.REDUCE, dtypes.int, (UOp.const(dtypes.int, 3), e1), ReduceOps.SUM)
+    sink = graph_rewrite(sink, together)
+    assert sink.op is UOps.CONST
+    self.assertEqual(sink.arg, 3*4)
+
+  @unittest.expectedFailure
+  def test_reduce_different_axis(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
+    sink = UOp(UOps.REDUCE, dtypes.int, (e1,e2), ReduceOps.SUM)
+    sink = graph_rewrite(sink, together)
+    print_tree(sink)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

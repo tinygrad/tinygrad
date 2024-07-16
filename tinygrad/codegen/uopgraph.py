@@ -68,6 +68,26 @@ class PatternMatcher:
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
+# ***** image handling *****
+
+def fix_image_idx(ls:UOp):
+  if ls.src[1].dtype is None or ls.src[1].dtype.count != 1: return None
+  if not isinstance(ls.src[0].dtype, ImageDType): return None
+  assert ls.op is not UOps.STORE or cast(DType, ls.src[2].dtype).count == 4, "image store must be float4"
+  idxy = ls.src[1]
+  #if not idxy.divides(4): raise RuntimeError("image index must divide 4")
+  base_shape = ls.src[0].dtype.shape
+  idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
+  image_idx = UOp(UOps.VECTORIZE, cast(DType, idxy.dtype).vec(2), (idx, idy))
+  if ls.op is UOps.LOAD and cast(DType, ls.dtype).count == 1:
+    cconst = (UOp(UOps.VECTORIZE, cast(DType, ls.dtype).vec(4), src=(ls.src[3], ls.src[3], ls.src[3], ls.src[3])),) if len(ls.src) >= 3 else ()
+    loaded = UOp(ls.op, cast(DType, ls.dtype).vec(4), (ls.src[0], image_idx) + ls.src[2:3] + cconst, ls.arg)
+    subidx = idxy%4
+    ret = UOp.const(ls.dtype, 0)
+    for i in range(4): ret = UOp.alu(TernaryOps.WHERE, subidx.ne(i), ret, UOp(UOps.GEP, ls.dtype, (loaded,), i))
+    return ret
+  return UOp(ls.op, ls.dtype, (ls.src[0], image_idx) + ls.src[2:], ls.arg)
+
 # ***** float4 handling *****
 
 def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None):
@@ -180,8 +200,9 @@ constant_folder = PatternMatcher([
    lambda x: UOp(x.op, dtypes.int32, x.src, x.arg)),
   # VECTORIZE/GEP
   (UOp(UOps.GEP, src=(UOp(UOps.VECTORIZE).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
-  *[(UOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=j)
-      for j in range(i))), lambda x: x) for i in [2, 4, 8]],
+  (UOp(UOps.VECTORIZE, dtypes.float.vec(2), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(2))), lambda x: x),
+  (UOp(UOps.VECTORIZE, dtypes.float.vec(4), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(4))), lambda x: x),
+  (UOp(UOps.VECTORIZE, dtypes.float.vec(8), tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(8))), lambda x: x),
   # tensor core with a 0 input is acc
   (UOp(UOps.WMMA, src=(UOp.const(None, 0.0), UOp.var(), UOp.var('acc'))), lambda acc: acc),
   (UOp(UOps.WMMA, src=(UOp.var(), UOp.const(None, 0.0), UOp.var('acc'))), lambda acc: acc),
@@ -322,6 +343,8 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (UOp(UOps.SINK).name("root"),
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
+  # image indexing.
+  (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
 ])
 
 constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.patterns)
@@ -377,17 +400,19 @@ def do_reduce_with_expand(root):
   expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
   expands_reduce = [x for x in expands if root.src[0].op is UOps.EXPAND and all(y in root.src[0].arg for y in x.arg)]
   expands_non_reduce = [x for x in expands if x not in expands_reduce]
-  assert len(expands_non_reduce) == 0
   const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
   ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
   acc_number += 1
-  if len(expands):
+  if len(expands_reduce):
     assert root.src[0].op is UOps.EXPAND
     for xx in root.src[0].src:
       ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
   else:
     ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, root.src[0])
-  return UOp(UOps.PHI, ret.dtype, (acc, ret))
+  ret = UOp(UOps.PHI, ret.dtype, (acc, ret))
+  if len(expands_non_reduce): ret = ret * prod([sz for _,sz in flatten([x.arg for x in expands_non_reduce])])
+  return ret
+
 
 def do_contract(con:UOp):
   ex = con.src[0]
