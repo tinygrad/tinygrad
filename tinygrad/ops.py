@@ -172,9 +172,7 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
   assert ast.op is MetaOps.SINK, "must be SINK"
   sts: Dict[LazyOp, ShapeTracker] = {}
   def dfs(op:LazyOp, st:ShapeTracker):
-    nonlocal depth
     if op in sts: return
-    depth += 1
     # restore globals from the two stage reduce
     if op.op is BufferOps.LOAD and op.arg.idx == -1:
       dfs(local_reduce:=op.src[0].src[0], op.arg.st)
@@ -189,12 +187,11 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
       # movementops are pushed to the edges with LOAD
       if op.op in BufferOps: st = op.arg.st
       else: st = sts[op.src[0]]
-      for x in op.src: assert sts[x].shape == st.shape, f"line: {depth} found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
+      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
     sts[op] = st
   for i, out in enumerate(ast.src):
     assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
     assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
     assert out.arg.st.size == ast.src[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
-    depth = -1
     dfs(out, out.arg.st)
   return sts

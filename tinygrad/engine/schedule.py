@@ -40,14 +40,11 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer], cache) -> LazyOp:
   """recursively create a lazyop"""
   if (buf, st) in cache: return cache[(buf, st)]
-  view: Optional[LazyBuffer] = None
   if buf != buf.base:
     st = buf.st + st
-    view = buf
     buf = buf.base
   # all buffers here are base now
   assert buf.op is not None
-  arg = buf.arg
 
   # consts are always fused and generated
   if buf.op is MetaOps.CONST:
@@ -89,27 +86,25 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
-    input_shape = buf.srcs[0].shape
+    input = buf.srcs[0]
     if not st.contiguous:
-      assert view is not None, f"view doesn't exist on non-contiguous reduceop late fusion"
-      desired_reduce_st = st
-      assert len(desired_reduce_st.views) == 1, f"reduceop late fixup must have one view {desired_reduce_st}"
-      assert prod(buf.st.shape) < prod(desired_reduce_st.shape), f"reduceop late fixup must be an expend {buf.st.shape} >= {desired_reduce_st.shape}"
-      input_shape = (4, 16384, 256, 16384)
-      arg = (3,)
-    st = ShapeTracker.from_shape(input_shape)
+      assert input.base.op is MetaOps.CONST, f"reduceop late fixup not supported for input {buf.srcs[0].base.op}"
+      assert isinstance(input.base.arg, get_args(ConstType)), "todo: symbolic arange"
+      assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
+      assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expend {buf.st.shape} >= {st.shape}"
+      st = input.st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
+      cache[(buf, st)] = ret = LazyOp(buf.op, (LazyOp(BufferOps.CONST, (), ConstBuffer(input.base.arg, input.base.dtype, st)),), (3,))
+      return ret
+    st = ShapeTracker.from_shape(input.shape)
 
   # otherwise we fuse it like normal
   cache[(buf, st)] = ret = \
-    LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, cache) for x in buf.srcs), arg)
+    LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, cache) for x in buf.srcs), buf.arg)
   return ret
 
-# TODO: the next two functions are dumb
-def _recursive_reshape(op:LazyOp, new_shape:Tuple[sint, ...]) -> LazyOp:
-  assert op.op not in ReduceOps, "cannot do reduce"
-  if op.op in BufferOps: return replace(op, arg=replace(op.arg, st=op.arg.st.reshape(new_shape)))
-  return replace(op, src=tuple(_recursive_reshape(x, new_shape) for x in op.src))
+# TODO: the next two functions are dumb, why does the arange reshape anyway
 
+# add 1s to some sts, because the arange goes from (16384, 1) to (16384,)...
 def _fixup_ones(op:LazyOp, st:ShapeTracker, sts:Dict[LazyOp, ShapeTracker]) -> LazyOp:
   replace_src, replace_arg = list(_fixup_ones(x, st, sts) for x in op.src), op.arg
   if op.op in {BufferOps.LOAD, BufferOps.CONST}: st = op.arg.st
@@ -125,6 +120,12 @@ def _fixup_ones(op:LazyOp, st:ShapeTracker, sts:Dict[LazyOp, ShapeTracker]) -> L
   sts[op] = st
   if op.op is BufferOps.STORE and st.shape != op.arg.st.shape: replace_arg = replace(op.arg, st=op.arg.st.reshape(st.shape))
   return replace(op, src=tuple(replace_src), arg=replace_arg)
+
+# recursively push through reshapes
+def _recursive_reshape(op:LazyOp, new_shape:Tuple[sint, ...]) -> LazyOp:
+  assert op.op not in ReduceOps, "cannot push reshape through a reduce"
+  if op.op in BufferOps: return replace(op, arg=replace(op.arg, st=op.arg.st.reshape(new_shape)))
+  return replace(op, src=tuple(_recursive_reshape(x, new_shape) for x in op.src))
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
