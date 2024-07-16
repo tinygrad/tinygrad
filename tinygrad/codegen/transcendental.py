@@ -102,6 +102,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410]
 
+  input_dtype: DType = d.dtype
   dtype_via = dtypes.float32 if d.dtype == dtypes.float16 else d.dtype
   acc_dtype = dtypes.uint64
 
@@ -117,7 +118,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
     if count+offset <= len(two_over_pi_f[0:-2]):
       an = _eq(i, count).where(_take(an, offset, count=count+1), an.const(two_over_pi_f[count+offset]))
     return an
-  def _exact_pow2if(x): return pow2if(x, d.dtype).cast(acc_dtype)
+  def _exact_pow2if(x): return pow2if(x, input_dtype).cast(acc_dtype)
   def _shl_lazy(x, y): return (x.cast(acc_dtype) * _exact_pow2if(y)).cast(dtypes.uint32)
   def _shr_lazy(x, y): return (x.cast(acc_dtype) // _exact_pow2if(y)).cast(dtypes.uint32)
   # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
@@ -137,7 +138,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
 
   q = shr(p, 62).cast(dtypes.int32)
   p = p & 0x3fffffffffffffff
-  r = (p.cast(dtype_via) * (3.4061215800865545e-19)).cast(d.dtype)
+  r = (p.cast(dtype_via) * (3.4061215800865545e-19)).cast(input_dtype)
 
   # if fraction >= 0.5, r -= pi/2, q += 1
   return f.lt(0.5).where(r, r + r.const(-math.pi / 2)), f.lt(0.5).where(q, q + 1)
