@@ -62,8 +62,9 @@ class LazyOp:
     ret = context[key] = all(a.cached_compare(b, context) for a,b in zip(self.src, x.src))
     return ret
   def __eq__(self, x): return self.cached_compare(x, context={})
-  def __repr__(self:LazyOp,indent=0):
-    return' '*indent+f"LazyOp({self.op}, arg={self.arg}, src=("+(('\n'+'\n'.join(x.__repr__(indent+2)+','for x in self.src)) if self.src else '')+"))"
+  def __repr__(self:LazyOp, d=0, c=None):
+    if (c:={} if not c else c).setdefault(self, len(c)) != len(c)-1: return ' '*d+f"L{c[self]}"
+    return ' '*d+f"(L{c[self]}:=LazyOp({self.op}, arg={self.arg}, src=("+(','.join('\n'+x.__repr__(d+2, c)for x in self.src) if self.src else'')+")))"
   @functools.cached_property
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
