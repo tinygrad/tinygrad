@@ -5,7 +5,7 @@ from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.helpers import prod
 
 # the order of these UOps controls the order of the toposort
@@ -134,19 +134,16 @@ def type_verify(uops):
         assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
 
 def uop_alu_resolve(u:UOp) -> sint:
-  if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return u.arg
   if u.op is UOps.SPECIAL: return u.arg[2]-1
-  if u.op is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.src[0]) * uop_alu_resolve(u.src[1])
-  if u.op is UOps.ALU and u.arg is BinaryOps.SHL: return uop_alu_resolve(u.src[0]) * (2**cast(int, uop_alu_resolve(u.src[1])))
-  if u.op is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.src[0]) + uop_alu_resolve(u.src[1])
+  if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
+  if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   flops: sint = 0
   mem: sint = 0
   mults: sint = 1
-  mult_stack = []
+  mult_stack: List[sint] = []
   dont_count: Set[UOp] = set()
   if ignore_indexing:
     for u in uops:
