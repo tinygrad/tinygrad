@@ -346,6 +346,34 @@ class TestExpander(unittest.TestCase):
     assert sink.op is UOps.CONST
     self.assertEqual(sink.arg, 3*4)
 
+  def test_double_expand(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
+    e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4+x) for x in range(4)), ((2,4),))
+    e = UOp(UOps.EXPAND, dtypes.int, (e1, e2), ((1,2),))
+    sink = graph_rewrite(e, together)
+    assert sink.op is UOps.EXPAND and len(sink.src) == 8
+    assert sink.arg == ((1, 2), (2, 4))
+    self.assertListEqual([x.arg for x in sink.src], [0,1,2,3,4,5,6,7])
+
+  def test_double_expand_reverse(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4+x) for x in range(4)), ((1,4),))
+    e = UOp(UOps.EXPAND, dtypes.int, (e1, e2), ((2,2),))
+    sink = graph_rewrite(e, together)
+    assert sink.op is UOps.EXPAND and len(sink.src) == 8
+    assert sink.arg == ((1, 4), (2, 2))
+    self.assertListEqual([x.arg for x in sink.src], [0, 4, 1, 5, 2, 6, 3, 7])
+
+  def test_double_expand_middle(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,2),(3,2)))
+    e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4+x) for x in range(4)), ((1,2),(3,2)))
+    e = UOp(UOps.EXPAND, dtypes.int, (e1, e2), ((2,2),))
+    sink = graph_rewrite(e, together)
+    assert sink.op is UOps.EXPAND and len(sink.src) == 8
+    assert sink.arg == ((1, 2), (2, 2), (3, 2))
+    self.assertListEqual([x.arg for x in sink.src], [0, 1, 4, 5, 2, 3, 6, 7])
+
+  # does this need to work?
   @unittest.expectedFailure
   def test_reduce_different_axis(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))

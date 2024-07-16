@@ -374,9 +374,9 @@ def do_expand(root:UOp):
         for lchoices in itertools.product(*[range(x[1]) for x in dont_expand_args]):
           lrpk = {**rpk, **dict(zip([x[0] for x in dont_expand_args], lchoices))}
           idx, mul = 0, 1
-          for a,l in src.arg[::-1]:
-            idx += lrpk[a] * mul
-            mul *= l
+          for axis,m in src.arg[::-1]:
+            idx += lrpk[axis] * mul
+            mul *= m
           lnew_src.append(src.src[idx])
         if len(dont_expand_args):
           new_src.append(UOp(UOps.EXPAND, root.dtype, tuple(lnew_src), dont_expand_args))
@@ -387,12 +387,22 @@ def do_expand(root:UOp):
         new_src.append(src)
     new_srcs.append(UOp(root.op, root.dtype, tuple(new_src), root.arg))
   if root.op is UOps.EXPAND:
-    # NOTE: the insertion location matters here
-    if root.arg[-1][0] < expand_args[0][0]:
-      return UOp(UOps.EXPAND, root.dtype, tuple(flatten(zip(*[x.src for x in new_srcs]))), root.arg+expand_args)
-    if expand_args[-1][0] < root.arg[0][0]:
-      return UOp(UOps.EXPAND, root.dtype, tuple(flatten([x.src for x in new_srcs])), expand_args+root.arg)
-    raise RuntimeError(f"can't merge {root.arg} w {expand_args}")
+    expand_args, old_expand_args = tuple(sorted(root.arg+expand_args)), expand_args
+    assert len(expand_args) == (len(old_expand_args) + len(root.arg))
+    new_new_srcs = []
+    for choices in itertools.product(*[range(x[1]) for x in expand_args]):
+      rpk = dict(zip([x[0] for x in expand_args], choices))
+      root_idx, src_idx = 0, 0
+      mul = 1
+      for axis,m in root.arg[::-1]:
+        root_idx += rpk[axis] * mul
+        mul *= m
+      mul = 1
+      for axis,m in old_expand_args[::-1]:
+        src_idx += rpk[axis] * mul
+        mul *= m
+      new_new_srcs.append(new_srcs[src_idx].src[root_idx])
+    new_srcs = new_new_srcs
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
 acc_number = 0
