@@ -77,8 +77,11 @@ class Lowerer(Kernel):
     return ret
 
   def _to_uop(self, x:LazyOp) -> UOp:
+    print("to uop: ", x.op, "[", [s.op for s in x.src], "]", x.arg)
     if x.op in BufferOps:
       idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
+      # print("idx for bufferop: ", x.op, x.arg)
+      # print("  -> ", idx)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
@@ -110,6 +113,8 @@ class Lowerer(Kernel):
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axis[2])
       # NOTE: always using ridxs is fine here
+      print("  for reduce: ", x.op, "[", [s.op for s in x.src], "]", x.arg)
+      print("  reduce on idxs=",tuple(self.ridxs[i] for i in x.arg))
       return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
 
@@ -117,6 +122,8 @@ class Lowerer(Kernel):
     modified_ast, ki = self.get_optimized_ast()
     if DEBUG >= 3:
       print(self.name)
+      print("self.full_shape=",self.full_shape)
+      print("self.output_shape=",self.output_shape)
       from tinygrad.engine.graph import print_tree
       print_tree(modified_ast)
 
@@ -151,9 +158,17 @@ class Lowerer(Kernel):
     self.ridxs = self.idxs[:]
     for a in range(ki.first_reduce, ki.first_reduce+ki.group_for_reduces):
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(ki.full_shape[a])), (1000+a, True))
+    
+    print("ridxs:")
+    for i in self.ridxs: print("  ", i)
+    print("all idxs:")
+    for i in self.idxs: print("  ", i)
 
     self.uop_cache: Dict[LazyOp, UOp] = {}
-    self.uops:UOpGraph = UOpGraph(self.to_uop(modified_ast), self.opts)
+    root = self.to_uop(modified_ast)
+    print("root:")
+    print_tree(root)
+    self.uops:UOpGraph = UOpGraph(root, self.opts)
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
