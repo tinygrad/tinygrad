@@ -530,7 +530,7 @@ def train_retinanet():
 
     # ***********EVAL******************
     if not TRAIN_ONLY:
-      bt = time.time()
+      bt = time.perf_counter()
       if getenv("RESET_STEP", 1): train_step.reset()
       Tensor.training = False
       BEAM.value = EVAL_BEAM
@@ -584,7 +584,7 @@ def train_retinanet():
           f"{(nt - pt) * 1000.0:6.2f} ms fetch data, {(npt - nt) * 1000.0:7.2f} ms np, {(ct - dt) * 1000.0:7.2f} ms eval, "
           f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9/(pt-st):9.2f} GFLOPS")
         if WANDB: wandb.log({"eval/step_time": ct - st, "eval/model_time": pt - st, "eval/post_proc": dt - npt, "eval/data": nt - pt, 
-                             "eval/np": npt - nt, "eval/evaluate": ct - dt, "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (pt - st), 
+                             "eval/np": npt - nt, "eval/evaluate": ct - dt, "eval/GFLOPS": GlobalCounters.global_ops * 1e-9 / (pt - st), 
                              "epoch": epoch - 1 + (cnt + 1) / (len(val_files)//BS_EVAL)})
 
       coco_eval.params.imgIds = evaluated_imgs
