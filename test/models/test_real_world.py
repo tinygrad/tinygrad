@@ -4,7 +4,7 @@ from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
-from tinygrad.helpers import CI, Context, RUN_PROCESS_REPLAY
+from tinygrad.helpers import CI, Context
 from tinygrad.shape.symbolic import Variable
 from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model, is_dtype_supported
@@ -63,7 +63,7 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, params["ctx_dim"])), test, 18.0, 513 if CI else 839)
 
   def test_unet_resblock(self):
-    with Context(RUN_PROCESS_REPLAY = 2 if RUN_PROCESS_REPLAY else 0):
+    with Context(TIME_REPLAY = 1):
       model = [ResBlock(16, 24, 16) for _ in range(4)]
       derandomize_model(model)
       @TinyJit
@@ -74,7 +74,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_llama(self):
-    with Context(RUN_PROCESS_REPLAY = 2 if RUN_PROCESS_REPLAY else 0):
+    with Context(TIME_REPLAY = 1):
       dtypes.default_float = dtypes.float16
 
       args_tiny = {"dim": 1024, "hidden_dim": 2048, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
@@ -87,7 +87,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_gpt2(self):
-    with Context(RUN_PROCESS_REPLAY = 2 if RUN_PROCESS_REPLAY else 0):
+    with Context(TIME_REPLAY = 1):
       dtypes.default_float = dtypes.float16
 
       args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
