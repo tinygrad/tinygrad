@@ -115,11 +115,8 @@ class IndependentLowerer:
     return ret
 
   def _to_uop(self, x:LazyOp) -> UOp:
-    # print("to uop: ", x.op, "[", [s.op for s in x.src], "]", x.arg)
     if x.op in BufferOps:
       idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
-      # print("idx for bufferop: ", x.op, x.arg)
-      # print("  -> ", idx)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
@@ -154,8 +151,6 @@ class IndependentLowerer:
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=((upcast_axis[2], wmma_sz[2]),))
       # NOTE: always using ridxs is fine here
-      print("  for reduce: ", x.op, "[", [s.op for s in x.src], "]", x.arg)
-      print("  reduce on idxs=",tuple(self.ridxs[i] for i in x.arg))
       return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
 

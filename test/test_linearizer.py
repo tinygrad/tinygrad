@@ -106,18 +106,16 @@ class TestLinearizer(unittest.TestCase):
     first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((3, 27, 8))))
     first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
     store = LazyOp(BufferOps.STORE, (first_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 27, 1))))
-    wanna_output = x.numpy().sum(-1).reshape(-1)
+    wanna_output = x.numpy().sum(-1).reshape(3,27,1)
     helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
-    assert False, "success"
 
   def test_simple_double_sum_multireduce(self):
     x = Tensor.randn(3, 32, 27, 32, dtype=dtypes.float).realize()
     first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((3, 32, 27, 32))))
     first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (1,3,))
     store = LazyOp(BufferOps.STORE, (first_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 1, 27, 1))))
-    wanna_output = x.numpy().sum((1,3)).reshape(-1)
+    wanna_output = x.numpy().sum((1,3)).reshape(3,1,27,1)
     helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
-    assert False, "success"
 
   def test_sum_multireduce(self):
     x = Tensor.randn(32, dtype=dtypes.float).realize()
