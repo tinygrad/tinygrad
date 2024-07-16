@@ -275,7 +275,7 @@ class NVProgram(HCQCompatProgram):
       self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
 
     # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
-    self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
+    self.max_threads = ((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
     super().__init__(kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
