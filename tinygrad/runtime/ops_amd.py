@@ -3,8 +3,8 @@ from typing import Tuple, List, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWComputeQueue, HWCopyQueue, hcq_profile, \
-                            Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE, mv_address
+                            HCQCompatProgram, Compiler, CompileError, BufferOptions
+from tinygrad.helpers import getenv, to_mv, round_up, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.support.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -268,7 +268,7 @@ class AMDCopyQueue(HWCopyQueue):
     device.sdma_queue.doorbell[0] = device.sdma_queue.put_value
 
 SHT_PROGBITS, SHF_ALLOC = 0x1, 0x2
-class AMDProgram:
+class AMDProgram(HCQCompatProgram):
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
@@ -289,8 +289,6 @@ class AMDProgram:
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
-    self.kernargs_alloc_size = self.kernargs_segment_size
-    self.kernargs_offset = 0
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.device.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
@@ -314,23 +312,22 @@ class AMDProgram:
 
     AMDComputeQueue().memory_barrier().submit(self.device)
 
+    super().__init__(kernargs_alloc_size=self.kernargs_segment_size)
+
   # NOTE: no programs are ever freed
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
+
+  def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
+    if (given:=len(bufs)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
+    if len(bufs): to_mv(kernargs_ptr, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
+    if len(vals): to_mv(kernargs_ptr + len(bufs) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if self.device.kernargs_ptr + self.kernargs_alloc_size > (self.device.kernargs.va_addr + self.device.kernargs.size):
       self.device.kernargs_ptr = self.device.kernargs.va_addr
 
-    if not hasattr(self, "args_struct_t"):
-      self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
-                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
-      if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
-        raise RuntimeError(f"AMDProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
-
-    args_st = self.args_struct_t.from_address(self.device.kernargs_ptr)
-    for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
-    for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
+    self.fill_kernargs(self.device.kernargs_ptr, args, vals)
 
     q = AMDComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
@@ -351,12 +348,8 @@ class AMDAllocator(HCQCompatAllocator):
   def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
 
   def _alloc(self, size:int, options:BufferOptions) -> HCQCompatAllocRes:
-    try:
-      if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
-      return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
-    except OSError as e:
-      if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory") from e
-      raise
+    if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
+    return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
 
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
 
@@ -394,7 +387,14 @@ class AMDDevice(HCQCompatCompiled):
     else:
       buf, addr = 0, libc.mmap(0, size, 0, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|MAP_NORESERVE, -1, 0)
     assert addr != 0xffffffffffffffff
-    mem = kio.alloc_memory_of_gpu(self.kfd, va_addr=addr, size=size, base=addr, length=size, gpu_id=self.gpu_id, flags=flags, mmap_offset=buf)
+
+    try: mem = kio.alloc_memory_of_gpu(self.kfd, va_addr=addr, size=size, base=addr, length=size, gpu_id=self.gpu_id, flags=flags, mmap_offset=buf)
+    except OSError as e:
+      if e.errno == errno.EINVAL and (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) and public:
+        raise MemoryError("Cannot allocate host-visible VRAM. Ensure the resizable BAR option is enabled on your system.") from e
+      if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory: no memory is available.") from e
+      raise
+
     if not (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR):
       buf = libc.mmap(mem.va_addr, mem.size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|MAP_FIXED, self.drm_fd, mem.mmap_offset)
       assert addr == buf == mem.va_addr
@@ -410,13 +410,13 @@ class AMDDevice(HCQCompatCompiled):
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
 
   @classmethod
-  def _read_signal(self, sig): return sig.value
+  def _read_signal(self, signal): return signal.value
 
   @classmethod
-  def _read_timestamp(self, sig): return sig.start_ts
+  def _read_timestamp(self, signal): return signal.start_ts
 
   @classmethod
-  def _set_signal(self, sig, value): sig.value = value
+  def _set_signal(self, signal, value): signal.value = value
 
   @classmethod
   def _alloc_signal(self, value=0, **kwargs) -> hsa.amd_signal_t:
@@ -428,7 +428,7 @@ class AMDDevice(HCQCompatCompiled):
     return ret
 
   @classmethod
-  def _free_signal(self, sig): self.signals_pool.append(sig)
+  def _free_signal(self, signal): self.signals_pool.append(signal)
 
   @classmethod
   def _wait_signal(self, signal:hsa.amd_signal_t, value=0, timeout=10000):
@@ -487,7 +487,7 @@ class AMDDevice(HCQCompatCompiled):
     self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x100000, ctx_save_restore_size=0x2C02000, eop_buffer_size=0x1000)
     self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
 
-    timeline_signals=[self._alloc_signal(sync_event=sync_event), self._alloc_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))]
+    timeline_signals=(self._alloc_signal(sync_event=sync_event), self._alloc_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1)))
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDComputeQueue, AMDCopyQueue, timeline_signals)
 

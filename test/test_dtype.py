@@ -347,6 +347,20 @@ class TestHelpers(unittest.TestCase):
     with self.assertRaises(RuntimeError): dtypes.from_py({})
     with self.assertRaises(RuntimeError): dtypes.from_py(set())
 
+  def test_dtype_range(self):
+    for dt in core_dtypes:
+      if dtypes.is_float(dt):
+        np.testing.assert_equal(dtypes.min(dt), -math.inf)
+        np.testing.assert_equal(dtypes.max(dt), math.inf)
+      elif dtypes.is_int(dt):
+        info = np.iinfo(_to_np_dtype(dt))
+        np.testing.assert_equal(dtypes.min(dt), info.min)
+        np.testing.assert_equal(dtypes.max(dt), info.max)
+      else:
+        assert dt == dtypes.bool, dt
+        np.testing.assert_equal(dtypes.min(dt), False)
+        np.testing.assert_equal(dtypes.max(dt), True)
+
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float

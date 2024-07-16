@@ -56,8 +56,8 @@ st_0 = LazyOp(BufferOps.STORE, (alu,), MemBuffer(0, dtypes.int32, ShapeTracker.f
 sink = LazyOp(MetaOps.SINK, (st_0,))
 
 # convert the computation to a "linearized" format (print the format)
-from tinygrad.engine.realize import get_linearizer, CompiledRunner
-lin = get_linearizer(Device[DEVICE].renderer, sink).linearize()
+from tinygrad.engine.realize import get_kernel, CompiledRunner
+lin = get_kernel(Device[DEVICE].renderer, sink).linearize()
 for u in lin.uops: print(u)
 
 # compile a program (and print the source)
@@ -79,8 +79,8 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule
 
 # allocate some values + load in values
-a = LazyBuffer.loadop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
-b = LazyBuffer.loadop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
+a = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
+b = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
 a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 del a.srcs

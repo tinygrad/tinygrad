@@ -4,14 +4,19 @@ from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
 from tinygrad.engine.graph import print_tree
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, \
+                         verify_lazyop, KernelInfo, get_lazyop_info
 from tinygrad.device import Device
-from tinygrad.renderer import Renderer, TensorCore
+from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, get_contraction, to_function_name # noqa: E501
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
+                             get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
+from tinygrad.codegen.uops import UOps, flops_mem
+from tinygrad.codegen.uopgraph import UOpGraph
+from tinygrad.codegen.lowerer import lazyop_to_uop
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -21,16 +26,6 @@ class OptOps(Enum):
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
-
-@dataclass(frozen=True)
-class KernelInfo:
-  full_shape: Tuple[sint, ...]  # full shape (findable in AST)
-  global_dims: int              # number of global dimensions (this is remapping RANGE to SPECIAL)
-  first_reduce: int             # axis of first_reduce        (findable in AST)
-  group_for_reduces: int        # count that are grouped      (findable in AST)
-  upcasted: int                 # count that are upcasted     (this is remapping RANGE to EXPAND)
-  @property
-  def shape_len(self): return len(self.full_shape)
 
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
@@ -660,7 +655,7 @@ class Kernel:
     suffix = f"{'n'+str(Kernel.kernel_cnt[function_name]-1)}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name+colored(suffix, 'BLACK')
 
-  def get_optimized_ast(self) -> Tuple[LazyOp, KernelInfo]:
+  def get_optimized_ast(self) -> LazyOp:
     # set the shapetrackers to the optimized ones, fixup reduceop
     # transformed to the final LazyOp
     @functools.lru_cache(None)
@@ -680,15 +675,15 @@ class Kernel:
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd = self.global_dims
             tcd = self.shape_len-self.upcasted
-            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
-            assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, "tcd dims wrong"
+            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
+            assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd))
-            for x,y in pattern_1: permaxis.append(y + (wd if x == 0 else tcd))
+            permaxis += [y + (wd if x == 0 else tcd) for x,y in pattern_1]
             permaxis += list(range(wd+len(warp_dims), tcd))
-            for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
-            permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
-            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape)
+            permaxis += [y + (wd if x == 0 else tcd) for x,y in pattern_2]
+            permaxis += list(range(tcd+len(tcd_expand), len(new_shape)))
+            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device == "AMD":
             reduce_axes = [self.shape_len-self.upcasted]
@@ -724,7 +719,52 @@ class Kernel:
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
           return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+      elif op.op is MetaOps.SINK:
+        arg = KernelInfo(self.local_dims, self.upcasted)
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    return fixup_ast(self.ast), KernelInfo(self.full_shape, self.global_dims, self.first_reduce, self.group_for_reduces, self.upcasted)
+    return fixup_ast(self.ast)
+
+  # **** this is the lowerer ****
+
+  def linearize(self) -> Kernel:
+    modified_ast = self.get_optimized_ast()
+
+    if DEBUG >= 3:
+      print(self.name)
+      print_tree(modified_ast)
+    verify_lazyop(modified_ast)
+
+    uop_sink = lazyop_to_uop(modified_ast, self.opts)
+
+    # extract global/local sizes
+    if self.opts.has_local:
+      self.global_size: Optional[List[int]] = [1,1,1]
+      self.local_size: Optional[List[int]] = [1,1,1]
+      for u in uop_sink.parents:
+        if u.op is UOps.SPECIAL:
+          if u.arg[1][0] == 'l': self.local_size[u.arg[0]] = u.arg[2]
+          else: self.global_size[u.arg[0]] = u.arg[2]
+    else:
+      self.global_size, self.local_size = None, None
+
+    # generate the UOpGraph
+    self.uops:UOpGraph = UOpGraph(uop_sink, self.opts)
+    if DEBUG >= 5: self.uops.print()
+    if getenv("GRAPHUOPS"):
+      self.uops.graph()
+      if getenv("GRAPHUOPS") == 2: exit(0)
+    return self
+
+  def to_program(self) -> Program:
+    self.linearize()
+    src = self.opts.render(name:=to_function_name(self.name), self.uops)
+    if getenv("RUN_PROCESS_REPLAY"):
+      table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
+      diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+    info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed
+    ops, mem = flops_mem(self.uops.uops)
+    run_count = prod((self.global_size or []) + (self.local_size or []))
+    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
+                   self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

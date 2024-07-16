@@ -48,7 +48,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   schedule, schedule_independent = partition(schedule, lambda si: any(out in depends for out in si.outputs))
   print(f"{len(schedule)} schedule items depend on the input, {len(schedule_independent)} don't")
 
-  # confirm no loadops in the (non independent) schedule except for the ones that load the input buffers
+  # confirm no non-sink metaop in the (non independent) schedule except for the ones that load the input buffers
   assert all(si.ast.op is MetaOps.SINK or out in input_lb for si in schedule for out in si.outputs), "has non SINK ops, can't compile to Thneed"
   return schedule, schedule_independent, inputs
 
