@@ -1,12 +1,12 @@
 import sys, pickle, atexit
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
     merge_dicts, getenv, Metadata
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -41,7 +41,6 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   """recursively create a lazyop"""
   if (buf, st) in cache: return cache[(buf, st)]
   view: Optional[LazyBuffer] = None
-  st_prev = st
   if buf != buf.base:
     st = buf.st + st
     view = buf
@@ -97,13 +96,35 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
       assert len(desired_reduce_st.views) == 1, f"reduceop late fixup must have one view {desired_reduce_st}"
       assert prod(buf.st.shape) < prod(desired_reduce_st.shape), f"reduceop late fixup must be an expend {buf.st.shape} >= {desired_reduce_st.shape}"
       input_shape = (4, 16384, 256, 16384)
-      arg = (3, )
+      arg = (3,)
     st = ShapeTracker.from_shape(input_shape)
 
   # otherwise we fuse it like normal
   cache[(buf, st)] = ret = \
     LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, cache) for x in buf.srcs), arg)
   return ret
+
+# TODO: the next two functions are dumb
+def _recursive_reshape(op:LazyOp, new_shape:Tuple[sint, ...]) -> LazyOp:
+  assert op.op not in ReduceOps, "cannot do reduce"
+  if op.op in BufferOps: return replace(op, arg=replace(op.arg, st=op.arg.st.reshape(new_shape)))
+  return replace(op, src=tuple(_recursive_reshape(x, new_shape) for x in op.src))
+
+def _fixup_ones(op:LazyOp, st:ShapeTracker, sts:Dict[LazyOp, ShapeTracker]) -> LazyOp:
+  replace_src, replace_arg = list(_fixup_ones(x, st, sts) for x in op.src), op.arg
+  if op.op in {BufferOps.LOAD, BufferOps.CONST}: st = op.arg.st
+  elif op.op in ReduceOps:
+    st = ShapeTracker.from_shape(tuple(1 if i in op.arg else s for i,s in enumerate(sts[op.src[0]].shape)))
+  else:
+    st = sts[op.src[0]]
+    assert all(prod(sts[x].shape) == prod(st.shape) for x in op.src)
+    if any(sts[x].shape != st.shape for x in op.src):
+      st = max((sts[x] for x in op.src), key=lambda x:len(x.shape))
+      for i,x in enumerate(op.src):
+        if sts[x].shape != st.shape: replace_src[i] = _recursive_reshape(x, st.shape)
+  sts[op] = st
+  if op.op is BufferOps.STORE and st.shape != op.arg.st.shape: replace_arg = replace(op.arg, st=op.arg.st.reshape(st.shape))
+  return replace(op, src=tuple(replace_src), arg=replace_arg)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
@@ -122,7 +143,9 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], re
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, cache=cache)
     output_view, vv = output_view.simplify().unbind()
     if vv: var_vals.update(vv)
-    ast.append(LazyOp(BufferOps.STORE, (lop, ), MemBuffer(i, out.dtype, output_view)))
+    lop = LazyOp(BufferOps.STORE, (lop, ), MemBuffer(i, out.dtype, output_view))
+    lop = _fixup_ones(lop, output_view, {})
+    ast.append(lop)
   return LazyOp(MetaOps.SINK, tuple(ast)), inputs, var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])
 
 # *** DAG creation: decide which LazyBuffers should realize ***
