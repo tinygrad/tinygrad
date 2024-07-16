@@ -46,11 +46,13 @@ class CStyleLanguage(Renderer):
 
   # returns a str expression of the const with the given type
   def render_const(self, x:ConstType, dtype:DType) -> str:
-    if math.isnan(x): return self.render_cast("NAN", dtype)
-    if math.isinf(x): return self.render_cast(("-" if x < 0 else "") + "INFINITY", dtype)
-    if dtype == dtypes.bool: return "1" if x else "0"
-    if dtype == dtypes.float: return f"{x}f"
-    return (self.render_cast(str(x), dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else str(x))
+    if math.isnan(x): val = "NAN"
+    elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
+    elif dtype.scalar() == dtypes.bool: val = "1" if x else "0"
+    elif dtype.scalar() == dtypes.float: val = f"{x}f"
+    else: val = str(x)
+    if dtype.count > 1: return self.render_vectorize([val] * dtype.count, dtype)
+    return (self.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -155,7 +157,7 @@ class CStyleLanguage(Renderer):
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
           else: val = self.render_vectorize([r[x] for x in src], dtype)
-          if child_count[u] <= 1 or all(x.op == UOps.CONST for x in src): r[u] = val
+          if child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
           kk(self.render_local(args[0], dtype, args[1]))
@@ -169,7 +171,8 @@ class CStyleLanguage(Renderer):
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {r[src[0]]};")
+        elif uop is UOps.DEFINE_ACC:
+          kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].src[0].arg if dtype.count > 1 else src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
