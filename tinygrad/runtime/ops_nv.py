@@ -226,7 +226,7 @@ class NVProgram(HCQCompatProgram):
         print(subprocess.check_output(["cuobjdump", "-elf", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.shmem_usage, self.registers_usage = 0, 0
+    self.program_addr, self.program_sz, self.registers_usage, self.shmem_usage = 0, 0, 0, 0
     self.constbufs: Dict[int, Tuple[int, int]] = {0: (0, 0x160)} # Dict[constbuf index, Tuple[va_addr, size]]
 
     if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], []
@@ -238,7 +238,7 @@ class NVProgram(HCQCompatProgram):
     for sh in sections:
       if sh.header.sh_type == libc.SHT_NOBITS and sh.header.sh_flags & libc.SHF_ALLOC: self.shmem_usage = sh.header.sh_size
       if sh.name == ".text." + self.name:
-        self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr + sh.header.sh_addr, sh.header.sh_size, sh.header.sh_info >> 24
+        self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, sh.header.sh_info>>24
       elif match := re.match(r'\.nv\.constant(\d+)', sh.name):
         self.constbufs[int(match.group(1))] = (self.lib_gpu.va_addr + sh.header.sh_addr, sh.header.sh_size)
       elif sh.name == ".nv.info":

@@ -1,6 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
-from typing import Tuple, List, Any, cast, Union, Dict
+from typing import Tuple, List, Any
 from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc
 
@@ -8,7 +7,7 @@ import tinygrad.runtime.autogen.libc as libc
 class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
 
 def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[ElfSection], Any]:
-  def _elf_parse_names(tabs): return {sum(len(w) + 1 for w in tabs.split(b'\0')[:i]): w.decode('utf-8')  for i, w in enumerate(tabs.split(b'\0'))}
+  def _elf_parse_names(tabs): return {sum(len(w) + 1 for w in tabs.split(b'\0')[:i]): w.decode('utf-8') for i, w in enumerate(tabs.split(b'\0'))}
 
   header = libc.Elf64_Ehdr.from_buffer_copy(blob)
   section_headers = (libc.Elf64_Shdr * header.e_shnum).from_buffer_copy(blob[header.e_shoff:])

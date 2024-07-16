@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List, Any
-import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
+import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, subprocess, time, array
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWComputeQueue, HWCopyQueue, hcq_profile, \
                             HCQCompatProgram, Compiler, CompileError, BufferOptions
@@ -275,10 +275,10 @@ class AMDProgram(HCQCompatProgram):
 
     if DEBUG >= 6: print(disasm(lib))
 
-    image, sections, relocs = elf_loader(self.lib)
+    image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.device.allocator.alloc(image.nbytes, BufferOptions(cpu_access=True))
 
-    entry_point = min(shdr.sh_addr for _,shdr,_ in sections.values() if shdr.sh_type == libc.SHT_PROGBITS and shdr.sh_flags & libc.SHF_ALLOC)
+    entry_point = min(sh.header.sh_addr for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC)
     self.group_segment_size = image.cast("I")[entry_point//4]
     self.private_segment_size = image.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = image.cast("I")[entry_point//4 + 2]
