@@ -539,6 +539,8 @@ class UOpGraph:
 
   cnt = 0
   def linearize(self, extra_pm:Optional[PatternMatcher]=None):
+    import time, random
+    if random.random() > 0.5: time.sleep(0.001)
     global acc_number
     acc_number = 0
 

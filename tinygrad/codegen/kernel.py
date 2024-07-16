@@ -761,7 +761,7 @@ class Kernel:
     src = self.opts.render(name:=to_function_name(self.name), self.uops)
     if getenv("RUN_PROCESS_REPLAY"):
       def lin(): self.linearize().uops.linearize()
-      lt = min(timeit(lin) for _ in range(5)) if TIME_REPLAY.value > 1 else None
+      lt = min(timeit(lin) for _ in range(5)) if TIME_REPLAY else None
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}, lt))
     info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed
