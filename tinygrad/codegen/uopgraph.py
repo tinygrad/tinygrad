@@ -485,32 +485,49 @@ constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.
 
 # *** uop expander ***
 
-def do_expand(root):
+def do_expand(root:UOp):
   expands = [x for x in root.src if x.op is UOps.EXPAND]
-  if len(dedup([x.arg for x in expands])) != 1: return None
-  new_srcs = tuple(UOp(root.op, root.dtype,
-                       tuple(y.src[i] if y.op is UOps.EXPAND else y for y in root.src), root.arg) for i in range(len(expands[0].src)))
-  return UOp(UOps.EXPAND, root.dtype, new_srcs, expands[0].arg)
+  if len(expands) == 0: return None
+  expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
+  new_srcs = []
+  for choices in itertools.product(*[range(x[1]) for x in expand_args]):
+    rpk = dict(zip([x[0] for x in expand_args], choices))
+    new_src = []
+    for src in root.src:
+      if src.op is UOps.EXPAND:
+        idx, mul = 0, 1
+        for a,l in src.arg[::-1]:
+          idx += rpk[a] * mul
+          mul *= l
+        new_src.append(src.src[idx])
+      else:
+        new_src.append(src)
+    new_srcs.append(UOp(root.op, root.dtype, tuple(new_src), root.arg))
+  return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
 def do_reduce(root):
   global acc_number
   expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
-  if len(expands) > 1: return None
+  expands_reduce = [x for x in expands if root.src[0].op is UOps.EXPAND and all(y in root.src[0].arg for y in x.arg)]
+  expands_non_reduce = [x for x in expands if x not in expands_reduce]
+  #print(expands_reduce)
+  #print(expands_non_reduce)
+  #print(root)
+  assert len(expands_non_reduce) == 0
   const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
-  ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x not in expands), (acc_number,))
+  ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
   acc_number += 1
-  if len(expands):
-    assert root.src[0].op is UOps.EXPAND
-    assert root.src[0].arg == expands[0].arg
+  if len(expands_reduce):
+    # not right
     for xx in root.src[0].src:
       ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
   else:
-    for xx in root.src[0:1]:
-      ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
+    # no EXPANDS
+    ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, root.src[0])
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
 
 expander = PatternMatcher([
-  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE}, name="root"), do_expand),
+  (UPat({UOps.ALU, UOps.LOAD, UOps.STORE, UOps.CAST, UOps.GEP}, name="root"), do_expand),
   (UOp(UOps.REDUCE).name("root"), do_reduce),
   # remove EXPANDs from SINK
   (UOp(UOps.SINK).name("root"),
@@ -518,7 +535,9 @@ expander = PatternMatcher([
     if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
   # CONTRACT and EXPAND cancel out
   (UOp(UOps.CONTRACT, src=(UOp(UOps.EXPAND).name("ex"),)).name("con"),
-   lambda con,ex: UOp(UOps.VECTORIZE, con.dtype, ex.src) if ex.arg in con.arg else None),
+   lambda con,ex: UOp(UOps.VECTORIZE, con.dtype, ex.src) if len(ex.arg) == 1 and ex.arg[0][0] in con.arg else None),
+  # CONTRACT alone repeats the element VECTORIZED
+  (UOp(UOps.CONTRACT).name("con"), lambda con: UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)),
 ])
 
 # *** uop graph ***
@@ -604,11 +623,11 @@ class UOpGraph:
     if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
 
     # expand
-    sink = graph_rewrite(sink, expander)
-
-    """
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
+      sink = graph_rewrite(sink, expander)
+
+    """
       # do contracts/reduces
       sink = graph_rewrite(sink, contractor)
       sink = graph_rewrite(sink, reducer)
