@@ -85,7 +85,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
     if not st.contiguous:
-      input_lop = _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, input_st:=reduce_info[buf][0], realizes, assign_targets, reduce_info, cache)
+      input_lop = _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, input_st:=reduce_info[buf][0], realizes, assign_targets, \
+          reduce_info, cache)
       assert input_lop.op is BufferOps.CONST, f"reduceop late fixup not supported for input {input_lop.op}"
       # TODO: why is the input_lop ShapeTracker wrong?
       return LazyOp(cast(Op,buf.op), (replace(input_lop, arg=replace(input_lop.arg, st=input_st)),), reduce_info[buf][1])
@@ -100,7 +101,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
   cache.setdefault((buf, st))
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   for x in buf.srcs: _recurse_reduceops(x, buf.srcs[0].st if buf.op in ReduceOps else st, realizes, outs, reduce_info, cache)
-  if buf.op in ReduceOps:
+  if buf.op in ReduceOps and buf not in reduce_info:
     input_st, axis = buf.srcs[0].st, buf.arg
     if not st.contiguous:
       assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
