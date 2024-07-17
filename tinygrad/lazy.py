@@ -170,8 +170,7 @@ class LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
     axis = tuple(sorted([x for x in axis if self.shape[x] != 1]))
     if len(axis) == 0: return self
-    new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, axis, (self,))
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(reduce_st(self.st, axis)), self.dtype, op, axis, (self,))
 
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = reduce_st(self.st, axis)
