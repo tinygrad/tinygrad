@@ -22,7 +22,7 @@ from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto(); REVERSEGLOBAL = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
@@ -406,7 +406,7 @@ class Kernel:
               if self.full_shape[tc_opts.axes[0]] % upc == 0:
                 self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
                 break
-
+      self.apply_opt(Opt(op=OptOps.REVERSEGLOBAL, axis=None, amt=None))
       return True
     except KernelOptError:
       return False
@@ -484,6 +484,8 @@ class Kernel:
       self.reshape_and_permute(None, tuple(range(axis)) + (axis+1, axis) + tuple(range(axis+2, self.shape_len)))
       self.reshape_and_permute(lambda x: x[0:axis] + (x[axis] * x[axis+1],) + x[axis+2:], None)
       self.upcasted -= 1
+    elif opt.op is OptOps.REVERSEGLOBAL:
+      self.reshape_and_permute(None, tuple(range(self.global_dims))[::-1] + tuple(range(self.global_dims, self.shape_len)))
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.shape_len - self.upcasted, "cannot pad upcasted")
@@ -531,6 +533,7 @@ class Kernel:
             if MV_THREADS_PER_ROW > 1: self.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
             if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
+            self.apply_opt(Opt(op=OptOps.REVERSEGLOBAL, axis=None, amt=None))
             return
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
@@ -563,7 +566,9 @@ class Kernel:
             self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
 
     # no more opt if we are grouping
-    if self.group_for_reduces: return
+    if self.group_for_reduces:
+      self.apply_opt(Opt(op=OptOps.REVERSEGLOBAL, axis=None, amt=None))
+      return
 
     # **** below this line need to be optional and benchmarked ****
 
@@ -636,6 +641,7 @@ class Kernel:
           will_delete_shape = local_sz == self.full_shape[axis]
           self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
           if will_delete_shape: deleted_shape += 1
+    self.apply_opt(Opt(op=OptOps.REVERSEGLOBAL, axis=None, amt=None))
 
   # **** kernel outputs ****
 
