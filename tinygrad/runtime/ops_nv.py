@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
-from typing import Tuple, List, Any, cast, Union
+from typing import Tuple, List, Any, cast, Union, Dict
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
                             HCQCompatProgram, hcq_profile, Compiler, CompileError, BufferOptions
@@ -11,6 +11,7 @@ import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.renderer.assembly import PTXRenderer
 import tinygrad.runtime.autogen.libc as libc
+from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 if MOCKGPU:=getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
@@ -157,7 +158,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
   def _exec(self, prg, kernargs, global_size, local_size):
     cmd_idx = len(self) - 1
 
-    ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
+    ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     self.cmd_idx_to_qmd[cmd_idx] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
     self.cmd_idx_to_local_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
@@ -215,7 +216,6 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
 
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).dma_gpfifo)
 
-SHT_PROGBITS, SHT_NOBITS, SHF_ALLOC, SHF_EXECINSTR = 0x1, 0x8, 0x2, 0x4
 class NVProgram(HCQCompatProgram):
   def __init__(self, device:NVDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
@@ -226,39 +226,33 @@ class NVProgram(HCQCompatProgram):
         print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.rel_info, self.global_init, self.shmem_usage = None, None, 0
-    constant_buffers_data = {}
+    if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
+    else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
 
-    if MOCKGPU:
-      self.program, self.registers_usage = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), 0x10
-      constant_buffers_data[0] = memoryview(bytearray(0x190))
-    else:
-      _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
-      sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]
-      shstrtab = memoryview(bytearray(self.lib[sections[_shstrndx][4]:sections[_shstrndx][4]+sections[_shstrndx][5]]))
-      for sh_name, sh_type, sh_flags, _, sh_offset, sh_size, _, sh_info, _ in sections:
-        section_name = shstrtab[sh_name:].tobytes().split(b'\0', 1)[0].decode('utf-8')
-        if sh_type == SHT_NOBITS and sh_flags & SHF_ALLOC: self.shmem_usage = sh_size
-        elif sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC and sh_flags & SHF_EXECINSTR:
-          self.program = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
-          self.registers_usage = sh_info >> 24
-        if match := re.match(r'\.nv\.constant(\d+)', section_name):
-          constant_buffers_data[int(match.group(1))] = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
-        if section_name == ".nv.global.init": self.global_init = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
-        elif section_name.startswith(".rel.text"): self.rel_info = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast('I')
-        elif section_name == ".nv.info":
-          section_data = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
-          for i in range(sh_size // 12):
-            if section_data[i * 3 + 0] & 0xffff == 0x1204: self.device._ensure_has_local_memory(section_data[i * 3 + 2] + 0x240)
-
-    # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
-    self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
-
-    # Load program and constant buffers (if any)
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
-    self.lib_sz = round_up(round_up(self.program.nbytes, 128) + max(0x1000, sum([round_up(x.nbytes, 128) for i,x in constant_buffers_data.items()]) +
-                           round_up(0 if self.global_init is None else self.global_init.nbytes, 128)), 0x1000)
-    self.lib_gpu = self.device.allocator.alloc(self.lib_sz, BufferOptions(cpu_access=True))
+    self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, BufferOptions(cpu_access=True))
+
+    self.program_addr, self.program_sz, self.registers_usage, self.shmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0
+    self.constbufs: Dict[int, Tuple[int, int]] = {0: (0, 0x160)} # Dict[constbuf index, Tuple[va_addr, size]]
+    for sh in sections:
+      if sh.name == f".nv.shared.{self.name}": self.shmem_usage = sh.header.sh_size
+      if sh.name == f".text.{self.name}":
+        self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, sh.header.sh_info>>24
+      elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
+      elif sh.name == ".nv.info":
+        for off in range(0, sh.header.sh_size, 12):
+          typ, _, val = struct.unpack_from("III", sh.content, off)
+          if typ & 0xffff == 0x1204: self.device._ensure_has_local_memory(val + 0x240)
+
+    # Apply relocs
+    for apply_image_offset, rel_sym_offset, typ, _ in relocs:
+      # These types are CUDA-specific, applying them here
+      if typ == 2: image[apply_image_offset:apply_image_offset+8] = struct.pack('<Q', self.lib_gpu.va_addr + rel_sym_offset) # R_CUDA_64
+      elif typ == 0x38: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) & 0xffffffff)
+      elif typ == 0x39: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) >> 32)
+      else: raise RuntimeError(f"unknown NV reloc {typ}")
+
+    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
     self.constbuffer_0 = [0] * 88
     self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
@@ -266,52 +260,27 @@ class NVProgram(HCQCompatProgram):
     smem_config = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
     self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
                             invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
-                            cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3,
+                            cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3, constant_buffer_invalidate_0=1,
                             shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
                             max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
-                            barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program.nbytes>>8,
-                            program_address_lower=self.lib_gpu.va_addr&0xffffffff, program_address_upper=self.lib_gpu.va_addr>>32, sass_version=0x89,
-                            program_prefetch_addr_lower_shifted=self.lib_gpu.va_addr>>8, program_prefetch_addr_upper_shifted=self.lib_gpu.va_addr>>40,
-                            constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
+                            barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
+                            program_address_lower=self.program_addr&0xffffffff, program_address_upper=self.program_addr>>32, sass_version=0x89,
+                            program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40)
 
-    # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
-    self.constbuf_0_size = constant_buffers_data[0].nbytes if 0 in constant_buffers_data else 0
-    if 0 in constant_buffers_data: constant_buffers_data.pop(0)
-
-    off = round_up(self.program.nbytes, 128)
-
-    if self.rel_info is not None:
-      assert self.global_init is not None
-      global_init_addr = self.lib_gpu.va_addr + off
-      for rel_i in range(0, len(self.rel_info), 4):
-        if self.rel_info[rel_i+2] == 0x39: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr >> 32) # R_CUDA_ABS32_HI_32
-        elif self.rel_info[rel_i+2] == 0x38: self.program[self.rel_info[rel_i]//4 + 1] = (global_init_addr & 0xffffffff) # R_CUDA_ABS32_LO_32
-        else: raise RuntimeError(f"unknown reloc: {self.rel_info[rel_i+2]}")
-
-    ctypes.memmove(self.lib_gpu.va_addr, mv_address(self.program), self.program.nbytes) # copy program
-
-    if self.global_init is not None:
-      ctypes.memmove(load_addr:=(self.lib_gpu.va_addr + off), mv_address(self.global_init), self.global_init.nbytes)
-      off += round_up(self.global_init.nbytes, 128)
-      if 4 in constant_buffers_data: # >= 12.4
-        # Constbuffer 4 contains a pointer to nv.global.init, load section and set up the pointer.
-        assert constant_buffers_data[4].nbytes == 8
-        constant_buffers_data[4][0:2] = memoryview(struct.pack('Q', load_addr)).cast('I')
-
-    for i,data in constant_buffers_data.items():
-      self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (self.lib_gpu.va_addr + off) >> 32)
-      self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (self.lib_gpu.va_addr + off) & 0xffffffff)
-      self.qmd.__setattr__(f'constant_buffer_size_shifted4_{i}', data.nbytes)
+    for i,(addr,sz) in self.constbufs.items():
+      self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (addr) >> 32)
+      self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (addr) & 0xffffffff)
+      self.qmd.__setattr__(f'constant_buffer_size_shifted4_{i}', sz)
       self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
 
-      ctypes.memmove(self.lib_gpu.va_addr + off, mv_address(data), data.nbytes)
-      off += round_up(data.nbytes, 128)
+    # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
+    self.max_threads = ((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    super().__init__(kernargs_alloc_size=round_up(self.constbuf_0_size, 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
+    super().__init__(kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_sz, BufferOptions(cpu_access=True))
+    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
 
   def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
