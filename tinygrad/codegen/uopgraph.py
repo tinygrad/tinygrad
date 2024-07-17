@@ -617,7 +617,6 @@ class UOpGraph:
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.UNMUL, UOps.ALL_SAME}])
-
     try:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
