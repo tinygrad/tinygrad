@@ -159,7 +159,8 @@ class CStyleLanguage(Renderer):
           else:
             notfin = all(x.op == UOps.CONST and not math.isfinite(x.arg) for x in src)
             val = self.render_vectorize([strip_parens(r[x]) if notfin else r[x] for x in src], dtype)
-          if uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src): r[u] = f"({val})" if all(math.isnan(x.arg) for x in src) else val
+          if uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src):
+            r[u] = f"({val})" if all(math.isnan(x.arg) or (math.isinf(x.arg) and x.arg < 0) for x in src) else val
           elif child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
