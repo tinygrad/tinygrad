@@ -30,11 +30,9 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[
 
   # Relocations
   relocs = []
-  for sh, trgt_sh_name, rels in rel + rela:
+  for sh, trgt_sh_name, c_rels in rel + rela:
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
-
-    for r in rels:
-      rel_image_off = sections[(rel_sym:=symtab[libc.ELF64_R_SYM(r.r_info)]).st_shndx].header.sh_addr + rel_sym.st_value
-      relocs.append((target_image_off + r.r_offset, rel_image_off, libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)))
+    rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
+    relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
   return memoryview(image), sections, relocs
