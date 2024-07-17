@@ -82,7 +82,7 @@ if __name__ == "__main__":
     ops = get_lazyop_info(si.ast.src[0]).flops
 
     if DEBUG >= 2:
-      for ast in si.ast: print_tree(ast)
+      print_tree(si.ast)
 
     rawbufs = bufs_from_lin(Kernel(si.ast))
 
