@@ -2138,7 +2138,7 @@ class Tensor:
     print(Tensor([1., 2., 3.]).lerp(Tensor([4., 5., 6.]), 0.5).numpy())
     ```
     """
-    return self * (1 - weight) + end * weight
+    return self + (end - self) * weight
 
   def square(self):
     """
