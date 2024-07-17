@@ -223,7 +223,7 @@ class NVProgram(HCQCompatProgram):
       try:
         fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
         with open(fn + ".cubin", "wb") as f: f.write(lib)
-        print(subprocess.check_output(["cuobjdump", "-elf", fn+".cubin"]).decode('utf-8'))
+        print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
     if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
