@@ -10,7 +10,7 @@ inf, nan = float('inf'), float('nan')
 
 # kernel unpacker
 from tinygrad.codegen.kernel import Kernel
-def ast_str_to_ast(ast_str:str) -> Tuple[LazyOp,...]: return LazyOp(MetaOps.SINK, val) if isinstance(val:=eval(ast_str), tuple) else val
+def ast_str_to_ast(ast_str:str) -> LazyOp: return LazyOp(MetaOps.SINK, val) if isinstance(val:=eval(ast_str), tuple) else val
 def ast_str_to_lin(ast_str:str, opts=None): return Kernel(ast_str_to_ast(ast_str), opts=opts)
 def kern_str_to_lin(kern_str:str, opts=None):
   (ast, applied_opts,) = eval(kern_str)

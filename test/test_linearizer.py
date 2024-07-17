@@ -126,7 +126,6 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "ocelot/remu doesn't have multiple wave syncs yet")
-  # @unittest.skip("still broken")
   def test_var_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(3, 27, 32, dtype=dtypes.float).realize()
@@ -390,7 +389,6 @@ class TestLinearizer(unittest.TestCase):
       [((x.numpy() - x.numpy().mean(axis=2, keepdims=True))/x.numpy().std(axis=2, keepdims=True, ddof=0)).sum(axis=2).reshape(-1)])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  # @unittest.skip("AST has implicit movement ops")
   def test_mean_std_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
@@ -407,7 +405,6 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast((store,), [x], wanna_output=[wanna_output])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  # @unittest.skip("AST has implicit movement ops")
   def test_mean_std_multireduce_mid_dim(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
