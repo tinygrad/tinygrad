@@ -157,8 +157,8 @@ class CStyleLanguage(Renderer):
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
           else: val = self.render_vectorize([strip_parens(r[x]) if x.op == UOps.CONST and math.isnan(x.arg) else r[x] for x in src], dtype)
-          if child_count[u] <= 1 or (uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src)):
-            r[u] = f"({val})" if uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src) and all(math.isnan(x.arg) for x in src) else val
+          if uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src): r[u] = f"({val})" if all(math.isnan(x.arg) for x in src) else val
+          elif child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
           kk(self.render_local(args[0], dtype, args[1]))
@@ -172,9 +172,8 @@ class CStyleLanguage(Renderer):
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
         elif uop is UOps.WMMA:
-          if src[2].op == UOps.VECTORIZE:
-            kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {self.render_const(src[2].src[0].arg, dtype)});")
-          else: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
+          val = self.render_const(src[2].src[0].arg, dtype) if src[2].op == UOps.VECTORIZE else r[src[2]]
+          kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {val});")
         elif uop is UOps.DEFINE_ACC:
           kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].src[0].arg if dtype.count > 1 else src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
