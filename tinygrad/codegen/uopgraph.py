@@ -196,19 +196,8 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 def handle_all_same(root:UOp):
   # if all same except 0 consts
   if all_same(lst:=[x for x in root.src if x.op is not UOps.CONST or x.arg != 0.0]): return lst[0]
-  # move all same before vectorize
-  if any(x.op is UOps.VECTORIZE for x in root.src):
-    new_srcs = []
-    assert root.dtype is not None
-    for i in range(root.dtype.count):
-      new_srcs.append(UOp(UOps.ALL_SAME, root.dtype.scalar(), tuple((x.src[i] if x.op is UOps.VECTORIZE else x) for x in root.src), root.arg))
-    return UOp(UOps.VECTORIZE, root.dtype, tuple(new_srcs))
-  # load case
-  if all(x.op is UOps.LOAD and len(x.src) == 4 and x.src[3].arg == 0.0 for x in lst):
-    if all_same([x.src[0:2] for x in lst]):
-      gate = UOp.const(dtypes.bool, False)
-      for l in lst: gate = gate + l.src[2]
-      return UOp(UOps.LOAD, lst[0].dtype, lst[0].src[0:2] + (gate,) + lst[0].src[3:])
+  from tinygrad.device import CompileError
+  raise CompileError("reduce axis for TC is messed up")
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
