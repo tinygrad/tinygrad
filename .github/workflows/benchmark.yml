@@ -9,6 +9,7 @@ on:
     branches:
       - master
       - update_benchmark
+      - update_benchmark_staging
   workflow_dispatch:
     inputs:
       run_process_replay:
@@ -36,6 +37,12 @@ jobs:
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+    - name: drop staging tables
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHESTAGING=1" >> $GITHUB_ENV
+        # drop all tables that start with staging_
+        sqlite3 /home/tiny/.cache/tinygrad/cache.db "SELECT 'DROP TABLE ' || name || ';' FROM sqlite_master WHERE type='table' AND name LIKE 'staging_%';" | sqlite3 /home/tiny/.cache/tinygrad/cache.db
     - name: Run Stable Diffusion
       run: JIT=2 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run Stable Diffusion with fp16
@@ -135,6 +142,12 @@ jobs:
         ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: drop staging tables
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHESTAGING=1" >> $GITHUB_ENV
+        # drop all tables that start with staging_
+        sqlite3 /home/tiny/.cache/tinygrad/cache.db "SELECT 'DROP TABLE ' || name || ';' FROM sqlite_master WHERE type='table' AND name LIKE 'staging_%';" | sqlite3 /home/tiny/.cache/tinygrad/cache.db
     - name: Run model inference benchmark
       run: NV=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -240,6 +253,12 @@ jobs:
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: drop staging tables
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHESTAGING=1" >> $GITHUB_ENV
+        # drop all tables that start with staging_
+        sqlite3 /home/tiny/.cache/tinygrad/cache.db "SELECT 'DROP TABLE ' || name || ';' FROM sqlite_master WHERE type='table' AND name LIKE 'staging_%';" | sqlite3 /home/tiny/.cache/tinygrad/cache.db
     - name: Train MNIST
       run: time PYTHONPATH=. NV=1 TARGET_EVAL_ACC_PCT=97.3 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
@@ -298,6 +317,12 @@ jobs:
         ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: drop staging tables
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHESTAGING=1" >> $GITHUB_ENV
+        # drop all tables that start with staging_
+        sqlite3 /home/tiny/.cache/tinygrad/cache.db "SELECT 'DROP TABLE ' || name || ';' FROM sqlite_master WHERE type='table' AND name LIKE 'staging_%';" | sqlite3 /home/tiny/.cache/tinygrad/cache.db
     - name: Show off tinybox
       run: /opt/rocm/bin/rocm-bandwidth-test
     # TODO: unstable on AMD
@@ -396,6 +421,12 @@ jobs:
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: drop staging tables
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHESTAGING=1" >> $GITHUB_ENV
+        # drop all tables that start with staging_
+        sqlite3 /home/tiny/.cache/tinygrad/cache.db "SELECT 'DROP TABLE ' || name || ';' FROM sqlite_master WHERE type='table' AND name LIKE 'staging_%';" | sqlite3 /home/tiny/.cache/tinygrad/cache.db
     - name: Train MNIST
       run: time PYTHONPATH=. AMD=1 TARGET_EVAL_ACC_PCT=97.3 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
