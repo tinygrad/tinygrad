@@ -1,7 +1,7 @@
 import unittest
 from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
-from tinygrad.ops import BinaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps # noqa: F401
 from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat, _match, constant_folder
 
@@ -176,6 +176,7 @@ class TestPatternMatcher(TestUOps):
     self.assert_equiv_uops(e3, uops.uops[2])
 
   def test_upat_str(self):
+    dtypes._float2 = dtypes.float.vec(2)
     upat = UPat(UOps.CONST, name="x", dtype=dtypes.float)
     assert str(upat) == str(eval(str(upat)))
     for i in range(10):
@@ -183,9 +184,10 @@ class TestPatternMatcher(TestUOps):
     assert str(upat).count('\n') < 100
     assert str(eval(str(upat))) == str(upat)
     for pat in constant_folder.pdict.values():
+      pat = pat[0][0]
       eval_pat = eval(str(pat))
       assert type(eval_pat.op) is type(pat.op)
-      assert type(eval.src) is type(pat.src)
+      assert type(eval_pat.src) is type(pat.src)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
