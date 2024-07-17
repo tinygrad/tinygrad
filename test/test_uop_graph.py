@@ -5,7 +5,6 @@ from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
 from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, graph_rewrite
-#from tinygrad.engine.graph import print_tree
 
 simple_pm = PatternMatcher([
   (UOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),

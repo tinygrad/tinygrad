@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import subprocess, pickle, shlex, sys, os
 from typing import Dict, List, Tuple
-from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import colored
 from tinygrad.ops import LazyOp
 
@@ -27,7 +26,7 @@ if __name__ == "__main__":
     except AssertionError as e:
       print(colored("FAILED FOR AST: ", "red"))
       print("expected:")
-      for op in m: print_tree(op)
+      for op in m: print(op)
       print("got:")
-      for op in f: print_tree(op)
+      for op in f: print(op)
       raise e
