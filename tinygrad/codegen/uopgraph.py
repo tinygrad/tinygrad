@@ -351,6 +351,13 @@ constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.
 
 # *** uop expander ***
 
+def _expand_arg_to_idx(arg:Tuple[Tuple[int, int], ...], rpk:Dict[int, int]):
+  idx, mul = 0, 1
+  for axis,m in arg[::-1]:
+    idx += rpk[axis] * mul
+    mul *= m
+  return idx
+
 def do_expand(root:UOp):
   if root.op is UOps.REDUCE:
     if root.src[0].op is not UOps.EXPAND: return None
@@ -376,11 +383,7 @@ def do_expand(root:UOp):
         lnew_src = []
         for lchoices in itertools.product(*[range(x[1]) for x in dont_expand_args]):
           lrpk = {**rpk, **dict(zip([x[0] for x in dont_expand_args], lchoices))}
-          idx, mul = 0, 1
-          for axis,m in src.arg[::-1]:
-            idx += lrpk[axis] * mul
-            mul *= m
-          lnew_src.append(src.src[idx])
+          lnew_src.append(src.src[_expand_arg_to_idx(src.arg, lrpk)])
         if len(dont_expand_args):
           if root.op is UOps.WMMA:
             new_src.append(lnew_src[0])  # TODO: is this always right?
@@ -398,16 +401,7 @@ def do_expand(root:UOp):
     new_new_srcs = []
     for choices in itertools.product(*[range(x[1]) for x in expand_args]):
       rpk = dict(zip([x[0] for x in expand_args], choices))
-      root_idx, src_idx = 0, 0
-      mul = 1
-      for axis,m in root.arg[::-1]:
-        root_idx += rpk[axis] * mul
-        mul *= m
-      mul = 1
-      for axis,m in old_expand_args[::-1]:
-        src_idx += rpk[axis] * mul
-        mul *= m
-      new_new_srcs.append(new_srcs[src_idx].src[root_idx])
+      new_new_srcs.append(new_srcs[_expand_arg_to_idx(old_expand_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)])
     new_srcs = new_new_srcs
   assert prod([x[1] for x in expand_args]) == len(new_srcs)
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
