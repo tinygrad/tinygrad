@@ -156,7 +156,7 @@ class CStyleLanguage(Renderer):
             kk(f"{self.render_dtype(cast(DType, src[0].dtype))} {precast} = {r[src[0]]};")
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
-          else: val = self.render_vectorize([r[x] for x in src], dtype)
+          else: val = self.render_vectorize([strip_parens(r[x]) if x.op == UOps.CONST and math.isnan(x.arg) else r[x] for x in src], dtype)
           if child_count[u] <= 1 or (uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src)):
             r[u] = f"({val})" if uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src) and all(math.isnan(x.arg) for x in src) else val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
