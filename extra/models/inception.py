@@ -4,7 +4,6 @@ from tinygrad.nn.state import load_state_dict, torch_load
 from tinygrad.helpers import fetch
 
 from typing import Optional, Dict
-from functools import lru_cache
 
 # Base Inception Model
 
@@ -237,10 +236,6 @@ class FidInceptionE2(InceptionE):
     ]
     return Tensor.cat(*outputs, dim=1)
 
-@lru_cache()
-def default_fid():
-  return torch_load(str(fetch("https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth", "pt_inception-2015-12-05-6726825d.pth")))
-
 class FidInceptionV3:
   def __init__(self):
     inception = Inception3(cls_map={
@@ -271,7 +266,7 @@ class FidInceptionV3:
     self.Mixed_7c = inception.Mixed_7c
 
   def load_from_pretrained(self):
-    state_dict = default_fid()
+    state_dict = torch_load(str(fetch("https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth", "pt_inception-2015-12-05-6726825d.pth")))
     for k,v in state_dict.items():
       if k.endswith(".num_batches_tracked"):
         state_dict[k] = v.reshape(1)
