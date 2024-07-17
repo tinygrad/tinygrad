@@ -2,7 +2,7 @@ import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass, replace
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
-from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
+from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
     merge_dicts, getenv, Metadata
@@ -40,8 +40,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer],
                       reduce_info:Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> LazyOp:
   """recursively create a lazyop"""
-  if (buf, st) in cache: return cache[(buf, st)]
   if buf is not buf.base: st, buf = buf.st+st, buf.base
+  if (buf, st) in cache: return cache[(buf, st)]
   arg = buf.arg
 
   # consts are always fused and generated
@@ -97,11 +97,11 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
 def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
+  cache.setdefault((buf, st))
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   for x in buf.srcs: _recurse_reduceops(x, buf.srcs[0].st if buf.op in ReduceOps else st, realizes, outs, reduce_info, cache)
   if buf.op in ReduceOps:
     input_st, axis = buf.srcs[0].st, buf.arg
-    # if it's an expand, push through it
     if not st.contiguous:
       assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
       assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
@@ -112,10 +112,11 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
     else:
       # reshape to match the output st of the top reduce
       if reduce_info:
-        top_reduce_input_st, top_reduce_axes = list(reduce_info.values()).pop()
+        top_reduce_input_st, top_reduce_axes = deque(reduce_info.values(), 1).pop()
         input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
+      # TODO: fix this
+      else: input_st = ShapeTracker.from_shape(input_st.shape)
     reduce_info[buf] = (input_st, axis)
-  cache.setdefault((buf, st))
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
@@ -129,12 +130,10 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   ast: List[LazyOp] = []
   inputs: List[LazyBuffer] = []
   reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
+  seen_ops: Dict[Tuple[LazyBuffer, ShapeTracker], None] = {}
   for i, out in enumerate(outs):
-    _recurse_reduceops(out, out.st, realizes, outs, reduce_info, {})
-    output_st = ShapeTracker.from_shape(out.shape)
-    if len(reduce_info) != 0:
-      last_reduce, axis = list(reduce_info.values())[-1]
-      output_st = ShapeTracker.from_shape(tuple(1 if i in axis else s for i,s in enumerate(last_reduce.shape)))
+    _recurse_reduceops(out, out.st, realizes, outs, reduce_info, seen_ops)
+    output_st = ShapeTracker.from_shape(reduce_st(*deque(reduce_info.values(), 1).pop()) if reduce_info else out.shape)
     output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
     output_view, vv = output_view.simplify().unbind()
