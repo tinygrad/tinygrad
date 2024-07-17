@@ -336,9 +336,9 @@ class TestUOpCompare(unittest.TestCase):
 class TestUOpStr(TestUOps):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
-    for i in range(10): a = a + a
+    for i in range(20): a = a + a
     assert str(eval(str(a))) == str(a)
-    assert str(a).count('\n') < 100, "exponential string growth"
+    assert len(str(a)) < 10_000, "exponential string growth"
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

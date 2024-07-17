@@ -180,9 +180,9 @@ class TestPatternMatcher(TestUOps):
     upat = UPat(UOps.CONST, name="x", dtype=dtypes.float)
     print(str(upat))
     assert str(upat) == str(eval(str(upat)))
-    for i in range(10):
+    for i in range(20):
       upat = UPat(UOps.ALU, name="x", src=[upat, upat], arg=BinaryOps.ADD)
-    assert str(upat).count('\n') < 100
+    assert len(str(upat)) < 10_000
     assert str(eval(str(upat))) == str(upat)
     for pat in constant_folder.pdict.values():
       pat = pat[0][0]
