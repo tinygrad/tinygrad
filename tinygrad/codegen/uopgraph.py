@@ -9,8 +9,6 @@ from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
-class LoweringError(Exception): pass
-
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
 
