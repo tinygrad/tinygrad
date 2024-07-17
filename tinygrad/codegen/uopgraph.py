@@ -193,8 +193,27 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
+def handle_all_same(root:UOp):
+  # if all same except 0 consts
+  if all_same(lst:=[x for x in root.src if x.op is not UOps.CONST or x.arg != 0.0]): return lst[0]
+  # move all same before vectorize
+  if any(x.op is UOps.VECTORIZE for x in root.src):
+    new_srcs = []
+    assert root.dtype is not None
+    for i in range(root.dtype.count):
+      new_srcs.append(UOp(UOps.ALL_SAME, root.dtype.scalar(), tuple((x.src[i] if x.op is UOps.VECTORIZE else x) for x in root.src), root.arg))
+    return UOp(UOps.VECTORIZE, root.dtype, tuple(new_srcs))
+  # load case
+  if all(x.op is UOps.LOAD and len(x.src) == 4 and x.src[3].arg == 0.0 for x in lst):
+    if all_same([x.src[0:2] for x in lst]):
+      gate = UOp.const(dtypes.bool, False)
+      for l in lst: gate = gate + l.src[2]
+      return UOp(UOps.LOAD, lst[0].dtype, lst[0].src[0:2] + (gate,) + lst[0].src[3:])
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # ALL_SAME
+  (UOp(UOps.ALL_SAME).name("root"), handle_all_same),
   # CONTRACT before REDUCE
   (UPat(UOps.CONTRACT, name="con", src=UPat(UOps.REDUCE, name="red")),
    lambda con, red: UOp(UOps.REDUCE, con.dtype, (UOp(UOps.CONTRACT, con.dtype, red.src[0:1], con.arg),)+red.src[1:], red.arg)),
@@ -346,8 +365,6 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (UOp(UOps.SINK).name("root"),
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
-  # ALL_SAME
-  (UOp(UOps.ALL_SAME).name("root"), lambda root: lst[0] if all_same(lst:=[x for x in root.src if x.op is not UOps.CONST or x.arg != 0.0]) else None),
 ])
 
 constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.patterns)
