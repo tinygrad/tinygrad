@@ -41,7 +41,7 @@ jobs:
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
-        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal 
     - name: Run Stable Diffusion
       run: JIT=2 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run Stable Diffusion with fp16
