@@ -42,7 +42,7 @@ def compare_tiny_torch(model, model_torch, X, Y):
     for k,v in list(model_torch.named_parameters())[::-1]:
       g = model_state_dict[k].grad.numpy()
       gt = v.grad.detach().numpy()
-      if not CI: print("testing grads", k, v.grad.dtype)
+      if not CI: print("testing grads", k, model_state_dict[k].grad.dtype)
       np.testing.assert_allclose(g, gt, atol=1e-3, err_msg=f'grad mismatch {k}')
 
     # take the steps
@@ -51,7 +51,7 @@ def compare_tiny_torch(model, model_torch, X, Y):
 
     # assert weights match
     for k,v in model_torch.named_parameters():
-      if not CI: print("testing weight", k, v.dtype)
+      if not CI: print("testing weight", k, model_state_dict[k].dtype)
       np.testing.assert_allclose(model_state_dict[k].numpy(), v.detach().numpy(), atol=1e-3, err_msg=f'weight mismatch {k}')
 
 def get_mnist_data():
