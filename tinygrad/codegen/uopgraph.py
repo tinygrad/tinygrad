@@ -196,7 +196,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
 def handle_all_same(root:UOp):
-  if all_same(root.src): return root.src[0]
+  if all_same(list(root.src)): return root.src[0]
   # if all same except 0 consts
   if all_same(lst:=[x for x in root.src if x.op is not UOps.CONST or x.arg != 0.0]): return lst[0]
   return None
