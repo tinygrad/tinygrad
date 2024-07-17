@@ -63,6 +63,9 @@ class PatternMatcher:
       assert p.op is not None
       for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
 
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+  def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
+
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
@@ -496,8 +499,7 @@ class UOpGraph:
     self.opts = opts
     self.folder = constant_folder if opts is None or not opts.supports_float4 else constant_folder_w_f4
     if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
-      # TODO: slow to rebuild this...
-      self.folder = PatternMatcher(self.folder.patterns + transcendental_folding.patterns)
+      self.folder = self.folder + transcendental_folding
 
   def __reduce__(self): return self.__class__, (self.sink, self.opts)
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
@@ -546,15 +548,11 @@ class UOpGraph:
 
     # do graph rewrite
     sink = graph_rewrite(sink, self.folder)
-    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
+    if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
 
     # expand
     UOpGraph.cnt += 1
-    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, expander)
-
-    # do graph rewrite (2)
-    sink = graph_rewrite(sink, self.folder)
-    if extra_pm: sink = graph_rewrite(sink, PatternMatcher(self.folder.patterns+extra_pm.patterns))
+    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, (expander+self.folder+extra_pm) if extra_pm else (expander+self.folder))
 
     # filter nodes that don't link to a sink
     # BFS toposort
