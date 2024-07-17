@@ -167,6 +167,8 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
 
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
+def reduce_st(st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(st.shape))
+
 # the living definition of LazyOps
 def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
   assert ast.op is MetaOps.SINK, "must be SINK"
@@ -182,7 +184,7 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
     if op.op in ReduceOps:
       axis = op.arg[-1] if op.op is ReduceOps.WMMA else op.arg
       assert isinstance(axis, tuple) and all(isinstance(i, int) for i in axis), f"reduceop must have axis {op.arg}"
-      st = ShapeTracker.from_shape(tuple(1 if i in axis else s for i,s in enumerate(sts[op.src[0]].shape)))
+      st = ShapeTracker.from_shape(reduce_st(sts[op.src[0]], axis))
     else:
       # movementops are pushed to the edges with LOAD
       if op.op in BufferOps: st = op.arg.st
