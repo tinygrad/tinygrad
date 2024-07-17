@@ -443,3 +443,30 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: openpilot compile 0.9.4
+      run: NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python examples/openpilot/compile2.py
+    - name: openpilot compile 0.9.7
+      run: NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx
+    - name: check openpilot correctness 0.9.4
+      run: FLOAT16=0 IMAGE=2 GPU=1 python examples/openpilot/compile2.py
+    - name: check openpilot correctness 0.9.4
+      run: FLOAT16=0 IMAGE=2 GPU=1 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx
+    - name: benchmark openpilot
+      run: GPU=1 python3 test/external/external_benchmark_openpilot.py | tee openpilot.txt
+    - name: benchmark openpilot w IMAGE=2
+      run: IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py | tee openpilot_image.txt
+    - name: benchmark openpilot w IMAGE=2 FLOAT16=1
+      run: FLOAT16=1 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py | tee openpilot_image_fp16.txt
+    - name: benchmark openpilot w IMAGE=2 FLOAT16=1 NOLOCALS=1
+      run: NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py | tee openpilot_image_fp16_nolocals.txt
+    - name: Run process replay tests
+      if: env.RUN_PROCESS_REPLAY == '1'
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Speed (comma)
+        path: |
+          openpilot.txt
+          openpilot_image.txt
+          openpilot_image_fp16.txt
+          openpilot_image_fp16_nolocals.txt
