@@ -20,35 +20,36 @@ def process_replay(offset:int):
   cur.execute(f"SELECT val FROM '{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   changed = 0
   for row in cur.fetchall():
-    ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
-    with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
-      # try linearize
-      try:
+    ast, applied_opts = None, None
+    # try unpickle and linearize
+    try:
+      ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
+      with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
         k = Kernel(ast, opts=opts)
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
-      except Exception as e:
-        logging.warn("FAILED TO RECREATE KERNEL")
-        logging.info(ast)
-        logging.info(applied_opts)
-        logging.info(e)
-        if ASSERT_DIFF: raise e
-        continue
-      # try compare
-      try: assert compare_src == good_src
-      except AssertionError as e:
-        changed += 1
-        logging.info("PROCESS REPLAY DETECTED CHANGE")
-        logging.info(ast)
-        logging.info(applied_opts)
-        diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
-        for line in diff:
-          logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-        if ASSERT_DIFF: raise e
-        if changed > MAX_DIFF_PCT:
-          logging.warn(f"detected changes in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
-          early_stop.set()
-          break
+    except Exception as e:
+      logging.warn("FAILED TO RECREATE KERNEL")
+      logging.info(ast)
+      logging.info(applied_opts)
+      logging.info(e)
+      if ASSERT_DIFF: raise e
+      continue
+    # try compare
+    try: assert compare_src == good_src
+    except AssertionError as e:
+      changed += 1
+      logging.info("PROCESS REPLAY DETECTED CHANGE")
+      logging.info(ast)
+      logging.info(applied_opts)
+      diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
+      for line in diff:
+        logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+      if ASSERT_DIFF: raise e
+      if changed > MAX_DIFF_PCT:
+        logging.warn(f"detected changes in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
+        early_stop.set()
+        break
   conn.commit()
   cur.close()
 
