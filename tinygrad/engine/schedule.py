@@ -1,11 +1,10 @@
 import sys, pickle, atexit
 from collections import defaultdict, deque
-from dataclasses import dataclass, replace
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
-from tinygrad.ops import MetaOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
+from dataclasses import dataclass
+from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
+from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
-    merge_dicts, getenv, Metadata
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -38,15 +37,11 @@ class ScheduleItem:
 
 def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer],
-                      reduce_info:Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]],
-                      cache) -> LazyOp:
+                      reduce_info:Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> LazyOp:
   """recursively create a lazyop"""
   if (buf, st) in cache: return cache[(buf, st)]
-  if buf != buf.base:
-    st = buf.st + st
-    buf = buf.base
-  # all buffers here are base now
-  assert buf.op is not None
+  if buf is not buf.base: st, buf = buf.st+st, buf.base
+  arg = buf.arg
 
   # consts are always fused and generated
   if buf.op is MetaOps.CONST:
@@ -88,18 +83,23 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
-    input_st, axis = reduce_info[buf]
-    if not st.contiguous:
-      input_lop = _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, input_st, realizes, assign_targets, reduce_info, cache)
-      assert input_lop.op is BufferOps.CONST, f"reduceop late fixup not supported for input {input_lop.op}"
-      # TODO: why is input_lop.arg.st wrong?
-      return LazyOp(buf.op, (replace(input_lop, arg=replace(input_lop.arg, st=input_st)),), axis)
-    st = input_st
+    assert st.contiguous, "ReduceOps late fusion must be contiguous"
+    st, arg = reduce_info[buf]
 
   # otherwise we fuse it like normal
-  ret = LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)\
-      for x in buf.srcs), buf.arg)
-  return cache.setdefault((buf, st), ret)
+  return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, \
+      reduce_info, cache) for x in buf.srcs), arg))
+
+def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
+  if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
+  if buf is not buf.base: st, buf = buf.st+st, buf.base
+  if buf.op in ReduceOps:
+    reduce_input, axis = buf.srcs[0], buf.arg
+    assert st.contiguous
+    st = ShapeTracker.from_shape(reduce_input.shape)
+    reduce_info[buf] = (st, axis)
+  for x in buf.srcs: _recurse_reduceops(x, st, realizes, outs, reduce_info, cache)
+  cache.setdefault((buf, st))
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
@@ -112,24 +112,10 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   cache: Dict[Tuple[LazyBuffer, ShapeTracker], LazyOp] = {}
   ast: List[LazyOp] = []
   inputs: List[LazyBuffer] = []
-  # push movement ops to the edges, fixup reduceop(s) shapes and axes
   reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
-  # reduceops change output shape
-  def _construct_sts(op:LazyBuffer, st:ShapeTracker, cache:Dict):
-    if op.base.realized is not None or (op.base in realizes and op.base not in outs) or (op, st) in cache: return
-    if op is not op.base:
-      st = op.st+st
-      op = op.base
-    for x in op.srcs: _construct_sts(x, st, cache)
-    if op.op in ReduceOps:
-      _, reduce_input_st, axis = op.srcs[0], op.srcs[0].st, op.arg
-      assert st.contiguous, "todo!"
-      reduce_info[op] = (ShapeTracker.from_shape(reduce_input_st.shape), axis)
-    cache.setdefault((op, st))
   for i, out in enumerate(outs):
-    _construct_sts(out, out.st, {})
-    output_st = ShapeTracker.from_shape(list(reduce_info).pop().shape if reduce_info else out.shape)
-    # if reduce_info: output_st = ShapeTracker.from_shape(next(iter(reduce_info)).shape)
+    _recurse_reduceops(out, out.st, realizes, outs, reduce_info, {})
+    output_st = ShapeTracker.from_shape(next(iter(reduce_info)).shape if reduce_info else out.shape)
     output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
     output_view, vv = output_view.simplify().unbind()
@@ -146,9 +132,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   if GRAPH: log_lazybuffer(buf, scheduled)
   # view
   if buf.base != buf:
-    if FUSE_AS_ONE_KERNEL: pass
     # fuse some pads
-    elif len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
+    if len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
       simple_pads.add(buf.base)
     # realize all expands
@@ -255,7 +240,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
-    if forced_realize:
+    if forced_realize and (r.srcs[0].base.op is not MetaOps.CONST or any(x.shape != r.shape for x in children[r])):
       tr = r
       if can_chase:
         # can chase this down to contiguous children
@@ -272,7 +257,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
-      if not FUSE_AS_ONE_KERNEL and (r.srcs[0].base.op is not MetaOps.CONST or any(x.shape != r.shape for x in children[r])): realizes[tr] = None
+      realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
