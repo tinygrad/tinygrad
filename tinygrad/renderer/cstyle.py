@@ -156,8 +156,10 @@ class CStyleLanguage(Renderer):
             kk(f"{self.render_dtype(cast(DType, src[0].dtype))} {precast} = {r[src[0]]};")
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
-          else: val = self.render_vectorize([strip_parens(r[x]) if x.op == UOps.CONST and not math.isfinite(x.arg) else r[x] for x in src], dtype)
-          if uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src): r[u] = f"({val})" if all(not math.isfinite(x.arg) for x in src) else val
+          else:
+            notfin = all(x.op == UOps.CONST and not math.isfinite(x.arg) for x in src)
+            val = self.render_vectorize([strip_parens(r[x]) if notfin else r[x] for x in src], dtype)
+          if uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src): r[u] = f"({val})" if all(math.isnan(x.arg) for x in src) else val
           elif child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
