@@ -239,52 +239,70 @@ class FidInceptionE2(InceptionE):
 
 @lru_cache()
 def default_fid():
-  return torch_load(fetch("https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth", "pt_inception-2015-12-05-6726825d.pth"))
+  return torch_load(str(fetch("https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth", "pt_inception-2015-12-05-6726825d.pth")))
 
 class FidInceptionV3:
-  def __init__(self, inception:Inception3):
-
-    self.blocks = [
-      inception.Conv2d_1a_3x3,
-      inception.Conv2d_2a_3x3,
-      inception.Conv2d_2b_3x3,
-      lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=2, dilation=1),
-
-      inception.Conv2d_3b_1x1,
-      inception.Conv2d_4a_3x3,
-      lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=2, dilation=1),
-
-      inception.Mixed_5b,
-      inception.Mixed_5c,
-      inception.Mixed_5d,
-      inception.Mixed_6a,
-      inception.Mixed_6b,
-      inception.Mixed_6c,
-      inception.Mixed_6d,
-      inception.Mixed_6e,
-
-      inception.Mixed_7a,
-      inception.Mixed_7b,
-      inception.Mixed_7c,
-      lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8)),
-    ]
-
-  @classmethod
-  def from_pretrained(cls):
+  def __init__(self):
     inception = Inception3(cls_map={
       "A":  FidInceptionA,
       "C":  FidInceptionC,
       "E1": FidInceptionE1,
       "E2": FidInceptionE2,
     })
+
+    self.Conv2d_1a_3x3 = inception.Conv2d_1a_3x3
+    self.Conv2d_2a_3x3 = inception.Conv2d_2a_3x3
+    self.Conv2d_2b_3x3 = inception.Conv2d_2b_3x3
+
+    self.Conv2d_3b_1x1 = inception.Conv2d_3b_1x1
+    self.Conv2d_4a_3x3 = inception.Conv2d_4a_3x3
+
+    self.Mixed_5b = inception.Mixed_5b
+    self.Mixed_5c = inception.Mixed_5c
+    self.Mixed_5d = inception.Mixed_5d
+    self.Mixed_6a = inception.Mixed_6a
+    self.Mixed_6b = inception.Mixed_6b
+    self.Mixed_6c = inception.Mixed_6c
+    self.Mixed_6d = inception.Mixed_6d
+    self.Mixed_6e = inception.Mixed_6e
+
+    self.Mixed_7a = inception.Mixed_7a
+    self.Mixed_7b = inception.Mixed_7b
+    self.Mixed_7c = inception.Mixed_7c
+
+  def load_from_pretrained(self):
     state_dict = default_fid()
     for k,v in state_dict.items():
       if k.endswith(".num_batches_tracked"):
         state_dict[k] = v.reshape(1)
-    load_state_dict(inception, state_dict)
-    return cls(inception)
+    load_state_dict(self, state_dict)
+    return self
 
   def __call__(self, x:Tensor) -> Tensor:
     x = x.interpolate((299,299), mode="linear")
     x = (x * 2) - 1
-    return x.sequential(self.blocks)
+    x = x.sequential([
+      self.Conv2d_1a_3x3,
+      self.Conv2d_2a_3x3,
+      self.Conv2d_2b_3x3,
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=2, dilation=1),
+
+      self.Conv2d_3b_1x1,
+      self.Conv2d_4a_3x3,
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=2, dilation=1),
+
+      self.Mixed_5b,
+      self.Mixed_5c,
+      self.Mixed_5d,
+      self.Mixed_6a,
+      self.Mixed_6b,
+      self.Mixed_6c,
+      self.Mixed_6d,
+      self.Mixed_6e,
+
+      self.Mixed_7a,
+      self.Mixed_7b,
+      self.Mixed_7c,
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8)),
+    ])
+    return x
