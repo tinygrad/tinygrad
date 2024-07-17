@@ -112,39 +112,39 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   cache: Dict[Tuple[LazyBuffer, ShapeTracker], LazyOp] = {}
   ast: List[LazyOp] = []
   inputs: List[LazyBuffer] = []
+  # push movement ops to the edges, fixup reduceop(s) shapes and axes
+  reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
+  output_st = ShapeTracker.from_shape(outs[0].shape)
+  @functools.lru_cache(None)
+  def _get_sts(op:LazyBuffer, st:ShapeTracker):
+    nonlocal output_st
+    for x in op.base.srcs:
+      if op.base.op in ReduceOps: parent_st = ShapeTracker.from_shape(op.base.srcs[0].shape)
+      elif op != op.base: parent_st = st+op.st
+      else: parent_st = st
+      if x.base.realized is None and x.base not in realizes: _get_sts(x, parent_st)
+    if op.base.op in ReduceOps:
+      reduce_input, axis = op.base.srcs[0], op.base.arg
+      # if it's expanded, push expand through a reduce
+      if not st.contiguous:
+        assert prod(op.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {op.st.shape} >= {st.shape}"
+        assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
+        pre_reduce = st.shape+tuple(s for i,s in enumerate(reduce_input.st.shape) if i in axis)
+        axis = tuple(i+len(st.shape)-1 for i in axis)
+        mid_reshape = tuple(1 if s not in reduce_input.st.shape else s for s in pre_reduce)
+        reduce_info[op.base] = (reduce_input.st.reshape(mid_reshape).expand(pre_reduce), axis)
+      # otherwise reshape the input shape with previous reduceop reshape(s)
+      else:
+        reduce_info[op.base] = (ShapeTracker.from_shape(reduce_input.shape), axis)
+        if len(reduce_info) > 1:
+          first_reduce_input_st, first_reduce_axis = next(iter(reduce_info.values()))
+          first_reduce_output_shape = tuple(1 if i in first_reduce_axis else s for i,s in enumerate(first_reduce_input_st.shape))
+          reduce_info[op.base] = (reduce_info[op.base][0].reshape(first_reduce_output_shape), axis)
+        this_output_shape = tuple(1 if i in axis else s for i,s in enumerate(reduce_info[op.base][0].shape))
+        # reduceop changes output shape for late elementwise fusion
+        # NOTE: this is the new reduce_for_op
+        output_st = output_st.reshape(this_output_shape)
   for i, out in enumerate(outs):
-    # push movement ops to the edges, fixup reduceop(s) shapes and axes
-    reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
-    output_st = ShapeTracker.from_shape(out.shape)
-    @functools.lru_cache(None)
-    def _get_sts(op:LazyBuffer, st:ShapeTracker):
-      nonlocal output_st
-      for x in op.base.srcs:
-        if op.base.op in ReduceOps: parent_st = ShapeTracker.from_shape(op.base.srcs[0].shape)
-        elif op != op.base: parent_st = st+op.st
-        else: parent_st = st
-        if x.base.realized is None and x.base not in realizes: _get_sts(x, parent_st)
-      if op.base.op in ReduceOps:
-        reduce_input, axis = op.base.srcs[0], op.base.arg
-        # if it's expanded, push expand through a reduce
-        if not st.contiguous:
-          assert prod(op.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {op.st.shape} >= {st.shape}"
-          assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
-          pre_reduce = st.shape+tuple(s for i,s in enumerate(reduce_input.st.shape) if i in axis)
-          axis = tuple(i+len(st.shape)-1 for i in axis)
-          mid_reshape = tuple(1 if s not in reduce_input.st.shape else s for s in pre_reduce)
-          reduce_info[op.base] = (reduce_input.st.reshape(mid_reshape).expand(pre_reduce), axis)
-        # otherwise reshape the input shape with previous reduceop reshape(s)
-        else:
-          reduce_info[op.base] = (ShapeTracker.from_shape(reduce_input.shape), axis)
-          if len(reduce_info) > 1:
-            first_reduce_input_st, first_reduce_axis = next(iter(reduce_info.values()))
-            first_reduce_output_shape = tuple(1 if i in first_reduce_axis else s for i,s in enumerate(first_reduce_input_st.shape))
-            reduce_info[op.base] = (reduce_info[op.base][0].reshape(first_reduce_output_shape), axis)
-          this_output_shape = tuple(1 if i in axis else s for i,s in enumerate(reduce_info[op.base][0].shape))
-          # reduceop changes output shape for late elementwise fusion
-          # NOTE: this is the new reduce_for_op
-          output_st = output_st.reshape(this_output_shape)
     _get_sts(out, out.st)
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
     output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
