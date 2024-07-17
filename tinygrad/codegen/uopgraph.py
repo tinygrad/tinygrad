@@ -359,8 +359,8 @@ def _expand_arg_to_idx(args:Tuple[Tuple[int, int], ...], rpk:Dict[int, int]) -> 
     mul *= m
   return idx
 
-def _dictlist_from_args(args:Tuple[Tuple[int, int], ...]) -> List[Dict[int, int]]:
-  return [dict(lchoices) for lchoices in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
+def _choices_from_args(args:Tuple[Tuple[int, int], ...]) -> List[Dict[int, int]]:
+  return [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
 
 def do_expand(root:UOp):
   if root.op is UOps.REDUCE:
@@ -379,12 +379,12 @@ def do_expand(root:UOp):
     else:
       dont_expand_args = ()
   new_srcs: List[UOp] = []
-  lrpks = _dictlist_from_args(dont_expand_args)
-  for rpk in _dictlist_from_args(expand_args):
+  lrpks = _choices_from_args(dont_expand_args)
+  for rpk in _choices_from_args(expand_args):
     new_src = []
     for src in root.src:
       if src.op is UOps.EXPAND:
-        lnew_src = [src.src[_expand_arg_to_idx(src.arg, rpk | lrpk)] for lrpk in lrpks]
+        lnew_src = [src.src[_expand_arg_to_idx(src.arg, {**rpk, **lrpk})] for lrpk in lrpks]
         if len(dont_expand_args):
           # TODO: is this right for UOps.WMMA? all lnew_src should be the same
           new_src.append(lnew_src[0] if root.op is UOps.WMMA else UOp(UOps.EXPAND, root.dtype, tuple(lnew_src), dont_expand_args))
@@ -397,7 +397,7 @@ def do_expand(root:UOp):
   if root.op is UOps.EXPAND:
     expand_args, old_args = tuple(sorted(root.arg+expand_args)), expand_args
     assert len(expand_args) == (len(old_args) + len(root.arg))
-    new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _dictlist_from_args(expand_args)]
+    new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _choices_from_args(expand_args)]
   assert prod([x[1] for x in expand_args]) == len(new_srcs)
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
