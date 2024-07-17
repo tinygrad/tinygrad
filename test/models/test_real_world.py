@@ -87,15 +87,13 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_gpt2(self):
-    with Context(TIME_REPLAY = 1):
-      args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
-      model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))
-      derandomize_model(model)
-      @TinyJit
-      def test(t, v):
-        with Context(JIT=0): return model(t, v).realize()
-      helper_test("test_gpt2", lambda: (Tensor([[1,]]),
-                                        Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 164 if CI else 468, all_jitted=True)
+    args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
+    model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))
+    derandomize_model(model)
+    @TinyJit
+    def test(t, v):
+      with Context(JIT=0): return model(t, v).realize()
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 164 if CI else 468, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CLANG", "slow")
   def test_train_mnist(self):

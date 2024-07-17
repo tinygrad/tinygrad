@@ -1,16 +1,16 @@
 import unittest
 from tinygrad import Tensor, GlobalCounters
-from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
+from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv, Context
 from tinygrad.ops import MetaOps
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule
 
 class TestWinograd(unittest.TestCase):
   def setUp(self):
-    self.old = WINO.value
-    WINO.value = 1
+    self.ctx = Context(WINO=1, TIMEIT=1)
+    self.ctx.__enter__()
   def tearDown(self):
-    WINO.value = self.old
+    self.ctx.__exit__()
 
   def test_speed(self):
     x = Tensor.empty(1,4,9,9)
