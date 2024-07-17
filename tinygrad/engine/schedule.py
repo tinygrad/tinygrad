@@ -1,4 +1,4 @@
-import sys, pickle, atexit, functools
+import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
@@ -94,6 +94,19 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
       reduce_info, cache) for x in buf.srcs), buf.arg)
   return cache.setdefault((buf, st), ret)
 
+def _recurse_reduceops(op:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
+  if op.base.realized is not None or (op.base in realizes and op.base not in outs): return
+  if op is not op.base:
+    st = op.st + st
+    op = op.base
+  if op.op in ReduceOps:
+    reduce_input, axis = op.srcs[0], op.arg
+    assert st.contiguous
+    st = ShapeTracker.from_shape(reduce_input.shape)
+    reduce_info[op] = (st, axis)
+  for x in op.srcs: _recurse_reduceops(x, st, realizes, outs, reduce_info, cache)
+  cache.setdefault((op, st))
+
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], _:Dict[LazyBuffer, LazyBuffer]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
   if (out:=outs[0]).op is MetaOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
@@ -106,20 +119,8 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], _:
   ast: List[LazyOp] = []
   inputs: List[LazyBuffer] = []
   reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
-  def _recurse_reduceops(op:LazyBuffer, st:ShapeTracker, cache):
-    if op.base.realized is not None or (op.base in realizes and op.base not in outs): return
-    if op is not op.base:
-      st = op.st + st
-      op = op.base
-    if op.op in ReduceOps:
-      reduce_input, axis = op.srcs[0], op.arg
-      assert st.contiguous
-      st = ShapeTracker.from_shape(reduce_input.shape)
-      reduce_info[op] = (st, axis)
-    for x in op.srcs: _recurse_reduceops(x, st, cache)
-    cache.setdefault((op, st))
   for i, out in enumerate(outs):
-    _recurse_reduceops(out, out.st, {})
+    _recurse_reduceops(out, out.st, realizes, outs, reduce_info, {})
     output_st = ShapeTracker.from_shape(list(reduce_info)[-1].shape if reduce_info else out.shape)
     output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
