@@ -120,6 +120,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
   SEED = getenv("SEED", 42)
   random.seed(SEED)
   np.random.seed(SEED)
+  print(lin.ast)
   print(lin.colored_shape())
   seen_uops = {}
   last_lins = [lin]
