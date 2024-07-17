@@ -1,4 +1,4 @@
-import time
+import time, sys
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
@@ -14,7 +14,7 @@ if __name__ == "__main__":
   Tensor.no_grad = True
   Tensor.training = False
 
-  onnx_model = onnx.load(onnx_path := fetch(OPENPILOT_MODEL))
+  onnx_model = onnx.load(onnx_path := fetch(sys.argv[1] if len(sys.argv) > 1 else OPENPILOT_MODEL))
   run_onnx = get_run_onnx(onnx_model)
 
   Tensor.manual_seed(100)
