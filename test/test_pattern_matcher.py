@@ -175,5 +175,13 @@ class TestPatternMatcher(TestUOps):
     self.assert_equiv_uops(e2, uops.uops[1])
     self.assert_equiv_uops(e3, uops.uops[2])
 
+  def test_upat_str(self):
+    upat = UPat(UOps.CONST, name="x", dtype=dtypes.float)
+    assert str(upat) == str(eval(str(upat)))
+    for i in range(10):
+      upat = UPat(UOps.ALU, name="x", src=[upat, upat], arg=BinaryOps.ADD)
+    assert str(upat).count('\n') < 100
+    assert str(eval(str(upat))) == str(upat)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

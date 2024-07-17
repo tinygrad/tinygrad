@@ -333,5 +333,12 @@ class TestUOpCompare(unittest.TestCase):
     mul = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.MUL)
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
+class TestUOpStr(TestUOps):
+  def test_uop_str(self):
+    a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
+    for i in range(10): a = a + a
+    assert str(eval(str(a))) == str(a)
+    assert str(a).count('\n') < 100, "exponential string growth"
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
