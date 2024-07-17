@@ -3487,9 +3487,9 @@ if IMAGE:
   setattr(Tensor, "conv2d", Tensor.image_conv2d)
   setattr(Tensor, "dot", Tensor.image_dot)
 
-def _argparse_dim(func):
+def _argparse_dim(func, signature):
   def _wrapper(*args, **kwargs):
-    bound_args = inspect.signature(func).bind(*args, **kwargs)
+    bound_args = signature.bind(*args, **kwargs)
     for main, alias in [("dim", "axis"), ("keepdim", "keepdims")]:
       if (alias_val := kwargs.get(alias)) is not None:
         if bound_args.arguments.get(main) is not None: raise TypeError(f"cannot specify both '{main}' and '{alias}'. Use only one.")
@@ -3497,8 +3497,8 @@ def _argparse_dim(func):
     return func(*bound_args.args, **bound_args.kwargs)
   return _wrapper
 
-for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-  if {"dim", "keepdim"} & set(inspect.signature(fn).parameters): setattr(Tensor, name, functools.wraps(fn)(_argparse_dim(fn)))
+for nm, fn in inspect.getmembers(Tensor, inspect.isfunction):
+  if "dim" in (sig:=inspect.signature(fn)).parameters or "keepdim" in sig.parameters: setattr(Tensor, nm, functools.wraps(fn)(_argparse_dim(fn, sig)))
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
