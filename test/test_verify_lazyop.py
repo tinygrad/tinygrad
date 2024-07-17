@@ -1,24 +1,22 @@
 from __future__ import annotations
 import unittest
-from tinygrad.codegen.linearizer import Linearizer
-#from tinygrad.codegen.lowerer import Lowerer
+from tinygrad.codegen.kernel import Kernel
+#from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, LazyOp, ReduceOps, verify_lazyop
+from tinygrad.ops import BufferOps, MemBuffer, LazyOp, ReduceOps, MetaOps, verify_lazyop
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
 from tinygrad.shape.view import View
 
-class LazyOp(LazyOp):
-  def __add__(self, other:LazyOp): return LazyOp(BinaryOps.ADD, (self, other))
-
 class InvalidLazyOpException(Exception): pass
 def lower(*ast:LazyOp):
+  sink_ast = LazyOp(MetaOps.SINK, ast)
   if DEBUG >= 3:
     for op in ast: print_tree(op)
-  try: verify_lazyop(*ast)
+  try: verify_lazyop(sink_ast)
   except AssertionError: raise InvalidLazyOpException()
-  k = Linearizer(*ast)
+  k = Kernel(sink_ast)
   k.linearize()
   if DEBUG >= 6: k.uops.print()
   if DEBUG >= 4: print(k.to_program().src)

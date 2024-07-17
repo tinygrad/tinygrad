@@ -129,6 +129,8 @@ class TestOps(unittest.TestCase):
 
   def test_eye(self):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
+    helper_test_op([], lambda: torch.eye(3, 5), lambda: Tensor.eye(3, 5), forward_only=True)
+    helper_test_op([], lambda: torch.eye(5, 3), lambda: Tensor.eye(5, 3), forward_only=True)
     helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
     helper_test_op([], lambda: torch.eye(0), lambda: Tensor.eye(0), forward_only=True)
 
@@ -278,19 +280,25 @@ class TestOps(unittest.TestCase):
     (t*(t < 0)).sum().backward()
     np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
 
+  # TODO: fix backward of these functions
   def test_trunc(self):
+    helper_test_op([()], lambda x: x.trunc(), forward_only=True)
     helper_test_op([(45,35)], lambda x: x.trunc(), forward_only=True)
     helper_test_op(None, lambda x: x.trunc(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_floor(self):
+    helper_test_op([()], lambda x: x.floor(), forward_only=True)
     helper_test_op([(45,35)], lambda x: x.floor(), forward_only=True)
     helper_test_op(None, lambda x: x.floor(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_ceil(self):
+    helper_test_op([()], lambda x: x.ceil(), forward_only=True)
     helper_test_op([(45,35)], lambda x: x.ceil(), forward_only=True)
     helper_test_op(None, lambda x: x.ceil(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_round(self):
+    helper_test_op([()], lambda x: x.round(), forward_only=True)
     helper_test_op([(45,35)], lambda x: x.round(), forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[2.5, -1.5]], forward_only=True)
+
   def test_lerp(self):
     helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
     helper_test_op(None, lambda x,y,z: x.lerp(y,z), vals=[[1.,2.,3.], [4.,5.,6.], 0.5])
@@ -509,14 +517,22 @@ class TestOps(unittest.TestCase):
     # works on real CUDA but not CUDACPU
     if not (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")):
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf]])
+      helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
+                    atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
+    if not (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")):
+      helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
+                    atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   def test_tan(self):
     # NOTE: backward has much higher diff with input close to pi/2 and -pi/2
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
     helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5, forward_only=True)
     helper_test_op([()], lambda x: x.tan())
+    if not (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")):
+      helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
+                    atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
 
   def test_relu(self):
     helper_test_op([(64,64)], lambda x: x.relu())
@@ -838,6 +854,28 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.max().mul(0.5), vals=[[[1.0,1.0,0.0,1.0]],])
     helper_test_op([(3,4,5,6)], lambda x: x.max(axis=1)[0], lambda x: x.max(axis=1))
     helper_test_op([()], lambda x: x.max())
+
+  def test_any(self):
+    helper_test_op([(3,4,5,6)], lambda x: x.any(), forward_only=True)
+    helper_test_op(None, lambda x: x.any(), vals=[[True, True]], forward_only=True)
+    helper_test_op(None, lambda x: x.any(), vals=[[True, False]], forward_only=True)
+    helper_test_op(None, lambda x: x.any(), vals=[[False, False]], forward_only=True)
+    helper_test_op([()], lambda x: x.any(), forward_only=True)
+  def test_any_axis(self):
+    helper_test_op([(3,4,5,6)], lambda x: x.any(axis=(1,2)), forward_only=True)
+  def test_any_zero_axis(self):
+    helper_test_op([(1,0,3,0,5)], lambda x: x.any(axis=(1,3)), forward_only=True)
+
+  def test_all(self):
+    helper_test_op([(3,4,5,6)], lambda x: x.all(), forward_only=True)
+    helper_test_op(None, lambda x: x.all(), vals=[[True, True]], forward_only=True)
+    helper_test_op(None, lambda x: x.all(), vals=[[True, False]], forward_only=True)
+    helper_test_op(None, lambda x: x.all(), vals=[[False, False]], forward_only=True)
+    helper_test_op([()], lambda x: x.all(), forward_only=True)
+  def test_all_axis(self):
+    helper_test_op([(3,4,5,6)], lambda x: x.all(axis=(1,2)), forward_only=True)
+  def test_all_zero_axis(self):
+    helper_test_op([(1,0,3,0,5)], lambda x: x.all(axis=(1,3)), forward_only=True)
 
   def test_mean(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean())
@@ -1594,6 +1632,13 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
+  def test_maxpool2d_padding(self):
+    for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
+      with self.subTest(kernel_size=ksz):
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=1),
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=1))
+
   def test_maxpool2d_bigger_stride(self):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
@@ -1635,10 +1680,62 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), rtol=1e-5)
 
+  def test_avgpool2d_padding(self):
+    shape = (32,2,111,28)
+    for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
+      with self.subTest(kernel_size=ksz):
+        helper_test_op([shape],
+          lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1),
+          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1), rtol=1e-5)
+
+  def test_avgpool2d_padding_not_counted(self):
+    shape = (32,2,111,28)
+    for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
+      with self.subTest(kernel_size=ksz):
+        helper_test_op([shape],
+          lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, count_include_pad=False),
+          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1, count_include_pad=False), rtol=1e-5)
+
   def test_global_avgpool2d(self):
     helper_test_op([(32,2,111,28)],
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
+
+  def test_interpolate_linear(self):
+    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"))
+
+  def test_interpolate_linear_corners_aligned(self):
+    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear", align_corners=True),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True))
+
+  def test_interpolate_bilinear(self):
+    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="bilinear"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"), atol=1e-4)
+
+  def test_interpolate_bilinear_corners_aligned(self):
+    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="bilinear", align_corners=True),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True), atol=1e-4)
+
+  def test_interpolate_trilinear(self):
+    for in_sz, out_sz in [((5,2,8),(3,6,4))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="trilinear"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"), atol=1e-4)
+
+  def test_interpolate_trilinear_corners_aligned(self):
+    for in_sz, out_sz in [((5,2,8),(3,6,4))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="trilinear", align_corners=True),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True), atol=1e-4)
 
   def test_cat(self):
     for dim in range(-2, 3):
@@ -1698,7 +1795,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.clip(10, 100))
     helper_test_op([(45,65)], lambda x: x.clip(0, 0.1))
     helper_test_op([(45,65)], lambda x: x.clip(-0.3, -0.2))
-    helper_test_op([(45,65)], lambda x: x.clip(3, 0))
+    helper_test_op([(45,65)], lambda x: x.clip(3, 0))  # min > max
+    helper_test_op([(45,65)], lambda x: x.clip(None, 0))
+    helper_test_op([(45,65)], lambda x: x.clip(0, None))
+    self.helper_test_exception([(45,65)], lambda x: x.clip(None, None), lambda x: x.clip(None, None), RuntimeError)
 
   def test_matvecmat(self):
     helper_test_op([(1,128), (128,128), (128,128)], lambda x,y,z: (x@y).relu()@z)
@@ -1822,6 +1922,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=1, index=b), lambda x: x.gather(dim=1, index=a))
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=2, index=b), lambda x: x.gather(dim=2, index=a))
     helper_test_op([(3,4,5)], lambda x: x.gather(dim=0, index=b), lambda x: x.gather(dim=0, index=a))
+    helper_test_op([(4,5,6)], lambda x: x.gather(dim=-1, index=b), lambda x: x.gather(dim=-1, index=a))
+    helper_test_op([(4,5,6)], lambda x: x.gather(dim=-2, index=b), lambda x: x.gather(dim=-2, index=a))
+    helper_test_op([(4,5,6)], lambda x: x.gather(dim=-3, index=b), lambda x: x.gather(dim=-3, index=a))
     self.helper_test_exception([(4,5,6)], lambda x: x.gather(dim=0, index=torch.tensor([1], dtype=torch.int64)),
                                           lambda x: x.gather(dim=0, index=Tensor([1], dtype=dtypes.int32)), expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(2,1,1)], lambda x: x.gather(dim=0, index=b),
@@ -1865,6 +1968,13 @@ class TestOps(unittest.TestCase):
   def test_masked_fill(self):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))
     helper_test_op([(32,10)], lambda x: x.masked_fill((x<0.1).detach(), -math.inf))
+
+  def test_cast(self):
+    helper_test_op([(3, 3)], lambda x: x.float())
+    helper_test_op(None, lambda x: x.float(), vals=[[0, 1, 2, 3]], forward_only=True)
+    helper_test_op(None, lambda x: x.float(), vals=[[True, False]], forward_only=True)
+    helper_test_op([(3, 3)], lambda x: x.int(), forward_only=True)
+    helper_test_op([(3, 3)], lambda x: x.bool(), forward_only=True)
 
 if __name__ == '__main__':
   np.random.seed(1337)

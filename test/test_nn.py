@@ -4,9 +4,9 @@ import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
 from tinygrad.helpers import CI, Context
-from tinygrad.ops import BufferOps
+from tinygrad.ops import MetaOps
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
-from tinygrad.nn import BatchNorm2d, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm
+from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -27,12 +27,12 @@ class TestNN(unittest.TestCase):
         torch_loss = torch.nn.CrossEntropyLoss(reduction='mean', label_smoothing=smoothing, ignore_index=ignore_index)(torch_input, torch_target)
         np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
 
-  def test_batchnorm2d(self, training=False):
+  def test_batchnorm2d(self, training=False, threed=False):
     with Tensor.train(training):
       szs = [4, 8, 16, 32]
       for sz in szs:
         # create in tinygrad
-        bn = BatchNorm2d(sz, eps=1e-5, track_running_stats=training)
+        bn = BatchNorm(sz, eps=1e-5, track_running_stats=training)
         bn.weight = Tensor.randn(sz)
         bn.bias = Tensor.randn(sz)
         bn.running_mean = Tensor.randn(sz)
@@ -41,7 +41,10 @@ class TestNN(unittest.TestCase):
 
         # create in torch
         with torch.no_grad():
-          tbn = torch.nn.BatchNorm2d(sz).eval()
+          if threed:
+            tbn = torch.nn.BatchNorm3d(sz).eval()
+          else:
+            tbn = torch.nn.BatchNorm2d(sz).eval()
           tbn.training = training
           tbn.weight[:] = torch.tensor(bn.weight.numpy())
           tbn.bias[:] = torch.tensor(bn.bias.numpy())
@@ -52,7 +55,10 @@ class TestNN(unittest.TestCase):
         np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
 
         # trial
-        inn = Tensor.randn(2, sz, 3, 3)
+        if threed:
+          inn = Tensor.randn(2, sz, 3, 3, 3)
+        else:
+          inn = Tensor.randn(2, sz, 3, 3)
 
         # in tinygrad
         outt = bn(inn)
@@ -67,6 +73,9 @@ class TestNN(unittest.TestCase):
 
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
+
+  def test_batchnorm3d(self): self.test_batchnorm2d(False, True)
+  def test_batchnorm3d_training(self): self.test_batchnorm2d(True, True)
 
   def test_batchnorm_axis(self):
     sz = (2, 4, 3, 2, 2)
@@ -431,7 +440,7 @@ class TestNN(unittest.TestCase):
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(3, len([item for item in schedule if item.ast[0].op is BufferOps.STORE]), "first run realizes arange, weight, and embedding")
+    self.assertEqual(3, len([item for item in schedule if item.ast.op is MetaOps.SINK]), "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
     b = Tensor([[1, 2, 3],
@@ -439,7 +448,7 @@ class TestNN(unittest.TestCase):
                 [7, 8, 9]])
     result = layer(b)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(1, len([item for item in schedule if item.ast[0].op is BufferOps.STORE]), "second run realizes embedding only")
+    self.assertEqual(1, len([item for item in schedule if item.ast.op is MetaOps.SINK]), "second run realizes embedding only")
     run_schedule(schedule)
 
   def test_load_state_dict(self):

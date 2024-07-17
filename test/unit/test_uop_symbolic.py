@@ -8,7 +8,8 @@ import unittest, pickle
 
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.codegen.uops import UOp, UOps, UOpGraph
+from tinygrad.codegen.uops import UOp, UOps
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.ops import BinaryOps
 import functools
 
