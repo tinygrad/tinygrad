@@ -39,7 +39,7 @@ class UPat:
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
   def __repr__(self):
-    def rep(x): return f"UPat(({x.op if isinstance(x.op, UOps) else ', '.join(str(x) for x in x.op)}), {x.arg}, name={x.name}, dtype={x.dtype}, src=("
+    def rep(x): return f"UPat(({', '.join(str(x) for x in x.op) if isinstance(x.op, set) else x.op}), {x.arg}, name={x.name}, dtype={x.dtype}, src=("
     return pretty_print(self, rep, lambda x: [] if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:

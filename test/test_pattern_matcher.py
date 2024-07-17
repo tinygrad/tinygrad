@@ -3,7 +3,7 @@ from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
 from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat, _match
+from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat, _match, constant_folder
 
 class TestPatternMatcher(TestUOps):
   def test_simple_match(self):
@@ -182,6 +182,10 @@ class TestPatternMatcher(TestUOps):
       upat = UPat(UOps.ALU, name="x", src=[upat, upat], arg=BinaryOps.ADD)
     assert str(upat).count('\n') < 100
     assert str(eval(str(upat))) == str(upat)
+    for pat in constant_folder.pdict.values():
+      eval_pat = eval(str(pat))
+      assert type(eval_pat.op) is type(pat.op)
+      assert type(eval.src) is type(pat.src)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
