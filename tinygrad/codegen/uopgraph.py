@@ -350,8 +350,6 @@ constant_folder = PatternMatcher([
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
 ])
 
-constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.patterns)
-
 # *** uop expander ***
 
 def _expand_arg_to_idx(arg:Tuple[Tuple[int, int], ...], rpk:Dict[int, int]):
@@ -497,7 +495,7 @@ class UOpGraph:
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
-    self.folder = constant_folder if opts is None or not opts.supports_float4 else constant_folder_w_f4
+    self.folder = constant_folder if opts is None or not opts.supports_float4 else (constant_folder+float4_folding)
     if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
       self.folder = self.folder + transcendental_folding
 
