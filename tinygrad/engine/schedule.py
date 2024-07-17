@@ -1,4 +1,4 @@
-import sys, pickle, atexit
+import sys, pickle, atexit, functools
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
@@ -106,7 +106,13 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None], re
   ast: List[LazyOp] = []
   inputs: List[LazyBuffer] = []
   reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
+  def _recurse_reduceops(op:LazyBuffer, st:ShapeTracker, cache):
+    if op.base.realized is not None or (op.base in realizes and op.base not in outs): return
+    if op is not op.base: op = op.base
+    for x in op.srcs: _recurse_reduceops(x, st, cache)
+    cache.setdefault((op, st))
   for i, out in enumerate(outs):
+    _recurse_reduceops(out, out.st, {})
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
