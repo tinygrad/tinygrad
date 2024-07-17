@@ -546,11 +546,13 @@ class UOpGraph:
 
     # do graph rewrite
     sink = graph_rewrite(sink, self.folder)
-    if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
 
     # expand
     UOpGraph.cnt += 1
-    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, (expander+self.folder+extra_pm) if extra_pm else (expander+self.folder))
+    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, expander+self.folder)
+
+    # for PTX only
+    if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
 
     # filter nodes that don't link to a sink
     # BFS toposort
