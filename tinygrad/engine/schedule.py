@@ -39,9 +39,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer],
                       reduce_info:Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> LazyOp:
   """recursively create a lazyop"""
-  # TODO: is this correct?
-  if (buf, st) in cache: return cache[(buf, st)]
   if buf is not buf.base: st, buf = buf.st+st, buf.base
+  if (buf, st) in cache: return cache[(buf, st)]
   arg = buf.arg
 
   # consts are always fused and generated
