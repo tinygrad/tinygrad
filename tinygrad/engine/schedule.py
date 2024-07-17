@@ -1,6 +1,6 @@
 import sys, pickle, atexit
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
@@ -83,7 +83,13 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)
 
   # if it's a reduce, we have to change the shapetracker
-  if buf.op in ReduceOps: st, arg = reduce_info[buf]
+  if buf.op in ReduceOps:
+    if not st.contiguous:
+      input_lop = _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, input_st:=reduce_info[buf][0], realizes, assign_targets, reduce_info, cache)
+      assert input_lop.op is BufferOps.CONST, f"reduceop late fixup not supported for input {input_lop.op}"
+      # TODO: why is the input_lop ShapeTracker wrong?
+      return LazyOp(cast(Op,buf.op), (replace(input_lop, arg=replace(input_lop.arg, st=input_st)),), reduce_info[buf][1])
+    st, arg = reduce_info[buf]
 
   # otherwise we fuse it like normal
   return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, \
