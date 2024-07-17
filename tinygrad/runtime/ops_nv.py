@@ -451,13 +451,13 @@ class NVDevice(HCQCompatCompiled):
 
     # NOTE: va_addr is set to make rawbufs compatable with AMD.
     return uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
-                                       gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size)
+                                       gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size, mapped_gpu_ids=[self.gpu_uuid])
 
   def _gpu_map(self, mem):
     mem = mem._base if hasattr(mem, '_base') else mem
-    if self.gpu_uuid in getattr(mem, "mapped_gpu_ids", []): return
-    mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_uuid])
-    return self._gpu_uvm_map(mem.va_addr, mem.size, mem.hMemory, create_range=False)
+    if self.gpu_uuid in mem.mapped_gpu_ids: return
+    mem.mapped_gpu_ids.append(self.gpu_uuid)
+    self._gpu_uvm_map(mem.va_addr, mem.size, mem.hMemory, create_range=False)
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10)):
     NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
@@ -546,19 +546,19 @@ class NVDevice(HCQCompatCompiled):
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
-                     functools.partial(NVProgram, self), NVComputeQueue, NVCopyQueue, timeline_signals=[self._alloc_signal(), self._alloc_signal()])
+                     functools.partial(NVProgram, self), NVComputeQueue, NVCopyQueue, timeline_signals=(self._alloc_signal(), self._alloc_signal()))
 
     self._setup_gpfifos()
     NVDevice.devices.append(self)
 
   @classmethod
-  def _read_signal(self, sig): return sig[0]
+  def _read_signal(self, signal): return signal[0]
 
   @classmethod
-  def _read_timestamp(self, sig): return sig[1]
+  def _read_timestamp(self, signal): return signal[1]
 
   @classmethod
-  def _set_signal(self, sig, value): sig[0] = value
+  def _set_signal(self, signal, value): signal[0] = value
 
   @classmethod
   def _alloc_signal(self, value=0, **kwargs) -> memoryview:
@@ -566,7 +566,7 @@ class NVDevice(HCQCompatCompiled):
     return sig
 
   @classmethod
-  def _free_signal(self, sig): self.signals_pool.append(sig)
+  def _free_signal(self, signal): self.signals_pool.append(signal)
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000):

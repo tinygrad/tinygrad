@@ -122,6 +122,47 @@ class TestLinearizer(unittest.TestCase):
     y_tiny = x.var(axis=2, correction=0)
     np.testing.assert_allclose(y_tiny.numpy(), wanna_output, atol=1e-4, rtol=1e-4)
 
+  # *** buildup to fused indexing
+  @unittest.skipIf(CI, "very slow because of recomputing")
+  def test_arange_expanded(self):
+    # Tensor.arange(16384) expanded such that output shape is (4, 16384, 256, 1)
+    # basically it's pushing the expand through this reduce:
+    tiny = Tensor.arange(16384).reshape(16384, 1).expand(4, 16384, 256).reshape(4, 16384, 256, 1)
+    real_arange = np.broadcast_to(np.arange(16384).reshape(16384, 1), (4, 16384, 256)).reshape(4, 16384, 256, 1)
+    # NOTE: this is stupidly recomputing because it's not fused, but it proves a point.
+    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), \
+        View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
+    arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
+    arange_axis = (3,)
+    arange = LazyOp(ReduceOps.SUM, (LazyOp(BufferOps.CONST, (), ConstBuffer(1, dtypes.int, arange_input_st)), ), arange_axis)
+    output_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
+    out = arange-LazyOp.const(1, dtypes.int, output_shape)
+    store = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, dtypes.int, st=ShapeTracker.from_shape(output_shape)))
+    helper_linearizer_ast((store, ), [], wanna_output=[real_arange])
+    with Context(DEBUG=0, NOOPT=0): np.testing.assert_equal(tiny.numpy(), real_arange)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "very slow")
+  def test_indexing_multireduce(self):
+    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), \
+        View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
+    # TODO: do this arange broadcast in the scheduler
+    arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
+    arange_axis = (3,)
+    arange = LazyOp(ReduceOps.SUM, (LazyOp(BufferOps.CONST, (), ConstBuffer(1, dtypes.int, arange_input_st)), ), arange_axis)
+    arange_out_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
+    arange = arange-LazyOp.const(1, dtypes.int, arange_out_shape)
+    # p2: the indexing
+    dataset = Tensor.rand(16384, 256).realize()
+    data1 = MemBuffer(1, dataset.dtype, ShapeTracker.from_shape(dataset.shape).reshape((1, 16384, 256, 1)).expand(arange_out_shape))
+    idxs = Tensor([0,3,5,6]).realize()
+    data2 = MemBuffer(2, dtypes.int, ShapeTracker.from_shape((4,)+(1,)*(len(arange_out_shape)-1)).expand(arange_out_shape))
+    reduce_input = LazyOp(BufferOps.LOAD, (), data1)*LazyOp(UnaryOps.CAST, (arange.eq(LazyOp(BufferOps.LOAD, (), data2)),), dataset.dtype)
+    out = LazyOp(ReduceOps.SUM, (reduce_input, ), (1,))
+    output_shape = tuple(1 if i in out.arg else s for i,s in enumerate(arange_out_shape))
+    store = LazyOp(BufferOps.STORE, (out, ), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape)))
+    real_index = dataset.numpy()[idxs.numpy()].reshape(4, 1, 256, 1)
+    helper_linearizer_ast((store, ), [dataset, idxs], wanna_output=[real_index])
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_end_local(self):
@@ -166,7 +207,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(4, 1).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a + b[0]).sum() + b[0]
-    lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()[0]])[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     # LOAD -> RANGE -> LOAD -> PHI
     assert lin.uops[ranges[0]-2].op is UOps.LOAD
@@ -176,7 +217,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a.reshape(2, 1).expand(2, 3) + b[0]).sum() + b[0]
-    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()[0]])[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     if getenv("PTX"):
     # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> PHI
@@ -1046,10 +1087,10 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 1
     assert k.upcasted == 1
 
-def helper_linearizer_ast(_ast:Tuple[LazyOp, ...], inputs:List[Tensor], *args, **kwargs):
-  if not isinstance(_ast, LazyOp): ast = LazyOp(MetaOps.SINK, _ast)
+def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp], inputs:List[Tensor], *args, **kwargs):
+  if not isinstance(ast, LazyOp): ast = LazyOp(MetaOps.SINK, ast)
   inbufs = [x.lazydata.buffer for x in inputs]
-  outbufs = [Buffer(inbufs[-1].device, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
+  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Union[Tensor, List[Tensor]], *args, **kwargs):
@@ -1059,7 +1100,7 @@ def helper_linearizer_opt(r:Union[Tensor, List[Tensor]], *args, **kwargs):
 def _helper_linearizer_opt_ast(realized_ast:LazyOp, real_bufs:List[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> List[Kernel]:
   lins: List[Kernel] = []
-  outbufs = [real_bufs[i] for i in range(len(realized_ast.src))]
+  outbufs = [(real_bufs[i], lop.arg.st.shape) for i,lop in enumerate(realized_ast.src)]
 
   def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
 
@@ -1074,31 +1115,31 @@ def _helper_linearizer_opt_ast(realized_ast:LazyOp, real_bufs:List[Buffer], opts
     if expected_color_size is not None:
       assert (cs:=list(zip(k.colors(), k.full_shape))) == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = get_prg(k)
-    for buf in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
+    for buf,_ in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
 
-    for i, buf in enumerate(outbufs):
-      np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)), wanna_output[i], atol=atol, rtol=rtol)
+    for i, (buf,shape) in enumerate(outbufs):
+      np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).reshape(shape), wanna_output[i], atol=atol, rtol=rtol)
 
   # Get baseline if it is not provided, which is not optimized at all.
   k = Kernel(realized_ast)
   lins.append(k)
   prg = get_prg(k)
   prg.exec(real_bufs)
-  if len(wanna_output) == 0: wanna_output = [np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).copy() for buf in outbufs]
+  if len(wanna_output) == 0: wanna_output = [np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).reshape(shape).copy() for buf,shape in outbufs]
   else:
-    for i, buf in enumerate(outbufs):
-      np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)), wanna_output[i], atol=atol, rtol=rtol)
+    for i, (buf,shape) in enumerate(outbufs):
+      np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).reshape(shape), wanna_output[i], atol=atol, rtol=rtol)
 
   # Check correctness of handcoded optimiztions.
   k = Kernel(realized_ast)
   lins.append(k)
   k.hand_coded_optimizations()
   prg = get_prg(k)
-  for buf in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
+  for buf,_ in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
-  for i, buf in enumerate(outbufs):
-    np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)), wanna_output[i], atol=atol, rtol=rtol)
+  for i, (buf,shape) in enumerate(outbufs):
+    np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).reshape(shape), wanna_output[i], atol=atol, rtol=rtol)
   for i, x in enumerate(opts): # Check custom transformations if any.
     check_opt(x, lambda: Kernel(realized_ast), color_sizes[i] if i < len(color_sizes) else None)
   return lins
@@ -1172,6 +1213,10 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)],
       # Checking how it works with locals + grouped reduce + upcasts
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
+      # many local + many group
+      [Opt(OptOps.GROUP, 0, 2)] * 4,
+      [Opt(OptOps.LOCAL, 0, 2)] * 4,
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)] * 4,
     ])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
@@ -1745,7 +1790,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
       # can optimize further post PADTO
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
-    ], wanna_output=[(a.numpy()@b.numpy()+c.numpy()@d.numpy()).reshape(-1)])
+    ], wanna_output=[(a.numpy()@b.numpy()+c.numpy()@d.numpy()).reshape(N, N, 1)])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")

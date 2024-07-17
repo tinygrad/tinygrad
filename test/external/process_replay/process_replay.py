@@ -20,7 +20,7 @@ def process_replay(offset:int):
   changed = 0
   for row in cur.fetchall():
     ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
-    with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache}):
+    with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
       # try linearize
       try:
         k = Kernel(ast, opts=opts)
@@ -45,7 +45,7 @@ def process_replay(offset:int):
           logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ASSERT_DIFF: raise e
         if changed > MAX_DIFF_PCT:
-          logging.warn(f"detected chanegs in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
+          logging.warn(f"detected changes in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
           early_stop.set()
           break
   conn.commit()
@@ -58,4 +58,7 @@ if __name__ == "__main__":
   conn.commit()
   cur.close()
   offsets = range(0, row_count, PAGE_SIZE)
-  with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool: list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
+  with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+    list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
+    pool.close()
+    pool.join()
