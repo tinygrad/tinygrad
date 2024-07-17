@@ -39,8 +39,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer],
                       reduce_info:Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> LazyOp:
   """recursively create a lazyop"""
-  if (buf, st) in cache: return cache[(buf, st)]
   if buf is not buf.base: st, buf = buf.st+st, buf.base
+  if (buf, st) in cache: return cache[(buf, st)]
   arg = buf.arg
 
   # consts are always fused and generated
@@ -92,14 +92,14 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
 def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
+  cache.setdefault((buf, st))
   if buf is not buf.base: st, buf = buf.st+st, buf.base
+  for x in buf.srcs: _recurse_reduceops(x, buf.srcs[0].st if buf.op in ReduceOps else st, realizes, outs, reduce_info, cache)
   if buf.op in ReduceOps:
     reduce_input, axis = buf.srcs[0], buf.arg
     assert st.contiguous
     st = ShapeTracker.from_shape(reduce_input.shape)
     reduce_info[buf] = (st, axis)
-  for x in buf.srcs: _recurse_reduceops(x, st, realizes, outs, reduce_info, cache)
-  cache.setdefault((buf, st))
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
@@ -113,9 +113,10 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   ast: List[LazyOp] = []
   inputs: List[LazyBuffer] = []
   reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
+  seen_ops: Dict[Tuple[LazyBuffer, ShapeTracker], None] = {}
   for i, out in enumerate(outs):
-    _recurse_reduceops(out, out.st, realizes, outs, reduce_info, {})
-    output_st = ShapeTracker.from_shape(reduce_st(*next(iter(reduce_info.values()))) if reduce_info else out.shape)
+    _recurse_reduceops(out, out.st, realizes, outs, reduce_info, seen_ops)
+    output_st = ShapeTracker.from_shape(reduce_st(*deque(reduce_info.values(), 1).pop()) if reduce_info else out.shape)
     output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
     output_view, vv = output_view.simplify().unbind()
