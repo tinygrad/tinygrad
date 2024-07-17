@@ -51,9 +51,8 @@ if __name__ == "__main__":
   failures = defaultdict(list)
   for i, test_lin in enumerate(test_lins):
     print(f"testing kernel {i}")
-    for op in test_lin.ast:
-      print_tree(op)
-      print(op)
+    print_tree(test_lin.ast)
+    print(test_lin.ast)
     print(test_lin.applied_opts)
     unoptimized_lin = Kernel(test_lin.ast)
     unoptimized_lin.required_optimizations()

@@ -167,8 +167,6 @@ class TestFromFuzzer(unittest.TestCase):
     if dtype == dtypes.float64:
       # crashes in CUDACPU
       if (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")): return
-      # fails now. TODO: fix
-      if Device.DEFAULT == "NV": return
     def _test_value(n: float, unit: float=1.0):
       next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
       ulp = next_float - 1.0
@@ -189,8 +187,6 @@ class TestFromFuzzer(unittest.TestCase):
     if dtype == dtypes.float64:
       # crashes in CUDACPU
       if (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")): return
-      # fails now. TODO: fix
-      if Device.DEFAULT == "NV": return
     def _test_value(n: float, unit: float=1.0):
       next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
       ulp = next_float - 1.0
