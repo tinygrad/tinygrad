@@ -385,7 +385,7 @@ class TestExpander(unittest.TestCase):
     e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
     sink = UOp(UOps.REDUCE, dtypes.int, (e1,e2), ReduceOps.SUM)
     sink = expander_rewrite(sink)
-    print_tree(sink)
+    print(sink)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
