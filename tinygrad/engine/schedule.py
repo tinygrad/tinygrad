@@ -40,9 +40,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
                       reduce_info:Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> LazyOp:
   """recursively create a lazyop"""
   if (buf, st) in cache: return cache[(buf, st)]
-  if buf != buf.base:
-    st = buf.st + st
-    buf = buf.base
+  if buf is not buf.base: st, buf = buf.st+st, buf.base
   arg = buf.arg
 
   # consts are always fused and generated
@@ -92,18 +90,16 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, \
       reduce_info, cache) for x in buf.srcs), arg))
 
-def _recurse_reduceops(op:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
-  if op.base.realized is not None or (op.base in realizes and op.base not in outs) or (op, st) in cache: return
-  if op is not op.base:
-    st = op.st + st
-    op = op.base
-  if op.op in ReduceOps:
-    reduce_input, axis = op.srcs[0], op.arg
+def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
+  if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
+  if buf is not buf.base: st, buf = buf.st+st, buf.base
+  if buf.op in ReduceOps:
+    reduce_input, axis = buf.srcs[0], buf.arg
     assert st.contiguous
     st = ShapeTracker.from_shape(reduce_input.shape)
-    reduce_info[op] = (st, axis)
-  for x in op.srcs: _recurse_reduceops(x, st, realizes, outs, reduce_info, cache)
-  cache.setdefault((op, st))
+    reduce_info[buf] = (st, axis)
+  for x in buf.srcs: _recurse_reduceops(x, st, realizes, outs, reduce_info, cache)
+  cache.setdefault((buf, st))
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
