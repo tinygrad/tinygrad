@@ -346,6 +346,8 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (UOp(UOps.SINK).name("root"),
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
+  # ALL_SAME
+  (UOp(UOps.ALL_SAME).name("root"), lambda root: lst[0] if all_same(lst:=[x for x in root.src if x.op is not UOps.CONST or x.arg != 0.0]) else None),
 ])
 
 constant_folder_w_f4 = PatternMatcher(constant_folder.patterns + float4_folding.patterns)
@@ -453,13 +455,6 @@ def do_contract(con:UOp):
     srcs += [UOp(UOps.VECTORIZE, con.dtype, tuple(src)) for src in zip(*to_join[i:i+con.dtype.count])]
   return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x[0] != con.arg[0]))
 
-def assert_all_same(root:UOp):
-  if not all_same(list(root.src)):
-    from tinygrad.engine.graph import print_tree
-    for s in root.src: print_tree(s)
-    return None
-  return root.src[0]
-
 expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
@@ -475,8 +470,6 @@ expander = PatternMatcher([
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
   # empty EXPAND is NOOP
   (UOp(UOps.EXPAND, src=(UOp.var('x'),), arg=()), lambda x: x),
-  # ALL_SAME
-  (UOp(UOps.ALL_SAME).name("root"), assert_all_same),
 ])
 
 # *** uop graph ***
