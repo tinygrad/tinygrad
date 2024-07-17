@@ -1,8 +1,8 @@
 import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
-from tinygrad.ops import MetaOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
+from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
+from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
@@ -43,8 +43,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   if buf != buf.base:
     st = buf.st + st
     buf = buf.base
-  # all buffers here are base now
-  assert buf.op is not None
+  arg = buf.arg
 
   # consts are always fused and generated
   if buf.op is MetaOps.CONST:
@@ -87,12 +86,11 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
     assert st.contiguous, "ReduceOps late fusion must be contiguous"
-    st = ShapeTracker.from_shape(buf.srcs[0].shape)
+    st, arg = reduce_info[buf]
 
   # otherwise we fuse it like normal
-  ret = LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets,\
-      reduce_info, cache) for x in buf.srcs), buf.arg)
-  return cache.setdefault((buf, st), ret)
+  return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, \
+      reduce_info, cache) for x in buf.srcs), arg))
 
 def _recurse_reduceops(op:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
   if op.base.realized is not None or (op.base in realizes and op.base not in outs) or (op, st) in cache: return
