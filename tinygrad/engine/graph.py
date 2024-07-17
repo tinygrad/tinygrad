@@ -86,6 +86,7 @@ def _tree(dag:Union[LazyOp, UOp, UPat], cycles, cnt):
   childs = [_tree(c, cycles, cnt) for c in src]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
+
 def print_tree(dag:Union[LazyOp, UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(dag, {}, [-1]))]))
 
 def graph_uops(uops:List[UOp]):
