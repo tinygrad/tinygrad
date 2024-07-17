@@ -368,6 +368,7 @@ def train_retinanet():
   EVAL_ONLY       = config['EVAL_ONLY']   = getenv('EVAL_ONLY')
   CHKPT_PATH      = config['CHKPT_PATH']  = getenv('CHKPT_PATH', 'ckpts/retinanet_6xtiny_B96_E4.safe')
   TRAIN_ONLY      = config['TRAIN_ONLY']  = getenv('TRAIN_ONLY')
+  PART_BATCH      = config['PART_BATCH']  = getenv('PART_BATCH', 1)
 
   Tensor.manual_seed(SEED)
   np.random.seed(SEED)
@@ -382,6 +383,7 @@ def train_retinanet():
   from extra.models import resnet
   from tinygrad.nn import BatchNorm2d
   from examples.hlb_cifar10 import UnsyncedBatchNorm
+  from tinygrad.multi import MultiLazyBuffer
   from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
   from tinygrad.nn.optim import Adam
   from examples.mlperf.helpers import anchor_generator
@@ -408,7 +410,20 @@ def train_retinanet():
     resnet.BatchNorm = functools.partial(BatchNorm2d, eps=0.0)
     resnet.BatchNorm.__call__ = cust_call_bn
   else:
-    resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
+    class CustUnsyncedBN(UnsyncedBatchNorm):
+      def __call__(self, x:Tensor):
+        if isinstance(x.lazydata, MultiLazyBuffer): assert x.lazydata.axis is None or x.lazydata.axis == 0 and len(x.lazydata.lbs) == self.num_devices
+        nd = x.shape[0]%self.num_devices
+        if nd==0: nd = self.num_devices
+        xr = x.reshape(nd, -1, *x.shape[1:]).cast(dtypes.float32)
+        batch_mean, batch_invstd = self.calc_stats(xr)
+        ret = xr.batchnorm(
+          self.weight.reshape(1, -1).expand((nd, -1)),
+          self.bias.reshape(1, -1).expand((nd, -1)),
+          batch_mean, batch_invstd, axis=(0, 2))
+        return ret.reshape(x.shape).cast(x.dtype)
+    resnet.BatchNorm = functools.partial(CustUnsyncedBN, num_devices=len(GPUS))
+    # resnet.BatchNorm.__call__ = cust_call_unbn
   resnet_model = resnet.ResNeXt50_32X4D()
   resnet_model.load_from_pretrained()
 
@@ -486,9 +501,33 @@ def train_retinanet():
     if TEST or EVAL_ONLY:
       cnt, proc = 0, fake_data_get(BS)
     else:
-      batch_loader = batch_load_retinanet(batch_size=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP)
+      batch_loader = batch_load_retinanet(batch_size=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP, pad_first_batch=PART_BATCH)
       it = iter(tqdm(batch_loader, total=len(train_files)//BS, desc=f"epoch {epoch}"))
-      cnt, proc = 0, data_get(it)
+      cnt = 0
+      if PART_BATCH:
+        pl = round_up(len(train_files), BS) - len(train_files)
+        rl = BS - pl
+        sl = round_up(rl, len(GPUS)) - len(GPUS)
+        x, yb, yl, ym, cookie = next(it)
+        proc_single = x[pl:pl+rl-sl].to(GPUS), yb[pl:pl+rl-sl].to(GPUS), yl[pl:pl+rl-sl].to(GPUS), ym[pl:pl+rl-sl].to(GPUS)
+        mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,Tensor.stack(*ANCHORS[pl:pl+rl-sl]).to(GPUS), m, b_t)
+        loss = train_step(*proc_single)
+        loss_single = loss.numpy().item()
+        if WANDB: wandb.log({'train/loss':loss_single})
+        print('LOSS_SINGLE', loss_single)
+        train_step.reset()
+        proc_shard = x[pl+rl-sl:].shard(GPUS, axis=0), yb[pl+rl-sl:].shard(GPUS, axis=0), yl[pl+rl-sl:].shard(GPUS, axis=0), ym[pl+rl-sl:].shard(GPUS, axis=0)
+        mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,Tensor.stack(*ANCHORS[pl+rl-sl:]).shard(GPUS, axis=0), m, b_t)
+        loss = train_step(*proc_shard)
+        loss_shard = loss.numpy().item()
+        print('LOSS_SHARD', loss_shard)
+        if WANDB: wandb.log({'train/loss':loss_shard})
+        train_step.reset()
+        
+        mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,ANCHORS_STACK, m, b_t)
+        del cookie
+      proc = data_get(it)
+
     st = time.perf_counter()
     bt = st
     while not EVAL_ONLY and proc is not None:

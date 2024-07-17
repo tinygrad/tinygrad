@@ -389,7 +389,9 @@ def loader_process_retinanet(q_in, q_out, seed, X:Tensor, YB:Tensor, YL:Tensor, 
       else:
         # pad data with training mean
         img = np.tile(np.array([[[123.68, 116.78, 103.94]]], dtype=np.uint8), (800, 800, 1))
-
+        tb = np.zeros((120087, 4)).astype(np.float32)
+        tl = np.zeros((120087)).astype(np.int16)+1
+        midx = np.zeros((120087)).astype(np.int64)
       X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
       YB[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tb.tobytes()
       YL[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tl.tobytes()
@@ -522,11 +524,17 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
       p.daemon = True
       p.start()
       procs.append(p)
+    if FIRST_BATCH_PAD>0:
+      enqueue_batch(0)
+      start_idx = 1
+      yield receive_batch()
+    else:
+      start_idx = 0
 
-    for bn in range(BATCH_COUNT): enqueue_batch(bn)
+    for bn in range(start_idx, BATCH_COUNT): enqueue_batch(bn)
 
     # NOTE: this is batch aligned, last ones are ignored unless pad_first_batch is True
-    for _ in range(0, file_count//batch_size): yield receive_batch()
+    for _ in range(start_idx, file_count//batch_size): yield receive_batch()
   finally:
     shutdown = True
     # empty queues
@@ -570,6 +578,17 @@ if __name__ == "__main__":
     with tqdm(total=len(files)) as pbar:
       for x,y,c in batch_load_resnet(val=val):
         pbar.update(x.shape[0])
+  def load_retinanet(val):
+    from extra.datasets.openimages import get_retinanet_train_files, get_retinanet_val_files
+    from examples.mlperf.helpers import anchor_generator
+    feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
+    ANCHORS = anchor_generator((10,3,800,800), feature_shapes)
+    ANCHOR_NP = ANCHORS[0].numpy()
+    files = get_retinanet_val_files() if val else get_retinanet_train_files()
+    cnt=0
+    with tqdm(total=len(files)) as pbar:
+      for x in batch_load_retinanet(96, val=val, anchor_np=ANCHOR_NP, pad_first_batch=False):
+        pbar.update(x[0].shape[0])
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn_name in globals():
