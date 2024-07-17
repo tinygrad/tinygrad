@@ -11,7 +11,7 @@ from tinygrad.helpers import prod
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
+  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto(); ALL_SAME = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702

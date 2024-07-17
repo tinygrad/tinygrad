@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -363,7 +363,11 @@ def do_expand(root:UOp):
     expands = [x for x in root.src if x.op is UOps.EXPAND]
     if len(expands) == 0: return None
     expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
-    dont_expand_args = ()
+    if root.op is UOps.WMMA:
+      dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1])
+      expand_args = tuple(x for x in expand_args if x[0] not in root.arg[-1])
+    else:
+      dont_expand_args = ()
   new_srcs = []
   for choices in itertools.product(*[range(x[1]) for x in expand_args]):
     rpk = dict(zip([x[0] for x in expand_args], choices))
@@ -379,7 +383,7 @@ def do_expand(root:UOp):
             mul *= m
           lnew_src.append(src.src[idx])
         if len(dont_expand_args):
-          new_src.append(UOp(UOps.EXPAND, root.dtype, tuple(lnew_src), dont_expand_args))
+          new_src.append(UOp(UOps.ALL_SAME if root.op is UOps.WMMA else UOps.EXPAND, root.dtype, tuple(lnew_src), dont_expand_args))
         else:
           assert len(lnew_src) == 1
           new_src.append(lnew_src[0])
@@ -403,8 +407,7 @@ def do_expand(root:UOp):
         mul *= m
       new_new_srcs.append(new_srcs[src_idx].src[root_idx])
     new_srcs = new_new_srcs
-  # filter the WMMA reduce arg (is this right?)
-  if root.op is UOps.WMMA: expand_args = tuple([x for x in expand_args if x[0] not in root.arg[-1]])
+  assert prod([x[1] for x in expand_args]) == len(new_srcs)
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
 acc_number = 0
@@ -418,6 +421,8 @@ def do_reduce_with_expand(root):
   acc_number += 1
   if len(expands_reduce):
     assert root.src[0].op is UOps.EXPAND
+    expand_reduce_args = dedup(flatten([x.arg for x in expands_reduce]))
+    assert prod([y[1] for y in expand_reduce_args]) == len(root.src[0].src)
     for xx in root.src[0].src:
       ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
   else:
@@ -448,6 +453,13 @@ def do_contract(con:UOp):
     srcs += [UOp(UOps.VECTORIZE, con.dtype, tuple(src)) for src in zip(*to_join[i:i+con.dtype.count])]
   return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x[0] != con.arg[0]))
 
+def assert_all_same(root:UOp):
+  if not all_same(list(root.src)):
+    from tinygrad.engine.graph import print_tree
+    for s in root.src: print_tree(s)
+    return None
+  return root.src[0]
+
 expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
@@ -463,6 +475,8 @@ expander = PatternMatcher([
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
   # empty EXPAND is NOOP
   (UOp(UOps.EXPAND, src=(UOp.var('x'),), arg=()), lambda x: x),
+  # ALL_SAME
+  (UOp(UOps.ALL_SAME).name("root"), assert_all_same),
 ])
 
 # *** uop graph ***
@@ -605,7 +619,7 @@ class UOpGraph:
     try:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-      assert all(x.op not in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.UNMUL} for x in self._uops), "fake UOp left in list"
+      assert all(x.op not in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.UNMUL, UOps.ALL_SAME} for x in self._uops), "fake UOp left in list"
       # TODO: this should be enabled, and the valid clause should be removed
       # NOTE: multiple identical stores to DEFINE_LOCAL is okay
       assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \
