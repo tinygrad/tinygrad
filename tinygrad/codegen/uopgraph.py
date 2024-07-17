@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -195,16 +195,8 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
-def handle_all_same(root:UOp):
-  if all_same(list(root.src)): return root.src[0]
-  # if all same except 0 consts
-  if all_same(lst:=[x for x in root.src if x.op is not UOps.CONST or x.arg != 0.0]): return lst[0]
-  return None
-
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  # ALL_SAME
-  (UOp(UOps.ALL_SAME).name("root"), handle_all_same),
   # CONTRACT before REDUCE
   (UPat(UOps.CONTRACT, name="con", src=UPat(UOps.REDUCE, name="red")),
    lambda con, red: UOp(UOps.REDUCE, con.dtype, (UOp(UOps.CONTRACT, con.dtype, red.src[0:1], con.arg),)+red.src[1:], red.arg)),
@@ -373,8 +365,8 @@ def do_expand(root:UOp):
     if len(expands) == 0: return None
     expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
     if root.op is UOps.WMMA:
-      dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1])
-      expand_args = tuple(x for x in expand_args if x[0] not in root.arg[-1])
+      dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1] or x[0] in root.arg[-2])
+      expand_args = tuple(x for x in expand_args if x not in dont_expand_args)
     else:
       dont_expand_args = ()
   new_srcs = []
@@ -392,7 +384,10 @@ def do_expand(root:UOp):
             mul *= m
           lnew_src.append(src.src[idx])
         if len(dont_expand_args):
-          new_src.append(UOp(UOps.ALL_SAME if root.op is UOps.WMMA else UOps.EXPAND, root.dtype, tuple(lnew_src), dont_expand_args))
+          if root.op is UOps.WMMA:
+            new_src.append(lnew_src[0])  # TODO: is this always right?
+          else:
+            new_src.append(UOp(UOps.EXPAND, root.dtype, tuple(lnew_src), dont_expand_args))
         else:
           assert len(lnew_src) == 1
           new_src.append(lnew_src[0])
@@ -616,7 +611,7 @@ class UOpGraph:
     for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-    bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.UNMUL, UOps.ALL_SAME}])
+    bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.UNMUL}])
     try:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
