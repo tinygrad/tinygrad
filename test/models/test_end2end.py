@@ -77,14 +77,14 @@ class TestEnd2End(unittest.TestCase):
         self.l1 = Linear(784, 128, bias=bias)
         self.l2 = Linear(128, 10, bias=bias)
       def __call__(self, x):
-        return self.l2(self.l1(x)).log_softmax(-1)
+        return self.l2(self.l1(x).relu()).log_softmax(-1)
     class LinTorch(nn.Module):
       def __init__(self, bias=False):
         super().__init__()
         self.l1 = nn.Linear(784, 128, bias=bias)
         self.l2 = nn.Linear(128, 10, bias=bias)
       def forward(self, x):
-        return self.l2(self.l1(x)).log_softmax(-1)
+        return self.l2(self.l1(x).relu()).log_softmax(-1)
     compare_tiny_torch(LinTiny(), LinTorch(), self.X, self.Y)
 
   def test_bn_mnist(self):
