@@ -80,8 +80,7 @@ if __name__ == "__main__":
   for i,si in enumerate(sched):
     ops = get_lazyop_info(si.ast.src[0]).flops
 
-    if DEBUG >= 2:
-      for ast in si.ast: print(ast)
+    if DEBUG >= 2: print(si.ast)
 
     rawbufs = bufs_from_lin(Kernel(si.ast))
 
