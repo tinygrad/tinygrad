@@ -8,7 +8,6 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.uops import UOp
-from tinygrad.codegen.uopgraph import LoweringError
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.graph import print_tree

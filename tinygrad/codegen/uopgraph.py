@@ -617,7 +617,6 @@ class UOpGraph:
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.UNMUL, UOps.ALL_SAME}])
-    if UOps.ALL_SAME in bad_ops: raise LoweringError("ALL_SAME still present (fix reduce axis for tensor cores)")
 
     try:
       type_verify(self.uops)
