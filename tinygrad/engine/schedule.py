@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
+    merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -142,8 +143,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
         pass # don't realize reduceops on const (unless base is forced_realize)
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         pass # don't realize image to image casts. this is part of a larger problem
-      else:
-        realizes[buf.base] = None
+      elif not FUSE_AS_ONE_KERNEL: realizes[buf.base] = None
     # check all other pads for safe fusion
     elif any(v.mask is not None for v in buf.st.views): simple_pads.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
@@ -257,7 +257,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
-      realizes[tr] = None
+      if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
