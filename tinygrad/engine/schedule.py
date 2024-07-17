@@ -1,4 +1,4 @@
-import sys, pickle, atexit, functools
+import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass, replace
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
@@ -115,27 +115,26 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   # push movement ops to the edges, fixup reduceop(s) shapes and axes
   reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
   # reduceops change output shape
-  output_st = ShapeTracker.from_shape(outs[0].shape)
-  @functools.lru_cache(None)
-  def _construct_sts(op:LazyBuffer, st:ShapeTracker):
-    nonlocal output_st
-    if op.base.realized is not None or (op.base in realizes and op.base not in outs): return
+  def _construct_sts(op:LazyBuffer, st:ShapeTracker, cache:Dict):
+    if op.base.realized is not None or (op.base in realizes and op.base not in outs) or (op, st) in cache: return
     if op is not op.base:
       st = op.st+st
       op = op.base
+    for x in op.srcs: _construct_sts(x, st, cache)
     if op.op in ReduceOps:
       _, reduce_input_st, axis = op.srcs[0], op.srcs[0].st, op.arg
       assert st.contiguous, "todo!"
       reduce_info[op] = (ShapeTracker.from_shape(reduce_input_st.shape), axis)
-      output_st = output_st.reshape(op.shape)
-    for x in op.srcs: _construct_sts(x, st)
+    cache.setdefault((op, st))
   for i, out in enumerate(outs):
-    _construct_sts(out, output_st)
-    lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
+    _construct_sts(out, out.st, {})
+    output_st = ShapeTracker.from_shape(list(reduce_info).pop().shape if reduce_info else out.shape)
+    # if reduce_info: output_st = ShapeTracker.from_shape(next(iter(reduce_info)).shape)
     output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
+    lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
     output_view, vv = output_view.simplify().unbind()
     if vv: var_vals.update(vv)
-    ast.append(LazyOp(BufferOps.STORE, (lop,), MemBuffer(i, out.dtype, output_view)))
+    ast.append(LazyOp(BufferOps.STORE, (lop, ), MemBuffer(i, out.dtype, output_view)))
   return LazyOp(MetaOps.SINK, tuple(ast)), inputs, var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])
 
 # *** DAG creation: decide which LazyBuffers should realize ***
