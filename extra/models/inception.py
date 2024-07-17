@@ -242,18 +242,7 @@ def default_fid():
   return torch_load(fetch("https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth", "pt_inception-2015-12-05-6726825d.pth"))
 
 class FidInceptionV3:
-  def __init__(self):
-    inception = Inception3(cls_map={
-      "A":  FidInceptionA,
-      "C":  FidInceptionC,
-      "E1": FidInceptionE1,
-      "E2": FidInceptionE2,
-    })
-    state_dict = default_fid()
-    for k,v in state_dict.items():
-      if k.endswith(".num_batches_tracked"):
-        state_dict[k] = v.reshape(1)
-    load_state_dict(inception, state_dict)
+  def __init__(self, inception:Inception3):
 
     self.blocks = [
       inception.Conv2d_1a_3x3,
@@ -279,6 +268,21 @@ class FidInceptionV3:
       inception.Mixed_7c,
       lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8)),
     ]
+
+  @classmethod
+  def from_pretrained(cls):
+    inception = Inception3(cls_map={
+      "A":  FidInceptionA,
+      "C":  FidInceptionC,
+      "E1": FidInceptionE1,
+      "E2": FidInceptionE2,
+    })
+    state_dict = default_fid()
+    for k,v in state_dict.items():
+      if k.endswith(".num_batches_tracked"):
+        state_dict[k] = v.reshape(1)
+    load_state_dict(inception, state_dict)
+    return cls(inception)
 
   def __call__(self, x:Tensor) -> Tensor:
     x = x.interpolate((299,299), mode="linear")
