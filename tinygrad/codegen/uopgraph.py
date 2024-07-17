@@ -381,7 +381,7 @@ def do_expand(root:UOp):
   new_srcs: List[UOp] = []
   lrpks = _choices_from_args(dont_expand_args)
   for rpk in _choices_from_args(expand_args):
-    new_src = []
+    new_src: List[UOp] = []
     for src in root.src:
       if src.op is UOps.EXPAND:
         lnew_src = [src.src[_expand_arg_to_idx(src.arg, {**rpk, **lrpk})] for lrpk in lrpks]
