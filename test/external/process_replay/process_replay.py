@@ -7,6 +7,7 @@ from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSIO
 PAGE_SIZE = 100
 TABLE_NAME = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
 ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
+SKIP_PROCESS_REPLAY = int((k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", ""))
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 assert MAX_DIFF_PCT < 100
 early_stop = multiprocessing.Event()
@@ -52,6 +53,9 @@ def process_replay(offset:int):
   cur.close()
 
 if __name__ == "__main__":
+  if SKIP_PROCESS_REPLAY:
+    logging.info("skipping process replay.")
+    exit(0)
   conn = db_connection()
   cur = conn.cursor()
   row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
