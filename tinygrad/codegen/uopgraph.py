@@ -9,6 +9,8 @@ from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
+class LoweringError(Exception): pass
+
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
 
@@ -196,8 +198,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 def handle_all_same(root:UOp):
   # if all same except 0 consts
   if all_same(lst:=[x for x in root.src if x.op is not UOps.CONST or x.arg != 0.0]): return lst[0]
-  from tinygrad.device import CompileError
-  raise CompileError("reduce axis for TC is messed up")
+  return None
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
@@ -615,10 +616,13 @@ class UOpGraph:
     for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
+    bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.UNMUL, UOps.ALL_SAME}])
+    if UOps.ALL_SAME in bad_ops: raise LoweringError("ALL_SAME still present (fix reduce axis for tensor cores)")
+
     try:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-      assert all(x.op not in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.UNMUL, UOps.ALL_SAME} for x in self._uops), "fake UOp left in list"
+      assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
       # TODO: this should be enabled, and the valid clause should be removed
       # NOTE: multiple identical stores to DEFINE_LOCAL is okay
       assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \

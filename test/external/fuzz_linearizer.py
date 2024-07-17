@@ -8,6 +8,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.uops import UOp
+from tinygrad.codegen.uopgraph import LoweringError
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.graph import print_tree
@@ -157,7 +158,10 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
         if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        tuops = tuplize_uops(test_lin.linearize().uops.uops)
+        try:
+          tuops = tuplize_uops(test_lin.linearize().uops.uops)
+        except LoweringError:
+          continue
         if tuops in seen_uops: continue
         seen_uops[tuops] = tuple(test_lin.applied_opts)
 
