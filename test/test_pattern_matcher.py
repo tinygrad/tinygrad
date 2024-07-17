@@ -178,6 +178,7 @@ class TestPatternMatcher(TestUOps):
   def test_upat_str(self):
     dtypes._float2 = dtypes.float.vec(2)
     upat = UPat(UOps.CONST, name="x", dtype=dtypes.float)
+    print(str(upat))
     assert str(upat) == str(eval(str(upat)))
     for i in range(10):
       upat = UPat(UOps.ALU, name="x", src=[upat, upat], arg=BinaryOps.ADD)
@@ -188,6 +189,7 @@ class TestPatternMatcher(TestUOps):
       eval_pat = eval(str(pat))
       assert type(eval_pat.op) is type(pat.op)
       assert type(eval_pat.src) is type(pat.src)
+      assert str(eval_pat) == str(pat)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
