@@ -69,7 +69,6 @@ class Kernel:
       print("INVALID AST")
       for op in ast: print_tree(op)
       raise e
-    self.lazyops = self.ast.lazyops
 
     cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
     def ordered_lazyops(op):
@@ -78,7 +77,7 @@ class Kernel:
     self.reduceops = dedup([x for x in ordered_lazyops(self.ast) if x.op in ReduceOps])
 
     self.vars = self.ast.vars()
-    self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.lazyops if x.op in BufferOps])
+    self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.ast.lazyops if x.op in BufferOps])
 
     # get earlybufs, before any reduceops
     earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
@@ -121,7 +120,7 @@ class Kernel:
     ret = type(self).__new__(type(self))
 
     # base linearizer params
-    ret.opts, ret.ast, ret.lazyops = self.opts, self.ast, self.lazyops
+    ret.opts, ret.ast = self.opts, self.ast
 
     # things downstream of the AST
     ret.reduceops, ret.vars, ret.bufs, ret.full_buf_index = \
@@ -492,7 +491,7 @@ class Kernel:
       # ok to pad SUM if all parent ops have f(0) = 0
       if self.first_reduce <= axis:
         check((r:=cast(LazyOp, self.reduceop)).op is ReduceOps.SUM and \
-            all(op.op not in UNSAFE_PAD_OPS for ops in r.src for op in ops.lazyops), "cannot pad")
+            all(op.op not in UNSAFE_PAD_OPS for sop in r.src for op in sop.lazyops), "cannot pad")
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] == 1: continue  # reduced
@@ -645,7 +644,7 @@ class Kernel:
   @functools.cached_property
   def name(self) -> str:
     # kernel name (before late upcast)
-    name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
+    name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.ast.lazyops) else "E")) + \
                  (f"{len(self.ast.src)}_" if len(self.ast.src) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
@@ -712,7 +711,7 @@ class Kernel:
           new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
           return LazyOp(op.op, (ret,), new_reduce_axes) if new_reduce_axes else ret
         if self.group_for_reduces:
-          start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+          start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces] + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           local_buffer = MemBuffer(-1, start.dtype, ShapeTracker.from_shape(local_shape))
@@ -723,7 +722,7 @@ class Kernel:
         arg = KernelInfo(self.local_dims, self.upcasted)
       else:
         arg = op.arg
-      return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+      return LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
     return fixup_ast(self.ast)
 
   # **** this is the lowerer ****
