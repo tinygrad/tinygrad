@@ -190,7 +190,7 @@ class ProfileLogger:
 
 _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache"))
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
-CACHELEVEL, CACHESTAGING = getenv("CACHELEVEL", 2), getenv("CACHESTAGING")
+CACHELEVEL = getenv("CACHELEVEL", 2)
 
 VERSION = 16
 _db_connection = None
@@ -211,7 +211,6 @@ def diskcache_clear():
 def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   if CACHELEVEL == 0: return None
   if isinstance(key, (str,int)): key = {"key": key}
-  if CACHESTAGING >= 1: table = f"staging_{table}"
   conn = db_connection()
   cur = conn.cursor()
   try:
@@ -225,7 +224,6 @@ _db_tables = set()
 def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   if CACHELEVEL == 0: return val
   if isinstance(key, (str,int)): key = {"key": key}
-  if CACHESTAGING >= 1: table = f"staging_{table}"
   conn = db_connection()
   cur = conn.cursor()
   if table not in _db_tables:
