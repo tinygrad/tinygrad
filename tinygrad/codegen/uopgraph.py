@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
-from tinygrad.helpers import DEBUG, getenv, flatten, all_same, dedup, TRANSCENDENTAL
+from tinygrad.helpers import DEBUG, getenv, flatten, all_same, dedup, TRANSCENDENTAL, pretty_print
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -38,6 +38,9 @@ class UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
+  def __repr__(self):
+    def rep(x): return f"UPat(({x.op if isinstance(x.op, UOps) else ', '.join(str(x) for x in x.op)}), {x.arg}, name={x.name}, dtype={x.dtype}, src=("
+    return pretty_print(self, rep, lambda x: [] if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
