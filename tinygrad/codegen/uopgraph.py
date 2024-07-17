@@ -387,7 +387,7 @@ def do_expand(root:UOp):
           lnew_src.append(src.src[_expand_arg_to_idx(src.arg, lrpk)])
         if len(dont_expand_args):
           if root.op is UOps.WMMA:
-            new_src.append(lnew_src[0])  # TODO: is this always right?
+            new_src.append(lnew_src[0])  # TODO: is this always right? all lnew_src should be the same
           else:
             new_src.append(UOp(UOps.EXPAND, root.dtype, tuple(lnew_src), dont_expand_args))
         else:
