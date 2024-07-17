@@ -83,9 +83,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)
 
   # if it's a reduce, we have to change the shapetracker
-  if buf.op in ReduceOps:
-    assert st.contiguous, "ReduceOps late fusion must be contiguous"
-    st, arg = reduce_info[buf]
+  if buf.op in ReduceOps: st, arg = reduce_info[buf]
 
   # otherwise we fuse it like normal
   return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, \
@@ -94,12 +92,23 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
   if buf is not buf.base: st, buf = buf.st+st, buf.base
+  for x in buf.srcs: _recurse_reduceops(x, buf.srcs[0].st if buf.op in ReduceOps else st, realizes, outs, reduce_info, cache)
   if buf.op in ReduceOps:
-    reduce_input, axis = buf.srcs[0], buf.arg
-    assert st.contiguous
-    st = ShapeTracker.from_shape(reduce_input.shape)
-    reduce_info[buf] = (st, axis)
-  for x in buf.srcs: _recurse_reduceops(x, st, realizes, outs, reduce_info, cache)
+    input_st, axis = buf.srcs[0].st, buf.arg
+    # if it's an expand, push through it
+    if not st.contiguous:
+      assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
+      assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
+      pre_reduce = st.shape+tuple(s for i,s in enumerate(input_st.shape) if i in axis)
+      axis = tuple(i+len(st.shape)-1 for i in axis)
+      mid_reshape = tuple(1 if s not in input_st.shape else s for s in pre_reduce)
+      input_st = input_st.reshape(mid_reshape).expand(pre_reduce)
+    else:
+      # reshape to match the output st of the top reduce
+      if reduce_info:
+        top_reduce_input_st, top_reduce_axes = list(reduce_info.values()).pop()
+        input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
+    reduce_info[buf] = (input_st, axis)
   cache.setdefault((buf, st))
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
@@ -116,7 +125,10 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
   for i, out in enumerate(outs):
     _recurse_reduceops(out, out.st, realizes, outs, reduce_info, {})
-    output_st = ShapeTracker.from_shape(next(iter(reduce_info)).shape if reduce_info else out.shape)
+    output_st = ShapeTracker.from_shape(out.shape)
+    if len(reduce_info) != 0:
+      last_reduce, axis = list(reduce_info.values())[-1]
+      output_st = ShapeTracker.from_shape(tuple(1 if i in axis else s for i,s in enumerate(last_reduce.shape)))
     output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
     output_view, vv = output_view.simplify().unbind()

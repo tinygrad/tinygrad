@@ -68,7 +68,6 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(real_index, X.numpy())
 
   # TODO: AssertionError: ReduceOps late fusion must be contiguous
-  @unittest.expectedFailure
   def test_index_fused(self):
     dataset = Tensor.rand(16384, 256).realize()
     idxs = Tensor([0,3,5,6]).realize()
