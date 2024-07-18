@@ -74,9 +74,9 @@ def prepare_test_op(low, high, shps, vals, forward_only=False):
 
 class TestOps(unittest.TestCase):
 
-  def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn, expected, exact=False, vals=None, low=-1.5, high=1.5):
+  def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn, expected, exact=False, vals=None, low=-1.5, high=1.5, forward_only=False):
     if getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV"): self.skipTest('helper_test_exception fails in CUDACPU')
-    ts, tst = prepare_test_op(low, high, shps, vals)
+    ts, tst = prepare_test_op(low, high, shps, vals, forward_only=forward_only)
     with self.assertRaises(expected) as torch_cm:
       torch_fxn(*ts)
     with self.assertRaises(expected) as tinygrad_cm:
@@ -510,6 +510,24 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor >> 31, lambda: (ten >> 31).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
+
+  def test_bitcast(self):
+    dtype_pairs = [(torch.int8, dtypes.int8), (torch.uint8, dtypes.uint8), (torch.int16, dtypes.int16), (torch.uint16, dtypes.uint16),
+                   (torch.int32, dtypes.int32), (torch.uint32, dtypes.uint32), (torch.int64, dtypes.int64), (torch.uint64, dtypes.uint64),
+                   (torch.float16, dtypes.float16), (torch.float32, dtypes.float32), (torch.float64, dtypes.float64)]
+    for item_pre in dtype_pairs:
+      for item_post in dtype_pairs:
+        if item_post!=item_pre:
+          print(f'\nTESTING_BITCAST {item_pre} to {item_post}')
+          if item_pre[1] not in [dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64]:
+            helper_test_op([(3,32)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), forward_only=True)
+            if item_pre[0].itemsize<item_post[0].itemsize:
+              self.helper_test_exception([(3,43)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), expected=RuntimeError, forward_only=True)
+          else:
+            # We are not testing cast, only bitcast
+            helper_test_op([(3,32)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), forward_only=True, low=1, high=5)
+            if item_pre[0].itemsize<item_post[0].itemsize:
+              self.helper_test_exception([(3,43)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), expected=RuntimeError, forward_only=True, low=1, high=5)
 
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
