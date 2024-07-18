@@ -1,4 +1,0 @@
-# 2 space indentation
-[*.py]
-indent_style = space
-indent_size = 2

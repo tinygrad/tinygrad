@@ -2,11 +2,14 @@
 import unittest, functools
 import numpy as np
 
+from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, Context
+from tinygrad.dtype import dtypes
+from extra.models.unet import ResBlock
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
@@ -17,6 +20,19 @@ def _simple_test(add, extract=lambda x: x, N=10):
   assert_jit_cache_len(add, 1)
 
 class TestJit(unittest.TestCase):
+
+  @settings(deadline=2e4)
+  @unittest.skipUnless(Device.DEFAULT in ["LLVM", "CLANG"], f"no support on {Device.DEFAULT}")
+  @given(strat.sampled_from([Tensor.exp2, Tensor.log2, Tensor.sin]))
+  def test_approx_jit_timeout(self, op):
+    with Context(TRANSCENDENTAL=2):
+      model = [ResBlock(16, 24, 16) for _ in range(4)]
+      @TinyJit
+      def fw_approx(t, t2):
+        for l in model: t = l(t, t2)
+        return op(t).realize()
+      fw_approx(Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24))
+
   def test_simple_jit(self):
     @TinyJit
     def add(a, b): return (a+b).realize()
@@ -64,6 +80,41 @@ class TestJit(unittest.TestCase):
         a = Tensor.randn(10, 10)
         b = Tensor.randn(10, 10)
         add(a, b)
+
+  def test_jit_zero_does_not_jit(self):
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    with Context(JIT=0):
+      for i in range(5):
+        a = Tensor([i])
+        b = Tensor([i])
+        c = add(a, b)
+        np.testing.assert_allclose(c.numpy(), 2*i)
+      assert_jit_cache_len(add, 0)
+
+  def test_jit_not_capturing(self):
+    @TinyJit
+    def add(a, b):
+      Tensor.zeros(4, 4).contiguous().realize()  # no-op kernel is captured
+      return (a+b).realize()
+    for i in range(5):
+      a = Tensor([i])
+      b = Tensor([i])
+      c = add(a, b)
+      np.testing.assert_allclose(c.numpy(), 2*i)
+    assert_jit_cache_len(add, 2)
+
+    @TinyJit
+    def add2(a, b):
+      with Context(CAPTURING=0):  # not captured
+        Tensor.zeros(4, 4).contiguous().realize()
+      return (a+b).realize()
+    for i in range(5):
+      a = Tensor([i])
+      b = Tensor([i])
+      c = add2(a, b)
+      np.testing.assert_allclose(c.numpy(), 2*i)
+    assert_jit_cache_len(add2, 1)
 
   def test_jit_shape_mismatch(self):
     @TinyJit
@@ -287,7 +338,7 @@ class TestJit(unittest.TestCase):
     for i in range(5):
       np.testing.assert_equal(g(Tensor([i]*3), Tensor.ones(3), Tensor.zeros(3)).numpy(), np.array([i+1]*3))
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "HSA"}, "no GPU CI")
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
   def test_jitted_transfers(self):
     d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
 
@@ -304,6 +355,21 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(a.numpy(), xc.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(b.numpy(), yc.numpy(), atol=1e-4, rtol=1e-5)
 
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU/CUDA/METAL in CI, fine to run on AMD/NV")
+  def test_jitted_view(self):
+    d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
+
+    def f(a):
+      x1 = a.sum(axis=(1,))
+      x = (x1 + 5).bitcast(dtypes.int32)
+      y = x.to(d1)
+      return y.realize()
+
+    jf = TinyJit(f)
+    for _ in range(5):
+      a = Tensor.randn(10, 1000, device=d0).realize()
+      xc = jf(a)
+      np.testing.assert_allclose((a.numpy().sum(axis=(1,)) + 5).view(np.int32), xc.numpy(), atol=1e-4, rtol=1e-5)
 
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):
@@ -332,6 +398,19 @@ class TestMultioutputJit(unittest.TestCase):
     def fxn(a, b): return a+b, a-b, (a*b).realize()
     self._test(fxn)
     assert_jit_cache_len(fxn, 2)
+
+class TestJitInsideJit(unittest.TestCase):
+  def test_jit_jit_error(self):
+    @TinyJit
+    def f(t): return t + 1
+
+    @TinyJit
+    def g(t): return f(t) * 3
+
+    # NOTE: first does not raise
+    g(Tensor([1])).realize()
+    with self.assertRaisesRegex(RuntimeError, "having TinyJit inside another TinyJit is not supported"):
+      g(Tensor([1])).realize()
 
 if __name__ == '__main__':
   unittest.main()

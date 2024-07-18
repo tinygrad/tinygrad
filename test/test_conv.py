@@ -42,6 +42,14 @@ class TestConv(unittest.TestCase):
 
     print(ret.numpy())
 
+  def test_two_binops_no_rerun_small(self):
+    Tensor.no_grad = True
+    x = Tensor.rand(1,1,32,32)
+    w = Tensor.rand(1,1,3,3)
+    out = x.conv2d(w, padding=(1,1))
+    np.testing.assert_allclose(out.relu().numpy(), np.maximum(out.numpy(), 0))
+    Tensor.no_grad = False
+
   def test_two_binops_no_rerun(self):
     Tensor.no_grad = True
     x = Tensor.randn(1,12,128,256)

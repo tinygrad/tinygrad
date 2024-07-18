@@ -1,14 +1,16 @@
 ## Neural Network classes
 
-::: tinygrad.nn.BatchNorm2d
+::: tinygrad.nn.BatchNorm
 ::: tinygrad.nn.Conv1d
 ::: tinygrad.nn.Conv2d
+::: tinygrad.nn.ConvTranspose1d
 ::: tinygrad.nn.ConvTranspose2d
 ::: tinygrad.nn.Linear
 ::: tinygrad.nn.GroupNorm
 ::: tinygrad.nn.InstanceNorm
 ::: tinygrad.nn.LayerNorm
 ::: tinygrad.nn.LayerNorm2d
+::: tinygrad.nn.RMSNorm
 ::: tinygrad.nn.Embedding
 
 ## Optimizers

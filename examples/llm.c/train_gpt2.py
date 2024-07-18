@@ -142,7 +142,8 @@ if __name__ == "__main__":
   assert os.path.isfile(tokens_bin)
   print(f"loading cached tokens in {tokens_bin}")
   with open(tokens_bin, "rb") as f:
-    tokens = np.frombuffer(f.read(), dtype=np.int32)
+    f.seek(0x400)
+    tokens = np.frombuffer(f.read(), dtype=np.uint16).astype(np.int32)
   tokens = Tensor(tokens)
 
   # lightweight dataloader
@@ -161,7 +162,7 @@ if __name__ == "__main__":
   # forward backward for a few iterations
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
-  optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
+  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
 
   @TinyJit
   def step(x, y):
@@ -171,13 +172,14 @@ if __name__ == "__main__":
     optimizer.step()
     return loss
 
-  for i in range(args.num_iterations):
-    GlobalCounters.reset()
-    t0 = time.time()
-    loss = step(x.contiguous(), y.contiguous())
-    Device[Device.DEFAULT].synchronize()
-    t1 = time.time()
-    print(f"iteration {i}, loss: {loss.item()}, time: {(t1-t0)*1000:.3f}ms")
+  with Tensor.train():
+    for i in range(args.num_iterations):
+      GlobalCounters.reset()
+      t0 = time.time()
+      loss = step(x.contiguous(), y.contiguous())
+      Device[Device.DEFAULT].synchronize()
+      t1 = time.time()
+      print(f"iteration {i}, loss: {loss.item()}, time: {(t1-t0)*1000:.3f}ms")
 
   start = "<|endoftext|>"
   start_ids = encode(start)

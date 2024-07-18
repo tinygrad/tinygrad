@@ -1,5 +1,3 @@
-# to start thinking about the $2,000 norm fusion bounty
-
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, BatchNorm2d
 from tinygrad.nn.state import get_parameters

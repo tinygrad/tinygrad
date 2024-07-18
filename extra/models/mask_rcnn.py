@@ -4,6 +4,7 @@ import os
 import numpy as np
 from pathlib import Path
 from tinygrad import nn, Tensor, dtypes
+from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import get_child, fetch
 from tinygrad.nn.state import torch_load
 from extra.models.resnet import ResNet
@@ -66,7 +67,7 @@ def get_strides(shape):
 # with keys as integer array for all axes
 def tensor_getitem(tensor, *keys):
   # something about ints is broken with gpu, cuda
-  flat_keys = Tensor.stack([key.expand((sum(keys)).shape).reshape(-1) for key in keys], dim=1).cast(dtypes.int32)
+  flat_keys = Tensor.stack(*[key.expand((sum(keys)).shape).reshape(-1) for key in keys], dim=1).cast(dtypes.int32)
   strides = get_strides(tensor.shape)
   idxs = (flat_keys * strides).sum(1)
   gatherer = npgather if USE_NP_GATHER else _gather
@@ -255,7 +256,7 @@ class BoxList:
     bb2 = self.bbox.clip(min_=0, max_=self.size[1] - TO_REMOVE)[:, 1]
     bb3 = self.bbox.clip(min_=0, max_=self.size[0] - TO_REMOVE)[:, 2]
     bb4 = self.bbox.clip(min_=0, max_=self.size[1] - TO_REMOVE)[:, 3]
-    self.bbox = Tensor.stack((bb1, bb2, bb3, bb4), dim=1)
+    self.bbox = Tensor.stack(bb1, bb2, bb3, bb4, dim=1)
     if remove_empty:
       box = self.bbox
       keep = (box[:, 3] > box[:, 1]) & (box[:, 2] > box[:, 0])
@@ -394,7 +395,7 @@ class AnchorGenerator:
       shift_y, shift_x = meshgrid(shifts_y, shifts_x)
       shift_x = shift_x.reshape(-1)
       shift_y = shift_y.reshape(-1)
-      shifts = Tensor.stack((shift_x, shift_y, shift_x, shift_y), dim=1)
+      shifts = Tensor.stack(shift_x, shift_y, shift_x, shift_y, dim=1)
 
       anchors.append(
         (shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4)
@@ -525,7 +526,7 @@ class BoxCoder(object):
     targets_dw = ww * Tensor.log(gt_widths / ex_widths)
     targets_dh = wh * Tensor.log(gt_heights / ex_heights)
 
-    targets = Tensor.stack((targets_dx, targets_dy, targets_dw, targets_dh), dim=1)
+    targets = Tensor.stack(targets_dx, targets_dy, targets_dw, targets_dh, dim=1)
     return targets
 
   def decode(self, rel_codes, boxes):
@@ -556,7 +557,7 @@ class BoxCoder(object):
     y = pred_ctr_y - 0.5 * pred_h
     w = pred_ctr_x + 0.5 * pred_w - 1
     h = pred_ctr_y + 0.5 * pred_h - 1
-    pred_boxes = Tensor.stack([x, y, w, h]).permute(1,2,0).reshape(rel_codes.shape[0], rel_codes.shape[1])
+    pred_boxes = Tensor.stack(x, y, w, h).permute(1,2,0).reshape(rel_codes.shape[0], rel_codes.shape[1])
     return pred_boxes
 
 
@@ -632,8 +633,8 @@ class RPNPostProcessor:
       box_regression_list.append(tensor_gather(box_regression[batch_idx], topk_idx[batch_idx]))
       concat_anchors_list.append(tensor_gather(concat_anchors[batch_idx], topk_idx[batch_idx]))
 
-    box_regression = Tensor.stack(box_regression_list)
-    concat_anchors = Tensor.stack(concat_anchors_list)
+    box_regression = Tensor.stack(*box_regression_list)
+    concat_anchors = Tensor.stack(*concat_anchors_list)
 
     proposals = self.box_coder.decode(
       box_regression.reshape(-1, 4), concat_anchors.reshape(-1, 4)
@@ -1217,7 +1218,7 @@ def to_image_list(tensors, size_divisible=32):
       max_size = tuple(max_size)
 
     batch_shape = (len(tensors),) + max_size
-    batched_imgs = np.zeros(batch_shape, dtype=tensors[0].dtype.np)
+    batched_imgs = np.zeros(batch_shape, dtype=_to_np_dtype(tensors[0].dtype))
     for img, pad_img in zip(tensors, batched_imgs):
       pad_img[: img.shape[0], : img.shape[1], : img.shape[2]] += img.numpy()
 

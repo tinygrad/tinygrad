@@ -22,11 +22,9 @@ class Node:
 
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
-  @functools.cached_property
-  def hash(self) -> int: return hash(self.key)
   def __repr__(self): return self.render(ctx="REPR")
   def __str__(self): return "<"+self.key+">"
-  def __hash__(self): return self.hash
+  def __hash__(self): return hash(self.key)
   def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
@@ -45,6 +43,7 @@ class Node:
     if b == 1: return self
     return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
+  def __lshift__(self, b:int): return self*2**b
 
   # *** complex ops ***
 

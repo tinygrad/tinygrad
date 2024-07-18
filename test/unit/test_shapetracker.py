@@ -7,10 +7,10 @@ from tinygrad.shape.symbolic import Variable, NumNode
 from itertools import product
 
 def shapetracker_getitem(st, val):
-  locals = {"idx0": val, "valid": 1}
+  _locals = {"idx0": val, "valid": 1}
   idx, valid = st.reshape((st.size,)).expr_idxs()
-  exec(f"valid={valid.render()};idx0={idx.render()}", None, locals)
-  return locals["idx0"] if locals["valid"] else -1
+  exec(f"valid={valid.render()};idx0={idx.render()}", None, _locals)
+  return _locals["idx0"] if _locals["valid"] else -1
 
 class CheckingShapeTracker:
   def __init__(self, shape):
@@ -773,6 +773,39 @@ class TestIdxs(unittest.TestCase):
     st = ShapeTracker(views=(View(shape=(4096, 1024, 599, 1), strides=(613376, 599, 1, 0), offset=0, mask=None, contiguous=True),))
     with self.assertRaises(AssertionError):
       st.expr_idxs()
+
+class TestConsecutive(unittest.TestCase):
+  @classmethod
+  def setUpClass(self):
+    from tinygrad.tensor import Tensor  # easier test setup
+    self.t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8]])
+    self.const = Tensor(2)
+    self.ones = Tensor.ones(2, 4)
+
+  def test_unmodified(self):
+    assert self.t.lazydata.st.consecutive
+    assert self.t.reshape(4, 2).lazydata.st.consecutive
+    assert self.t.reshape(1, 8).lazydata.st.consecutive
+
+  def test_sliced(self):
+    assert self.t[0].lazydata.st.consecutive
+    assert self.t[0, 1:2].lazydata.st.consecutive
+    assert self.t[1].lazydata.st.consecutive
+    assert not self.t[:, 0].lazydata.st.consecutive
+    assert not self.t[:, 1].lazydata.st.consecutive
+
+  def test_padded(self):
+    assert not self.t.pad(((1, 1), None)).lazydata.st.consecutive
+    assert not self.t.pad((None, (1, 1))).lazydata.st.consecutive
+
+  def test_const(self):
+    assert self.const.lazydata.st.consecutive
+
+  def test_ones(self):
+    assert not self.ones.lazydata.st.consecutive
+    assert not self.ones[0, :].lazydata.st.consecutive
+    # consecutive if sliced into size 1
+    assert self.ones[0, 0].lazydata.st.consecutive
 
 if __name__ == '__main__':
   unittest.main()

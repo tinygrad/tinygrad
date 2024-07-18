@@ -98,7 +98,7 @@ def eval_retinanet():
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from contextlib import redirect_stdout
-  coco = COCO(openimages())
+  coco = COCO(openimages('validation'))
   coco_eval = COCOeval(coco, iouType="bbox")
   coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 

@@ -1,6 +1,5 @@
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
-import numpy as np  # TODO: remove numpy
 import functools
 from tinygrad.helpers import getenv
 
@@ -18,9 +17,6 @@ class DType:
     assert sz > 1 and self.count == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
-  # TODO: someday this will be removed with the "remove numpy" project
-  @property
-  def np(self) -> Optional[type]: return np.dtype(self.fmt).type if self.fmt is not None else None
 
 # dependent typing?
 @dataclass(frozen=True, repr=False)
@@ -43,17 +39,30 @@ class dtypes:
   @staticmethod
   def is_float(x: DType) -> bool: return x.scalar() in (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
-  def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64) or dtypes.is_unsigned(x)
+  def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.bigint) or dtypes.is_unsigned(x)
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
-  @staticmethod  # NOTE: isinstance(True, int) is True in python
-  def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
+  def from_py(x) -> DType:
+    if x.__class__ is float: return dtypes.default_float
+    if x.__class__ is int: return dtypes.default_int
+    if x.__class__ is bool: return dtypes.bool
+    # put this in the last is faster because there are more items than lists/tuples to check
+    if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
+    raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def as_const(val: ConstType, dtype:DType): return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
+  def min(dtype:DType):
+    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
+    return -float("inf") if dtypes.is_float(dtype) else False
+  @staticmethod
+  def max(dtype:DType):
+    if dtypes.is_int(dtype): return (2**(dtype.itemsize*8-(0 if dtypes.is_unsigned(dtype) else 1)))-1
+    return float("inf") if dtypes.is_float(dtype) else True
+  @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
+  bigint: Final[DType] = DType(-1, 0, "bigint", None, 1)   # arbitrary precision integer
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
   int8: Final[DType] = DType(1, 1, "char", 'b', 1)
   uint8: Final[DType] = DType(2, 1, "unsigned char", 'B', 1)
@@ -103,8 +112,9 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default')) or v.__class__ is staticmethod)}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default', 'bigint')) or v.__class__ is staticmethod)}
 INVERSE_DTYPES_DICT = {v.name:k for k,v in DTYPES_DICT.items()}
+INVERSE_DTYPES_DICT['bigint'] = 'bigint'
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum

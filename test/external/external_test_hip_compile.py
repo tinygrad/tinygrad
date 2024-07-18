@@ -1,16 +1,16 @@
 import time, unittest
-from tinygrad.runtime.driver.hip_comgr import compile_hip
+from tinygrad.runtime.support.hip_comgr import compile_hip
 from tinygrad import Tensor
 from tinygrad.device import Device
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.kernel import Kernel
 
 class TestHIPCompileSpeed(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT != "HIP", "only run on HIP")
   def test_hip_compile(self):
     a, b = Tensor([1,2,3,4,5]), Tensor([1,2,3,4,5])
     out = a + b
-    lin = Linearizer(create_schedule([out.lazydata])[-1].ast[0])
+    lin = Kernel(create_schedule([out.lazydata])[-1].ast[0])
     lin.linearize()
 
     reference = """
@@ -32,7 +32,7 @@ class TestHIPCompileSpeed(unittest.TestCase):
       compile_hip(code)
       return (time.perf_counter() - st) * 1000
 
-    tinygrad_tm = min([time_compile(Device[Device.DEFAULT].compiler.render(f"test{i}", lin.uops)) for i in range(10)])
+    tinygrad_tm = min([time_compile(Device[Device.DEFAULT].renderer.render(f"test{i}", lin.uops)) for i in range(10)])
     ref_tm = min([time_compile(reference.format(name=f"test{i}")) for i in range(10)])
     print(f"tinygrad {tinygrad_tm:6.2f} ms")
     print(f"reference {ref_tm:6.2f} ms")

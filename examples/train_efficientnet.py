@@ -2,10 +2,9 @@ import traceback
 import time
 from multiprocessing import Process, Queue
 import numpy as np
-from tqdm import trange
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, trange
 from tinygrad.tensor import Tensor
 from extra.datasets import fetch_cifar
 from extra.models.efficientnet import EfficientNet

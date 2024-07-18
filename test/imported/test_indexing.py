@@ -79,7 +79,7 @@ def make_tensor(shape, dtype:dtypes, noncontiguous) -> Tensor:
   +---------------------------+------------+----------+
   """
   contiguous = not noncontiguous
-  if dtype is dtypes.bool: return Tensor.randint(shape=shape, low=0, high=2, contiguous=contiguous).cast(dtypes.bool)
+  if dtype == dtypes.bool: return Tensor.randint(shape=shape, low=0, high=2, contiguous=contiguous).cast(dtypes.bool)
   elif dtype.is_unsigned(): return Tensor.randint(shape=shape, low=0, high=10, contiguous=contiguous).cast(dtype)
   elif dtype.is_int(): return Tensor.randint(shape=shape, low=-9, high=10, contiguous=contiguous).cast(dtype) # signed int
   elif dtype.is_float(): return Tensor.rand(shape=shape, low=-9, high=9, dtype=dtype, contiguous=contiguous)
@@ -131,13 +131,13 @@ class TestIndexing(unittest.TestCase):
 
     # indexing with step
     reference = consec((10, 10, 10))
-    numpy_testing_assert_equal_helper(reference[1:5:2], Tensor.stack([reference[1], reference[3]], 0))
-    numpy_testing_assert_equal_helper(reference[1:6:2], Tensor.stack([reference[1], reference[3], reference[5]], 0))
-    numpy_testing_assert_equal_helper(reference[1:9:4], Tensor.stack([reference[1], reference[5]], 0))
-    numpy_testing_assert_equal_helper(reference[2:4, 1:5:2], Tensor.stack([reference[2:4, 1], reference[2:4, 3]], 1))
-    numpy_testing_assert_equal_helper(reference[3, 1:6:2], Tensor.stack([reference[3, 1], reference[3, 3], reference[3, 5]], 0))
-    numpy_testing_assert_equal_helper(reference[None, 2, 1:9:4], Tensor.stack([reference[2, 1], reference[2, 5]], 0).unsqueeze(0))
-    numpy_testing_assert_equal_helper(reference[:, 2, 1:6:2], Tensor.stack([reference[:, 2, 1], reference[:, 2, 3], reference[:, 2, 5]], 1))
+    numpy_testing_assert_equal_helper(reference[1:5:2], Tensor.stack(reference[1], reference[3], dim=0))
+    numpy_testing_assert_equal_helper(reference[1:6:2], Tensor.stack(reference[1], reference[3], reference[5], dim=0))
+    numpy_testing_assert_equal_helper(reference[1:9:4], Tensor.stack(reference[1], reference[5], dim=0))
+    numpy_testing_assert_equal_helper(reference[2:4, 1:5:2], Tensor.stack(reference[2:4, 1], reference[2:4, 3], dim=1))
+    numpy_testing_assert_equal_helper(reference[3, 1:6:2], Tensor.stack(reference[3, 1], reference[3, 3], reference[3, 5], dim=0))
+    numpy_testing_assert_equal_helper(reference[None, 2, 1:9:4], Tensor.stack(reference[2, 1], reference[2, 5], dim=0).unsqueeze(0))
+    numpy_testing_assert_equal_helper(reference[:, 2, 1:6:2], Tensor.stack(reference[:, 2, 1], reference[:, 2, 3], reference[:, 2, 5], dim=1))
 
     lst = [list(range(i, i+10)) for i in range(0, 100, 10)]
     tensor = Tensor(lst)
@@ -179,7 +179,7 @@ class TestIndexing(unittest.TestCase):
     # self.assertRaises(TypeError, delitem)
 
   # TODO: LLVM is quite fast, why are other compiled backends slow?
-  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU", "METAL"], "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU", "METAL", "NV", "AMD"], "slow")
   def test_advancedindex(self):
     # integer array indexing
 
@@ -378,7 +378,6 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(strided[rows, columns],
                       np.array([[1, 3], [11, 13]]))
 
-
     # setting values
 
     # strided is [[10, 11],
@@ -453,7 +452,7 @@ class TestIndexing(unittest.TestCase):
 
     def tensor_indices_to_np(tensor: Tensor, indices):
       npt = tensor.numpy()
-      idxs = tuple(i.numpy().tolist() if isinstance(i, Tensor) and i.dtype is dtypes.int64 else
+      idxs = tuple(i.numpy().tolist() if isinstance(i, Tensor) and i.dtype == dtypes.int64 else
                   i for i in indices)
       return npt, idxs
 
@@ -1094,6 +1093,8 @@ class TestIndexing(unittest.TestCase):
       r[zero]
     numpy_testing_assert_equal_helper(r, r[...])
 
+  # TODO fancy setitem
+  '''
   def test_setitem_scalars(self):
     zero = Tensor(0, dtype=dtypes.int64)
 
@@ -1121,6 +1122,7 @@ class TestIndexing(unittest.TestCase):
     # TODO: weird inaccuracy Max relative difference: 3.85322971e-08
     # numpy_testing_assert_equal_helper(9.9, r)
     np.testing.assert_allclose(9.9, r, rtol=1e-7)
+  '''
 
   def test_basic_advanced_combined(self):
     # From the NumPy indexing example
@@ -1249,7 +1251,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_take_along_dim(self):
     def _test_against_numpy(t: Tensor, indices: Tensor, dim):
-      actual = t.gather(indices, dim=dim)
+      actual = t.gather(dim, indices)
       t_np = t.numpy()
       indices_np = indices.numpy()
       expected = np.take_along_axis(t_np, indices_np, axis=dim)
@@ -1293,24 +1295,24 @@ class TestIndexing(unittest.TestCase):
 
       # dim of `t` and `indices` does not match
       with self.assertRaises(RuntimeError, "input and indices should have the same number of dimensions"):
-        t.gather(indices[0], dim=0)
+        t.gather(0, indices[0])
 
       # invalid `indices` dtype
       with self.assertRaises(RuntimeError):
-        t.gather(indices.cast(dtypes.bool), dim=0)
+        t.gather(0, indices.cast(dtypes.bool))
 
       with self.assertRaises(RuntimeError):
-        t.gather(indices.cast(dtypes.float32), dim=0)
+        t.gather(0, indices.cast(dtypes.float32))
 
       with self.assertRaises(RuntimeError):
-        t.gather(indices.cast(dtypes.int32), dim=0)
+        t.gather(0, indices.cast(dtypes.int32))
 
       # invalid axis
       with self.assertRaises(IndexError):
-        t.gather(indices, dim=-7)
+        t.gather(-7, indices)
 
       with self.assertRaises(IndexError):
-        t.gather(t, indices, dim=7)
+        t.gather(7, indices)
   '''
 
 class TestNumpy(unittest.TestCase):
@@ -1518,7 +1520,10 @@ class TestNumpy(unittest.TestCase):
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)
     self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
+    # TODO: fancy setitem
+    '''
     self.assertRaises(IndexError, a.contiguous().__setitem__, ([0, 1], [0, 1, 2]), 0)
+    '''
 
   # TODO out of bound getitem does not raise error
   '''

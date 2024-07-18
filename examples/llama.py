@@ -8,12 +8,12 @@ from typing import List
 import argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
-from tinygrad import Tensor, Device, GlobalCounters, dtypes, nn
+from tinygrad import Tensor, Device, GlobalCounters, nn
+from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
-import tiktoken
+import tiktoken, sys
 from tiktoken.load import load_tiktoken_bpe
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
@@ -190,38 +190,23 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
-class AbsmaxQuantizedLinear:
-  def __init__(self, in_features, out_features, bias=False):
-    assert bias == False
-    self.weight = Tensor.ones(out_features, in_features, dtype=dtypes.int8)
-    self.scale = Tensor.ones(out_features, dtype=dtypes.half)
-
-  def __call__(self, x):
-    return x.dot(self.weight.cast(dtype=dtypes.half).T*self.scale)
-
-  @staticmethod
-  def quantize(tensors):
-    new_tensors = {}
-    for name,v in tensors.items():
-      if "feed_forward" in name or "attention.w" in name or name == "output.weight":
-        assert "weight" in name, name
-        scale = v.abs().max(axis=1) / 127.0
-        int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
-        new_tensors[name] = int8_weight
-        new_tensors[name.replace('weight', 'scale')] = scale
-      else:
-        new_tensors[name] = v
-    return new_tensors
-
 class LLaMa:
   @staticmethod
-  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False, device=None):
+  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=None, device=None):
     params = MODEL_PARAMS[model_gen][model_size]
     tokenizer = MODEL_PARAMS[model_gen]['tokenizer'](model_file=str(tokenizer_path))
     assert tokenizer.vocab_size() == params["args"]["vocab_size"], f"{tokenizer.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
-    jit = bool(getenv("JIT", 1))
-    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
+    if quantize == "int8":
+      from llama3 import Int8Linear
+      linear = Int8Linear
+    elif quantize == "nf4":
+      from llama3 import NF4Linear
+      linear = NF4Linear(64)
+    else:
+      linear = nn.Linear
+
+    model = Transformer(**params["args"], linear=linear, max_context=MAX_CONTEXT, jit=bool(JIT))
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
@@ -232,23 +217,29 @@ class LLaMa:
 
     weights = fix_bf16(weights)
 
-    if quantize:
-      weights = AbsmaxQuantizedLinear.quantize(weights)
-      for _,v in weights.items(): v.realize()
+    with Context(BEAM=0):
+      # quantize
+      if quantize is not None:
+        weights = linear.quantize(weights, device)
+        for _,v in weights.items(): v.realize()
 
-    if isinstance(device, tuple):
-      for k,v in nn.state.get_state_dict(model).items():
-        if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-        elif '.attention.' in k: v.shard_(device, axis=-1)
-        elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-        elif 'tok_embeddings.weight' in k: v.shard_(device, axis=-1)
-        elif 'output.weight' in k: v.shard_(device, axis=-1)
-        #elif k.endswith('.weight'): v.shard_(device, axis=-1)
-        #elif 'norm.' in k: v.shard_(device, axis=-1)
-        else: v.shard_(device, axis=None)
-        #print(k, v.shape, v.lazydata.axis)
+      # shard
+      if isinstance(device, tuple):
+        for k,v in nn.state.get_state_dict(model).items():
+          if 'scale' in k: v.shard_(device, axis=None)  # from quantized
+          elif '.attention.' in k: v.shard_(device, axis=-1)
+          elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
+          elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
+          elif '.feed_forward.' in k: v.shard_(device, axis=-1)
+          elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
+          elif 'output.weight' in k: v.shard_(device, axis=-1)
+          #elif k.endswith('.weight'): v.shard_(device, axis=-1)
+          #elif 'norm.' in k: v.shard_(device, axis=-1)
+          else: v.shard_(device, axis=None)
+          #print(k, v.shape, v.lazydata.axis)
 
-    load_state_dict(model, weights, strict=False, consume=True)
+      # replace weights in model
+      load_state_dict(model, weights, strict=False, consume=True)
 
     return LLaMa(model, tokenizer)
 
@@ -346,7 +337,7 @@ if __name__ == "__main__":
   parser.add_argument("--profile", action="store_true", help="Output profile data to out.prof")
   parser.add_argument("--gen", default="1", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
   parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
-  parser.add_argument("--quantize", action="store_true", help="Quantize the weights to int8 in memory")
+  parser.add_argument("--quantize", type=str, default=None, help="Quantize the weights to int8 or nf4 in memory")
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
   parser.add_argument("--shard", type=int, default=1, help="number of devices to load the weights to")
 
@@ -467,7 +458,11 @@ After you are done speaking, output [EOS]. You are not Chad.
     if chatbot:
       user_prompt = user_delim + input(user_delim) + "\n"
       outputted += user_prompt
-      toks.extend(llama.tokenizer.encode(user_prompt))
+
+    new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
+    assert toks == new_toks[:len(toks)] or args.gen == "3"
+    toks = new_toks
+    assert outputted == llama.tokenizer.decode(toks)
 
     for i in range(args.count):
       GlobalCounters.reset()
@@ -488,12 +483,14 @@ After you are done speaking, output [EOS]. You are not Chad.
       # add the new token
       toks.append(tok)
 
-      cur = llama.tokenizer.decode([tok])
-      outputted += cur
-      print(cur, end='', flush=True)
+      # TODO: this is a hack to deal with spaces. i think the decode is fast though, so who cares?
+      cur = llama.tokenizer.decode(toks)
+      sys.stdout.write(cur[len(outputted):])
+      sys.stdout.flush()
+      outputted = cur
 
       # stop after you have your answer
-      if chatbot and outputted.endswith(end_delim): break
+      if chatbot and end_delim in outputted[-10:]: break
     if not chatbot: break
 
   # validate output!

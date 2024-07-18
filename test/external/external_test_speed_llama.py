@@ -4,7 +4,8 @@ from examples.llama import Transformer, MODEL_PARAMS
 from tinygrad.tensor import Tensor
 from tinygrad import Device
 from tinygrad.nn.state import get_state_dict
-from tinygrad.device import Allocator, method_cache
+from tinygrad.device import Allocator
+from tinygrad.engine.realize import method_cache
 from tinygrad.helpers import Profiling
 
 class FakeProgram:

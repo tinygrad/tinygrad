@@ -56,7 +56,8 @@ class TestLrScheduler(unittest.TestCase):
   def setUp(self):
     self.old_training = Tensor.training
     Tensor.training = True
-  def tearDown(self): Tensor.training = self.old_training
+  def tearDown(self):
+    Tensor.training = self.old_training
 
   def _test_lr_scheduler(self, tinygrad_sched, torch_sched, epochs, opts, atol, rtol, adam=True):
     accs = opts.pop('accs', None)
