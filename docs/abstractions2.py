@@ -34,7 +34,8 @@ assert val == 5
 
 print("******** second, the Device ***********")
 
-DEVICE = "CLANG"   # NOTE: you can change this!
+# DEVICE = "CLANG"   # NOTE: you can change this!
+DEVICE = "INTEL" 
 
 import struct
 from tinygrad.dtype import dtypes
