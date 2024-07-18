@@ -128,9 +128,6 @@ def no_float4_alu(alu):
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 float4_folding = PatternMatcher([
-  (UOp(UOps.STORE, dtype=dtypes.float, src=(UOp.var("buf"), UOp.var("idx")+
-    (UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")), UOp.var("var"))).name("store"),
-    lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float(2,4) load
   (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("idx2"))).name("load"),
