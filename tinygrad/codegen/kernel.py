@@ -480,7 +480,7 @@ class Kernel:
       self.dont_use_locals = True
     elif opt.op is OptOps.SWAP:
       check(axis < self.global_dims and amt < self.global_dims, "swap is only for globals")
-      check(axis != amt, "NOOP swap")
+      check(axis < amt, "axis must be smaller than amt")
       permute = list(range(self.shape_len))
       permute[axis], permute[amt] = permute[amt], permute[axis]
       self.reshape_and_permute(None, tuple(permute))
