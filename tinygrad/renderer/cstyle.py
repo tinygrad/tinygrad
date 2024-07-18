@@ -403,7 +403,7 @@ class IntelRenderer(OpenCLRenderer):
     return super().render_cast(x, var_dtype, bitcast)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    for arg in set([uop.arg for uop in uops.uops if uop is UOps.WMMA]):
+    for arg in set([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       dt_in = ("ushort", "bf16") if arg[2] == dtypes.bfloat16 else (arg[2].name, "f16")
       prefix = [f"""{arg[3].name}8 __{arg[0]}({dt_in[0]}16 a, {dt_in[0]}16 b, {arg[3].name}8 c) {{return intel_sub_group_{dt_in[1]}_{dt_in[1]}_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}"""] # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)

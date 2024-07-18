@@ -7,15 +7,12 @@ from tinygrad.runtime.ops_gpu import CLAllocator, CLCompiler, CLDevice, CLProgra
 
 class IntelAllocator(CLAllocator):
   def __init__(self, device):
-    self.device: IntelDevice = device
+    self.device = device
     self.track_cross_device: Set[IntelDevice] = set()
     super().__init__(device)
 
-class IntelCompiler(CLCompiler):
-  pass
-
-class IntelProgram(CLProgram):
-  pass
+class IntelCompiler(CLCompiler): pass
+class IntelProgram(CLProgram): pass
 
 class IntelDevice(Compiled):
   def __init__(self, *args):
@@ -35,7 +32,7 @@ class IntelDevice(Compiled):
       device=self.device,
       allocator=IntelAllocator(self), # memory allocator
       renderer=IntelRenderer(),
-      compiler=IntelCompiler(self, f"compile_cl_{compile_key}"), # compiling code to binary
+      compiler=IntelCompiler(gpu_device, f"compile_cl_{compile_key}"), # compiling code to binary
       runtime=functools.partial(IntelProgram, self),
       graph=None, # TODO
     )
