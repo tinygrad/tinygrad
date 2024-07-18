@@ -40,8 +40,9 @@ class UPat:
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
   def __repr__(self):
     def rep(x):
-      return "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=(%s))" % (('{%s}'%', '.join(map(str,x.op))) if isinstance(x.op, tuple) else x.op,
-        x.arg, repr(x.name), None if not x.dtype else set(x.dtype), x.allow_any_len, "%s")
+      form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=(%s))"
+      return form % (('{%s}'%', '.join(map(str,x.op))) if isinstance(x.op, tuple) else x.op, x.arg,
+                     repr(x.name), set(x.dtype) if x.dtype else None, x.allow_any_len, "%s")
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
