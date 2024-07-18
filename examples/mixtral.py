@@ -1,7 +1,6 @@
 import functools, argparse, pathlib
-from tqdm import tqdm
 from tinygrad import Tensor, nn, Device, GlobalCounters, Variable
-from tinygrad.helpers import Timing, Profiling, CI
+from tinygrad.helpers import Timing, Profiling, CI, tqdm
 from tinygrad.nn.state import torch_load, get_state_dict
 from extra.models.llama import FeedForward, Transformer
 

@@ -1,3 +1,4 @@
+# pylint: disable=cell-var-from-loop
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
@@ -6,8 +7,9 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.codegen.uops import UOpGraph, UOps
-from tinygrad.ops import BinaryOps, TernaryOps, exec_alu
+from tinygrad.codegen.uops import UOps
+from tinygrad.codegen.uopgraph import UOpGraph
+from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer
 
@@ -40,7 +42,7 @@ class PythonProgram:
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {UOps.STORE, UOps.ENDRANGE, UOps.BARRIER, UOps.IF, UOps.ENDIF}
-        if uop is UOps.DEFINE_ACC: idp.clear()
+        if uop is UOps.DEFINE_ACC: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
@@ -62,11 +64,11 @@ class PythonProgram:
               if g: _store(m, o, v)
           i += 1
           continue
-        elif uop is UOps.ENDRANGE:
+        if uop is UOps.ENDRANGE:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        elif uop in (UOps.BARRIER, UOps.IF, UOps.ENDIF):
+        if uop in (UOps.BARRIER, UOps.IF, UOps.ENDIF):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -89,7 +91,7 @@ class PythonProgram:
         elif uop is UOps.CONST:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
-          ul[i] = [[arg[0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg[0]] * warp_size
+          ul[i] = [[inp[0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is UOps.RANGE:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
@@ -99,17 +101,19 @@ class PythonProgram:
               del ul[i]
               i = loop_ends[i] + 1
               continue
+        elif uop is UOps.VECTORIZE: ul[i] = inp
         elif uop in {UOps.CAST, UOps.BITCAST}:
-          if dtype.count > 1: ul[i] = inp
+          assert dtp[0].fmt and dtype.fmt
+          pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
+          if uop is UOps.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
           else:
-            assert dtp[0].fmt and dtype.fmt
-            pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-            if uop is UOps.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-            else:
-              casted = [dtypes.as_const(x, dtype) for x in inp[0]]
-              overflow_adjust = 2**(dtype.itemsize*8 - 1) if (dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype)) else 0
-              overflow_fixed = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) if dtypes.is_int(dtype) else x for x in casted]
-              ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *overflow_fixed)))
+            casted = [dtypes.as_const(x, dtype) for x in inp[0]]
+            if dtypes.is_int(dtype):
+              overflow_adjust = 2**(dtype.itemsize*8 - 1) if not dtypes.is_unsigned(dtype) else 0
+              casted = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) for x in casted]
+            elif dtypes.is_float(dtype):
+              casted = [truncate.get(dtype, lambda dt: dt)(x) for x in casted]
+            ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *casted)))
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.count == 4
@@ -132,9 +136,9 @@ class PythonProgram:
         elif uop is UOps.WMMA:
           # here are the models for the WMMA instruction on the different hardware
           def wmma_helper(WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
-            assert len(inp[0]) == NUM_A, f"A must have {NUM_A} elements per thread"
-            assert len(inp[1]) == NUM_B, f"B must have {NUM_B} elements per thread"
-            assert len(inp[2]) == NUM_C, f"C must have {NUM_C} elements per thread"
+            assert len(inp[0]) == NUM_A, f"A must have {NUM_A} elements per thread, it has {len(inp[0])}"
+            assert len(inp[1]) == NUM_B, f"B must have {NUM_B} elements per thread, it has {len(inp[1])}"
+            assert len(inp[2]) == NUM_C, f"C must have {NUM_C} elements per thread, it has {len(inp[2])}"
             assert len(flatten(inp[0])) == NUM_A * warp_size, f"WMMA must have {NUM_A * warp_size} total elements for A in WMMA"
             assert len(flatten(inp[1])) == NUM_B * warp_size, f"WMMA must have {NUM_B * warp_size} total elements for B in WMMA"
             assert len(flatten(inp[2])) == NUM_C * warp_size, f"WMMA must have {NUM_C * warp_size} total elements for C in WMMA"
@@ -160,7 +164,7 @@ class PythonProgram:
               assert x[i][goff+j] == x[i][goff+j+16], "warp elements not duplicated properly across lanes"
               return x[i][goff+j]
             # B (16 elements on 32 threads): row major, lane 16-32 == lane 0-15
-            def b_elem(x, i, j, goff): return a_elem(x, j, i, goff)
+            def b_elem(x, i, j, goff): return a_elem(x, j, i, goff)  # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[5] == "CUDA":
@@ -188,7 +192,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
 
   def render(self, name:str, uops:UOpGraph) -> str:
-    lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
+    lops = [(u.op, u.dtype, [uops.uops.index(v) for v in u.src], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
 class PythonCompiler(Compiler):

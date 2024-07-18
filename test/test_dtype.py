@@ -1,4 +1,4 @@
-import unittest, operator, subprocess
+import unittest, operator, subprocess, math
 import numpy as np
 import torch
 from typing import Any, List
@@ -112,7 +112,7 @@ class TestDType(unittest.TestCase):
     dtypes = list(map(np.dtype, ["bool", "uint8", "int8", "int16", "int32", "int64", "float32", "float64"]))
     data = [1., 2., 0., 0.5, -1.5, 5.25]
     for dt in dtypes:
-      arr = np.asarray(data, dtype=dt)
+      arr = np.asarray(data).astype(dt)
       tin = Tensor(arr).numpy()
       tor = torch.as_tensor(arr).detach().numpy()
       assert dt == tin.dtype == tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
@@ -347,6 +347,20 @@ class TestHelpers(unittest.TestCase):
     with self.assertRaises(RuntimeError): dtypes.from_py({})
     with self.assertRaises(RuntimeError): dtypes.from_py(set())
 
+  def test_dtype_range(self):
+    for dt in core_dtypes:
+      if dtypes.is_float(dt):
+        np.testing.assert_equal(dtypes.min(dt), -math.inf)
+        np.testing.assert_equal(dtypes.max(dt), math.inf)
+      elif dtypes.is_int(dt):
+        info = np.iinfo(_to_np_dtype(dt))
+        np.testing.assert_equal(dtypes.min(dt), info.min)
+        np.testing.assert_equal(dtypes.max(dt), info.max)
+      else:
+        assert dt == dtypes.bool, dt
+        np.testing.assert_equal(dtypes.min(dt), False)
+        np.testing.assert_equal(dtypes.max(dt), True)
+
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
@@ -464,6 +478,18 @@ class TestTypeSpec(unittest.TestCase):
     assert X_data.gather(0, indices).dtype == X_data.dtype
     assert X_data.gather(1, indices).dtype == X_data.dtype
 
+  @given(strat.sampled_from(dtype_floats), strat.sampled_from(dtype_floats))
+  def test_attention_returns_same_dtype(self, data_dtype, default_float):
+    dtypes.default_float = default_float
+    query = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
+    key = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
+    value = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
+    mask = (Tensor.rand(32, 8, 128, 128) < 0.5)
+    assert query.scaled_dot_product_attention(key, value, is_causal=True).dtype == data_dtype
+    assert query.scaled_dot_product_attention(key, value, is_causal=True, dropout_p=0.3).dtype == data_dtype
+    assert query.scaled_dot_product_attention(key, value, is_causal=False).dtype == data_dtype
+    assert query.scaled_dot_product_attention(key, value, attn_mask=mask).dtype == data_dtype
+
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
   def test_self_promo_to_self(self, dtype):
@@ -543,6 +569,16 @@ class TestAutoCastType(unittest.TestCase):
     #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16")
+  def test_sum_acc_dtype(self):
+    t = Tensor([40000, 40000], dtype=dtypes.float16)
+    # default float16 sum returns in float16, overflowed in this case
+    assert t.sum().dtype == dtypes.float16
+    assert math.isinf(t.sum().numpy().item())
+    # specifiying acc_dtype and it's not downcasted
+    assert t.sum(acc_dtype=dtypes.float32).dtype == dtypes.float32
+    np.testing.assert_allclose(t.sum(acc_dtype=dtypes.float32).numpy(), 80000)
 
   def test_mean(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).mean().dtype == dtypes.float32

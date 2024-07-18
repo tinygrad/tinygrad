@@ -39,6 +39,56 @@ def _try_dlopen_$name():
 EOF
 }
 
+process_cdefines() {
+  local input_file="$1"
+  local output_file="$2"
+
+  sed -E '
+    # Remove single-line comments
+    s/[[:space:]]*\/\*.*\*\///g
+
+    # Remove multi-line comments
+    /\/\*/,/\*\//d
+
+    /.*DT_MIPS_NUM.*/d
+
+    # Remove lines ending with backslash (multi-line macros)
+    /\\$/d
+
+    # Convert C integer literals (remove U suffix)
+    s/\b([0-9]+)U\b/\1/g
+
+    # Convert C types to Python ctypes
+    s/\bunsigned char\b/ctypes.c_ubyte/g
+    s/\bsigned char\b/ctypes.c_byte/g
+    s/\bunsigned short\b/ctypes.c_ushort/g
+    s/\bshort\b/ctypes.c_short/g
+    s/\bunsigned int\b/ctypes.c_uint/g
+    s/\bint\b/ctypes.c_int/g
+    s/\bunsigned long\b/ctypes.c_ulong/g
+    s/\blong\b/ctypes.c_long/g
+    s/\bfloat\b/ctypes.c_float/g
+    s/\bdouble\b/ctypes.c_double/g
+
+    # Function-like macros with parameters
+    /^#define[[:space:]]+([[:alnum:]_]+)[[:space:]]*\(([^)]*)\)[[:space:]]+(.+)/ {
+      s//def \1(\2): return \3/
+      p
+      d
+    }
+
+    # Simple #define statements (including those with parentheses)
+    /^#define[[:space:]]+([[:alnum:]_]+)[[:space:]]+(.+)/ {
+      s//\1 = \2/
+      p
+      d
+    }
+
+    # Drop all other lines
+    d
+  ' "$input_file" >> "$output_file"
+}
+
 generate_opencl() {
   clang2py /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
   fixup $BASE/opencl.py
@@ -82,12 +132,20 @@ generate_kfd() {
 }
 
 generate_cuda() {
-  clang2py /usr/include/cuda.h /usr/include/nvrtc.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so -l /usr/lib/x86_64-linux-gnu/libnvrtc.so
+  clang2py /usr/include/cuda.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
   sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\ctypes.CDLL(ctypes.util.find_library('cuda'))\g" $BASE/cuda.py
-  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libnvrtc.so')\ctypes.CDLL(ctypes.util.find_library('nvrtc'))\g" $BASE/cuda.py
   fixup $BASE/cuda.py
   python3 -c "import tinygrad.runtime.autogen.cuda"
+}
+
+generate_nvrtc() {
+  clang2py /usr/local/cuda/include/nvrtc.h /usr/local/cuda/include/nvJitLink.h -o $BASE/nvrtc.py -l /usr/local/cuda/lib64/libnvrtc.so -l /usr/local/cuda/lib64/libnvJitLink.so
+  sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/nvrtc.py
+  sed -i "s\ctypes.CDLL('/usr/local/cuda/lib64/libnvrtc.so')\ctypes.CDLL(ctypes.util.find_library('nvrtc'))\g" $BASE/nvrtc.py
+  sed -i "s\ctypes.CDLL('/usr/local/cuda/lib64/libnvJitLink.so')\ctypes.CDLL(ctypes.util.find_library('nvJitLink'))\g" $BASE/nvrtc.py
+  fixup $BASE/nvrtc.py
+  python3 -c "import tinygrad.runtime.autogen.nvrtc"
 }
 
 generate_nv() {
@@ -185,14 +243,47 @@ generate_hsa() {
   python3 -c "import tinygrad.runtime.autogen.hsa"
 }
 
+generate_io_uring() {
+  clang2py \
+    /usr/include/liburing.h \
+    /usr/include/linux/io_uring.h \
+    -o $BASE/io_uring.py
+
+  # clang2py can't parse defines
+  sed -r '/^#define __NR_io_uring/ s/^#define __(NR_io_uring[^ ]+) (.*)$/\1 = \2/; t; d' /usr/include/asm-generic/unistd.h >> $BASE/io_uring.py # io_uring syscalls numbers
+  sed -r '/^#define\s+([^ \t]+)\s+([^ \t]+)/ s/^#define\s+([^ \t]+)\s*([^/]*).*$/\1 = \2/; s/1U/1/g; s/0ULL/0/g; t; d' /usr/include/linux/io_uring.h >> $BASE/io_uring.py # #define name (val) -> name = val
+
+  fixup $BASE/io_uring.py
+}
+
+generate_libc() {
+  clang2py \
+    $(dpkg -L libc6-dev | grep sys/mman.h) \
+    $(dpkg -L libc6-dev | grep sys/syscall.h) \
+    /usr/include/elf.h \
+    /usr/include/unistd.h \
+    -o $BASE/libc.py
+
+  process_cdefines "/usr/include/elf.h" "$BASE/libc.py"
+
+  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
+  sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('c'))\g" $BASE/libc.py
+
+  fixup $BASE/libc.py
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
+elif [ "$1" == "nvrtc" ]; then generate_nvrtc
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa; generate_kfd; generate_nv; generate_amd
+elif [ "$1" == "io_uring" ]; then generate_io_uring
+elif [ "$1" == "libc" ]; then generate_libc
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
 else echo "usage: $0 <type>"
 fi

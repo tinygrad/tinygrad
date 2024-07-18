@@ -47,7 +47,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     graph_class = (ji_graph_dev.graph.func if isinstance(ji_graph_dev.graph, functools.partial) else ji_graph_dev.graph) if ji_graph_dev else None #type: ignore
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_share_graph = (ji_graph_dev == current_device or (isinstance(graph_class, type) and issubclass(graph_class, MultiGraphRunner)) and
-                       type(ji_graph_dev) == type(current_device))
+                       type(ji_graph_dev) is type(current_device))
     can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and can_share_graph
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
 
@@ -115,7 +115,7 @@ class TinyJit(Generic[ReturnType]):
     if found:=self.buffer_replace.get(b, None): return found
     if b.is_allocated() or b.lb_refcount > 0: return b
     if b._base is not None:
-      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.buffer_replace.get(b._base, b._base), offset=b.offset)
+      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.add_buffer(b._base), offset=b.offset)
     else:
       self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
     return ret
@@ -144,7 +144,7 @@ class TinyJit(Generic[ReturnType]):
     var_vals: Dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
                                                 [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
     st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
-    if self.cnt == 0:
+    if not JIT or self.cnt == 0:
       # jit ignore
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
         self.ret = self.fxn(*args, **kwargs)
@@ -153,11 +153,14 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       self.expected_names: List[Union[int, str]] = names
       self.expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = st_vars_dtype_device
+      if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
-        self.ret = self.fxn(*args, **kwargs)
-        if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
-        capturing.clear()
+        try:
+          self.ret = self.fxn(*args, **kwargs)
+          if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
+        except Exception as e: raise e
+        finally: capturing.clear()
       del self.buffer_replace
       assert len(self.jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_buffers)} inputs")
@@ -170,7 +173,9 @@ class TinyJit(Generic[ReturnType]):
             self.extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 
       # memory planning (optional)
-      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in self.jit_cache], debug_prefix="JIT ")
+      # Exclude buffers involved in transfer ops to preserve parallelism.
+      noopt_buffers = {b for ji in self.jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
+      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in self.jit_cache], noopt_buffers, debug_prefix="JIT ")
       self.jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in self.jit_cache]
 
       # Condense the items into a graph executor.

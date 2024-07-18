@@ -51,12 +51,12 @@ def run_evaluation(model_name, tinygrad_expected_wer, reference_wer):
 
 class LibriSpeech(torch.utils.data.Dataset):
   def __init__(self):
-    dir = pathlib.Path(__file__).parent.parent.parent / "extra" / "datasets" / "librispeech"
-    if not os.path.exists(dir):
-      os.makedirs(dir)
+    folder = pathlib.Path(__file__).parent.parent.parent / "extra" / "datasets" / "librispeech"
+    if not os.path.exists(folder):
+      os.makedirs(folder)
 
     self.dataset = torchaudio.datasets.LIBRISPEECH(
-      root=dir,
+      root=folder,
       url="test-clean",
       download=True,
     )

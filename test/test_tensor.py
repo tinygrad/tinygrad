@@ -1,10 +1,12 @@
 import numpy as np
 import torch
-import unittest, copy, mmap, random
+import unittest, copy, mmap, random, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import getenv, temp, CI
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.helpers import getenv, temp, CI, _METADATA
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
+from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -302,6 +304,30 @@ class TestTinygrad(unittest.TestCase):
         data = _generate_data(depth)
         np.testing.assert_allclose(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_list_special_values(self):
+    if is_dtype_supported(dtypes.float16):
+      data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
+      data = data + [-x for x in data]
+      np.testing.assert_allclose(Tensor(data, dtype=dtypes.float16).numpy(), np.array(data).astype(np.float16))
+
+    # uint32
+    data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
+    data = data + [-x for x in data]
+    np.testing.assert_allclose(Tensor(data, dtype=dtypes.uint32).numpy(), np.array(data).astype(np.uint32))
+
+    # int32
+    data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
+    data = data + [-x for x in data]
+    np.testing.assert_allclose(Tensor(data, dtype=dtypes.int32).numpy(), np.array(data).astype(np.int32))
+
+  def test_tensor_list_ndarray(self):
+    data = [np.array([1, 2, 3]), np.array([1, 2, 3]), np.array([1, 2, 3])]
+    np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
+    data = [np.array([1.0, 2.0, 3.0]), np.array([1, 2, 3]), np.array([1, 2, 3])]
+    np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
+    data = [np.array(1.0), np.array(2.0), np.array(3.0)]
+    np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
+
   def test_tensor_bytes(self):
     data = b"abc123"
     t = Tensor(data)
@@ -335,13 +361,13 @@ class TestTinygrad(unittest.TestCase):
   def test_item_to_tensor_to_item(self):
     for a in [0, 1, 2, 3, -1, -100, 100, -101.1, 2.345, 100.1, True, False]:
       item = Tensor(a).item()
-      assert type(item) == type(a), a
+      assert type(item) is type(a), a
       np.testing.assert_allclose(item, a), a
       buffered_item = Tensor([a]).item()
-      assert type(buffered_item) == type(a), a
+      assert type(buffered_item) is type(a), a
       np.testing.assert_allclose(buffered_item, a), a
       reshaped_item = Tensor([a]).reshape((1, 1, 1, 1, 1)).item()
-      assert type(reshaped_item) == type(a), a
+      assert type(reshaped_item) is type(a), a
       np.testing.assert_allclose(reshaped_item, a), a
 
   def test_no_bool(self):
@@ -578,6 +604,58 @@ class TestInferenceMode(unittest.TestCase):
       assert mm.grad is None
       assert W.grad is None
     f(x, m, W)
+
+class TestTensorMetadata(unittest.TestCase):
+  def test_matmul(self):
+    _METADATA.set(None)
+    x = Tensor.rand(3, requires_grad=True)
+    W = Tensor.rand(3, 3, requires_grad=True)
+    out = x.matmul(W)
+    assert out.lazydata.metadata.name == "matmul"
+    s = create_schedule([out.lazydata])
+    assert len(s[-1].metadata) == 1
+    assert s[-1].metadata[0].name == "matmul"
+
+  def test_relu(self):
+    _METADATA.set(None)
+    x = Tensor.rand(3, requires_grad=True)
+    out = x.relu()
+    assert out.lazydata.metadata.name == "relu"
+    s = create_schedule([out.lazydata])
+    assert len(s[-1].metadata) == 1
+    assert s[-1].metadata[0].name == "relu"
+
+  def test_complex(self):
+    _METADATA.set(None)
+    x = Tensor.rand(3, requires_grad=True)
+    y = Tensor.rand(3, requires_grad=True)
+    out = x.relu() * y.sigmoid()
+    assert out.lazydata.metadata.name == "__mul__"
+    assert out.lazydata.srcs[0].metadata.name == "relu"
+    assert out.lazydata.srcs[1].metadata.name == "sigmoid"
+    s = create_schedule([out.lazydata])
+    assert len(s[-1].metadata) == 3
+    assert s[-1].metadata[0].name == "relu"
+    assert s[-1].metadata[1].name == "sigmoid"
+    assert s[-1].metadata[2].name == "__mul__"
+
+  def test_complex_backward(self):
+    _METADATA.set(None)
+    x = Tensor.rand(3, requires_grad=True)
+    y = Tensor.rand(3, requires_grad=True)
+    out = (x.relu() * y.sigmoid()).sum()
+    assert out.lazydata.metadata.name == "sum"
+    out.backward()
+    assert x.grad.lazydata.metadata.name == "relu"
+    assert x.grad.lazydata.metadata.backward
+    assert y.grad.lazydata.metadata.name == "sigmoid"
+    assert y.grad.lazydata.metadata.backward
+    s = create_schedule([out.lazydata, x.grad.lazydata, y.grad.lazydata])
+    assert len(s[-1].metadata) == 3
+    assert s[-1].metadata[0].name == "sigmoid"
+    assert s[-1].metadata[1].name == "sigmoid"
+    assert s[-1].metadata[1].backward
+    assert s[-1].metadata[2].name == "relu"
 
 if __name__ == '__main__':
   unittest.main()

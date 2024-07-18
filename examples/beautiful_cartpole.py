@@ -2,7 +2,7 @@ from typing import Tuple
 import time
 from tinygrad import Tensor, TinyJit, nn
 import gymnasium as gym
-from tqdm import trange
+from tinygrad.helpers import trange
 import numpy as np  # TODO: remove numpy import
 
 ENVIRONMENT_NAME = 'CartPole-v1'

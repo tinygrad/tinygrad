@@ -25,7 +25,7 @@ class CLCache:
     capturing.append(self)
     print("cache: entering")
     return self
-  def __exit__(self, type, value, traceback):
+  def __exit__(self, _type, value, traceback):
     capturing.clear()
     print(f"cache: exiting with size {self.count}", f"allowed {self.allowed}" if self.allowed is not None else "")
     if self.allowed is not None:

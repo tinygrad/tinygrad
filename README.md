@@ -51,7 +51,7 @@ And we can change `DEBUG` to `4` to see the generated code.
 As it turns out, 90% of what you need for neural networks are a decent autograd/tensor library.
 Throw in an optimizer, a data loader, and some compute, and you have all you need.
 
-```py
+```python
 from tinygrad import Tensor, nn
 
 class LinearNet:
@@ -66,11 +66,12 @@ optim = nn.optim.Adam([model.l1, model.l2], lr=0.001)
 
 x, y = Tensor.rand(4, 1, 28, 28), Tensor([2,4,3,7])  # replace with real mnist dataloader
 
-for i in range(10):
-  optim.zero_grad()
-  loss = model(x).sparse_categorical_crossentropy(y).backward()
-  optim.step()
-  print(i, loss.item())
+with Tensor.train():
+  for i in range(10):
+    optim.zero_grad()
+    loss = model(x).sparse_categorical_crossentropy(y).backward()
+    optim.step()
+    print(i, loss.item())
 ```
 
 See [examples/beautiful_mnist.py](examples/beautiful_mnist.py) for the full version that gets 98% in ~5 seconds
@@ -109,11 +110,11 @@ python3 -m pip install git+https://github.com/tinygrad/tinygrad.git
 
 ## Documentation
 
-Documentation along with a quick start guide can be found in the [docs/](/docs) directory.
+Documentation along with a quick start guide can be found on the [docs website](https://docs.tinygrad.org/) built from the [docs/](/docs) directory.
 
 ### Quick example comparing to PyTorch
 
-```py
+```python
 from tinygrad import Tensor
 
 x = Tensor.eye(3, requires_grad=True)
@@ -126,7 +127,7 @@ print(y.grad.numpy())  # dz/dy
 ```
 
 The same thing but in PyTorch:
-```py
+```python
 import torch
 
 x = torch.eye(3, requires_grad=True)
@@ -155,7 +156,7 @@ Now, what we want:
 - Bug fixes (with a regression test) are great! This library isn't 1.0 yet, so if you stumble upon a bug, fix it, write a test, and submit a PR, this is valuable work.
 - Solving bounties! tinygrad [offers cash bounties](https://docs.google.com/spreadsheets/d/1WKHbT-7KOgjEawq5h5Ic1qUWzpfAzuD_J06N1JwOCGs/edit?usp=sharing) for certain improvements to the library. All new code should be high quality and well tested.
 - Features. However, if you are adding a feature, consider the line tradeoff. If it's 3 lines, there's less of a bar of usefulness it has to meet over something that's 30 or 300 lines. All features must have regression tests. In general with no other constraints, your feature's API should match torch or numpy.
-- Refactors that are clear wins. In general, if your refactor isn't a clear win it will be closed. But some refactors are amazing! Think about readability in a deep core sense. A whitespace change or moving a few functions around is useless, but if you realize that two 100 line functions can actually use the same 110 line function with arguments while also improving readability, this is a big win.
+- Refactors that are clear wins. In general, if your refactor isn't a clear win it will be closed. But some refactors are amazing! Think about readability in a deep core sense. A whitespace change or moving a few functions around is useless, but if you realize that two 100 line functions can actually use the same 110 line function with arguments while also improving readability, this is a big win. Refactors should pass [process replay](#process-replay-tests).
 - Tests/fuzzers. If you can add tests that are non brittle, they are welcome. We have some fuzzers in here too, and there's a plethora of bugs that can be found with them and by improving them. Finding bugs, even writing broken tests (that should pass) with `@unittest.expectedFailure` is great. This is how we make progress.
 - Dead code removal from core `tinygrad/` folder. We don't care about the code in extra, but removing dead code from the core library is great. Less for new people to read and be confused by.
 
@@ -171,3 +172,7 @@ python3 -m pip install -e '.[testing]'  # install extra deps for testing
 python3 test/test_ops.py                # just the ops tests
 python3 -m pytest test/                 # whole test suite
 ```
+
+#### Process replay tests
+
+[Process replay](https://github.com/tinygrad/tinygrad/blob/master/test/external/process_replay/process_replay.py) compares your PR's generated kernels against master. If your PR is a refactor or speedup without any expected behavior change, It should include [run_process_replay] in the PR title, [example](https://github.com/tinygrad/tinygrad/pull/4995). Note that you should keep your branch up-to-date with master.
