@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
+    merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -83,7 +84,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
-    assert st.contiguous, "ReduceOps late fusion must be contiguous"
+    if not st.contiguous: assert buf.srcs[0].base.op is MetaOps.CONST, f"reduceop late fixup not supported for input {buf.srcs[0].base}"
     st, arg = reduce_info[buf]
 
   # otherwise we fuse it like normal
@@ -95,11 +96,21 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
   cache.setdefault((buf, st))
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   for x in buf.srcs: _recurse_reduceops(x, buf.srcs[0].st if buf.op in ReduceOps else st, realizes, outs, reduce_info, cache)
-  if buf.op in ReduceOps:
-    reduce_input, axis = buf.srcs[0], buf.arg
-    assert st.contiguous
-    st = ShapeTracker.from_shape(reduce_input.shape)
-    reduce_info[buf] = (st, axis)
+  if buf.op in ReduceOps and buf not in reduce_info:
+    input_st, axis = ShapeTracker.from_shape(buf.srcs[0].st.shape), buf.arg
+    if not st.contiguous:
+      assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
+      assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
+      pre_reduce = st.shape+tuple(s for i,s in enumerate(input_st.shape) if i in axis)
+      axis = tuple(i+len(st.shape)-1 for i in axis)
+      mid_reshape = tuple(1 if s not in input_st.shape else s for s in pre_reduce)
+      input_st = input_st.reshape(mid_reshape).expand(pre_reduce)
+    else:
+      # reshape to match the output st of the top reduce
+      if reduce_info:
+        top_reduce_input_st, top_reduce_axes = deque(reduce_info.values(), 1).pop()
+        input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
+    reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
@@ -139,13 +150,10 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       simple_pads.add(buf.base)
     # realize all expands
     elif prod(buf.base.st.shape) < prod(buf.st.shape):
-      if buf.base.op in ReduceOps and buf.base.srcs[0].base.op is MetaOps.CONST:
-        pass # don't realize reduceops on const (unless base is forced_realize)
       # this was causing "test_lil_model" to fail
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         simple_pads.add(buf.base) # don't realize image to image casts. this is part of a larger problem
-      else:
-        realizes[buf.base] = None
+      elif not FUSE_AS_ONE_KERNEL: realizes[buf.base] = None
     # check all other pads for safe fusion
     elif any(v.mask is not None for v in buf.st.views): simple_pads.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
@@ -259,7 +267,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
-      realizes[tr] = None
+      if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
