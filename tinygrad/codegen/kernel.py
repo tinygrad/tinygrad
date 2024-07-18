@@ -22,7 +22,7 @@ from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
@@ -478,6 +478,12 @@ class Kernel:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
+    elif opt.op is OptOps.SWAP:
+      check(axis < self.global_dims and amt < self.global_dims, "swap is only for globals")
+      check(axis != amt, "NOOP swap")
+      permute = list(range(self.shape_len))
+      permute[axis], permute[amt] = permute[amt], permute[axis]
+      self.reshape_and_permute(None, tuple(permute))
     elif opt.op is OptOps.MERGE:
       check(axis >= self.shape_len-self.upcasted, "only merge upcasted")
       check(self.full_shape[axis:axis+2] == self.output_shape[axis:axis+2], "can't merge reduces")
