@@ -520,14 +520,18 @@ class TestOps(unittest.TestCase):
         if item_post!=item_pre:
           print(f'\nTESTING_BITCAST {item_pre} to {item_post}')
           if item_pre[1] not in [dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64]:
-            helper_test_op([(3,32)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), forward_only=True)
+            helper_test_op([(3,32)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]),
+                           forward_only=True)
             if item_pre[0].itemsize<item_post[0].itemsize:
-              self.helper_test_exception([(3,43)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), expected=RuntimeError, forward_only=True)
+              self.helper_test_exception([(3,43)], lambda x: x.to(item_pre[0]).view(item_post[0]),
+                                         lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), expected=RuntimeError, forward_only=True)
           else:
             # We are not testing cast, only bitcast
-            helper_test_op([(3,32)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), forward_only=True, low=1, high=5)
+            helper_test_op([(3,32)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]),
+                           forward_only=True, low=1, high=5)
             if item_pre[0].itemsize<item_post[0].itemsize:
-              self.helper_test_exception([(3,43)], lambda x: x.to(item_pre[0]).view(item_post[0]), lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), expected=RuntimeError, forward_only=True, low=1, high=5)
+              self.helper_test_exception([(3,43)], lambda x: x.to(item_pre[0]).view(item_post[0]),
+                                        lambda x: x.cast(item_pre[1]).bitcast(item_post[1]), expected=RuntimeError, forward_only=True, low=1, high=5)
 
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
