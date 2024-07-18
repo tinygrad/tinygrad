@@ -398,8 +398,8 @@ class IntelRenderer(OpenCLRenderer):
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     # TODO: handle all casts. Only handling bf16 to f16 and f16 to bf16 for now
-    if var_dtype == dtypes.bfloat16: return f"intel_convert_as_bfloat16_float({x})"
-    if var_dtype == dtypes.float: return f"intel_convert_as_bfloat16_float({x[0]})"
+    if var_dtype == dtypes.bfloat16: return f"intel_convert_bfloat16_as_ushort({x})"
+    if var_dtype == dtypes.float: return f"intel_convert_as_bfloat16_float({x})"
     return super().render_cast(x, var_dtype, bitcast)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
