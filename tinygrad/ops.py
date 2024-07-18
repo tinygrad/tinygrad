@@ -27,7 +27,7 @@ class ReduceOps(Enum):
   SUM = auto(); MAX = auto(); WMMA = auto() # noqa: E702
 class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
 class MetaOps(Enum):
-  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto(); SINK = auto() # noqa: E702
+  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto(); KERNEL = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps, BufferOps]
 
 # do not preserve f(0) = 0
@@ -171,7 +171,7 @@ def reduce_st(st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[sint, ...]: return
 
 # the living definition of LazyOps
 def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
-  assert ast.op is MetaOps.SINK, "must be SINK"
+  assert ast.op is MetaOps.KERNEL, "must be SINK"
   sts: Dict[LazyOp, ShapeTracker] = {}
   def dfs(op:LazyOp, st:ShapeTracker):
     if op in sts: return

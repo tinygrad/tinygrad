@@ -23,7 +23,7 @@ class TestWinograd(unittest.TestCase):
       sched = create_schedule([out.lazydata])
 
     for i,s in enumerate(sched):
-      if s.ast.op is not MetaOps.SINK: continue
+      if s.ast.op is not MetaOps.KERNEL: continue
       ops = s.ast.lazyops
       with Timing(f"linearize {i} with {len(ops):4d} ops: "):
         l = Kernel(s.ast)

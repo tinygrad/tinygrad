@@ -139,7 +139,7 @@ class IndependentLowerer:
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
-    if x.op is MetaOps.SINK: return UOp(UOps.SINK, src=in_uops)
+    if x.op is MetaOps.KERNEL: return UOp(UOps.SINK, src=in_uops)
     if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg.scalar(), in_uops)
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
