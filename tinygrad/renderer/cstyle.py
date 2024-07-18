@@ -389,7 +389,6 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
-  
 class IntelRenderer(OpenCLRenderer):
   device = "INTEL"
   tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
@@ -397,17 +396,16 @@ class IntelRenderer(OpenCLRenderer):
 
   def render_dtype(self, var_dtype:DType) -> str:
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
-  
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     # TODO: handle all casts. Only handling bf16 to f16 and f16 to bf16 for now
     if var_dtype == dtypes.bfloat16: return f"intel_convert_as_bfloat16_float({x})"
     if var_dtype == dtypes.float: return f"intel_convert_as_bfloat16_float({x[0]})"
     return super().render_cast(x, var_dtype, bitcast)
-  
+
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     for arg in set([uop.arg for uop in uops.uops if uop is UOps.WMMA]):
       dt_in = ("ushort", "bf16") if arg[2] == dtypes.bfloat16 else (arg[2].name, "f16")
-      prefix = [f"""{arg[3].name}8 __{arg[0]}({dt_in[0]}16 a, {dt_in[0]}16 b, {arg[3].name}8 c) {{return intel_sub_group_{dt_in[1]}_{dt_in[1]}_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}"""]
+      prefix = [f"""{arg[3].name}8 __{arg[0]}({dt_in[0]}16 a, {dt_in[0]}16 b, {arg[3].name}8 c) {{return intel_sub_group_{dt_in[1]}_{dt_in[1]}_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}"""] # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class NVRenderer(CUDARenderer): device = "NV"
