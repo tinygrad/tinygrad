@@ -368,7 +368,7 @@ def train_retinanet():
   EVAL_ONLY       = config['EVAL_ONLY']   = getenv('EVAL_ONLY')
   CHKPT_PATH      = config['CHKPT_PATH']  = getenv('CHKPT_PATH', 'ckpts/retinanet_6xtiny_B96_E4.safe')
   TRAIN_ONLY      = config['TRAIN_ONLY']  = getenv('TRAIN_ONLY')
-  PART_BATCH      = config['PART_BATCH']  = getenv('PART_BATCH', 1)
+  PART_BATCH      = config['PART_BATCH']  = getenv('PART_BATCH', 0)
 
   Tensor.manual_seed(SEED)
   np.random.seed(SEED)
@@ -505,6 +505,7 @@ def train_retinanet():
       it = iter(tqdm(batch_loader, total=len(train_files)//BS, desc=f"epoch {epoch}"))
       cnt = 0
       if PART_BATCH:
+        train_step.reset()
         pl = round_up(len(train_files), BS) - len(train_files)
         rl = BS - pl
         sl = round_up(rl, len(GPUS)) - len(GPUS)
