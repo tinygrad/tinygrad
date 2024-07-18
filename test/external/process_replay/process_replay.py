@@ -31,7 +31,7 @@ def process_replay(offset:int):
         good_src = k.opts.render(name, k.linearize().uops)
         if comp_time is not None:
           td = timeit(lambda: k.linearize().uops.linearize()) - comp_time
-          if comp_time > 1e-3: timediffs.append(name, comp_time, td)
+          if comp_time > 1e-3: timediffs.append((name, comp_time, td))
     except Exception as e:
       logging.warn("FAILED TO RECREATE KERNEL")
       logging.info(ast)
@@ -61,7 +61,7 @@ def process_replay(offset:int):
 def timeit(fn):
   st = time.perf_counter()
   fn()
-  return time.perf_counter - st
+  return time.perf_counter() - st
 
 if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
