@@ -731,8 +731,7 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
-      #print_tree(modified_ast)
-      print_tree(self.ast)
+      print_tree(modified_ast)
     verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)
