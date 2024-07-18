@@ -47,7 +47,7 @@ class UPat:
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
-     (pat.dtype is not None and uop.dtype is not None and uop.dtype not in pat.dtype) or \
+     (pat.dtype is not None and uop.dtype not in pat.dtype) or \
      (pat.arg is not None and pat.arg != uop.arg) or \
      (pat.op is not None and uop.op not in pat.op): return []
   if pat.src is None: return [store]
@@ -128,7 +128,8 @@ def no_float4_alu(alu):
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 float4_folding = PatternMatcher([
-  (UOp(UOps.STORE, dtype=dtypes.float, src=(UOp.var("buf"), UOp.var("idx")+
+  # reorder index to bring const closer to store
+  (UOp(UOps.STORE, src=(UOp.var("buf"), UOp.var("idx")+
     (UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")), UOp.var("var"))).name("store"),
     lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float(2,4) load
