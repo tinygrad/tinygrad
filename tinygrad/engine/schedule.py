@@ -142,8 +142,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       if buf.base.op in ReduceOps and buf.base.srcs[0].base.op is MetaOps.CONST:
         pass # don't realize reduceops on const (unless base is forced_realize)
       # this was causing "test_lil_model" to fail
-      #if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
-      #  pass # don't realize image to image casts. this is part of a larger problem
+      if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
+        simple_pads.add(buf.base) # don't realize image to image casts. this is part of a larger problem
       else:
         realizes[buf.base] = None
     # check all other pads for safe fusion
