@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import difflib, pickle, multiprocessing, os, logging
+import difflib, pickle, multiprocessing, os, logging, time
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
+from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm, partition
 
 PAGE_SIZE = 100
 TABLE_NAME = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
@@ -14,6 +14,7 @@ early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 def process_replay(offset:int):
+  timediffs = []
   if early_stop.is_set(): return
   conn = db_connection()
   cur = conn.cursor()
@@ -23,11 +24,14 @@ def process_replay(offset:int):
     ast, applied_opts = None, None
     # try unpickle and linearize
     try:
-      ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
+      ast, opts, applied_opts, name, compare_src, ctx, comp_time = pickle.loads(row[0])
       with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
         k = Kernel(ast, opts=opts)
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
+        if comp_time is not None:
+          td = timeit(lambda: k.linearize().uops.linearize()) - comp_time
+          if comp_time > 1e-3: timediffs.append(name, comp_time, td)
     except Exception as e:
       logging.warn("FAILED TO RECREATE KERNEL")
       logging.info(ast)
@@ -52,6 +56,12 @@ def process_replay(offset:int):
         break
   conn.commit()
   cur.close()
+  return timediffs
+
+def timeit(fn):
+  st = time.perf_counter()
+  fn()
+  return time.perf_counter - st
 
 if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
@@ -64,6 +74,9 @@ if __name__ == "__main__":
   cur.close()
   offsets = range(0, row_count, PAGE_SIZE)
   with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-    list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
+    timediffs = sum(tqdm(pool.imap(process_replay, offsets), total=len(offsets)), [])
     pool.close()
     pool.join()
+    better, worse = partition(sorted(timediffs, key=lambda x: x[2]),lambda x:x[2]>0)
+    for (name,lintime, dt) in better[-1:-10:-1]: print(f"better:{lintime:.3f} - {dt:.3f}s {name}")
+    for (name, lintime, dt) in worse[:10]: print(f"worse: {lintime:.3f} + {-dt:.3f}s {name}")

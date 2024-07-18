@@ -106,7 +106,7 @@ DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0),
 WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
 MULTIOUTPUT, PROFILE, TRANSCENDENTAL = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("TRANSCENDENTAL", 1)
-USE_TC, TC_OPT = ContextVar("TC", 1), ContextVar("TC_OPT", 0)
+USE_TC, TC_OPT, TIME_REPLAY = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("TIME_REPLAY", 0)
 FUSE_AS_ONE_KERNEL = ContextVar("FUSE_AS_ONE_KERNEL", 0)
 
 @dataclass(frozen=True)
@@ -322,6 +322,11 @@ class tqdm:
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+
+def timeit(fn, *args, **kwargs):
+  st = time.perf_counter()
+  fn(*args, **kwargs)
+  return time.perf_counter() - st
 
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
   def dfs(x:Any, cache:dict):
