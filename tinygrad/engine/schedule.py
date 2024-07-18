@@ -1,6 +1,6 @@
 import sys, pickle, atexit
 from collections import defaultdict, deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
@@ -84,12 +84,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
-    if not st.contiguous:
-      input_lop = _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, input_st:=reduce_info[buf][0], realizes, assign_targets, \
-          reduce_info, cache)
-      assert input_lop.op is BufferOps.CONST, f"reduceop late fixup not supported for input {input_lop.op}"
-      # TODO: why is the input_lop ShapeTracker wrong?
-      return LazyOp(cast(Op,buf.op), (replace(input_lop, arg=replace(input_lop.arg, st=input_st)),), reduce_info[buf][1])
+    if not st.contiguous: assert buf.srcs[0].base.op is MetaOps.CONST, f"reduceop late fixup not supported for input {buf.srcs[0].base}"
     st, arg = reduce_info[buf]
 
   # otherwise we fuse it like normal
@@ -102,7 +97,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   for x in buf.srcs: _recurse_reduceops(x, buf.srcs[0].st if buf.op in ReduceOps else st, realizes, outs, reduce_info, cache)
   if buf.op in ReduceOps and buf not in reduce_info:
-    input_st, axis = buf.srcs[0].st, buf.arg
+    input_st, axis = ShapeTracker.from_shape(buf.srcs[0].st.shape), buf.arg
     if not st.contiguous:
       assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
       assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
@@ -115,8 +110,6 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
       if reduce_info:
         top_reduce_input_st, top_reduce_axes = deque(reduce_info.values(), 1).pop()
         input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
-      # TODO: fix this
-      else: input_st = ShapeTracker.from_shape(input_st.shape)
     reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
