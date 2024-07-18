@@ -707,41 +707,10 @@ class Kernel:
             fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
               ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
           elif self.opts.device == "INTEL":
-            # TODO
-            # intel partially working            
-            # reduce_axes = [self.shape_len-self.upcasted, self.shape_len-self.upcasted+1]
-            # upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted+2, self.shape_len-self.upcasted+2)
-            # fix_st1 = functools.partial(fix_st, (2,16,4,4), (4,4), (4,4), ((0,0), (0,1)), ((0,2), (0,3)))
-            # fix_st2 = None
-
-            # metal
             reduce_axes = [self.shape_len-self.upcasted]
             upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1)
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
-
-            # amd
-            # reduce_axes = [self.shape_len-self.upcasted]
-            # upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
-            # fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
-            # fix_st2 = None
-
-            # wip below
-
-            # fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
-            #   ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
-
-
-            # reduce_axes = [self.shape_len-self.upcasted]
-            # upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted)
-            # # (2, 2, 16, 2, 2, 16, 4, 4)
-            # fix_st1 = functools.partial(fix_st, (2,16,4), (4,4), (2,2,16,4,4), ((0,0), (0,0)), ((0,0), (0,0)))
-            # fix_st2 = None
-            
-            # reduce_axes = [self.shape_len-self.upcasted]
-            # upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
-            # fix_st1 = functools.partial(fix_st, (4,16,4), (4,4), (4,4), ((0,1), (0,0)), ((0,0), (0,0)))
-            # fix_st2 = None
           else:
             raise RuntimeError("unsupported device for tensor cores")
 
