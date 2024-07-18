@@ -1,7 +1,8 @@
 import unittest
 import numpy as np
-from tinygrad import Device, dtypes, Tensor
+from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.dtype import ImageDType
+from tinygrad.engine.realize import lower_schedule
 
 @unittest.skipIf(Device.DEFAULT != "GPU", "only images on GPU")
 class TestImageDType(unittest.TestCase):
@@ -68,16 +69,21 @@ class TestImageDType(unittest.TestCase):
     it = data.cast(dtypes.imageh((9,27,4))).realize()
     assert it.lazydata.base.realized._buf != b1
 
+  # issue caused by: don't realize image to image casts. this is part of a larger problem
   def test_lil_model(self):
-    x = Tensor.zeros(1, 1)
-    w1 = Tensor.zeros(1, 8, requires_grad=True)
-    w2 = Tensor.zeros(8, 2)
-    ret = x.image_dot(w1).image_dot(w2)
-    loss = (ret - ret.max(-1, keepdim=True)).mean()
-    loss.backward()
-    val = w1.grad.numpy()
-    print(val)
-    assert not np.any(np.isnan(val))
+    with Context(IMAGE=2):
+      x = Tensor.zeros(1, 1)
+      w1 = Tensor.zeros(1, 8, requires_grad=True)
+      w2 = Tensor.zeros(8, 2)
+      loss = x.image_dot(w1).image_dot(w2).float().max()
+      loss.backward()
+      sched = w1.grad.schedule()
+      for s,ei in zip(sched, lower_schedule(sched[:])):
+        ei.run()
+        if s.outputs[0].dtype is dtypes.float:
+          lst = s.outputs[0].as_buffer().cast("f").tolist()
+          print(lst)
+          assert not np.any(np.isnan(lst))
 
 if __name__ == '__main__':
   unittest.main()
