@@ -31,7 +31,7 @@ class UPat:
       # repeat if it's a UPat
       self.src = [itertools.repeat(src)]
     self.name: Optional[str] = name
-    self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
+    self.allow_any_len = allow_any_len or isinstance(src, UPat) or src is None
 
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
@@ -39,9 +39,10 @@ class UPat:
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
   def __repr__(self):
-    def rep(x): return f"UPat({{{{{', '.join(str(x) for x in x.op) if isinstance(x.op, tuple) else x.op}}}}}, {x.arg}, name='{x.name}',\
- dtype={None if x.dtype is None else f'{{{set(x.dtype)}}}'}, src=({{}}))"
-    return pretty_print(self, rep, lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
+    def rep(x):
+      return "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=(%s))" % (('{%s}'%', '.join(map(str,x.op))) if isinstance(x.op, tuple) else x.op,
+        x.arg, repr(x.name), None if not x.dtype else set(x.dtype), x.allow_any_len, "%s")
+    return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
@@ -51,7 +52,7 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if pat.src is None: return [store]
   res: List[Dict[str, UOp]] = []
   for vp in pat.src:
-    if pat.allowed_len != 0 and len(uop.src) != pat.allowed_len: return []
+    if not pat.allow_any_len and len(uop.src) != len(vp): return []
     new_stores = [store.copy()]
     for uu, vv in zip(uop.src, vp): new_stores = [rstore for nstore in new_stores for rstore in _match(uu, vv, nstore)]
     res.extend(new_stores)

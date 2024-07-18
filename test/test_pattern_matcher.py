@@ -1,4 +1,4 @@
-import unittest
+import unittest, itertools
 from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps # noqa: F401
@@ -175,21 +175,25 @@ class TestPatternMatcher(TestUOps):
     self.assert_equiv_uops(e2, uops.uops[1])
     self.assert_equiv_uops(e3, uops.uops[2])
 
+  def _assert_eq_upat(self, a:UPat, b:UPat):
+    assert (a.op, a.dtype, a.arg, a.allow_any_len) == (b.op, b.dtype, b.arg, b.allow_any_len)
+    assert (a.name, type(a.src)) == (b.name, type(b.src))
+    def simple_src(u:UPat):
+      if u.src is None: return []
+      if isinstance(u.src, itertools.repeat): return next(u.src[0])
+      return u.src[0]
+    for a,b in zip(simple_src(a), simple_src(b)): self._assert_eq_upat(a, b)
+
   def test_upat_str(self):
     dtypes._float2 = dtypes.float.vec(2)
     upat = UPat(UOps.CONST, name="x", dtype=dtypes.float)
-    print(str(upat))
     assert str(upat) == str(eval(str(upat)))
-    for i in range(20):
-      upat = UPat(UOps.ALU, name="x", src=[upat, upat], arg=BinaryOps.ADD)
+    for i in range(20): upat = UPat(UOps.ALU, name="x", src=[upat, upat], arg=BinaryOps.ADD)
     assert len(str(upat)) < 10_000
     assert str(eval(str(upat))) == str(upat)
-    for pat in constant_folder.pdict.values():
-      pat = pat[0][0]
-      eval_pat = eval(str(pat))
-      assert type(eval_pat.op) is type(pat.op)
-      assert type(eval_pat.src) is type(pat.src)
-      assert str(eval_pat) == str(pat)
+    for rule in constant_folder.pdict.values():
+      pat = rule[0][0]
+      self._assert_eq_upat(pat, eval(str(pat)))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
