@@ -785,7 +785,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
-      sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is MetaOps.SINK]
+      sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is MetaOps.KERNEL]
       assert len(sched) == 1
 
       lin = Kernel(sched[0].ast)
@@ -806,7 +806,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
-    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is MetaOps.SINK]
+    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is MetaOps.KERNEL]
     assert len(sched) == 1
     lin = Kernel(sched[0].ast)
     assert not any(u.op is UOps.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
@@ -1159,7 +1159,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.upcasted == 1
 
 def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp], inputs:List[Tensor], *args, **kwargs):
-  if not isinstance(ast, LazyOp): ast = LazyOp(MetaOps.SINK, ast)
+  if not isinstance(ast, LazyOp): ast = LazyOp(MetaOps.KERNEL, ast)
   inbufs = [x.lazydata.buffer for x in inputs]
   outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)

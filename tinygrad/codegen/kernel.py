@@ -58,9 +58,9 @@ class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
     if len(ast) > 1 or ast[0].op is BufferOps.STORE:
       assert all(x.op is BufferOps.STORE for x in ast)
-      self.ast = LazyOp(MetaOps.SINK, ast)
+      self.ast = LazyOp(MetaOps.KERNEL, ast)
     else:
-      assert len(ast) == 1 and ast[0].op is MetaOps.SINK
+      assert len(ast) == 1 and ast[0].op is MetaOps.KERNEL
       self.ast = ast[0]
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
@@ -718,7 +718,7 @@ class Kernel:
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
           return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
-      elif op.op is MetaOps.SINK:
+      elif op.op is MetaOps.KERNEL:
         arg = KernelInfo(self.local_dims, self.upcasted)
       else:
         arg = op.arg

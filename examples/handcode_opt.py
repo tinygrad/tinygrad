@@ -69,7 +69,7 @@ if __name__ == "__main__":
   print(f"optimizing for {Device.DEFAULT}")
 
   sched = globals()[f"get_sched_{getenv('MODEL', 'resnet')}"]()
-  sched = [x for x in sched if x.ast.op is MetaOps.SINK]
+  sched = [x for x in sched if x.ast.op is MetaOps.KERNEL]
 
   # focus on one kernel
   if getenv("KERNEL", -1) >= 0: sched = sched[getenv("KERNEL", -1):getenv("KERNEL", -1)+1]
