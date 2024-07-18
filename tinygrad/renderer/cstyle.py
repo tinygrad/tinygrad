@@ -390,18 +390,14 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
 class IntelRenderer(OpenCLRenderer):
-  device = "GPU"
+  device, kernel_prefix = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + OpenCLRenderer.kernel_prefix
   tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
-  kernel_prefix = "__attribute__((intel_reqd_sub_group_size(8)))\n" + OpenCLRenderer.kernel_prefix
-
   def render_dtype(self, var_dtype:DType) -> str:
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
-  def render_cast(self, x, var_dtype, bitcast=False) -> str:
-    # TODO: handle all casts. Only handling bf16 to f16 and f16 to bf16 for now
+  def render_cast(self, x, var_dtype, bitcast=False) -> str: # TODO: handle all casts
     if var_dtype == dtypes.bfloat16: return f"intel_convert_bfloat16_as_ushort({x})"
     if var_dtype == dtypes.float: return f"intel_convert_as_bfloat16_float({x})"
     return super().render_cast(x, var_dtype, bitcast)
-
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     for arg in set([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       dt_in = ("ushort", "bf16") if arg[2] == dtypes.bfloat16 else (arg[2].name, "f16")
