@@ -220,6 +220,11 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
+      - name: Run process replay tests
+        run: |
+          export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+          export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+          cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   #testwebgpu:
   #  name: WebGPU Tests

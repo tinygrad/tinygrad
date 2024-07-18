@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, DType, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, pretty_print
 from tinygrad.codegen.uops import UOp, UOps, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -38,10 +38,16 @@ class UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None,
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
+  def __repr__(self):
+    def rep(x):
+      form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=(%s))"
+      return form % (('{%s}'%', '.join(map(str,x.op))) if isinstance(x.op, tuple) else x.op, x.arg,
+                     repr(x.name), set(x.dtype) if x.dtype else None, x.allowed_len == 0, "%s")
+    return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
-     (pat.dtype is not None and uop.dtype is not None and uop.dtype not in pat.dtype) or \
+     (pat.dtype is not None and uop.dtype not in pat.dtype) or \
      (pat.arg is not None and pat.arg != uop.arg) or \
      (pat.op is not None and uop.op not in pat.op): return []
   if pat.src is None: return [store]
@@ -96,7 +102,7 @@ def fix_image_idx(ls:UOp):
 def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None):
   if len(ex.src) != 4: return None
   if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
-  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
+  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   if idx2 is not None: idx = idx + idx2
   if not idx.divides(len(ex.src)): return None
 
@@ -107,7 +113,7 @@ def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None):
 def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtypes.int, 0), idx2=None, idx3=None):
   if len(ex.src) not in [2, 4]: return None
   if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
-  if buf.dtype != PtrDType(dtypes.float) and not isinstance(buf.dtype, ImageDType): return None
+  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   if idx2 is not None: idx = idx + idx2
   if idx3 is not None: idx = idx + idx3
   if not idx.divides(len(ex.src)): return None
@@ -115,24 +121,15 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
   new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), (ex.arg[0][0],))
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
 
-def no_float4_alu(alu):
-  if alu.dtype.count == 1: return None
-  alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(),
-                   tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
-  return UOp(UOps.VECTORIZE, alu.dtype, alus)
-
 float4_folding = PatternMatcher([
-  (UOp(UOps.STORE, dtype=dtypes.float, src=(UOp.var("buf"), UOp.var("idx")+
+  # reorder index to bring const closer to store
+  (UOp(UOps.STORE, src=(UOp.var("buf"), UOp.var("idx")+
     (UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")), UOp.var("var"))).name("store"),
     lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float(2,4) load
-  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("idx2"))).name("load"),
-    float4_expand_load),
-  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
-  (UOp(UOps.LOAD, dtype=dtypes.float, src=(UOp.var("buf"),
-    UOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
+  (UOp(UOps.LOAD, src=(UOp.var("buf"), UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("idx2"))).name("load"), float4_expand_load),
+  (UOp(UOps.LOAD, src=(UOp.var("buf"), UOp(UOps.EXPAND).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
+  (UOp(UOps.LOAD, src=(UOp.var("buf"), UOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
   # float(2,4) store
   # TODO: fold ADDs into one UOp and remove add chains
   (UOp(UOps.STORE, src=(UOp.var("buf"),
@@ -145,8 +142,6 @@ float4_folding = PatternMatcher([
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
-  # no ALU on float4 (float4 constructor doesn't work in METAL/GPU)
-  (UOp(UOps.ALU).name("alu"), no_float4_alu),
 ])
 
 # ***** transcendental *****
@@ -198,8 +193,10 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  # CONTRACT before REDUCE
-  (UPat(UOps.CONTRACT, name="con", src=UPat(UOps.REDUCE, name="red")),
+  # CONTRACT before ALU/REDUCE
+  (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.ALU, name="alu"),)),
+   lambda con, alu: UOp(alu.op, con.dtype, tuple(UOp(UOps.CONTRACT, x.dtype.vec(con.dtype.count), (x,), con.arg) for x in alu.src), alu.arg)),
+  (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.REDUCE, name="red"),)),
    lambda con, red: UOp(UOps.REDUCE, con.dtype, (UOp(UOps.CONTRACT, con.dtype, red.src[0:1], con.arg),)+red.src[1:], red.arg)),
   # bigint is rewritten to int32
   (UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.bigint, name="x"),
@@ -239,6 +236,9 @@ constant_folder = PatternMatcher([
   (UOp(UOps.UNMUL, src=(UOp.const(None, 0).name('zero'), UOp.var())), lambda zero: zero),
   (UOp(UOps.UNMUL).name('unmul').cast().name('root'), lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.src[0].cast(root.dtype), unmul.src[1]))),
   # indexing (with a multiply offset)!
+  (UOp.var('idx').eq(UOp(UOps.RANGE).name("rng")).cast()*
+    UOp(UOps.LOAD, src=(UOp.var("buf"), UOp.var('add')+UOp.var('mul')*UOp(UOps.RANGE).name("rng"))).name("ld"),
+    lambda idx,rng,buf,add,mul,ld: UOp(UOps.UNMUL, ld.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx)), rng.src[1]-rng.src[0]))),
   (UOp.var('idx').eq(UOp(UOps.RANGE).name("rng")).where(
     UOp(UOps.LOAD, src=(UOp.var("buf"), UOp.var('add')+UOp.var('mul')*UOp(UOps.RANGE).name("rng"))).name("ld"), UOp.const(None, 0.0)),
     lambda idx,rng,buf,add,mul,ld: UOp(UOps.UNMUL, ld.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx)), rng.src[1]-rng.src[0]))),
@@ -444,6 +444,12 @@ def do_contract(con:UOp):
     srcs += [UOp(UOps.VECTORIZE, con.dtype, tuple(src)) for src in zip(*to_join[i:i+con.dtype.count])]
   return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x[0] != con.arg[0]))
 
+def no_vectorized_alu(alu):
+  if alu.dtype.count == 1: return None
+  alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(),
+                   tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
+  return UOp(UOps.VECTORIZE, alu.dtype, alus)
+
 expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
@@ -459,6 +465,8 @@ expander = PatternMatcher([
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
   # empty EXPAND is NOOP
   (UOp(UOps.EXPAND, src=(UOp.var('x'),), arg=()), lambda x: x),
+  # no ALU on vectorized dtypes
+  (UOp(UOps.ALU).name("alu"), no_vectorized_alu),
 ])
 
 # *** uop graph ***

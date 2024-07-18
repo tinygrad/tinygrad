@@ -3,7 +3,7 @@ from typing import Union, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes, struct
 from enum import Enum, auto
 from dataclasses import dataclass
-from tinygrad.helpers import prod, dedup
+from tinygrad.helpers import prod, dedup, pretty_print
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -62,7 +62,7 @@ class LazyOp:
     ret = context[key] = all(a.cached_compare(b, context) for a,b in zip(self.src, x.src))
     return ret
   def __eq__(self, x): return self.cached_compare(x, context={})
-  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
+  def __repr__(self:LazyOp): return pretty_print(self, lambda x: f'LazyOp({x.op}, arg={x.arg}, src=(%s))')
   @functools.cached_property
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype

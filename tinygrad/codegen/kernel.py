@@ -3,7 +3,7 @@ import itertools, functools
 from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
-from tinygrad.engine.graph import print_tree
+
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, \
                          verify_lazyop, KernelInfo, get_lazyop_info
 from tinygrad.device import Device
@@ -22,7 +22,7 @@ from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
@@ -67,7 +67,7 @@ class Kernel:
     try: lazyop_sts_map = verify_lazyop(self.ast)
     except AssertionError as e:
       print("INVALID AST")
-      for op in ast: print_tree(op)
+      for op in ast: print(op)
       raise e
 
     cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
@@ -141,7 +141,6 @@ class Kernel:
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
 
   # TODO: these need more tests or it might silently be no-op
-  def shape_offsets(self, i:int): return itertools.product(*[list(range(cast(int, s))) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]  # noqa: E501
   def float4_axis(self, i:int): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
   def upcasted_axis(self, i:int) -> List[Tuple[int, Optional[sint], bool]]:
@@ -426,7 +425,8 @@ class Kernel:
     axis = opt.real_axis(self)
     check(axis < len(self.full_shape), "invalid axis")
 
-    if opt.amt is not None:
+    if opt.op is OptOps.SWAP: amt = cast(int, opt.amt)  # amt is an axis in the SWAPs
+    elif opt.amt is not None:
       amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
       check(isinstance(amt, int) and amt != 1, "shift/padto of amt 1 or Node is meaningless")
       if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, "no longer valid shift")
@@ -479,6 +479,11 @@ class Kernel:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
+    elif opt.op is OptOps.SWAP:
+      check(axis < amt and amt < self.global_dims, "swap is only for globals with axis < amt")
+      permute = list(range(self.shape_len))
+      permute[axis], permute[amt] = permute[amt], permute[axis]
+      self.reshape_and_permute(None, tuple(permute))
     elif opt.op is OptOps.MERGE:
       check(axis >= self.shape_len-self.upcasted, "only merge upcasted")
       check(self.full_shape[axis:axis+2] == self.output_shape[axis:axis+2], "can't merge reduces")
@@ -496,7 +501,7 @@ class Kernel:
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] == 1: continue  # reduced
         check(self.sts[i].shape[axis] > amt//4, f"pad adds more than quadruple the work {self.sts[i].shape[axis]=} > {amt//4=}")
-        if (ru := round_up(cast(int, self.sts[i].shape[axis]), cast(int, amt)) - self.sts[i].shape[axis]):
+        if (ru := round_up(cast(int, self.sts[i].shape[axis]), amt) - self.sts[i].shape[axis]):
           # pad right seems to be faster
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
           padded = True
@@ -538,7 +543,7 @@ class Kernel:
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:  # noqa: E501
         # TODO: use 1024 if it's allowed in a smarter way
-        for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
+        for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
             try: # may fail due to excessive smem usage
               self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
@@ -600,7 +605,7 @@ class Kernel:
       else: break
 
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast.
-    if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and (self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
+    if self.first_reduce < (self.shape_len-self.upcasted) and (prod(self.full_shape[self.shape_len-self.upcasted:]) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and (self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
       if (s:=self.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
         self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
         # if it's small, upcast a second reduce dimension too
@@ -732,7 +737,7 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
-      print_tree(modified_ast)
+      print(modified_ast)
     verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)

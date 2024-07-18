@@ -304,8 +304,6 @@ class AMDProgram(HCQCompatProgram):
 
     self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
-    AMDComputeQueue().memory_barrier().submit(self.device)
-
     super().__init__(kernargs_alloc_size=self.kernargs_segment_size)
 
   def __del__(self):

@@ -4,7 +4,6 @@ from examples.mlperf.helpers import get_mlperf_bert_model
 from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Compiled
-from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import DEBUG, ansilen, getenv
@@ -81,8 +80,7 @@ if __name__ == "__main__":
   for i,si in enumerate(sched):
     ops = get_lazyop_info(si.ast.src[0]).flops
 
-    if DEBUG >= 2:
-      print_tree(si.ast)
+    if DEBUG >= 2: print(si.ast)
 
     rawbufs = bufs_from_lin(Kernel(si.ast))
 

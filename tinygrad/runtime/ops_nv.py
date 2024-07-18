@@ -155,6 +155,8 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     self.cmd_idx_to_qmd, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}
     super().__init__()
 
+  def _memory_barrier(self): self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
+
   def _exec(self, prg, kernargs, global_size, local_size):
     cmd_idx = len(self) - 1
 
@@ -168,7 +170,6 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = nvdata64(kernargs)
 
     if (prev_qmd:=self.cmd_idx_to_qmd.get(cmd_idx - 1)) is None:
-      self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
       self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8]
       self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9]
     else:
@@ -298,7 +299,7 @@ class NVProgram(HCQCompatProgram):
 
     self.fill_kernargs(self.device.kernargs_ptr, args, vals)
 
-    q = NVComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1)
+    q = NVComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
     with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
       q.exec(self, self.device.kernargs_ptr, global_size, local_size)

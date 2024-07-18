@@ -1,8 +1,6 @@
 from __future__ import annotations
 import unittest
 from tinygrad.codegen.kernel import Kernel
-#from tinygrad.codegen.kernel import Kernel
-from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BufferOps, MemBuffer, LazyOp, ReduceOps, MetaOps, verify_lazyop
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -13,7 +11,7 @@ class InvalidLazyOpException(Exception): pass
 def lower(*ast:LazyOp):
   sink_ast = LazyOp(MetaOps.KERNEL, ast)
   if DEBUG >= 3:
-    for op in ast: print_tree(op)
+    for op in ast: print(op)
   try: verify_lazyop(sink_ast)
   except AssertionError: raise InvalidLazyOpException()
   k = Kernel(sink_ast)

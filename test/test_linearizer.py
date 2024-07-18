@@ -16,7 +16,6 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
-from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import DEBUG, prod, Context, getenv, CI, flatten, dedup
 from tinygrad.dtype import DType, dtypes
 
@@ -946,6 +945,10 @@ class TestFloat4(unittest.TestCase):
   def count_float4(k):
     return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
             len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 3 and uop.src[2].dtype == dtypes.float.vec(4)]))
+  @staticmethod
+  def count_half4(k):
+    return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.half.vec(4)]),
+            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 3 and uop.src[2].dtype == dtypes.half.vec(4)]))
 
   # TODO: express opts below as auto opts
 
@@ -1081,6 +1084,35 @@ class TestFloat4(unittest.TestCase):
     k.linearize()
 
     assert TestFloat4.count_float4(k) == (1, 1)
+
+  def test_half4_load_unrolled(self):
+    # from llama 7B shard 4 gpus
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 0, 1024, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 32000, 1), strides=(0, 32000, 1, 0), offset=0, mask=None, contiguous=True),))))   # noqa: E501
+
+    # TODO: fix this, expected might change but should be positive
+    for expected, opts in [
+      ((7, 0), [Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=3), Opt(op=OptOps.UNROLL, axis=0, amt=4)]),
+      ((5, 0), [Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4)]),
+      ((2, 0), [Opt(op=OptOps.UNROLL, axis=0, amt=4)]),
+    ]:
+      k = Kernel(ast)
+      for opt in opts: k.apply_opt(opt)
+      k.linearize()
+      count = TestFloat4.count_half4(k)
+      assert count == expected, f"{count=}, {expected=}"
+
+  def test_float4_acc(self):
+    # from float32 stable diffusion red tinybox
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1, 256, 4, 514, 4, 514), strides=(0, 0, 0, 262144, 0, 512, 0, 1), offset=-513, mask=((0, 1), (0, 1), (0, 1), (0, 256), (0, 4), (1, 513), (0, 4), (1, 513)), contiguous=False), View(shape=(1, 1, 128, 512, 512, 256, 3, 3), strides=(0, 0, 0, 2056, 1, 4227136, 1058840, 515), offset=0, mask=None, contiguous=False))))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 128, 512, 512, 256, 3, 3), strides=(0, 0, 2304, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(5, 6, 7)), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 128, 512, 512, 1, 1, 1), strides=(0, 0, 1, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 128, 512, 512, 1, 1, 1), strides=(0, 0, 262144, 512, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    for expected, opts in [
+      (1, [Opt(op=OptOps.UPCAST, axis=2, amt=4)]),
+      (4, [Opt(op=OptOps.UPCAST, axis=2, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4)]),
+    ]:
+      k = Kernel(ast)
+      for opt in opts: k.apply_opt(opt)
+      k.linearize()
+      count = len([uop for uop in k.uops if uop.op is UOps.DEFINE_ACC and uop.dtype == dtypes.float.vec(4)])
+      assert count == expected, f"{count=}, {expected=}"
 
 class TestHandCodedOpts(unittest.TestCase):
   def test_masked_upcast(self):
@@ -1235,7 +1267,7 @@ def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs:Dict[int,Ten
   out = merge(op0, _deep_replace(op1, op0_loads))
   # limitation: only tests single output
   op = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, s0[-1].ast.src[-1].arg.dtype, s0[-1].ast.src[-1].arg.st))
-  if DEBUG >= 3: print_tree(op)
+  if DEBUG >= 3: print(op)
   return op,
 
 def check_fused_tc_opt(tc:TensorCore, r0:Tensor, r1:Tensor, inputs:List[Tensor]):
