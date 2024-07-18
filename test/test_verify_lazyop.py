@@ -11,7 +11,7 @@ from tinygrad.shape.view import View
 
 class InvalidLazyOpException(Exception): pass
 def lower(*ast:LazyOp):
-  sink_ast = LazyOp(MetaOps.SINK, ast)
+  sink_ast = LazyOp(MetaOps.KERNEL, ast)
   if DEBUG >= 3:
     for op in ast: print_tree(op)
   try: verify_lazyop(sink_ast)

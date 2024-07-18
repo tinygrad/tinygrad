@@ -28,7 +28,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
         for i,out in enumerate(s.outputs):
           seen.add(out)
   sched = create_schedule(flatten([r.lazydata.lbs for r in t]), seen)
-  if filter_sink: sched = [s for s in sched if s.ast.op is MetaOps.SINK]
+  if filter_sink: sched = [s for s in sched if s.ast.op is MetaOps.KERNEL]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
@@ -37,7 +37,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
   if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (sink) ops linearize
   for s in sched:
-    if s.ast.op is not MetaOps.SINK: continue
+    if s.ast.op is not MetaOps.KERNEL: continue
     l = Kernel(s.ast)
     l.hand_coded_optimizations()
     l.linearize()

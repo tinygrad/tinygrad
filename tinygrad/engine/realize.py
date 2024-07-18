@@ -189,7 +189,7 @@ class ExecItem:
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is MetaOps.COPY or getenv("USE_COPY_KERNEL")
-  if si.ast.op is MetaOps.SINK:
+  if si.ast.op is MetaOps.KERNEL:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals], si.metadata)
   out = si.outputs[0]
