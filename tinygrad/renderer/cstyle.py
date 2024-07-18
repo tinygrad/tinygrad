@@ -394,13 +394,22 @@ class IntelRenderer(OpenCLRenderer):
 # class IntelRenderer(ClangRenderer):
   # TODO
   device = "INTEL"
-  tensor_cores = [
-    TensorCore(
-      dims=(8,8,16),
-      threads=[(0,8)],
-      thread_local_sizes=[[2,8], [16], [8]],
-      dtype_in=di,
-      dtype_out=do) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]]  # noqa: E501
+
+  # amd
+  # tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+
+
+  # metal
+  tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+
+  # intel
+  # tensor_cores = [
+  #   TensorCore(
+  #     dims=(8,8,16),
+  #     threads=[(0,8)],
+  #     thread_local_sizes=[[2,8], [16], [8]],
+  #     dtype_in=di,
+  #     dtype_out=do) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]]  # noqa: E501
   # tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], thread_local_aliases=[[[0], [-1,1], [-2]], [[1], [-1], [0]], [[1], [0], [-1]]], thread_local_sizes=[[2,8], [16], [8]], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]],  # noqa: E501
   # tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
 
