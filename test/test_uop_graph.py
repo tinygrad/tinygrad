@@ -5,7 +5,6 @@ from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
 from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, graph_rewrite
-from tinygrad.engine.graph import print_tree  # noqa: F401 # pylint: disable=unused-import
 
 simple_pm = PatternMatcher([
   (UOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -386,7 +385,7 @@ class TestExpander(unittest.TestCase):
     e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
     sink = UOp(UOps.REDUCE, dtypes.int, (e1,e2), ReduceOps.SUM)
     sink = expander_rewrite(sink)
-    print_tree(sink)
+    print(sink)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

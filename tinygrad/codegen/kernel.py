@@ -3,7 +3,7 @@ import itertools, functools
 from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
-from tinygrad.engine.graph import print_tree
+
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, \
                          verify_lazyop, KernelInfo, get_lazyop_info
 from tinygrad.device import Device
@@ -67,7 +67,7 @@ class Kernel:
     try: lazyop_sts_map = verify_lazyop(self.ast)
     except AssertionError as e:
       print("INVALID AST")
-      for op in ast: print_tree(op)
+      for op in ast: print(op)
       raise e
 
     cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
@@ -731,7 +731,7 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
-      print_tree(modified_ast)
+      print(modified_ast)
     verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)

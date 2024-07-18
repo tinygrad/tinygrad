@@ -16,7 +16,6 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
-from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import DEBUG, prod, Context, getenv, CI, flatten, dedup
 from tinygrad.dtype import DType, dtypes
 
@@ -1235,7 +1234,7 @@ def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs:Dict[int,Ten
   out = merge(op0, _deep_replace(op1, op0_loads))
   # limitation: only tests single output
   op = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, s0[-1].ast.src[-1].arg.dtype, s0[-1].ast.src[-1].arg.st))
-  if DEBUG >= 3: print_tree(op)
+  if DEBUG >= 3: print(op)
   return op,
 
 def check_fused_tc_opt(tc:TensorCore, r0:Tensor, r1:Tensor, inputs:List[Tensor]):

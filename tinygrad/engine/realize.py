@@ -15,8 +15,7 @@ from tinygrad.engine.schedule import ScheduleItem
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
   if DEBUG >= 5:
-    from tinygrad.engine.graph import print_tree
-    print_tree(ast)
+    print(ast)
   k = Kernel(ast, opts=renderer)
   k.required_optimizations()
   if not NOOPT:

@@ -93,9 +93,8 @@ out = a.e(BinaryOps.ADD, b)
 sched = create_schedule([out])
 for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CLANG
 
-# DEBUGGING: print the compute ast as a tree
-from tinygrad.engine.graph import print_tree
-print_tree(sched[-1].ast)
+# DEBUGGING: print the compute ast
+print(sched[-1].ast)
 # NOTE: sched[-1].ast is the same as st_0 above
 
 # run that schedule

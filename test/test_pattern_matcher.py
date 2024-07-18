@@ -1,9 +1,9 @@
-import unittest
+import unittest, itertools
 from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
-from tinygrad.ops import BinaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps # noqa: F401
 from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat, _match
+from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat, _match, constant_folder
 
 class TestPatternMatcher(TestUOps):
   def test_simple_match(self):
@@ -174,6 +174,27 @@ class TestPatternMatcher(TestUOps):
     self.assert_equiv_uops(e1, uops.uops[0])
     self.assert_equiv_uops(e2, uops.uops[1])
     self.assert_equiv_uops(e3, uops.uops[2])
+
+  def _assert_eq_upat(self, a:UPat, b:UPat):
+    assert (sorted(map(str,a.op)) if a.op else [] == (sorted(map(str,b.op)) if b.op else []))
+    assert (sorted(a.dtype) if a.dtype else [] == (sorted(b.dtype) if b.dtype else []))
+    assert (a.name, type(a.src)) == (b.name, type(b.src))
+    def simple_src(u:UPat):
+      if u.src is None: return []
+      if isinstance(u.src, itertools.repeat): return next(u.src[0])
+      return u.src[0]
+    for a,b in zip(simple_src(a), simple_src(b)): self._assert_eq_upat(a, b)
+
+  def test_upat_str(self):
+    dtypes._float2 = dtypes.float.vec(2)
+    upat = UPat(UOps.CONST, name="x", dtype=dtypes.float)
+    assert str(upat) == str(eval(str(upat)))
+    for i in range(20): upat = UPat(UOps.ALU, name="x", src=[upat, upat], arg=BinaryOps.ADD)
+    assert len(str(upat)) < 10_000
+    assert str(eval(str(upat))) == str(upat)
+    for rule in constant_folder.pdict.values():
+      pat = rule[0][0]
+      self._assert_eq_upat(pat, eval(str(pat)))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
