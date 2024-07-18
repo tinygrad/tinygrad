@@ -87,7 +87,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_gpt2(self):
-    with Context(TIME_REAPLAY=1):
+    with Context(TIME_REPLAY=1):
       dtypes.default_float = dtypes.float16
 
       args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
