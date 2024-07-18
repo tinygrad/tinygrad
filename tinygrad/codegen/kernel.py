@@ -366,6 +366,12 @@ class Kernel:
           self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
           # NOTE: MERGE is needed because we can't deal with two upcasted dimensions
           self.apply_opt(Opt(OptOps.MERGE, self.shape_len-2), append_opt=False)
+        elif self.opts.device == "GPU":
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
+            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
         # assert tensor core
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
         return True
@@ -674,19 +680,16 @@ class Kernel:
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd = self.global_dims
             tcd = self.shape_len-self.upcasted
-            print(f"wd: {wd} tcd: {tcd}")
-            print(st1.shape[wd:])
             assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
-            print(f"test {st1.shape[tcd:tcd+4]}")
             assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, "tcd dims wrong"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
-            print(f"new shape: {new_shape}")
             permaxis = list(range(wd))
             for x,y in pattern_1: permaxis.append(y + (wd if x == 0 else tcd))
             permaxis += list(range(wd+len(warp_dims), tcd))
             for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
             permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
-            print(f"permaxis: {permaxis}")
+            new_shape = st1.shape
+            permaxis = range(9)
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device == "AMD":
@@ -710,7 +713,7 @@ class Kernel:
           elif self.opts.device == "GPU":
             reduce_axes = [self.shape_len-self.upcasted]
             upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted) # how to vary?
-            fix_st1 = functools.partial(fix_st, (4,), (4, 4), (), (8,), (8,))
+            fix_st1 = functools.partial(fix_st, (8,), (16,), (16,), (), ())
             fix_st2 = None
           else:
             raise RuntimeError("unsupported device for tensor cores")
