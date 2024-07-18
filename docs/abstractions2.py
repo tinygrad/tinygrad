@@ -58,7 +58,7 @@ sink = LazyOp(MetaOps.KERNEL, (st_0,))
 # convert the computation to a "linearized" format (print the format)
 from tinygrad.engine.realize import get_kernel, CompiledRunner
 lin = get_kernel(Device[DEVICE].renderer, sink).linearize()
-for u in lin.uops: print(u)
+lin.uops.print()
 
 # compile a program (and print the source)
 fxn = CompiledRunner(lin.to_program())
