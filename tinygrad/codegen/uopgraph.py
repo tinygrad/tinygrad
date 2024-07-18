@@ -244,6 +244,8 @@ constant_folder = PatternMatcher([
    lambda c1,c2,v: v if c1.arg == c2.arg else None),
   (UOp(UOps.UNMUL, src=(UOp.const(None, 0).name('zero'), UOp.var())), lambda zero: zero),
   (UOp(UOps.UNMUL).name('unmul').cast().name('root'), lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.src[0].cast(root.dtype), unmul.src[1]))),
+  # MUL with casted bool is where
+  (UOp.var("x")*(UOp.var("gate", dtype=dtypes.bool).cast(None)), lambda gate, x: gate.where(x, x.const(0)) if x.dtype != dtypes.bool else None),
   # indexing (with a multiply offset)!
   (UOp.var('idx').eq(UOp(UOps.RANGE).name("rng")).where(
     UOp(UOps.LOAD, src=(UOp.var("buf"), UOp.var('add')+UOp.var('mul')*UOp(UOps.RANGE).name("rng"))).name("ld"), UOp.const(None, 0.0)),

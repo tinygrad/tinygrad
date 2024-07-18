@@ -67,7 +67,6 @@ class TestIndexing(unittest.TestCase):
       #assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
-  # TODO: AssertionError: ReduceOps late fusion must be contiguous
   def test_index_fused(self):
     dataset = Tensor.rand(16384, 256).realize()
     idxs = Tensor([0,3,5,6]).realize()
@@ -80,8 +79,7 @@ class TestIndexing(unittest.TestCase):
       sched = X.schedule()
       assert len(sched) == 1, f"{len(sched)} != 1"
       run_schedule(sched)
-      # TODO: is this number correct?
-      #assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
+      assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
     np.testing.assert_allclose(real_index, X.numpy())
 
 if __name__ == "__main__":
