@@ -97,7 +97,7 @@ class CLDevice(Compiled):
     compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
     cl_device_vendor = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_VENDOR, 256, buf := ctypes.create_string_buffer(256), None), buf.value.decode())[1]  # noqa: E501
     if DEBUG >= 1: print(f"cl_device_vendor: {cl_device_vendor}")
-    renderer = IntelRenderer() if cl_device_vendor == "Intel" or getenv("FORCE_INTEL") else OpenCLRenderer()
+    renderer = IntelRenderer() if cl_device_vendor == "Intel" or getenv("INTEL") else OpenCLRenderer()
     super().__init__(device, CLAllocator(self), renderer, CLCompiler(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
