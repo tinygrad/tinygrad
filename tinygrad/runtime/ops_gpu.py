@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import Tuple, Optional, List, cast
 import ctypes, functools, hashlib
 import tinygrad.runtime.autogen.opencl as cl
-from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
-from tinygrad.renderer.cstyle import OpenCLRenderer
+from tinygrad.helpers import getenv, init_c_var, to_char_p_p, from_mv, OSX, DEBUG
+from tinygrad.renderer.cstyle import IntelRenderer, OpenCLRenderer
 from tinygrad.device import BufferOptions, LRUAllocator, Compiled, Compiler, CompileError
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
@@ -95,7 +95,10 @@ class CLDevice(Compiled):
     self.pending_copyin: List[memoryview] = []
 
     compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
-    super().__init__(device, CLAllocator(self), OpenCLRenderer(), CLCompiler(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))
+    cl_device_vendor = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_VENDOR, 256, buf := ctypes.create_string_buffer(256), None), buf.value.decode())[1]  # noqa: E501
+    if DEBUG >= 1: print(f"cl_device_vendor: {cl_device_vendor}")
+    renderer = IntelRenderer() if cl_device_vendor == "Intel" or getenv("FORCE_INTEL") else OpenCLRenderer()
+    super().__init__(device, CLAllocator(self), renderer, CLCompiler(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()

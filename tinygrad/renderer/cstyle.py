@@ -390,7 +390,7 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
 class IntelRenderer(OpenCLRenderer):
-  device = "INTEL"
+  device = "GPU"
   tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
   kernel_prefix = "__attribute__((intel_reqd_sub_group_size(8)))\n" + OpenCLRenderer.kernel_prefix
 
