@@ -336,10 +336,10 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
       with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
     if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.extend((ps[1] for ps in prescheduled.values()) if getenv("CAPTURE_AST") else [(graph, prescheduled)])
+    SCHEDULES.append((graph, prescheduled))
     if SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
   # confirm everything was scheduled correctly
-  if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
+  if any(degree != 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, var_vals
