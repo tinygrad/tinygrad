@@ -53,7 +53,7 @@ ld_1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.int32, ShapeTracker.from_s
 ld_2 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.int32, ShapeTracker.from_shape((1,))))
 alu = LazyOp(BinaryOps.ADD, (ld_1, ld_2))
 st_0 = LazyOp(BufferOps.STORE, (alu,), MemBuffer(0, dtypes.int32, ShapeTracker.from_shape((1,))))
-sink = LazyOp(MetaOps.SINK, (st_0,))
+sink = LazyOp(MetaOps.KERNEL, (st_0,))
 
 # convert the computation to a "linearized" format (print the format)
 from tinygrad.engine.realize import get_kernel, CompiledRunner
