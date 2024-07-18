@@ -446,11 +446,14 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=self.first_reduce)
       self.local_dims += 1
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
+      print(f"applying group: axis={axis}, amt={amt}, insert_before={self.first_reduce + self.group_for_reduces}")
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
-      check(len(self.reduceops) == 1, "can't group with multiple reduces")
+      # check(len(self.reduceops) == 1, "can't group with multiple reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
+      print("sts after shift_to:")
+      for st in self.sts: print("  ", st)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.shape_len-self.upcasted, "can't upcasted already upcasted")
@@ -714,11 +717,12 @@ class Kernel:
           return LazyOp(op.op, (ret,), new_reduce_axes) if len(new_reduce_axes) else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-          sts = ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])) # noqa: E501
+          mask = tuple(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] for i in range(self.first_reduce+self.group_for_reduces, self.shape_len))
+          sts = ShapeTracker.from_shape(tuple([1] * self.global_dims + [x if mask[i] else 1 for i,x in enumerate(list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]))] + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])) # noqa: E501
           local_buffer = MemBuffer(-1, start.dtype, sts)
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
-          return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+          return LazyOp(op.op, (local_load,), tuple(i for j,i in enumerate(range(self.first_reduce, self.first_reduce+self.group_for_reduces)) if mask[-j]))
       elif op.op is MetaOps.SINK:
         arg = KernelInfo(self.local_dims, self.upcasted)
       else:

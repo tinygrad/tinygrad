@@ -618,10 +618,8 @@ class UOpGraph:
       if DEBUG >= 7: print(p,x)
       if x.op is UOps.RANGE and x in range_group:
         while len(scope_stack) > 0:
-          s = scope_stack[-1]
-          if s not in range_group[x]:
-            scoped_chunk = self._uops[self._uops.index(scope_stack[-1]):]
-            popped_scope_stack.append((x,s,scoped_chunk))
+          if (s:=scope_stack[-1]) not in range_group[x]:
+            popped_scope_stack.append((x,s,self._uops[self._uops.index(scope_stack[-1]):]))
             self._uops = self._uops[:self._uops.index(scope_stack.pop(-1))]
           else: break
         scope_stack.append(x)
