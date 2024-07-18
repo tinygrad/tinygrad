@@ -30,7 +30,7 @@ def process_replay(offset:int):
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
         if comp_time is not None:
-          master_time = timeit(lambda: k.linearize().uops.linearize())
+          master_time = min(timeit(lambda: k.linearize().uops.linearize()) for _ in range(5))
           if abs(master_time - comp_time) > 1e-3: timediffs.append((name, comp_time, master_time))
     except Exception as e:
       logging.warn("FAILED TO RECREATE KERNEL")
