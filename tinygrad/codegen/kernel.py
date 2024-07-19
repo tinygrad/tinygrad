@@ -768,5 +768,8 @@ class Kernel:
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
     ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
     run_count = prod((self.global_size or []) + (self.local_size or []))
-    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
-                   self.uops, ops * run_count, min(mem * run_count, sum(arg.dtype.itemsize * arg.st.real_size() for arg in self.membufs)))
+    # group non-local MemBuffers by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
+    mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
+      itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
+                        key=lambda x: (x.op, x.arg.idx)))
+    return Program(self.name, src, self.opts.device, self.global_size, self.local_size, self.uops, ops * run_count, min(mem * run_count, mem_bytes))
