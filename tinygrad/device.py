@@ -368,10 +368,10 @@ class HCQSignal:
   def value(self) -> int: return self._get_value()
 
   @value.setter
-  def value(self, val:int): self._set_value(val)
+  def value(self, new_value:int): self._set_value(new_value)
 
   def _get_value(self) -> int: raise NotImplementedError("_get_value() method must be implemented")
-  def _set_value(self, val:int): raise NotImplementedError("_set_value() method must be implemented")
+  def _set_value(self, new_value:int): raise NotImplementedError("_set_value() method must be implemented")
 
   @property
   def timestamp(self) -> int: return self._get_timestamp()

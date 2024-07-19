@@ -81,7 +81,7 @@ class AMDSignal(HCQSignal):
   def __del__(self): AMDDevice.signals_pool.append(self._signal)
   def _get_value(self) -> int: return self._signal[0]
   def _get_timestamp(self) -> int: return self._signal[1] / 1e2
-  def _set_value(self, value:int): self._signal[0] = value
+  def _set_value(self, new_value:int): self._signal[0] = new_value
   def wait(self, value:int, timeout:int=10000):
     start_time = time.time() * 1000
     while (time_spent:=time.time() * 1000 - start_time) < timeout:
