@@ -74,10 +74,10 @@ class CLAllocator(LRUAllocator):
   def copyout(self, dest:memoryview, src:ctypes._CData):
     check(cl.clEnqueueReadBuffer(self.device.queue, src, False, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
     self.device.synchronize()
-  def offset(self, buf, size:int, offset:int): 
+  def offset(self, buf, size:int, offset:int):
     new_buf = type(buf)()
     ctypes.cast(ctypes.pointer(new_buf), ctypes.POINTER(ctypes.c_void_p))[0] = ctypes.cast(buf, ctypes.c_void_p).value + offset
-    return new_buf 
+    return new_buf
 
 class CLDevice(Compiled):
   device_ids = None                 # this is global and only initted once
