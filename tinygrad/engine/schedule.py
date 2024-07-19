@@ -137,8 +137,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.realized is not None: return
   if GRAPH: log_lazybuffer(buf, scheduled)
-  # view
-  if buf.base != buf:
+  # check if we need to realize views
+  if buf is not buf.base:
     # fuse some pads
     if len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
@@ -152,7 +152,6 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     # check all other pads for safe fusion
     elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets)
-  # base
   allbufs[buf] = None
   if buf.forced_realize or buf.op in MetaOps: realizes[buf] = None
   if buf.op is MetaOps.ASSIGN:
