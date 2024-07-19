@@ -3,7 +3,7 @@ import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, temp
 from typing import Tuple, List, Any, cast, Union, Dict
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
-                            HCQProgram, hcq_profile, Compiler, CompileError, BufferOptions
+                            HCQProgram, HCQSignal, hcq_profile, Compiler, CompileError, BufferOptions
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod, PROFILE
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler, PTXCompiler, PTX
@@ -92,6 +92,20 @@ class NVPTXCompiler(NVCompiler):
       raise CompileError(f"compile failed: {_get_bytes(handle, nvrtc.nvJitLinkGetErrorLog, nvrtc.nvJitLinkGetErrorLogSize, jitlink_check).decode()}")
     return _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, jitlink_check)
 
+class NVSignal(HCQSignal):
+  def __init__(self, value=0, **kwargs):
+    self._signal = NVDevice.signals_pool.pop()
+    self._signal[0] = value
+  def __del__(self): NVDevice.signals_pool.append(self._signal)
+  def _get_value(self) -> int: return self._signal[0]
+  def _get_timestamp(self) -> float: return self._signal[1] / 1e3
+  def _set_value(self, new_value:int): self._signal[0] = new_value
+  def wait(self, value:int, timeout:int=10000):
+    start_time = time.time() * 1000
+    while time.time() * 1000 - start_time < timeout:
+      if self._signal[0] >= value: return
+    raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
+
 class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
   def __del__(self):
     if self.binded_device is not None:
@@ -108,18 +122,18 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     if local_mem_tpc_bytes: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(local_mem_tpc_bytes), 0x40]
 
   def _wait(self, signal, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(mv_address(signal)), *nvdata64_le(value),
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(mv_address(signal._signal)), *nvdata64_le(value),
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
 
   def _signal(self, signal, value=0, timestamp=False):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(mv_address(signal)), *nvdata64_le(value),
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(mv_address(signal._signal)), *nvdata64_le(value),
                (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
   def _timestamp(self, signal): return NVCommandQueue._signal(self, signal, timestamp=True)
 
   def _update_signal(self, cmd_idx, signal=None, value=None): return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
   def _update_wait(self, cmd_idx, signal=None, value=None):
-    if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', nvdata64_le(mv_address(signal)))
+    if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', nvdata64_le(mv_address(signal._signal)))
     if value is not None: self.q[(valoff:=self.cmds_offset[cmd_idx]+3):valoff+2] = array.array('I', nvdata64_le(value))
 
   def bind(self, device: NVDevice):
@@ -185,14 +199,14 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
 
   def _signal(self, signal, value=0):
     if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 2)) is None or prev_qmd.release0_enable == 1: return super()._signal(signal, value)
-    prev_qmd.release0_address_upper, prev_qmd.release0_address_lower = nvdata64(mv_address(signal))
+    prev_qmd.release0_address_upper, prev_qmd.release0_address_lower = nvdata64(mv_address(signal._signal))
     prev_qmd.release0_payload_upper, prev_qmd.release0_payload_lower = nvdata64(value)
     prev_qmd.release0_enable = 1
     self.cmd_idx_to_qmd[len(self) - 1] = prev_qmd # this command is embedded into qmd.
 
   def _update_signal(self, cmd_idx, signal=None, value=None):
     if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_signal(cmd_idx, signal, value)
-    if signal is not None: qmd.release0_address_upper, qmd.release0_address_lower = nvdata64(mv_address(signal))
+    if signal is not None: qmd.release0_address_upper, qmd.release0_address_lower = nvdata64(mv_address(signal._signal))
     if value is not None: qmd.release0_payload_upper, qmd.release0_payload_lower = nvdata64(value)
 
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).compute_gpfifo)
@@ -208,11 +222,11 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
     if src is not None: self._patch(cmd_idx, offset=1, data=nvdata64(src))
 
   def _signal(self, signal, value=0):
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *nvdata64(mv_address(signal)), value, 4]
+    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *nvdata64(mv_address(signal._signal)), value, 4]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
 
   def _update_signal(self, cmd_idx, signal=None, value=None):
-    if signal is not None: self._patch(cmd_idx, offset=1, data=nvdata64(mv_address(signal)))
+    if signal is not None: self._patch(cmd_idx, offset=1, data=nvdata64(mv_address(signal._signal)))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).dma_gpfifo)
@@ -310,9 +324,8 @@ class NVProgram(HCQProgram):
     self.device.kernargs_ptr += self.kernargs_alloc_size
 
     if wait:
-      self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
-      if not PROFILE: self.device.signals_pool += [sig_st, sig_en]
-      return (sig_en[1] - sig_st[1]) / 1e9
+      self.device.timeline_signal.wait(self.device.timeline_value - 1)
+      return (sig_en.timestamp - sig_st.timestamp) / 1e6
 
 class NVAllocator(HCQAllocator):
   def __init__(self, device:NVDevice): super().__init__(device)
@@ -516,39 +529,13 @@ class NVDevice(HCQCompiled):
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
-                     functools.partial(NVProgram, self), NVComputeQueue, NVCopyQueue, timeline_signals=(self._alloc_signal(), self._alloc_signal()))
+                     functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue, timeline_signals=(NVSignal(), NVSignal()))
 
     self._setup_gpfifos()
     NVDevice.devices.append(self)
 
-  @classmethod
-  def _read_signal(self, signal): return signal[0]
-
-  @classmethod
-  def _read_timestamp(self, signal): return signal[1]
-
-  @classmethod
-  def _set_signal(self, signal, value): signal[0] = value
-
-  @classmethod
-  def _alloc_signal(self, value=0, **kwargs) -> memoryview:
-    self._set_signal(sig := self.signals_pool.pop(), value)
-    return sig
-
-  @classmethod
-  def _free_signal(self, signal): self.signals_pool.append(signal)
-
-  @classmethod
-  def _wait_signal(self, signal, value=0, timeout=10000):
-    start_time = time.time() * 1000
-    while time.time() * 1000 - start_time < timeout:
-      if signal[0] >= value: return
-    raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
-
-  def _gpu2cpu_time(self, gpu_time, is_copy): return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e3
-
   def synchronize(self):
-    NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
+    self.timeline_signal.wait(self.timeline_value - 1)
     self.cmdq_wptr = 0
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
