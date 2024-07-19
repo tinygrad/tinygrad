@@ -1924,10 +1924,10 @@ class Tensor:
 
   def interpolate(self, size:Tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
     """
-    Downsamples or Upsamples to the requested size, accepts 0 to N batch dimensions.
+    Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
 
-    The type of sampling is selected with `mode` which currently only supports `linear`.
-    To run `bilinear` or `trilinear` pass in a 2D or 3D size.
+    The interpolation algorithm is selected with `mode` which currently only supports `linear`.
+    To run `bilinear` or `trilinear`, pass in a 2D or 3D size.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 2, 3, 4], [21, 22, 23, 24], [41, 42, 43, 44]])
@@ -1937,16 +1937,16 @@ class Tensor:
     print(t.interpolate(size=(2,3), mode="linear").numpy())
     ```
     """
-    assert isinstance(size, (tuple,list)) and all(isinstance(s, int) for s in size) and len(size) > 0 and len(size) <= self.ndim
-    assert mode == "linear", "only linear interpolate supported right now"
-    x, expand = self, list(s for s in self.shape)
+    assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
+    assert mode == "linear", "only supports linear interpolate"
+    x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
-      scale = (self.shape[i] - (1 if align_corners else 0)) / (size[i] - (1 if align_corners else 0))
-      arr, reshape = Tensor.arange(size[i]).cast(dtypes.float32), [1 for _ in range(self.ndim)]
+      scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
+      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32), [1] * self.ndim
       index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
       reshape[i] = expand[i] = size[i]
       low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-      x = x.gather(i, low)*(1.0 - perc) + x.gather(i, high)*perc
+      x = x.gather(i, low).lerp(x.gather(i, high), perc)
     return x
 
   # ***** unary ops *****
@@ -2139,6 +2139,7 @@ class Tensor:
     ```
     """
     return self + (end - self) * weight
+
   def square(self):
     """
     Squares the tensor element-wise.

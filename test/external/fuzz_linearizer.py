@@ -10,7 +10,6 @@ from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.uops import UOp
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
-from tinygrad.engine.graph import print_tree
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
 from tinygrad.ops import LazyOp, UnaryOps, BufferOps
@@ -121,7 +120,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
   SEED = getenv("SEED", 42)
   random.seed(SEED)
   np.random.seed(SEED)
-  print_tree(lin.ast)
+  print(lin.ast)
   print(lin.colored_shape())
   seen_uops = {}
   last_lins = [lin]

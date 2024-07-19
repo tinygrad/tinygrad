@@ -1,13 +1,13 @@
 import unittest, ctypes, struct
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import CI, getenv
-from tinygrad.device import Buffer, BufferOptions, HCQCompatCompiled
+from tinygrad.device import Buffer, BufferOptions, HCQCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner
 
 MOCKGPU = getenv("MOCKGPU")
 
-@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompatCompiled), "HCQCompat device required to run")
+@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
 class TestHCQ(unittest.TestCase):
   @classmethod
   def setUpClass(self):

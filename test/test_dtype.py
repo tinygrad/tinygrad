@@ -298,7 +298,7 @@ class TestEqStrDType(unittest.TestCase):
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
-    self.assertEqual(str(PtrDType(dtypes.float32)), "ptr.dtypes.float")
+    self.assertEqual(str(PtrDType(dtypes.float32)), "PtrDType(dtypes.float)")
 
 class TestHelpers(unittest.TestCase):
   signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)

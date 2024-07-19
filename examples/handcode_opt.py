@@ -4,13 +4,11 @@ from examples.mlperf.helpers import get_mlperf_bert_model
 from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Compiled
-from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import DEBUG, ansilen, getenv
-from tinygrad.ops import MetaOps, get_lazyop_info
+from tinygrad.ops import MetaOps
 from tinygrad.shape.symbolic import sym_infer
-
 
 def get_sched_resnet():
   mdl = ResNet50()
@@ -69,7 +67,7 @@ if __name__ == "__main__":
   print(f"optimizing for {Device.DEFAULT}")
 
   sched = globals()[f"get_sched_{getenv('MODEL', 'resnet')}"]()
-  sched = [x for x in sched if x.ast.op is MetaOps.SINK]
+  sched = [x for x in sched if x.ast.op is MetaOps.KERNEL]
 
   # focus on one kernel
   if getenv("KERNEL", -1) >= 0: sched = sched[getenv("KERNEL", -1):getenv("KERNEL", -1)+1]
@@ -79,10 +77,7 @@ if __name__ == "__main__":
   running_gflops = 0
   usage = {}
   for i,si in enumerate(sched):
-    ops = get_lazyop_info(si.ast.src[0]).flops
-
-    if DEBUG >= 2:
-      for ast in si.ast: print_tree(ast)
+    if DEBUG >= 2: print(si.ast)
 
     rawbufs = bufs_from_lin(Kernel(si.ast))
 
@@ -109,6 +104,7 @@ if __name__ == "__main__":
     choices = []
     for lin in lins:
       tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10)
+      ops = lin.to_program().op_estimate
       gflops = sym_infer(ops, {k:k.min for k in lin.ast.vars()})*1e-9/tm
       choices.append((tm, gflops, lin.linearize()))
 

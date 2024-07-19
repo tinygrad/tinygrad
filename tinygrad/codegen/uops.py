@@ -5,8 +5,8 @@ from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import prod
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
+from tinygrad.helpers import prod, pretty_print
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -35,16 +35,15 @@ class UOp:
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def commutative(self) -> bool:
-    return self.op is UOps.ALU and \
-      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
+    return self.op is UOps.UNMUL or (self.op is UOps.ALU and \
+      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
   @functools.cached_property
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
-  def __repr__(self):
-    return f"{str(self.op):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.op for x in self.src]):32s} {self.arg}"
+  def __repr__(self): return pretty_print(self, lambda x: f"UOp({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
   def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return UOp(UOps.BITCAST, dtype, (self,))
   def name(self, name:Optional[str]): return UOp(UOps.VAR, src=(self,), arg=name)
@@ -134,19 +133,16 @@ def type_verify(uops):
         assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
 
 def uop_alu_resolve(u:UOp) -> sint:
-  if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return u.arg
   if u.op is UOps.SPECIAL: return u.arg[2]-1
-  if u.op is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.src[0]) * uop_alu_resolve(u.src[1])
-  if u.op is UOps.ALU and u.arg is BinaryOps.SHL: return uop_alu_resolve(u.src[0]) * (2**cast(int, uop_alu_resolve(u.src[1])))
-  if u.op is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.src[0]) + uop_alu_resolve(u.src[1])
+  if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
+  if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   flops: sint = 0
   mem: sint = 0
   mults: sint = 1
-  mult_stack = []
+  mult_stack: List[sint] = []
   dont_count: Set[UOp] = set()
   if ignore_indexing:
     for u in uops:

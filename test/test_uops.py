@@ -5,13 +5,13 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu # noqa F401
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
+from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
-from test.helpers import is_dtype_supported
+from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
 def _uops_to_prg(uops_list, print_uops=False):
   uops = UOpGraph(uops_list)
@@ -332,6 +332,19 @@ class TestUOpCompare(unittest.TestCase):
     add = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.ADD)
     mul = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.MUL)
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
+
+class TestUOpStr(TestEqUOps):
+  def test_uop_str(self):
+    a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
+    for _ in range(20): a = a + a
+    assert len(str(a)) < 10_000, "exponential string growth"
+    assert str(eval(str(a))) == str(a)
+
+    t = Tensor.arange(10)
+    t = t + t * Tensor.rand(10)
+    # nice big complicated uop
+    sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
+    self.assert_equiv_uops(sink, eval(str(sink)))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

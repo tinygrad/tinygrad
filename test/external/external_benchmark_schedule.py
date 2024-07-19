@@ -20,7 +20,7 @@ if __name__ == "__main__":
       with Timing("***** model schedule in "):
         sched = out.schedule()
 
-    asts = dedup([x.ast for x in sched if x.ast.op is MetaOps.SINK])
+    asts = dedup([x.ast for x in sched if x.ast.op is MetaOps.KERNEL])
     uops = []
     with Profiling(PROFILE):
       with Timing("***** model uops in "):

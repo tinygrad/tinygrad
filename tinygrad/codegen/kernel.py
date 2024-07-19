@@ -3,9 +3,8 @@ import itertools, functools
 from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
-from tinygrad.engine.graph import print_tree
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, \
-                         verify_lazyop, KernelInfo, get_lazyop_info
+
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop, KernelInfo
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import dtypes, ImageDType
@@ -22,7 +21,7 @@ from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
@@ -58,16 +57,16 @@ class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
     if len(ast) > 1 or ast[0].op is BufferOps.STORE:
       assert all(x.op is BufferOps.STORE for x in ast)
-      self.ast = LazyOp(MetaOps.SINK, ast)
+      self.ast = LazyOp(MetaOps.KERNEL, ast)
     else:
-      assert len(ast) == 1 and ast[0].op is MetaOps.SINK
+      assert len(ast) == 1 and ast[0].op is MetaOps.KERNEL
       self.ast = ast[0]
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     try: lazyop_sts_map = verify_lazyop(self.ast)
     except AssertionError as e:
       print("INVALID AST")
-      for op in ast: print_tree(op)
+      for op in ast: print(op)
       raise e
 
     cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
@@ -141,7 +140,6 @@ class Kernel:
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
 
   # TODO: these need more tests or it might silently be no-op
-  def shape_offsets(self, i:int): return itertools.product(*[list(range(cast(int, s))) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]  # noqa: E501
   def float4_axis(self, i:int): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
   def upcasted_axis(self, i:int) -> List[Tuple[int, Optional[sint], bool]]:
@@ -407,7 +405,8 @@ class Kernel:
               if self.full_shape[tc_opts.axes[0]] % upc == 0:
                 self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
                 break
-
+          # SWAP global
+          if self.global_dims > 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
       return True
     except KernelOptError:
       return False
@@ -426,7 +425,8 @@ class Kernel:
     axis = opt.real_axis(self)
     check(axis < len(self.full_shape), "invalid axis")
 
-    if opt.amt is not None:
+    if opt.op is OptOps.SWAP: amt = cast(int, opt.amt)  # amt is an axis in the SWAPs
+    elif opt.amt is not None:
       amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
       check(isinstance(amt, int) and amt != 1, "shift/padto of amt 1 or Node is meaningless")
       if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, "no longer valid shift")
@@ -479,6 +479,11 @@ class Kernel:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
+    elif opt.op is OptOps.SWAP:
+      check(axis < amt and amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
+      permute = list(range(self.shape_len))
+      permute[axis], permute[amt] = permute[amt], permute[axis]
+      self.reshape_and_permute(None, tuple(permute))
     elif opt.op is OptOps.MERGE:
       check(axis >= self.shape_len-self.upcasted, "only merge upcasted")
       check(self.full_shape[axis:axis+2] == self.output_shape[axis:axis+2], "can't merge reduces")
@@ -496,7 +501,7 @@ class Kernel:
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] == 1: continue  # reduced
         check(self.sts[i].shape[axis] > amt//4, f"pad adds more than quadruple the work {self.sts[i].shape[axis]=} > {amt//4=}")
-        if (ru := round_up(cast(int, self.sts[i].shape[axis]), cast(int, amt)) - self.sts[i].shape[axis]):
+        if (ru := round_up(cast(int, self.sts[i].shape[axis]), amt) - self.sts[i].shape[axis]):
           # pad right seems to be faster
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
           padded = True
@@ -506,14 +511,15 @@ class Kernel:
     if self.simplify_ones() and self.tensor_core_opts:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
-  def required_optimizations(self):
+  def required_optimizations(self) -> Kernel:
     if self.bufs[0].dtype.__class__ is ImageDType:
       unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
       assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[0]}"
       if len(unit_stride_axes_mul_4) and all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:  # noqa: E501
         self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
+    return self
 
-  def hand_coded_optimizations(self):
+  def hand_coded_optimizations(self) -> Kernel:
     self.required_optimizations()
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
@@ -532,13 +538,15 @@ class Kernel:
             if MV_THREADS_PER_ROW > 1: self.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
             if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
-            return
+            # SWAP global
+            if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
+            return self
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:  # noqa: E501
         # TODO: use 1024 if it's allowed in a smarter way
-        for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
+        for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
             try: # may fail due to excessive smem usage
               self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
@@ -564,7 +572,10 @@ class Kernel:
             self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
 
     # no more opt if we are grouping
-    if self.group_for_reduces: return
+    if self.group_for_reduces:
+      # SWAP global
+      if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
+      return self
 
     # **** below this line need to be optional and benchmarked ****
 
@@ -600,7 +611,7 @@ class Kernel:
       else: break
 
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast.
-    if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and (self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
+    if self.first_reduce < (self.shape_len-self.upcasted) and (prod(self.full_shape[self.shape_len-self.upcasted:]) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and (self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
       if (s:=self.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
         self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
         # if it's small, upcast a second reduce dimension too
@@ -637,6 +648,11 @@ class Kernel:
           will_delete_shape = local_sz == self.full_shape[axis]
           self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
           if will_delete_shape: deleted_shape += 1
+
+    # SWAP global
+    if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
+
+    return self
 
   # **** kernel outputs ****
 
@@ -711,18 +727,18 @@ class Kernel:
           new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
           return LazyOp(op.op, (ret,), new_reduce_axes) if new_reduce_axes else ret
         if self.group_for_reduces:
-          start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+          start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces] + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           local_buffer = MemBuffer(-1, start.dtype, ShapeTracker.from_shape(local_shape))
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
           return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
-      elif op.op is MetaOps.SINK:
+      elif op.op is MetaOps.KERNEL:
         arg = KernelInfo(self.local_dims, self.upcasted)
       else:
         arg = op.arg
-      return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+      return LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
     return fixup_ast(self.ast)
 
   # **** this is the lowerer ****
@@ -732,7 +748,7 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
-      print_tree(modified_ast)
+      print(modified_ast)
     verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)
@@ -762,8 +778,7 @@ class Kernel:
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
-    info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed
-    ops, mem = flops_mem(self.uops.uops)
+    ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
     run_count = prod((self.global_size or []) + (self.local_size or []))
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
-                   self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+                   self.uops, ops * run_count, min(mem * run_count, sum(arg.dtype.itemsize * arg.st.real_size() for arg in self.membufs)))

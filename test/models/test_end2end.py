@@ -42,16 +42,16 @@ def compare_tiny_torch(model, model_torch, X, Y):
     for k,v in list(model_torch.named_parameters())[::-1]:
       g = model_state_dict[k].grad.numpy()
       gt = v.grad.detach().numpy()
-      if not CI: print("testing grads", k)
+      if not CI: print("testing grads", k, model_state_dict[k].grad.dtype)
       np.testing.assert_allclose(g, gt, atol=1e-3, err_msg=f'grad mismatch {k}')
 
     # take the steps
     optimizer.step()
     optimizer_torch.step()
 
-    # assert weights match (they don't!)
+    # assert weights match
     for k,v in model_torch.named_parameters():
-      if not CI: print("testing weight", k)
+      if not CI: print("testing weight", k, model_state_dict[k].dtype)
       np.testing.assert_allclose(model_state_dict[k].numpy(), v.detach().numpy(), atol=1e-3, err_msg=f'weight mismatch {k}')
 
 def get_mnist_data():
@@ -73,19 +73,18 @@ class TestEnd2End(unittest.TestCase):
 
   def test_linear_mnist(self):
     class LinTiny:
-      def __init__(self, has_batchnorm=False):
-        self.l1 = Linear(784, 128)
-        self.l2 = Linear(128, 10)
-        self.bn1 = BatchNorm2d(128) if has_batchnorm else lambda x: x
+      def __init__(self, bias=False):
+        self.l1 = Linear(784, 128, bias=bias)
+        self.l2 = Linear(128, 10, bias=bias)
       def __call__(self, x):
-        return self.l2(self.l1(x)).relu().log_softmax(-1)
+        return self.l2(self.l1(x).relu()).log_softmax(-1)
     class LinTorch(nn.Module):
-      def __init__(self, has_batchnorm=False):
+      def __init__(self, bias=False):
         super().__init__()
-        self.l1 = nn.Linear(784, 128)
-        self.l2 = nn.Linear(128, 10)
+        self.l1 = nn.Linear(784, 128, bias=bias)
+        self.l2 = nn.Linear(128, 10, bias=bias)
       def forward(self, x):
-        return self.l2(self.l1(x)).relu().log_softmax(-1)
+        return self.l2(self.l1(x).relu()).log_softmax(-1)
     compare_tiny_torch(LinTiny(), LinTorch(), self.X, self.Y)
 
   def test_bn_mnist(self):
