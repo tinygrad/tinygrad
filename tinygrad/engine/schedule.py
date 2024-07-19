@@ -95,7 +95,6 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
   if buf.op in ReduceOps and buf not in reduce_info:
     input_st, axis = ShapeTracker.from_shape(buf.srcs[0].st.shape), buf.arg
     if not st.contiguous:
-      print(st, st.expr_idxs()[0].render(), isinstance(st.expr_idxs()[0], Variable))
       assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
       assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
       pre_reduce = st.shape+tuple(s for i,s in enumerate(input_st.shape) if i in axis)
@@ -300,7 +299,9 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         assert tr is __tr, f"{tr} != {__tr} {r}"
         if DEBUG_INDEX: print(tr_view.expr_idxs()[0].render())
         # TODO: is there a better way to check idxs cleanness, ridx is ok, no ALU
-        if not isinstance(tr_view.expr_idxs(), Variable): can_fuse = False
+        if not isinstance(tr_view.expr_idxs()[0], Variable):
+          can_fuse = False
+          break
       # TODO: what if only some children can fuse? can save an extra global_load
       if can_fuse:
         for x in group: del realizes[x]
