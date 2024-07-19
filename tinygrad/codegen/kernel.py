@@ -539,7 +539,7 @@ class Kernel:
             if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             # SWAP global
-            if self.global_dims > 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
+            if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
             return
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
@@ -574,7 +574,7 @@ class Kernel:
     # no more opt if we are grouping
     if self.group_for_reduces:
       # SWAP global
-      if self.global_dims > 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
+      if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
       return
 
     # **** below this line need to be optional and benchmarked ****
@@ -650,7 +650,7 @@ class Kernel:
           if will_delete_shape: deleted_shape += 1
 
     # SWAP global
-    if self.global_dims > 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
+    if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
 
   # **** kernel outputs ****
 
