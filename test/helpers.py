@@ -34,12 +34,13 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
     return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
   if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
-  # for CI LLVM, it segfaults because it can't link to the casting function
+  # for CI/tiny LLVM, it segfaults because it can't link to the casting function
   # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
     if device == "GPU": return not CI and not OSX
-    if device in ["LLVM", "CUDA", "NV"]: return not CI
+    if device in ["CUDA", "NV"]: return not CI
+    if device == "LLVM": return False
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
