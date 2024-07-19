@@ -97,9 +97,9 @@ class NVSignal(HCQSignal):
     self._signal = NVDevice.signals_pool.pop()
     self._signal[0] = value
   def __del__(self): NVDevice.signals_pool.append(self._signal)
-  def value(self) -> int: return self._signal[0]
-  def timestamp(self) -> int: return self._signal[1]
-  def signal(self, value:int): self._signal[0] = value
+  def _get_value(self) -> int: return self._signal[0]
+  def _get_timestamp(self) -> int: return self._signal[1] / 1e3
+  def _set_value(self, val:int): self._signal[0] = val
   def wait(self, value:int, timeout:int=10000):
     start_time = time.time() * 1000
     while time.time() * 1000 - start_time < timeout:
@@ -325,7 +325,7 @@ class NVProgram(HCQProgram):
 
     if wait:
       self.device.timeline_signal.wait(self.device.timeline_value - 1)
-      return (sig_en.timestamp() - sig_st.timestamp()) / 1e9
+      return (sig_en.timestamp - sig_st.timestamp) / 1e6
 
 class NVAllocator(HCQAllocator):
   def __init__(self, device:NVDevice): super().__init__(device)
@@ -533,8 +533,6 @@ class NVDevice(HCQCompiled):
 
     self._setup_gpfifos()
     NVDevice.devices.append(self)
-
-  def _gpu2cpu_time(self, gpu_time, is_copy): return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e3
 
   def synchronize(self):
     self.timeline_signal.wait(self.timeline_value - 1)

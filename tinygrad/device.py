@@ -364,29 +364,28 @@ class HWCopyQueue(HWCommandQueue):
   def _update_copy(self, cmd_idx, dest, src): raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
-  def value(self) -> int:
-    """
-    Read a value for a signal.
-    """
-    raise NotImplementedError("value() needs to be implemented")
+  @property
+  def value(self) -> int: return self._get_value()
 
-  def timestamp(self) -> int:
-    """
-    Read a timestamp for a signal.
-    """
-    raise NotImplementedError("timestamp() needs to be implemented")
+  @value.setter
+  def value(self, val:int): self._set_value(val)
 
-  def signal(self, value:int):
-    """
-    Set a value for a signal.
-    """
-    raise NotImplementedError("signal() needs to be implemented")
+  def _get_value(self) -> int: raise NotImplementedError("_get_value() method must be implemented")
+  def _set_value(self, val:int): raise NotImplementedError("_set_value() method must be implemented")
+
+  @property
+  def timestamp(self) -> int: return self._get_timestamp()
+  def _get_timestamp(self) -> int: raise NotImplementedError("_get_timestamp() method must be implemented")
 
   def wait(self, value:int, timeout:int=10000):
     """
-    Wait for a signal to reach a specific value. Signals
+    Waits the signal is greater than or equal to a specific value.
+
+    Args:
+      value: The value to wait for.
+      timeout: Maximum time to wait in milliseconds. Defaults to 10s.
     """
-    raise NotImplementedError("wait() needs to be implemented")
+    raise NotImplementedError("wait() method must be implemented")
 
 @contextlib.contextmanager
 def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
@@ -426,9 +425,10 @@ class HCQCompiled(Compiled):
 
   def _gpu2cpu_time(self, gpu_time:int, is_copy:bool) -> float:
     """
-    Convert GPU time to CPU time. `is_copy` flag indicating if this is a copy queue.
+    Translates local gpu time (timestamp) into global cpu time.
     """
-    raise NotImplementedError("_gpu2cpu_time needs to be implemented")
+    if is_copy: return self.copy_cpu_start_time_us + (gpu_time - self.copy_gpu_start_time_us)
+    return self.cpu_start_time_us + (gpu_time - self.gpu_start_time_us)
 
   def _prof_setup(self):
     if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
@@ -439,12 +439,12 @@ class HCQCompiled(Compiled):
       self.timeline_value += 1
       cpu_start_time = time.perf_counter_ns() / 1e3
       self.timeline_signal.wait(self.timeline_value - 1)
-      return cpu_start_time, self.timeline_signal.timestamp()
-    self.cpu_start_time, self.gpu_start_time = _sync_queue(self.hw_compute_queue_t)
-    self.copy_cpu_start_time, self.copy_gpu_start_time = _sync_queue(self.hw_copy_queue_t)
+      return cpu_start_time, self.timeline_signal.timestamp
+    self.cpu_start_time_us, self.gpu_start_time_us = _sync_queue(self.hw_compute_queue_t)
+    self.copy_cpu_start_time_us, self.copy_gpu_start_time_us = _sync_queue(self.hw_copy_queue_t)
 
   def _prof_process_events(self):
-    self.raw_prof_records += [(st.timestamp(), en.timestamp(), name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
+    self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
     self.sig_prof_records = []
 
   def _prof_finalize(self):
@@ -454,7 +454,7 @@ class HCQCompiled(Compiled):
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
-    self.timeline_signal.signal(0)
+    self.timeline_signal.value = 0
     cast(HCQAllocator, self.allocator).b_timeline = [0] * len(cast(HCQAllocator, self.allocator).b)
 
 # Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
@@ -490,7 +490,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   def copy_from_disk(self, dest:HCQBuffer, src, size):
     def _get_temp_buf():
       # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
-      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value():
+      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
         self.b_timeline[(self.b_next + 1) % len(self.b)], self.b_next = (1 << 64), (self.b_next + 1) % len(self.b)
         return (self.b[self.b_next].va_addr, self.b_next)
       return None

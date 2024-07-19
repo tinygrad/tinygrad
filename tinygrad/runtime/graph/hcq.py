@@ -123,13 +123,13 @@ class HCQGraph(MultiGraphRunner):
     # Wait and restore signals
     self.kickoff_value += 1
     for dev in self.devices: dev.timeline_signal.wait(self.graph_timeline[dev])
-    for queue in self.comp_queues.values(): self.signals[queue].signal(0)
-    for queue in self.copy_queues.values(): self.signals[queue].signal(0)
-    self.dev_kickoff_signal['CPU'].signal(self.kickoff_value)
+    for queue in self.comp_queues.values(): self.signals[queue].value = 0
+    for queue in self.copy_queues.values(): self.signals[queue].value = 0
+    self.dev_kickoff_signal['CPU'].value = self.kickoff_value
 
     if PROFILE and self.kickoff_value > 1:
       for _,_,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): #type: ignore
-        dev.raw_prof_records += [(st.timestamp(), en.timestamp(), desc, is_cp)]
+        dev.raw_prof_records += [(st.timestamp, en.timestamp, desc, is_cp)]
 
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items():

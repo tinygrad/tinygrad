@@ -57,7 +57,7 @@ class TestHCQ(unittest.TestCase):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       with self.subTest(name=str(queue_type)):
         fake_signal = TestHCQ.d0.signal_t()
-        fake_signal.signal(1)
+        fake_signal.value = 1
         queue_type().wait(fake_signal, 1) \
                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
@@ -74,7 +74,7 @@ class TestHCQ(unittest.TestCase):
         with self.assertRaises(RuntimeError):
           TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value, timeout=500)
 
-        fake_signal.signal(1)
+        fake_signal.value = 1
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
 
         TestHCQ.d0.timeline_value += 1
@@ -85,7 +85,7 @@ class TestHCQ(unittest.TestCase):
         fake_signal = TestHCQ.d0.signal_t()
         q = queue_type().wait(TestHCQ.d0.timeline_signal, 0xffffffff).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
-        fake_signal.signal(0x30)
+        fake_signal.value = 0x30
 
         q.update_wait(0, signal=fake_signal, value=0x30).submit(TestHCQ.d0)
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
@@ -196,7 +196,7 @@ class TestHCQ(unittest.TestCase):
         q = queue_type().wait(TestHCQ.d0.timeline_signal, 0xffffffff).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
         q.bind(TestHCQ.d0)
 
-        fake_signal.signal(0x30)
+        fake_signal.value = 0x30
 
         q.update_wait(0, signal=fake_signal, value=0x30).submit(TestHCQ.d0)
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
@@ -231,7 +231,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp(), True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp(), True)
+    et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp, True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp, True)
 
     print(f"exec kernel time: {et:.2f} us")
     assert 1 <= et <= (2000 if CI else 20)
@@ -253,7 +253,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp(), True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp(), True)
+    et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp, True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp, True)
     et_ms = et / 1e3
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
@@ -277,7 +277,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp(), True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp(), True)
+    et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp, True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp, True)
     et_ms = et / 1e3
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3

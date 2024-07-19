@@ -79,9 +79,9 @@ class AMDSignal(HCQSignal):
       self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._event_id)
     else: self._event_mailbox_ptr = self._event_id = 0
   def __del__(self): AMDDevice.signals_pool.append(self._signal)
-  def value(self) -> int: return self._signal[0]
-  def timestamp(self) -> int: return self._signal[1]
-  def signal(self, value:int): self._signal[0] = value
+  def _get_value(self) -> int: return self._signal[0]
+  def _get_timestamp(self) -> int: return self._signal[1] / 1e2
+  def _set_value(self, value:int): self._signal[0] = value
   def wait(self, value:int, timeout:int=10000):
     start_time = time.time() * 1000
     while (time_spent:=time.time() * 1000 - start_time) < timeout:
@@ -351,7 +351,7 @@ class AMDProgram(HCQProgram):
 
     if wait:
       self.device.timeline_signal.wait(self.device.timeline_value - 1)
-      return (sig_en.timestamp() - sig_st.timestamp()) / 1e8
+      return (sig_en.timestamp - sig_st.timestamp) / 1e6
 
 class AMDAllocator(HCQAllocator):
   def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
@@ -465,10 +465,6 @@ class AMDDevice(HCQCompiled):
     timeline_signals=(AMDSignal(sync_event=sync_event), AMDSignal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1)))
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue, timeline_signals)
-
-  def _gpu2cpu_time(self, gpu_time, is_copy):
-    if is_copy: return self.copy_cpu_start_time + (gpu_time - self.copy_gpu_start_time) / 1e2
-    return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e2
 
   def _alloc_queue(self, queue_type, ring_size, ctx_save_restore_size=None, eop_buffer_size=None) -> AMDQueueDesc:
     gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
