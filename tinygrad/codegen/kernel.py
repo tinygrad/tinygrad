@@ -775,7 +775,7 @@ class Kernel:
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
-    ops, _ = flops_mem(self.uops.uops, ignore_indexing=True)
+    ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
     run_count = prod((self.global_size or []) + (self.local_size or []))
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
-                   self.uops, ops * run_count, sum(arg.dtype.itemsize * arg.st.real_size() for arg in self.membufs))
+                   self.uops, ops * run_count, min(mem * run_count, sum(arg.dtype.itemsize * arg.st.real_size() for arg in self.membufs)))
