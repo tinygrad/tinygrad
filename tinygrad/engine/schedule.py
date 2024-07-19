@@ -132,7 +132,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
-def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Set[LazyBuffer],\
+def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None],\
     children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer], scheduled=False):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.realized is not None: return
@@ -142,15 +142,15 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     # fuse some pads
     if len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
-      simple_pads.add(buf.base)
+      simple_pads[buf.base] = None
     # realize all expands
     elif prod(buf.base.st.shape) < prod(buf.st.shape):
       # this was causing "test_lil_model" to fail
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
-        simple_pads.add(buf.base) # don't realize image to image casts. this is part of a larger problem
+        simple_pads[buf.base] = None # don't realize image to image casts. this is part of a larger problem
       elif not FUSE_AS_ONE_KERNEL: realizes[buf.base] = None
     # check all other pads for safe fusion
-    elif any(v.mask is not None for v in buf.st.views): simple_pads.add(buf.base)
+    elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets)
   # base
   allbufs[buf] = None
@@ -195,7 +195,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
   allbufs: Dict[LazyBuffer, None] = {}
-  simple_pads: Set[LazyBuffer] = set()
+  simple_pads: Dict[LazyBuffer, None] = {}
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
   assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
   for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, assign_targets, scheduled=True)
