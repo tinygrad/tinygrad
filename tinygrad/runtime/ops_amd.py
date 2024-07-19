@@ -80,7 +80,7 @@ class AMDSignal(HCQSignal):
     else: self._event_mailbox_ptr = self._event_id = 0
   def __del__(self): AMDDevice.signals_pool.append(self._signal)
   def _get_value(self) -> int: return self._signal[0]
-  def _get_timestamp(self) -> int: return self._signal[1] / 1e2
+  def _get_timestamp(self) -> float: return self._signal[1] / 1e2
   def _set_value(self, new_value:int): self._signal[0] = new_value
   def wait(self, value:int, timeout:int=10000):
     start_time = time.time() * 1000

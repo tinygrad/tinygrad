@@ -374,8 +374,17 @@ class HCQSignal:
   def _set_value(self, new_value:int): raise NotImplementedError("_set_value() method must be implemented")
 
   @property
-  def timestamp(self) -> int: return self._get_timestamp()
-  def _get_timestamp(self) -> int: raise NotImplementedError("_get_timestamp() method must be implemented")
+  def timestamp(self) -> float:
+    """
+    Get the timestamp field of the signal.
+
+    This property provides read-only access to the signal's timestamp.
+
+    Returns:
+      The timestamp in microseconds.
+    """
+    return self._get_timestamp()
+  def _get_timestamp(self) -> float: raise NotImplementedError("_get_timestamp() method must be implemented")
 
   def wait(self, value:int, timeout:int=10000):
     """

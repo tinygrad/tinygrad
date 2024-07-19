@@ -98,7 +98,7 @@ class NVSignal(HCQSignal):
     self._signal[0] = value
   def __del__(self): NVDevice.signals_pool.append(self._signal)
   def _get_value(self) -> int: return self._signal[0]
-  def _get_timestamp(self) -> int: return self._signal[1] / 1e3
+  def _get_timestamp(self) -> float: return self._signal[1] / 1e3
   def _set_value(self, new_value:int): self._signal[0] = new_value
   def wait(self, value:int, timeout:int=10000):
     start_time = time.time() * 1000
