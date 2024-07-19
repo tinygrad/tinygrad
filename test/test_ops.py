@@ -511,7 +511,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor >> 31, lambda: (ten >> 31).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
-
+  @unittest.skipIf(not CI, 'prob with llvm fp16 and metal fp64')
   def test_bitcast(self):
     dtype_pairs = [(torch.int8, dtypes.int8), (torch.uint8, dtypes.uint8), (torch.int16, dtypes.int16), (torch.uint16, dtypes.uint16),
                    (torch.int32, dtypes.int32), (torch.uint32, dtypes.uint32), (torch.int64, dtypes.int64), (torch.uint64, dtypes.uint64),
