@@ -729,9 +729,9 @@ class TestLinearizer(unittest.TestCase):
 
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
-      # TODO: fix reverse_dims
-      idxs = get_grouped_dims(prefix, dims, max_sizes)
+      idxs = get_grouped_dims(prefix, dims, max_sizes, reverse_dims)
       loop_idxs = dedup(flatten([[y for y in sorted(list(x.sparents)) if y.op is UOps.SPECIAL] for x in idxs]))
+      loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg[0])
       sizes = [x.arg[2] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
       assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
@@ -748,7 +748,7 @@ class TestLinearizer(unittest.TestCase):
     _assert_grouped_dims("gidx", (2,3), (16,16,16), False, [2,3])
 
     # check reverse dims
-    # _assert_grouped_dims("gidx", (2,3), (16,16,16), True, [3,2])
+    _assert_grouped_dims("gidx", (2,3), (16,16,16), True, [3,2])
     _assert_grouped_dims("gidx", (2,3,4), (16,16,16), False, [2,3,4])
 
     # test splitting globals
@@ -759,12 +759,12 @@ class TestLinearizer(unittest.TestCase):
 
     # collapse on onto the left most axis
     _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), False, [6,4,5])
-    # _assert_grouped_dims("gidx", (2,3,4,5), (32,16,16), True, [20,3,2])
+    _assert_grouped_dims("gidx", (2,3,4,5), (32,16,16), True, [20,3,2])
     # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (32,16,16), True, [20,3,Variable("start_pos",1,2)])
 
     # collapse on left-most available axis (the left most is too small)
     _assert_grouped_dims("gidx", (2,3,4,5), (4,16,16), False, [2,12,5])
-    # _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), True, [5,12,2])
+    _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), True, [5,12,2])
 
     # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (16,16,16), False, [Variable("start_pos",1,2)*3,4,5])
 
@@ -781,6 +781,17 @@ class TestLinearizer(unittest.TestCase):
     # # variable too large
     # with self.assertRaises(AssertionError):
     #   get_grouped_dims("gidx", (Variable("start_pos",0,16),3,4), (16,16,16), False,)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_default_global_reversed(self):
+    # shrink so that the dims do not collapse
+    t = Tensor.ones(5, 6, 7).contiguous().realize().shrink(((0, 4), (0, 5), (0, 6)))
+    k = helper_linearizer_opt(t+1)[0]
+    idxs = dedup([uop for uop in k.uops if uop.op is UOps.SPECIAL])
+    idxs = sorted(idxs, key=lambda uop: uop.arg[0])
+    assert idxs[0].arg == (0, 'gidx0', 6), idxs[0].arg
+    assert idxs[1].arg == (1, 'gidx1', 5), idxs[1].arg
+    assert idxs[2].arg == (2, 'gidx2', 4), idxs[2].arg
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
