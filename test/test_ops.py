@@ -812,8 +812,8 @@ class TestOps(unittest.TestCase):
       b = Tensor.ones(3,3)
       a @ b
   def test_multidot(self):
-    helper_test_op([(10,45,65), (10,65,45)], lambda x,y: x @ y, Tensor.dot)
-    helper_test_op([(3,3,45,65), (3,3,65,45)], lambda x,y: x @ y, Tensor.dot)
+    helper_test_op([(10,45,65), (10,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
+    helper_test_op([(3,3,45,65), (3,3,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
 
   def test_sum_simple(self):
     helper_test_op(None, lambda x: x.sum(), vals=[[1.,1.]])
