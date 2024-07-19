@@ -7,7 +7,7 @@ from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop, KernelInfo
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -147,17 +147,6 @@ class Kernel:
     assert all_int(upcasted_shape), f"cannot upcast a symbolic amount {upcasted_shape=}"
     return list(zip(upcasted_shape, upcasted_stride,
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
-
-  # TODO: is there a better way to write this?
-  def acc_offsets(self, i:int) -> List[int]:
-    if self.upcasted == 0: return [0]
-    upcasted_i = self.upcasted_axis(i)
-    acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
-    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
-
-  def get_float4_upcast_dim(self, i:int) -> List[int]:
-    should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in (dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType))
-    return [x for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1] if should_upcast else []
 
   @property
   def first_reduce(self) -> int:
