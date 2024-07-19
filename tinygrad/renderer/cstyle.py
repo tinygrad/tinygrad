@@ -183,9 +183,11 @@ class CStyleLanguage(Renderer):
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
-  supports_float4 = False
+  supports_float4 = True
+  float4 = "make_float4"
   has_local = False
   global_max = None
+  tensor_cores = [TensorCore(dims=(4,4,4), threads=[(0,1)], thread_local_sizes=[[4],[4],[4]], dtype_in=dtypes.float, dtype_out=dtypes.float)]
 
   # language options
   buffer_suffix = " restrict"

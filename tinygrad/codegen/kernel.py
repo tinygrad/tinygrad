@@ -325,7 +325,7 @@ class Kernel:
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
-    if use_tensor_cores and self.opts.has_local and self.reduceop is not None and self.reduceop.op is ReduceOps.SUM:
+    if use_tensor_cores and (self.opts.has_local or getenv("AMX",0)) and self.reduceop is not None and self.reduceop.op is ReduceOps.SUM:
       for tc in self.opts.tensor_cores:
         tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
         # can only fuse reduces with the same tc options
@@ -351,6 +351,9 @@ class Kernel:
             if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
           for (tc_dim, tc_amt) in tc.threads:
             self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+        elif self.opts.device == "CLANG":
+          self.apply_opt(Opt(OptOps.UPCAST, 0, 4), append_opt=False)
+          self.apply_opt(Opt(OptOps.UPCAST, 1, 4), append_opt=False)
         elif self.opts.device in {"CUDA", "NV"}:
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
@@ -388,7 +391,7 @@ class Kernel:
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
 
-      if (tc_opts:=self.tensor_core_opts) is not None:
+      if (tc_opts:=self.tensor_core_opts) is not None and not getenv("AMX", 0):
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
@@ -709,6 +712,9 @@ class Kernel:
             upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1)
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
+          elif self.opts.device == "CLANG":
+            reduce_axes, fix_st1, fix_st2 = [], None, None
+            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted+1, self.shape_len-self.upcasted)
           elif self.opts.device in {"CUDA", "NV"}:
             reduce_axes = [self.shape_len-self.upcasted, self.shape_len-self.upcasted+1]
             upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted+2, self.shape_len-self.upcasted+2)
