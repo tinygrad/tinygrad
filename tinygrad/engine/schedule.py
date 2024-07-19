@@ -73,13 +73,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     return LazyOp(BufferOps.LOAD, (), MemBuffer(len(outputs)+inputs.index(buf), buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
-  if buf.op is MetaOps.CONTIGUOUS:
+  if buf.op in {MetaOps.CONTIGUOUS, MetaOps.ASSIGN}:
     assert buf in outputs
-    return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)
-  if buf.op is MetaOps.ASSIGN:
-    assert buf in outputs
-    assert buf.srcs[1].base is buf.srcs[1], "assign must be to base"
-    assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
     return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)
 
   # if it's a reduce, we have to change the shapetracker
@@ -137,37 +132,39 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
-def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None],
-                simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
+def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None],\
+    children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer], scheduled=False):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.realized is not None: return
   if GRAPH: log_lazybuffer(buf, scheduled)
-  # view
-  if buf.base != buf:
+  # check if we need to realize views
+  if buf is not buf.base:
     # fuse some pads
     if len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
-      simple_pads.add(buf.base)
+      simple_pads[buf.base] = None
     # realize all expands
     elif prod(buf.base.st.shape) < prod(buf.st.shape):
       # this was causing "test_lil_model" to fail
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
-        simple_pads.add(buf.base) # don't realize image to image casts. this is part of a larger problem
+        simple_pads[buf.base] = None # don't realize image to image casts. this is part of a larger problem
       elif not FUSE_AS_ONE_KERNEL: realizes[buf.base] = None
     # check all other pads for safe fusion
-    elif any(v.mask is not None for v in buf.st.views): simple_pads.add(buf.base)
-    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
-  # base
+    elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
+    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets)
   allbufs[buf] = None
-  if buf.forced_realize: realizes[buf] = None
-  if buf.op in MetaOps: realizes[buf.base] = None
+  if buf.forced_realize or buf.op in MetaOps: realizes[buf] = None
+  if buf.op is MetaOps.ASSIGN:
+    assert buf.srcs[1].base is buf.srcs[1], f"assign must be to base {buf.srcs[1]}"
+    assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
+    assign_targets[buf.srcs[1]] = buf
   if buf.op is MetaOps.COPY:
     assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
     realizes[buf.srcs[0].base] = None
   if buf.op is MetaOps.VIEW: realizes[buf.srcs[0].base] = None
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
-    _recurse_lb(x, realizes, allbufs, simple_pads, children)
+    _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets)
 
 def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   if buf in realizes or buf.realized is not None: return True
@@ -197,10 +194,10 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
   allbufs: Dict[LazyBuffer, None] = {}
-  simple_pads: Set[LazyBuffer] = set()
+  simple_pads: Dict[LazyBuffer, None] = {}
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
-  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, scheduled=True)
-  assign_targets = {x.srcs[1]:x for x in realizes if x.op is MetaOps.ASSIGN and x not in seen and x.realized is None}
+  assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
+  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, assign_targets, scheduled=True)
 
   # check if we have to realize pads
   for p in simple_pads:
@@ -337,7 +334,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
     if len(SCHEDULES) == 0: atexit.register(_save)
     SCHEDULES.append((graph, prescheduled))
-    if SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
+    if SAVE_SCHEDULE.value > 1 and SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
   # confirm everything was scheduled correctly
   if any(degree != 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
