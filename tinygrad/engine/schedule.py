@@ -132,27 +132,26 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
-def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Set[LazyBuffer],\
+def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None],\
     children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer], scheduled=False):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.realized is not None: return
   if GRAPH: log_lazybuffer(buf, scheduled)
-  # view
-  if buf.base != buf:
+  # check if we need to realize views
+  if buf is not buf.base:
     # fuse some pads
     if len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
-      simple_pads.add(buf.base)
+      simple_pads[buf.base] = None
     # realize all expands
     elif prod(buf.base.st.shape) < prod(buf.st.shape):
       # this was causing "test_lil_model" to fail
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
-        simple_pads.add(buf.base) # don't realize image to image casts. this is part of a larger problem
+        simple_pads[buf.base] = None # don't realize image to image casts. this is part of a larger problem
       elif not FUSE_AS_ONE_KERNEL: realizes[buf.base] = None
     # check all other pads for safe fusion
-    elif any(v.mask is not None for v in buf.st.views): simple_pads.add(buf.base)
+    elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets)
-  # base
   allbufs[buf] = None
   if buf.forced_realize or buf.op in MetaOps: realizes[buf] = None
   if buf.op is MetaOps.ASSIGN:
@@ -195,7 +194,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
   allbufs: Dict[LazyBuffer, None] = {}
-  simple_pads: Set[LazyBuffer] = set()
+  simple_pads: Dict[LazyBuffer, None] = {}
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
   assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
   for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, assign_targets, scheduled=True)
@@ -335,7 +334,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
     if len(SCHEDULES) == 0: atexit.register(_save)
     SCHEDULES.append((graph, prescheduled))
-    if SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
+    if SAVE_SCHEDULE.value > 1 and SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
   # confirm everything was scheduled correctly
   if any(degree != 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
