@@ -67,14 +67,23 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       if isinstance(p, UOp): p = UPat.compile(p)
       assert p.op is not None
-      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
+      for uop in p.op: 
+          self.pdict[(uop, p.arg)].append((p, fxn))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
+    i = 0
+    d1 = self.pdict[(uop.op, uop.arg)]
+    d2 = self.pdict[(uop.op, None)]
+    rng = itertools.chain(d1, d2)
+    for p,fxn in rng:
+      i += 1
+      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: 
+#        print(i / (len(d1)+len(d2)), i, len(d1), len(d2))
+        return ret # NOTE: if it returns None, we keep trying to match
+#    print(1, len(d1), len(d2))
     return None
 
 # ***** image handling *****
