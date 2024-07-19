@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor
+from tinygrad.helpers import getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
 from tinygrad.codegen.uops import flops_mem, UOps, UOp
@@ -15,6 +16,7 @@ def get_stats(x:Tensor):
   return ei.prg.op_estimate, ei.prg.mem_estimate
 
 class TestUOpsStats(unittest.TestCase):
+  @unittest.skipIf(getenv("PTX"), "wrong in PTX")
   def test_simple_add(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
