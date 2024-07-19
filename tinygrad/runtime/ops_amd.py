@@ -42,10 +42,7 @@ def ioctls_from_header():
   return type("KIO", (object, ), fxns)
 kio = ioctls_from_header()
 
-SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 65536
-
-regBIF_BX_PF1_GPU_HDP_FLUSH_REQ = 0x0106
-regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0107
+regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0106, 0x0107
 
 # VGT_EVENT_TYPE in navi10_enum.h
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
@@ -74,27 +71,26 @@ class AMDCompiler(Compiler):
 class AMDSignal(HCQSignal):
   def __init__(self, value=0, sync_event=None):
     self._signal = AMDDevice.signals_pool.pop()
-    self._signal.value = value
-    self._value_addr = ctypes.addressof(self._signal) + getattr(hsa.amd_signal_t, 'value').offset
-    self._timestamp_addr = ctypes.addressof(self._signal) + getattr(hsa.amd_signal_t, 'start_ts').offset
+    self._signal[0] = value
+    self._value_addr, self._timestamp_addr = mv_address(self._signal), mv_address(self._signal) + 8
     if sync_event is not None:
       self._event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       self._event_id = sync_event.event_id
-      self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._signal.event_id)
+      self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._event_id)
     else: self._event_mailbox_ptr = self._event_id = 0
   def __del__(self): AMDDevice.signals_pool.append(self._signal)
-  def value(self) -> int: return self._signal.value
-  def timestamp(self) -> int: return self._signal.start_ts
-  def signal(self, value:int): self._signal.value = value
+  def value(self) -> int: return self._signal[0]
+  def timestamp(self) -> int: return self._signal[1]
+  def signal(self, value:int): self._signal[0] = value
   def wait(self, value:int, timeout:int=10000):
     start_time = time.time() * 1000
     while (time_spent:=time.time() * 1000 - start_time) < timeout:
-      if self._signal.value >= value: return
+      if self._signal[0] >= value: return
 
       # Wait active for 5s, then going to sleep.
       if time_spent > 5000 and self._event_id != 0:
         kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
-    raise RuntimeError(f"wait_signal: not set to {value}, but {self._signal.value}, {timeout} ms TIMEOUT!")
+    raise RuntimeError(f"wait_signal: not set to {value}, but {self._signal[0]}, {timeout} ms TIMEOUT!")
 
 class AMDComputeQueue(HWComputeQueue):
   def __init__(self):
@@ -154,7 +150,7 @@ class AMDComputeQueue(HWComputeQueue):
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
       dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
 
-  def _wait(self, signal:hsa.amd_signal_t, value=0):
+  def _wait(self, signal, value=0):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.WAIT_REG_MEM_ENGINE(0), *data64_le(signal._value_addr), value, 0xffffffff, 4]
@@ -176,7 +172,7 @@ class AMDComputeQueue(HWComputeQueue):
 
   def _timestamp(self, signal): self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._timestamp_addr)
 
-  def _signal(self, signal:hsa.amd_signal_t, value=0):
+  def _signal(self, signal, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._value_addr, value=value, cache_flush=True)
     if signal._event_mailbox_ptr != 0:
@@ -247,14 +243,14 @@ class AMDCopyQueue(HWCopyQueue):
       if src is not None: self._patch(cmd_idx, offset=8+i*7, data=[*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
       if dest is not None: self._patch(cmd_idx, offset=10+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
 
-  def _signal(self, signal: hsa.amd_signal_t, value=0):
+  def _signal(self, signal, value=0):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._value_addr), value])
 
     if signal._event_mailbox_ptr != 0:
       self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._event_mailbox_ptr), signal._event_id])
       self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal._event_id)])
 
-  def _wait(self, signal: hsa.amd_signal_t, value=0):
+  def _wait(self, signal, value=0):
     self._q([amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal._value_addr), value, 0xffffffff,
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
@@ -264,7 +260,7 @@ class AMDCopyQueue(HWCopyQueue):
     if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(signal._value_addr))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
-  def _timestamp(self, signal:hsa.amd_signal_t):
+  def _timestamp(self, signal):
     self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
              *data64_le(signal._timestamp_addr)])
 
@@ -380,7 +376,7 @@ class AMDDevice(HCQCompiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signals_pool:List[hsa.amd_signal_t] = []
+  signals_pool:List[memoryview] = []
   gpus:List[pathlib.Path] = []
 
   def _gpu_map(self, mem):
@@ -441,10 +437,9 @@ class AMDDevice(HCQCompiled):
     kio.acquire_vm(AMDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
     if AMDDevice.event_page is None:
-      AMDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+      AMDDevice.signals_page = self._gpu_alloc(16 * 65536, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       AMDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-      for off in range(0, AMDDevice.signals_page.size, SIGNAL_SIZE):
-        AMDDevice.signals_pool.append(hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + off))
+      AMDDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, AMDDevice.signals_page.size, 16)]
       sync_event = kio.create_event(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle, auto_reset=1)
     else:
       self._gpu_map(AMDDevice.signals_page)
