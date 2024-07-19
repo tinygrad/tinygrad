@@ -725,7 +725,7 @@ class Kernel:
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
           return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
       elif op.op is MetaOps.KERNEL:
-        arg = KernelInfo(self.local_dims, self.upcasted)
+        arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
@@ -749,8 +749,12 @@ class Kernel:
       self.local_size: Optional[List[int]] = [1,1,1]
       for u in uop_sink.parents:
         if u.op is UOps.SPECIAL:
-          if u.arg[1][0] == 'l': self.local_size[u.arg[0]] = u.arg[2]
-          else: self.global_size[u.arg[0]] = u.arg[2]
+          if u.arg[1][0] == 'i': self.local_size = None
+          if u.arg[1][0] == 'l':
+            assert self.local_size is not None
+            self.local_size[u.arg[0]] = u.arg[2]
+          else:
+            self.global_size[u.arg[0]] = u.arg[2]
     else:
       self.global_size, self.local_size = None, None
 
