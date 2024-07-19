@@ -104,9 +104,13 @@ class IndependentLowerer:
     global_dims = first_reduce-ki.local_dims
 
     if opts.has_local:
-      # define indexes for GPU-like execution
-      self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
-                  get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
+      if ki.dont_use_locals:
+        assert ki.local_dims == 0, "can't use locals if there's no local dims"
+        self.idxs = get_grouped_dims("idx", full_shape[:global_dims], opts.global_max, reverse=True)
+      else:
+        # define indexes for GPU-like execution
+        self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
+                    get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
     else:
       # all loops are RANGES
       self.idxs = [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, False))
