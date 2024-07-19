@@ -42,7 +42,7 @@ class TestHCQ(unittest.TestCase):
   def test_signal_update(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t]:
       with self.subTest(name=str(queue_type)):
-        q = queue_type().signal(fake_signal := TestHCQ.d0.signal_t(), 0x1000)
+        q = queue_type().signal(TestHCQ.d0.signal_t(), 0x1000)
 
         q.update_signal(0, signal=TestHCQ.d0.timeline_signal, value=TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
