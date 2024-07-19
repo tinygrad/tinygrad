@@ -424,7 +424,7 @@ class HCQCompiled(Compiled):
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
-  def _gpu2cpu_time(self, gpu_time:int, is_copy:bool) -> float: # this of this??
+  def _gpu2cpu_time(self, gpu_time:int, is_copy:bool) -> float:
     """
     Convert GPU time to CPU time. `is_copy` flag indicating if this is a copy queue.
     """
