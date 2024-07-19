@@ -782,6 +782,17 @@ class TestLinearizer(unittest.TestCase):
     # with self.assertRaises(AssertionError):
     #   get_grouped_dims("gidx", (Variable("start_pos",0,16),3,4), (16,16,16), False,)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_default_global_reversed(self):
+    # shrink so that the dims do not collapse
+    t = Tensor.ones(5, 6, 7).contiguous().realize().shrink(((0, 4), (0, 5), (0, 6)))
+    k = helper_linearizer_opt(t+1)[0]
+    idxs = dedup([uop for uop in k.uops if uop.op is UOps.SPECIAL])
+    idxs = sorted(idxs, key=lambda uop: uop.arg[0])
+    assert idxs[0].arg == (0, 'gidx0', 6), idxs[0].arg
+    assert idxs[1].arg == (1, 'gidx1', 5), idxs[1].arg
+    assert idxs[2].arg == (2, 'gidx2', 4), idxs[2].arg
+
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
       sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is MetaOps.KERNEL]
