@@ -2,6 +2,7 @@ import time, math, unittest
 import numpy as np
 import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
+from test.helpers import is_dtype_supported
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 
@@ -515,8 +516,12 @@ class TestOps(unittest.TestCase):
     dtype_pairs = [(torch.int8, dtypes.int8), (torch.uint8, dtypes.uint8), (torch.int16, dtypes.int16), (torch.uint16, dtypes.uint16),
                    (torch.int32, dtypes.int32), (torch.uint32, dtypes.uint32), (torch.int64, dtypes.int64), (torch.uint64, dtypes.uint64),
                    (torch.float16, dtypes.float16), (torch.float32, dtypes.float32), (torch.float64, dtypes.float64)]
-    for item_pre in dtype_pairs:
-      for item_post in dtype_pairs:
+    supported_dtypes = []
+    for item in dtype_pairs:
+      if is_dtype_supported(item[1]):
+        supported_dtypes.append(item)
+    for item_pre in supported_dtypes:
+      for item_post in supported_dtypes:
         if item_post!=item_pre:
           print(f'\nTESTING_BITCAST {item_pre} to {item_post}')
           if item_pre[1] not in [dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64]:
