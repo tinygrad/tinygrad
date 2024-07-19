@@ -7,12 +7,6 @@ from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.dtype import dtypes
 
-# TODO: can copy this in here when we remove it
-#from tinygrad.ops import get_lazyop_info
-#info = get_lazyop_info(ast)
-#print(ops, mem, expected_mem)
-#print(info.flops, info.mem_estimate)
-
 # **************** new FlopCounter ****************
 
 def get_stats(x:Tensor):
