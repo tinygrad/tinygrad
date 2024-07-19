@@ -89,11 +89,16 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
   cache.setdefault((buf, st))
+  st_prev = st
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   for x in buf.srcs: _recurse_reduceops(x, buf.srcs[0].st if buf.op in ReduceOps else st, realizes, outs, reduce_info, cache)
   if buf.op in ReduceOps and buf not in reduce_info:
     input_st, axis = ShapeTracker.from_shape(buf.srcs[0].st.shape), buf.arg
     if not st.contiguous:
+      if buf.size == 60000 and DEBUG == 6:
+        print(colored(buf.st, "red"))
+        print(colored(st_prev, "red"))
+        print(colored(st, "red"))
       assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
       assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
       pre_reduce = st.shape+tuple(s for i,s in enumerate(input_st.shape) if i in axis)
@@ -267,7 +272,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     else: reduce_for_op.update((tr, r) for tr in group)
     if r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST:
       can_fuse = True
-      if getenv("DEBUG_INDEX"): print(f"checking {r}")
+      if DEBUG_INDEX:=(getenv("DEBUG_INDEX") and r.size == 60000): print(f"checking {r}")
       # child: r's tr's view
       st_for_child: DefaultDict[LazyBuffer, List[ShapeTracker]] = defaultdict(list)
       for tr in group:
@@ -276,7 +281,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           st_for_child[child].extend(dedup([x.st for x in child.srcs if x.base is tr]))
       for child, sts in st_for_child.items():
         for st in sts:
-          if getenv("DEBUG_INDEX"): print(st)
+          if DEBUG_INDEX: print(r.st+st)
           if len(st.views) > 1:
             can_fuse = False
             break
