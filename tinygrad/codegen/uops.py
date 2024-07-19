@@ -120,9 +120,8 @@ def type_verify(uops):
         assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
         assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
       elif arg is BinaryOps.IDIV:
-        assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), \
-            f"input dtype mismatch {dtypes.int} != {src[0].dtype=} != {src[1].dtype=}"
-        assert dtypes.is_int(dtype), f"{arg} output dtype mismatch {dtype=} != {dtypes.int}"
+        assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), f"input dtype is not int {src[0].dtype=}, {src[1].dtype=}"
+        assert dtypes.is_int(dtype), f"output dtype is not int {dtype=}"
       elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
         # the distance to shift isn't typechecked
         assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
