@@ -105,7 +105,7 @@ def type_verify(uops):
         arg = src[0].arg
       assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
     if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
-    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == dtype.count
+    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
     if uop is UOps.VECTORIZE:
       assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
       assert dtype == src[0].dtype.vec(len(src)), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
