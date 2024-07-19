@@ -416,7 +416,7 @@ def do_reduce_with_expand(root):
     assert root.src[0].op is UOps.EXPAND
     expand_reduce_args = dedup(flatten([x.arg for x in expands_reduce]))
     assert prod([y[1] for y in expand_reduce_args]) == len(root.src[0].src)
-    ret = functools.reduce(lambda x,y: UOp.alu(alu_op, x, y), root.src[0].src+(ret,))
+    ret = functools.reduce(lambda x,y: UOp.alu(alu_op, x, y), (ret,)+root.src[0].src)
   else:
     ret = UOp.alu(alu_op, ret, root.src[0])
   ret = UOp(UOps.PHI, ret.dtype, (acc, ret))
