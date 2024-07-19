@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, flatten, prod, dedup, all_int, \
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, \
     merge_dicts, getenv, Metadata
-from tinygrad.shape.symbolic import NumNode, Variable
+from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -90,7 +90,8 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
   cache.setdefault((buf, st))
   if buf is not buf.base: st, buf = buf.st+st, buf.base
-  for x in buf.srcs: _recurse_reduceops(x, ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st, realizes, outs, reduce_info, cache)
+  for x in buf.srcs: _recurse_reduceops(x, ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st, realizes, outs,\
+      reduce_info, cache)
   if buf.op in ReduceOps and buf not in reduce_info:
     input_st, axis = ShapeTracker.from_shape(buf.srcs[0].st.shape), buf.arg
     if not st.contiguous:
@@ -191,14 +192,15 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
 def _last_recursive_child(xt:LazyBuffer, children, realizes, cache, first=True) -> Optional[LazyBuffer]:
-  if xt in cache: return
+  if xt in cache: return None
   cache.add(xt)
   if not first and xt in realizes: return xt
   for xt_next in children[xt]:
     if (ret:=_last_recursive_child(xt_next, children, realizes, cache, False)): return ret
+  return None
 
 def _buildup_st(xt:LazyBuffer, st:ShapeTracker, stop:LazyBuffer, realizes, sts:Dict[LazyBuffer, ShapeTracker], first=True):
-  if xt.base.realized is not None or (xt, st) in sts or (xt.base in realizes and not first and xt.base is not stop): return
+  if xt.base.realized is not None or xt in sts or (xt.base in realizes and not first and xt.base is not stop): return
   if xt is not xt.base: st, xt = xt.st+st, xt.base
   if xt.op in ReduceOps: st = ShapeTracker.from_shape(xt.srcs[0].shape)
   sts.setdefault(xt, st)
@@ -284,20 +286,24 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     if r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST:
       can_fuse = True
       if DEBUG_INDEX:=(getenv("DEBUG_INDEX")): print(f"checking {r}")
+      # check if tr can cleanly fuse with its children
       for tr in group:
+        # TODO: wrong
         leaf = _last_recursive_child(tr, children, realizes, set())
         if leaf is None:
           # nothing to fuse if there's no child
           can_fuse = False
           break
-        _buildup_st(leaf, leaf.st, tr, realizes, sts:={})
+        sts: Dict[LazyBuffer, ShapeTracker] = {}
+        _buildup_st(leaf, leaf.st, tr, realizes, sts)
         __tr,tr_view = sts.popitem()
         assert tr is __tr, f"{tr} != {__tr} {r}"
         if DEBUG_INDEX: print(tr_view.expr_idxs()[0].render())
+        # TODO: is there a better way to check idxs cleanness, ridx is ok, no ALU
         if not isinstance(tr_view.expr_idxs(), Variable): can_fuse = False
+      # TODO: what if only some children can fuse? can save an extra global_load
       if can_fuse:
         for x in group: del realizes[x]
-
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
