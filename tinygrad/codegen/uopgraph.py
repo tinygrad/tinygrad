@@ -193,13 +193,11 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  # CONTRACT before ALU/REDUCE/CAST
+  # CONTRACT before ALU/REDUCE
   (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.ALU, name="alu"),)),
    lambda con, alu: UOp(alu.op, con.dtype, tuple(UOp(UOps.CONTRACT, x.dtype.vec(con.dtype.count), (x,), con.arg) for x in alu.src), alu.arg)),
   (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.REDUCE, name="red"),)),
    lambda con, red: UOp(UOps.REDUCE, con.dtype, (UOp(UOps.CONTRACT, con.dtype, red.src[0:1], con.arg),)+red.src[1:], red.arg)),
-  (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.CAST, src=(UPat(name="casted"),)),)),
-   lambda con, casted: UOp(UOps.CAST, con.dtype, (UOp(UOps.CONTRACT, casted.dtype.vec(con.dtype.count), (casted,), con.arg),))),
   # bigint is rewritten to int32
   (UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.bigint, name="x"),
    lambda x: UOp(x.op, dtypes.int32, x.src, x.arg)),
@@ -449,7 +447,7 @@ def do_contract(con:UOp):
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(),
+  alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(),
                    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
@@ -469,7 +467,7 @@ expander = PatternMatcher([
   # empty EXPAND is NOOP
   (UOp(UOps.EXPAND, src=(UOp.var('x'),), arg=()), lambda x: x),
   # no ALU on vectorized dtypes
-  (UPat({UOps.ALU, UOps.CAST}, name="alu"), no_vectorized_alu),
+  (UOp(UOps.ALU).name("alu"), no_vectorized_alu),
 ])
 
 # *** uop graph ***
