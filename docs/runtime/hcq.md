@@ -69,7 +69,14 @@ The `HCQCompiled` class defines the API for HCQ-compatible devices. This class s
 
 #### Signals
 
-Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a `value` and a `timestamp` within the same signal. The following Python code demonstrates the usage of signals:
+Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a `value` and a `timestamp` within the same signal. HCQ-compatible backend implementations should use `HCQSignal` as a base class.
+
+::: tinygrad.device.HCQSignal
+    options:
+        members: [value, timestamp, wait]
+        show_source: false
+
+The following Python code demonstrates the usage of signals:
 
 ```python
 signal = your_device.signal_t()
@@ -79,6 +86,7 @@ HWComputeQueue().timestamp(signal) \
                 .submit(your_device)
 
 signal.wait(value_to_fire)
+signaled_value = signal.value # should be the same as `value_to_fire`
 timestamp = signal.timestamp
 ```
 
