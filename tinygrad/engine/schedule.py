@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, flatten, prod, dedup, all_int, \
     merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -148,7 +148,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       # this was causing "test_lil_model" to fail
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         simple_pads[buf.base] = None # don't realize image to image casts. this is part of a larger problem
-      elif not FUSE_AS_ONE_KERNEL: realizes[buf.base] = None
+      else: realizes[buf.base] = None
     # check all other pads for safe fusion
     elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets)
@@ -208,7 +208,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   for r in allbufs:
     if r.op not in ReduceOps or r in realizes: continue
-
     group: Set[LazyBuffer] = set()
     _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache=set())
     # max one reduceop per kernel
@@ -264,8 +263,25 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
-      if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
+      realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
+    if r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST:
+      can_fuse = True
+      if getenv("DEBUG_INDEX"): print(f"checking {r}")
+      # child: r's tr's view
+      st_for_child: DefaultDict[LazyBuffer, List[ShapeTracker]] = defaultdict(list)
+      for tr in group:
+        for child in children[tr]:
+          # TODO: can there be more than one view per child?
+          st_for_child[child].extend(dedup([x.st for x in child.srcs if x.base is tr]))
+      for child, sts in st_for_child.items():
+        for st in sts:
+          if getenv("DEBUG_INDEX"): print(st)
+          if len(st.views) > 1:
+            can_fuse = False
+            break
+      if can_fuse:
+        for x in group: del realizes[x]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:

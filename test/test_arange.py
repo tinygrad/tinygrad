@@ -72,12 +72,13 @@ class TestIndexing(unittest.TestCase):
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
-    with Context(NOOPT=1, FUSE_AS_ONE_KERNEL=1):
+    with Context(NOOPT=1):
       GlobalCounters.reset()
       X = dataset[idxs]
       assert X.shape == (4,256)
       sched = X.schedule()
-      assert len(sched) == 1, f"{len(sched)} != 1"
+      # TODO: this can be 1
+      assert len(sched) == 2, f"{len(sched)} != 2"
       run_schedule(sched)
       assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
     np.testing.assert_allclose(real_index, X.numpy())
