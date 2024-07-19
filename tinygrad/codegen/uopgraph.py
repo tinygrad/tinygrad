@@ -79,23 +79,18 @@ class PatternMatcher:
 
 # ***** image handling *****
 
-def fix_image_idx(ls:UOp):
-  if ls.src[1].dtype is None or ls.src[1].dtype.count != 1: return None
-  if not isinstance(ls.src[0].dtype, ImageDType): return None
-  assert ls.op is not UOps.STORE or cast(DType, ls.src[2].dtype).count == 4, "image store must be float4"
-  idxy = ls.src[1]
-  #if not idxy.divides(4): raise RuntimeError("image index must divide 4")
-  base_shape = ls.src[0].dtype.shape
-  idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
-  image_idx = UOp(UOps.VECTORIZE, cast(DType, idxy.dtype).vec(2), (idx, idy))
-  if ls.op is UOps.LOAD and cast(DType, ls.dtype).count == 1:
-    cconst = (UOp(UOps.VECTORIZE, cast(DType, ls.dtype).vec(4), src=(ls.src[3], ls.src[3], ls.src[3], ls.src[3])),) if len(ls.src) >= 3 else ()
-    loaded = UOp(ls.op, cast(DType, ls.dtype).vec(4), (ls.src[0], image_idx) + ls.src[2:3] + cconst, ls.arg)
-    subidx = idxy%4
-    ret = UOp.const(ls.dtype, 0)
-    for i in range(4): ret = UOp.alu(TernaryOps.WHERE, subidx.ne(i), ret, UOp(UOps.GEP, ls.dtype, (loaded,), i))
-    return ret
-  return UOp(ls.op, ls.dtype, (ls.src[0], image_idx) + ls.src[2:], ls.arg)
+def image_contract_load(buf, idx, idy, id4, ls_allow_any_len):
+  if len(ls_allow_any_len.src) > 3:
+    # TODO: there's no contract on the gate, is this okay?
+    extra = (ls_allow_any_len.src[2], UOp(UOps.VECTORIZE, ls_allow_any_len.dtype.vec(4), (ls_allow_any_len.src[3],)*4))
+  else: extra = ls_allow_any_len.src[2:]  # NOTE: image load shouldn't have barrier and this shouldn't matter
+  vec_load = UOp(UOps.LOAD, ls_allow_any_len.dtype.vec(4), (buf, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx, idy))) + extra)
+  return functools.reduce(lambda ret, i: UOp.alu(TernaryOps.WHERE, id4.ne(i), ret, UOp(UOps.GEP, ls_allow_any_len.dtype, (vec_load,), i)), range(4),
+                          UOp.const(ls_allow_any_len.dtype, float('nan')))
+
+def image_contract_store(buf, ex, idx, idy, ls_allow_any_len, var):
+  new_var = UOp(UOps.CONTRACT, var.dtype.vec(4), (var,), (ex.arg[0][0],))
+  return UOp(UOps.STORE, None, (buf, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx, idy)), new_var) + ls_allow_any_len.src[3:])
 
 # ***** float4 handling *****
 
@@ -142,6 +137,12 @@ float4_folding = PatternMatcher([
     UOp(UOps.EXPAND).name("ex")+UOp.var("idx"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf"),
     UOp(UOps.EXPAND).name("ex"), UOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
+  # image handling
+  (UOp(UOps.LOAD, src=(UOp.var("buf"), UOp(UOps.VECTORIZE, dtypes.int.vec(3), (UOp.var('idx'), UOp.var('idy'),
+     UOp.var('id4'))))).name("ls_allow_any_len"), image_contract_load),
+  (UOp(UOps.STORE, src=(UOp.var("buf"), UOp(UOps.VECTORIZE, dtypes.int.vec(3), (UOp.var('idx'), UOp.var('idy'),
+     UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))), UOp.var("var"))).name("ls_allow_any_len"),
+     image_contract_store),
 ])
 
 # ***** transcendental *****
@@ -300,6 +301,9 @@ constant_folder = PatternMatcher([
   ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
   # *** rules from symbolic ***
+  # mod divides
+  ((UOp.cvar('c')*UOp.var('x')) % UOp.cvar('c'), lambda x,c: x.const(0)),
+  (((UOp.cvar('c')*UOp.var('x'))+UOp.var('x2')) % UOp.cvar('c'), lambda x,c,x2: x2%c),
   # two stage mul, (x*c1)*c2 = x*(c1*c2)
   ((UOp.var("x") * UOp.cvar("c1")) * UOp.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
   # -(x+y) -> -x + -y
@@ -464,8 +468,6 @@ expander = PatternMatcher([
     if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
   # BARRIERs aren't actually expanded
   (UOp(UOps.BARRIER, src=(UOp(UOps.EXPAND).name("ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
-  # image indexing (needs to be here)
-  (UPat({UOps.LOAD, UOps.STORE}, name="ls"), fix_image_idx),
   # empty EXPAND is NOOP
   (UOp(UOps.EXPAND, src=(UOp.var('x'),), arg=()), lambda x: x),
   # no ALU on vectorized dtypes
