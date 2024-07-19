@@ -2,11 +2,12 @@ from __future__ import annotations
 from typing import List, Tuple, cast, Optional, Any, Dict
 import functools
 from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv, all_int, get_contraction
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -53,19 +54,30 @@ else:
     assert uvalid.dtype == dtypes.bool
     return uidx, uvalid
 
-def get_grouped_dims(prefix, dims, max_sizes:Optional[Tuple[int, ...]]) -> List[UOp]:
-  # TODO: this should be per dim max
-  maxdim = len(max_sizes) if max_sizes is not None else 0
-  local_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (),
-    (i, f"{prefix}{i}", s)) for i,s in enumerate((prod(dims[:-(maxdim-1)]),) + dims[-(maxdim-1):] if len(dims) > maxdim else dims)]
-  if maxdim != 0 and len(dims) > maxdim:
-    dd = local_idxs[0]
-    nli = []
-    for s in dims[:-(maxdim-1)]:
-      nli.append(dd % s)
-      dd //= s
-    local_idxs = nli + local_idxs[-(maxdim-1):]
-  return local_idxs
+def _limit_dims(dims:Tuple[sint, ...], max_sizes:Tuple[int, ...]):
+  # TODO: symbolic shape
+  if not all_int(dims): return dims
+  while len(dims) > len(max_sizes) or any(d > m for d,m in zip(dims, max_sizes)):
+    for i,m in enumerate(max_sizes):
+      if dims[i] * dims[i+1] <= m:
+        dims = dims[:i] + (dims[i]*dims[i+1],) + dims[i+2:]
+        break
+    else: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
+  return dims
+
+def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]]) -> List[UOp]:
+  limited_dims = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
+  ret = local_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (), (i, f"{prefix}{i}", s)) for i,s in enumerate(limited_dims)]
+  if limited_dims != dims:
+    ret = []
+    # cast for mypy, get_contraction won't be None
+    for idx, contraction in zip(local_idxs, cast(List[List[int]], get_contraction(dims, limited_dims))):
+      if len(contraction) == 1: ret.append(idx)
+      else:
+        for c in contraction:
+          ret.append(idx % dims[c])
+          idx //= dims[c]
+  return ret
 
 class IndependentLowerer:
   def lower(self, ast:LazyOp, opts:Renderer) -> UOp:
