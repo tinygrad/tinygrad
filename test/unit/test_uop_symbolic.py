@@ -202,7 +202,6 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_no_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
 
-  @unittest.expectedFailure
   def test_mod_factor(self):
     # NOTE: even though the mod max is 50, it can't know this without knowing about the mul
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
