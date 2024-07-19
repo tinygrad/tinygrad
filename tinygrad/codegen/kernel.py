@@ -405,8 +405,6 @@ class Kernel:
               if self.full_shape[tc_opts.axes[0]] % upc == 0:
                 self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
                 break
-          # SWAP global
-          if self.global_dims > 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
       return True
     except KernelOptError:
       return False
@@ -538,8 +536,6 @@ class Kernel:
             if MV_THREADS_PER_ROW > 1: self.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
             if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
-            # SWAP global
-            if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
             return self
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
@@ -572,10 +568,7 @@ class Kernel:
             self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
 
     # no more opt if we are grouping
-    if self.group_for_reduces:
-      # SWAP global
-      if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
-      return self
+    if self.group_for_reduces: return self
 
     # **** below this line need to be optional and benchmarked ****
 
@@ -648,9 +641,6 @@ class Kernel:
           will_delete_shape = local_sz == self.full_shape[axis]
           self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
           if will_delete_shape: deleted_shape += 1
-
-    # SWAP global
-    if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
 
     return self
 

@@ -65,19 +65,20 @@ def _limit_dims(dims:Tuple[sint, ...], max_sizes:Tuple[int, ...]):
     else: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
   return dims
 
-def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]]) -> List[UOp]:
-  limited_dims = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
-  ret = local_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (), (i, f"{prefix}{i}", s)) for i,s in enumerate(limited_dims)]
-  if limited_dims != dims:
+def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]], reverse=False) -> List[UOp]:
+  if reverse: dims = dims[::-1]
+  limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
+  ret = raw_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (), (i, f"{prefix}{i}", s)) for i,s in enumerate(limited)]
+  if limited != dims:
     ret = []
     # cast for mypy, get_contraction won't be None
-    for idx, contraction in zip(local_idxs, cast(List[List[int]], get_contraction(dims, limited_dims))):
+    for idx, contraction in zip(raw_idxs, cast(List[List[int]], get_contraction(dims, limited))):
       if len(contraction) == 1: ret.append(idx)
       else:
         for c in contraction:
           ret.append(idx % dims[c])
           idx //= dims[c]
-  return ret
+  return ret[::-1] if reverse else ret
 
 class IndependentLowerer:
   def lower(self, ast:LazyOp, opts:Renderer) -> UOp:
@@ -97,7 +98,7 @@ class IndependentLowerer:
 
     if opts.has_local:
       # define indexes for GPU-like execution
-      self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max) + \
+      self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
                   get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
     else:
       # all loops are RANGES
