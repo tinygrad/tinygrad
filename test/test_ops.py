@@ -2,7 +2,7 @@ import time, math, unittest
 import numpy as np
 import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
-from test.helpers import is_dtype_supported
+from helpers import is_dtype_supported
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 
