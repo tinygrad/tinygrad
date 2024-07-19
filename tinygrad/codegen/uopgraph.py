@@ -449,7 +449,7 @@ def do_contract(con:UOp):
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
-  alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(),
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(),
                    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
@@ -469,7 +469,7 @@ expander = PatternMatcher([
   # empty EXPAND is NOOP
   (UOp(UOps.EXPAND, src=(UOp.var('x'),), arg=()), lambda x: x),
   # no ALU on vectorized dtypes
-  (UOp(UOps.ALU).name("alu"), no_vectorized_alu),
+  (UPat({UOps.ALU, UOps.CAST}, name="alu"), no_vectorized_alu),
 ])
 
 # *** uop graph ***
