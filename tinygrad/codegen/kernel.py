@@ -4,8 +4,7 @@ from dataclasses import replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
 
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, \
-                         verify_lazyop, KernelInfo, get_lazyop_info
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop, KernelInfo
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import dtypes, ImageDType
@@ -406,8 +405,6 @@ class Kernel:
               if self.full_shape[tc_opts.axes[0]] % upc == 0:
                 self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
                 break
-          # SWAP global
-          if self.global_dims > 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
       return True
     except KernelOptError:
       return False
@@ -481,7 +478,7 @@ class Kernel:
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
     elif opt.op is OptOps.SWAP:
-      check(axis < amt and amt < self.global_dims, "swap is only for globals with axis < amt")
+      check(axis < amt and amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
       permute = list(range(self.shape_len))
       permute[axis], permute[amt] = permute[amt], permute[axis]
       self.reshape_and_permute(None, tuple(permute))
@@ -512,14 +509,15 @@ class Kernel:
     if self.simplify_ones() and self.tensor_core_opts:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
-  def required_optimizations(self):
+  def required_optimizations(self) -> Kernel:
     if self.bufs[0].dtype.__class__ is ImageDType:
       unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
       assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[0]}"
       if len(unit_stride_axes_mul_4) and all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:  # noqa: E501
         self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
+    return self
 
-  def hand_coded_optimizations(self):
+  def hand_coded_optimizations(self) -> Kernel:
     self.required_optimizations()
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
@@ -538,9 +536,7 @@ class Kernel:
             if MV_THREADS_PER_ROW > 1: self.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
             if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
-            # SWAP global
-            if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
-            return
+            return self
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
@@ -572,10 +568,7 @@ class Kernel:
             self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
 
     # no more opt if we are grouping
-    if self.group_for_reduces:
-      # SWAP global
-      if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
-      return
+    if self.group_for_reduces: return self
 
     # **** below this line need to be optional and benchmarked ****
 
@@ -649,8 +642,7 @@ class Kernel:
           self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
           if will_delete_shape: deleted_shape += 1
 
-    # SWAP global
-    if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
+    return self
 
   # **** kernel outputs ****
 
@@ -765,9 +757,7 @@ class Kernel:
     # generate the UOpGraph
     self.uops:UOpGraph = UOpGraph(uop_sink, self.opts)
     if DEBUG >= 5: self.uops.print()
-    if getenv("GRAPHUOPS"):
-      self.uops.graph()
-      if getenv("GRAPHUOPS") == 2: exit(0)
+    if getenv("GRAPHUOPS"): self.uops.graph()
     return self
 
   def to_program(self) -> Program:
@@ -776,8 +766,7 @@ class Kernel:
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
-    info = get_lazyop_info(self.ast.src[0])   # TODO: this should be removed
-    ops, mem = flops_mem(self.uops.uops)
+    ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
     run_count = prod((self.global_size or []) + (self.local_size or []))
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
-                   self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+                   self.uops, ops * run_count, min(mem * run_count, sum(arg.dtype.itemsize * arg.st.real_size() for arg in self.membufs)))

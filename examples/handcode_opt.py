@@ -7,9 +7,8 @@ from tinygrad.device import Compiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import DEBUG, ansilen, getenv
-from tinygrad.ops import MetaOps, get_lazyop_info
+from tinygrad.ops import MetaOps
 from tinygrad.shape.symbolic import sym_infer
-
 
 def get_sched_resnet():
   mdl = ResNet50()
@@ -78,8 +77,6 @@ if __name__ == "__main__":
   running_gflops = 0
   usage = {}
   for i,si in enumerate(sched):
-    ops = get_lazyop_info(si.ast.src[0]).flops
-
     if DEBUG >= 2: print(si.ast)
 
     rawbufs = bufs_from_lin(Kernel(si.ast))
@@ -107,6 +104,7 @@ if __name__ == "__main__":
     choices = []
     for lin in lins:
       tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10)
+      ops = lin.to_program().op_estimate
       gflops = sym_infer(ops, {k:k.min for k in lin.ast.vars()})*1e-9/tm
       choices.append((tm, gflops, lin.linearize()))
 

@@ -35,8 +35,8 @@ class UOp:
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def commutative(self) -> bool:
-    return self.op is UOps.ALU and \
-      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
+    return self.op is UOps.UNMUL or (self.op is UOps.ALU and \
+      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
   @functools.cached_property
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
@@ -105,7 +105,7 @@ def type_verify(uops):
         arg = src[0].arg
       assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
     if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
-    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == dtype.count
+    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
     if uop is UOps.VECTORIZE:
       assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
       assert dtype == src[0].dtype.vec(len(src)), f"{dtype=} must be {src[0].dtype.vec(len(src))}"

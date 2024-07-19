@@ -193,11 +193,13 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  # CONTRACT before ALU/REDUCE
+  # CONTRACT before ALU/REDUCE/CAST
   (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.ALU, name="alu"),)),
    lambda con, alu: UOp(alu.op, con.dtype, tuple(UOp(UOps.CONTRACT, x.dtype.vec(con.dtype.count), (x,), con.arg) for x in alu.src), alu.arg)),
-  (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.REDUCE, name="red"),)),
+  (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.REDUCE, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, name="red"),)),
    lambda con, red: UOp(UOps.REDUCE, con.dtype, (UOp(UOps.CONTRACT, con.dtype, red.src[0:1], con.arg),)+red.src[1:], red.arg)),
+  (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.CAST, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, src=(UPat(name="casted"),)),)),
+   lambda con, casted: UOp(UOps.CAST, con.dtype, (UOp(UOps.CONTRACT, casted.dtype.vec(con.dtype.count), (casted,), con.arg),))),
   # bigint is rewritten to int32
   (UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.bigint, name="x"),
    lambda x: UOp(x.op, dtypes.int32, x.src, x.arg)),
@@ -231,8 +233,9 @@ constant_folder = PatternMatcher([
   (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),)),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # deal with UNMUL
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(UOps.UNMUL, src=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
-   lambda c1,c2,v: v if c1.arg == c2.arg else None),
+  (UOp.cvar('c1') * UOp(UOps.UNMUL, src=(UOp.cvar('c2'), UOp.var('v'))), lambda c1,c2,v: v if c1.arg == c2.arg else None),
+  (UOp.cvar('c1') * (UOp.var('add') + UOp(UOps.UNMUL, src=(UOp.cvar('c2'), UOp.var('v')))),
+    lambda c1, add, c2, v: (add*c1+v) if c1.arg == c2.arg else None),
   (UOp(UOps.UNMUL, src=(UOp.const(None, 0).name('zero'), UOp.var())), lambda zero: zero),
   (UOp(UOps.UNMUL).name('unmul').cast().name('root'), lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.src[0].cast(root.dtype), unmul.src[1]))),
   # indexing (with a multiply offset)!
@@ -410,14 +413,14 @@ def do_reduce_with_expand(root):
   const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
   ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
   acc_number += 1
+  alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)]
   if len(expands_reduce):
     assert root.src[0].op is UOps.EXPAND
     expand_reduce_args = dedup(flatten([x.arg for x in expands_reduce]))
     assert prod([y[1] for y in expand_reduce_args]) == len(root.src[0].src)
-    for xx in root.src[0].src:
-      ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, xx)
+    ret = functools.reduce(lambda x,y: UOp.alu(alu_op, x, y), (ret,)+root.src[0].src)
   else:
-    ret = UOp.alu({ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)], ret, root.src[0])
+    ret = UOp.alu(alu_op, ret, root.src[0])
   ret = UOp(UOps.PHI, ret.dtype, (acc, ret))
   if len(expands_non_reduce): ret = ret * prod([sz for _,sz in flatten([x.arg for x in expands_non_reduce])])
   return ret
@@ -446,7 +449,7 @@ def do_contract(con:UOp):
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
-  alus = tuple(UOp(UOps.ALU, alu.dtype.scalar(),
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(),
                    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
@@ -466,7 +469,7 @@ expander = PatternMatcher([
   # empty EXPAND is NOOP
   (UOp(UOps.EXPAND, src=(UOp.var('x'),), arg=()), lambda x: x),
   # no ALU on vectorized dtypes
-  (UOp(UOps.ALU).name("alu"), no_vectorized_alu),
+  (UPat({UOps.ALU, UOps.CAST}, name="alu"), no_vectorized_alu),
 ])
 
 # *** uop graph ***
