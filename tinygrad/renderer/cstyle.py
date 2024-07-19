@@ -391,7 +391,7 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
 class IntelRenderer(OpenCLRenderer):
   device, kernel_prefix = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + OpenCLRenderer.kernel_prefix
-  tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], thread_local_sizes=[[2,8], [16], [8]], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float), (dtypes.float, dtypes.float)]]  # noqa: E501
   def render_dtype(self, var_dtype:DType) -> str:
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
   def render_cast(self, x, var_dtype, bitcast=False) -> str: # TODO: handle all casts
