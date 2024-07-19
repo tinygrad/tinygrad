@@ -63,7 +63,7 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, params["ctx_dim"])), test, 18.0, 513 if CI else 839)
 
   def test_unet_resblock(self):
-    with Context(TIME_REPLAY=1):
+    with Context(TIME_REPLAY=1, JIT=2):
       model = [ResBlock(16, 24, 16) for _ in range(4)]
       derandomize_model(model)
       @TinyJit
@@ -74,7 +74,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_llama(self):
-    with Context(TIME_REPLAY=1):
+    with Context(TIME_REPLAY=1, JIT=2):
       dtypes.default_float = dtypes.float16
 
       args_tiny = {"dim": 1024, "hidden_dim": 2048, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
@@ -87,7 +87,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_gpt2(self):
-    with Context(TIME_REPLAY=1):
+    with Context(TIME_REPLAY=1, JIT=2):
       dtypes.default_float = dtypes.float16
 
       args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
@@ -100,7 +100,7 @@ class TestRealWorld(unittest.TestCase):
                   lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 164 if CI else 468, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CLANG", "slow")
-  def test_train_mnist(self):
+  def test_train_mnist(self, JIT=2):
     from examples.beautiful_mnist import Model
     with Tensor.train():
       model = Model()
@@ -119,21 +119,22 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"CLANG", "GPU", "LLVM"}, "slow")
   def test_train_cifar(self):
-    with Tensor.train():
-      model = SpeedyResNet(Tensor.ones((12,3,2,2)))
-      optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
+    with Context(JIT=2):
+      with Tensor.train():
+        model = SpeedyResNet(Tensor.ones((12,3,2,2)))
+        optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
 
-      BS = 32 if CI else 512
+        BS = 32 if CI else 512
 
-      @TinyJit
-      def train(X):
-        out = model(X)
-        loss = out.mean()
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        @TinyJit
+        def train(X):
+          out = model(X)
+          loss = out.mean()
+          optimizer.zero_grad()
+          loss.backward()
+          optimizer.step()
 
-      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 142 if CI else 154)   # it's 154 on metal
+        helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 142 if CI else 154)   # it's 154 on metal
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_train_cifar_hyp(self):
