@@ -767,9 +767,7 @@ class Kernel:
     # generate the UOpGraph
     self.uops:UOpGraph = UOpGraph(uop_sink, self.opts)
     if DEBUG >= 5: self.uops.print()
-    if getenv("GRAPHUOPS"):
-      self.uops.graph()
-      if getenv("GRAPHUOPS") == 2: exit(0)
+    if getenv("GRAPHUOPS"): self.uops.graph()
     return self
 
   def to_program(self) -> Program:
