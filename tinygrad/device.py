@@ -287,7 +287,7 @@ class HWCommandQueue:
     return self
   def _update_wait(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
 
-  def submit(self, device:HCQCompatCompiled):
+  def submit(self, device:HCQCompiled):
     """
     Submits the command queue to a specific device for execution.
 
@@ -296,7 +296,7 @@ class HWCommandQueue:
     """
     self._submit(device)
     return self
-  def _submit(self, device:HCQCompatCompiled): raise NotImplementedError("backend should overload this function")
+  def _submit(self, device:HCQCompiled): raise NotImplementedError("backend should overload this function")
 
 class HWComputeQueue(HWCommandQueue):
   @hcq_command
@@ -308,7 +308,7 @@ class HWComputeQueue(HWCommandQueue):
   def _memory_barrier(self): pass
 
   @hcq_command
-  def exec(self, prg:HCQCompatProgram, kernargs:int, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+  def exec(self, prg:HCQProgram, kernargs:int, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
     """
     Enqueues an execution command for a kernel program.
 
@@ -337,7 +337,7 @@ class HWComputeQueue(HWCommandQueue):
 
 class HWCopyQueue(HWCommandQueue):
   @hcq_command
-  def copy(self, dest:HCQCompatAllocRes, src:HCQCompatAllocRes, copy_size:int):
+  def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
     """
     Enqueues a copy command to transfer data.
 
@@ -347,9 +347,9 @@ class HWCopyQueue(HWCommandQueue):
       copy_size: The size of data to copy
     """
     self._copy(dest, src, copy_size)
-  def _copy(self, dest:HCQCompatAllocRes, src:HCQCompatAllocRes, copy_size:int): raise NotImplementedError("backend should overload this function")
+  def _copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int): raise NotImplementedError("backend should overload this function")
 
-  def update_copy(self, cmd_idx:int, dest:Optional[HCQCompatAllocRes]=None, src:Optional[HCQCompatAllocRes]=None):
+  def update_copy(self, cmd_idx:int, dest:Optional[HCQBuffer]=None, src:Optional[HCQBuffer]=None):
     """
     Updates a previously queued copy command.
 
@@ -377,12 +377,12 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
 
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
-class HCQCompatProgram:
+class HCQProgram:
   def __init__(self, kernargs_alloc_size:int, kernargs_args_offset:int=0):
     self.kernargs_alloc_size, self.kernargs_args_offset = kernargs_alloc_size, kernargs_args_offset
   def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
 
-class HCQCompatCompiled(Compiled):
+class HCQCompiled(Compiled):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
   """
@@ -473,27 +473,27 @@ class HCQCompatCompiled(Compiled):
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
     self._set_signal(self.timeline_signal, 0)
-    cast(HCQCompatAllocator, self.allocator).b_timeline = [0] * len(cast(HCQCompatAllocator, self.allocator).b)
+    cast(HCQAllocator, self.allocator).b_timeline = [0] * len(cast(HCQAllocator, self.allocator).b)
 
 # Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
-class HCQCompatAllocRes(Protocol): va_addr:int; size:int # noqa: E702
+class HCQBuffer(Protocol): va_addr:int; size:int # noqa: E702
 
-class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
+class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   """
   A base allocator class compatible with the HCQ (Hardware Command Queue) API.
 
   This class implements basic copy operations following the HCQ API, utilizing both `HWComputeQueue` and `HWCopyQueue`.
   """
 
-  def __init__(self, device:HCQCompatCompiled, batch_size:int=(2 << 20), batch_cnt:int=32):
+  def __init__(self, device:HCQCompiled, batch_size:int=(2 << 20), batch_cnt:int=32):
     self.device:Any = device
     self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
 
-  def _alloc(self, size:int, options:BufferOptions) -> HCQCompatAllocRes: raise NotImplementedError("need hcq compat alloc")
+  def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer: raise NotImplementedError("need hcq compat alloc")
 
-  def copyin(self, dest:HCQCompatAllocRes, src:memoryview):
+  def copyin(self, dest:HCQBuffer, src:memoryview):
     with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"CPU -> {self.device.dname}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
@@ -505,7 +505,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
         self.b_timeline[self.b_next] = self.device.timeline_value
         self.device.timeline_value += 1
 
-  def copy_from_disk(self, dest:HCQCompatAllocRes, src, size):
+  def copy_from_disk(self, dest:HCQBuffer, src, size):
     def _get_temp_buf():
       # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
       if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device._read_signal(self.device.timeline_signal):
@@ -521,7 +521,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
         self.b_timeline[batch_info[1]] = self.device.timeline_value
         self.device.timeline_value += 1
 
-  def copyout(self, dest:memoryview, src:HCQCompatAllocRes):
+  def copyout(self, dest:memoryview, src:HCQBuffer):
     self.device.synchronize()
 
     with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
@@ -534,7 +534,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
 
         ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
-  def transfer(self, dest:HCQCompatAllocRes, src:HCQCompatAllocRes, sz:int, src_dev, dest_dev):
+  def transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev, dest_dev):
     src_dev._gpu_map(dest)
 
     with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
@@ -550,6 +550,6 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
                                    .signal(dest_dev.timeline_signal, dest_dev.timeline_value).submit(dest_dev)
       dest_dev.timeline_value += 1
 
-  def offset(self, buf, size:int, offset:int) -> HCQCompatAllocRes:
+  def offset(self, buf, size:int, offset:int) -> HCQBuffer:
     return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
                      **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']}, _base=buf)

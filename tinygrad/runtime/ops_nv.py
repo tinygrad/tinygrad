@@ -2,8 +2,8 @@ from __future__ import annotations
 import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any, cast, Union, Dict
 from dataclasses import dataclass
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
-                            HCQCompatProgram, hcq_profile, Compiler, CompileError, BufferOptions
+from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
+                            HCQProgram, hcq_profile, Compiler, CompileError, BufferOptions
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod, PROFILE
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler, PTXCompiler, PTX
@@ -217,7 +217,7 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
 
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).dma_gpfifo)
 
-class NVProgram(HCQCompatProgram):
+class NVProgram(HCQProgram):
   def __init__(self, device:NVDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
     if DEBUG >= 6:
@@ -314,10 +314,10 @@ class NVProgram(HCQCompatProgram):
       if not PROFILE: self.device.signals_pool += [sig_st, sig_en]
       return (sig_en[1] - sig_st[1]) / 1e9
 
-class NVAllocator(HCQCompatAllocator):
+class NVAllocator(HCQAllocator):
   def __init__(self, device:NVDevice): super().__init__(device)
 
-  def _alloc(self, size:int, options:BufferOptions) -> HCQCompatAllocRes:
+  def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.host: return self.device._gpu_host_alloc(size)
     return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)))
 
@@ -335,7 +335,7 @@ class GPFifo:
   put_value: int = 0
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
-class NVDevice(HCQCompatCompiled):
+class NVDevice(HCQCompiled):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1

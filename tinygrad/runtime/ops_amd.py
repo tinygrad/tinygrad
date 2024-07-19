@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import Tuple, List, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, subprocess, time, array
 from dataclasses import dataclass
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, HWComputeQueue, HWCopyQueue, hcq_profile, \
-                            HCQCompatProgram, Compiler, CompileError, BufferOptions
+from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, hcq_profile, \
+                            HCQProgram, Compiler, CompileError, BufferOptions
 from tinygrad.helpers import getenv, to_mv, round_up, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.support.hip_comgr import compile_hip
@@ -268,7 +268,7 @@ class AMDCopyQueue(HWCopyQueue):
     device.sdma_queue.write_ptr[0] = device.sdma_queue.put_value
     device.sdma_queue.doorbell[0] = device.sdma_queue.put_value
 
-class AMDProgram(HCQCompatProgram):
+class AMDProgram(HCQProgram):
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
@@ -335,10 +335,10 @@ class AMDProgram(HCQCompatProgram):
       if not PROFILE: self.device.signals_pool += [sig_st, sig_en]
       return (sig_en.start_ts - sig_st.start_ts) / 1e8
 
-class AMDAllocator(HCQCompatAllocator):
+class AMDAllocator(HCQAllocator):
   def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
 
-  def _alloc(self, size:int, options:BufferOptions) -> HCQCompatAllocRes:
+  def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
     return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
 
@@ -354,7 +354,7 @@ class AMDQueueDesc:
   doorbell: memoryview
   put_value: int = 0
 
-class AMDDevice(HCQCompatCompiled):
+class AMDDevice(HCQCompiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None

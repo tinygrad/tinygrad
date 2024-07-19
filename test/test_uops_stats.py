@@ -1,17 +1,12 @@
 import unittest
 from tinygrad import Tensor
+from tinygrad.helpers import getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
 from tinygrad.codegen.uops import flops_mem, UOps, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.dtype import dtypes
-
-# TODO: can copy this in here when we remove it
-#from tinygrad.ops import get_lazyop_info
-#info = get_lazyop_info(ast)
-#print(ops, mem, expected_mem)
-#print(info.flops, info.mem_estimate)
 
 # **************** new FlopCounter ****************
 
@@ -21,6 +16,7 @@ def get_stats(x:Tensor):
   return ei.prg.op_estimate, ei.prg.mem_estimate
 
 class TestUOpsStats(unittest.TestCase):
+  @unittest.skipIf(getenv("PTX"), "wrong in PTX")
   def test_simple_add(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
