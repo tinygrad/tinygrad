@@ -368,7 +368,7 @@ class Kernel:
         return True
     return False
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None, axis:int=0, tc_opt:Optional[int]=None) -> bool:
+  def apply_tensor_cores(self, use_tensor_cores=1, axis:int=0, tc_opt:Optional[int]=None) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel.  If one exists and applies properly, return true, otherwise return false.
     Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
 
@@ -377,7 +377,6 @@ class Kernel:
       0: will disable any tensor core matching
       1: enable tensor cores
       2: apply tensor core shape but don't use UOp.WMMA
-    extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
     tc_opt -- controls which kinds of kernels may be eligible for tensor cores application (default 2 during BEAM, 0 otherwise)
       0: applies to only kernels with a single reduce axis and direct BufferOps.LOAD into BinaryOps.MUL
       1: allows kernels with multiple reduce axes and also multiplication of UnaryOps.CAST'd buffers
@@ -389,22 +388,19 @@ class Kernel:
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
 
       if (tc_opts:=self.tensor_core_opts) is not None:
-        if extra_opts is not None:
-          for opt in extra_opts: self.apply_opt(opt)
-        else:
-          # hand-coded TC opts
-          def late_upcast_tc(tc_dim: int):
-            if tc_opts.axes_exist[tc_dim]:
-              ax_div = [upc for upc in [5,4,3,2,1] if self.full_shape[tc_opts.axes[tc_dim]]%upc == 0][0]
-              if ax_div != 1: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], ax_div))
-          late_upcast_tc(1) # attempt to upcast M
-          late_upcast_tc(0) # attempt to upcast N
+        # hand-coded TC opts
+        def late_upcast_tc(tc_dim: int):
+          if tc_opts.axes_exist[tc_dim]:
+            ax_div = [upc for upc in [5,4,3,2,1] if self.full_shape[tc_opts.axes[tc_dim]]%upc == 0][0]
+            if ax_div != 1: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], ax_div))
+        late_upcast_tc(1) # attempt to upcast M
+        late_upcast_tc(0) # attempt to upcast N
 
-          if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
-            for upc in [4,2]:
-              if self.full_shape[tc_opts.axes[0]] % upc == 0:
-                self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
-                break
+        if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
+          for upc in [4,2]:
+            if self.full_shape[tc_opts.axes[0]] % upc == 0:
+              self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
+              break
       return True
     except KernelOptError:
       return False
@@ -414,7 +410,7 @@ class Kernel:
 
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
-      check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
+      check(opt.axis is not None and opt.amt is not None, f"tensor core opts must have an axis and amt, {opt.axis=}, {opt.amt=}")
       check((use_tensor_cores:=USE_TC.value) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
       self.applied_opts.append(opt)

@@ -1235,7 +1235,8 @@ def _helper_linearizer_opt_ast(realized_ast:LazyOp, real_bufs:List[Buffer], opts
     k = create_k()
     lins.append(k)
     if apply_tc:
-      assert k.apply_tensor_cores(1, extra_opts=opts), "no tensor core triggered"
+      for opt in [Opt(OptOps.TC, axis=0, amt=0)] + opts:
+        k.apply_opt(opt)
     else:
       for opt in opts:
         k.apply_opt(opt)
@@ -1603,15 +1604,17 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.rand(N, N)
     b = Tensor.rand(N, N)
     realized_ast, _ = helper_realized_ast(a@b)
-    invalid_opts = [
+    invalid_extra_opts = [
       [Opt(OptOps.LOCAL, 2, 2)],
       [Opt(OptOps.UPCAST, 2, 2)],
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2)],
     ]
-    for x in invalid_opts:
+    for opts in invalid_extra_opts:
       k = Kernel(realized_ast)
-      with self.assertRaises(AssertionError):
-        assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
+      k.apply_opt(Opt(OptOps.TC, axis=0, amt=0))
+      with self.assertRaises(KernelOptError):
+        for opt in opts:
+          k.apply_opt(opt)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_buf_index_not_found_tensor_core(self):
