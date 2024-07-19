@@ -74,16 +74,12 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    i = 0
-    d1 = self.pdict[(uop.op, uop.arg)]
-    d2 = self.pdict[(uop.op, None)]
-    rng = itertools.chain(d1, d2)
-    for p,fxn in rng:
-      i += 1
+    ds = []
+    ds.append(self.pdict[(uop.op, uop.arg)])
+    ds.append(self.pdict[(uop.op, None)])
+    for p,fxn in itertools.chain(*ds):
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: 
-#        print(i / (len(d1)+len(d2)), i, len(d1), len(d2))
         return ret # NOTE: if it returns None, we keep trying to match
-#    print(1, len(d1), len(d2))
     return None
 
 # ***** image handling *****
