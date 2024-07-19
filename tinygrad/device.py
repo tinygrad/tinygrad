@@ -426,13 +426,13 @@ class HCQCompiled(Compiled):
     self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
-    self.raw_prof_records:List[Tuple[int, int, str, bool]] = []
+    self.raw_prof_records:List[Tuple[float, float, str, bool]] = []
     if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
-  def _gpu2cpu_time(self, gpu_time:int, is_copy:bool) -> float:
+  def _gpu2cpu_time(self, gpu_time:float, is_copy:bool) -> float:
     """
     Translates local gpu time (timestamp) into global cpu time.
     """
