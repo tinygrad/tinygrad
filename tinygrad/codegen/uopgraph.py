@@ -546,11 +546,14 @@ class UOpGraph:
 
     # fixup gated stores with an IF block to save extra local loads
     @functools.lru_cache(None)
-    def _dfs(u:UOp, gate:UOp) -> UOp:
-      if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
+    def _dfs(u:UOp, gate:Optional[UOp]=None) -> UOp:
+      if gate is None and u.op is UOps.STORE and len(u.src) == 4:
+        gate = u.src[3]
+      addif = u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER
+      if (replace_source:=tuple(_dfs(x, None if addif else gate) for x in u.src)) != u.src: u = UOp(u.op, u.dtype, replace_source, u.arg)
+      if addif and gate is not None:
         if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
         return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
-      if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
     sink_srcs = list(self.sink.src)
     for i, s in enumerate(sink_srcs):
@@ -593,8 +596,7 @@ class UOpGraph:
     # scope children impact the toposort and END* insertion
     scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
 
-    phi_for_scope={p:[s for s in scope_children if p in scope_children[s]] for x in scope_children for p in scope_children[x] if p.op is UOps.PHI}
-    range_group = {r:phi_for_scope[p] for p in phi_for_scope for r in phi_for_scope[p]}
+    phi_order = {r:[x for x in get_recursive_children(r, UOps.SINK) if x.op is UOps.PHI] for r in in_degree if r.op is UOps.PHI}
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
@@ -602,8 +604,6 @@ class UOpGraph:
       # prefer uops that are loop children
       for l, ss in scope_children.items():
         if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
-      # order ranges by their "group"
-      if u.op is UOps.RANGE and u in range_group: priority += sum([r.arg[0] for r in range_group[u] if r.op is UOps.RANGE])
       heapq.heappush(queue, (priority, u))
 
     for u in children:
@@ -611,41 +611,45 @@ class UOpGraph:
 
     scope_end: Dict[UOp, UOp] = {}
     self._uops = []
-    scope_stack: List[UOp] = []
-    popped_scope_stack: List[Tuple[UOp, UOp, List[UOp]]] = []
+    scope_cursor: Dict[UOp, UOp] = {}
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
-      if x.op is UOps.RANGE and x in range_group:
-        while len(scope_stack) > 0:
-          if (s:=scope_stack[-1]) not in range_group[x]:
-            popped_scope_stack.append((x,s,self._uops[self._uops.index(scope_stack[-1]):]))
-            self._uops = self._uops[:self._uops.index(scope_stack.pop(-1))]
-          else: break
-        scope_stack.append(x)
-      if x in scope_children: scope_end[x] = x
+
       if x.op is UOps.DEFINE_ACC:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
-      else: self._uops.append(x)
-      for u, ss in scope_children.items():
-        if x in ss:
-          ss.remove(x)
-          if len(ss) == 0:
-            if u.op is UOps.RANGE and u in range_group: assert (s:=scope_stack.pop(-1)) is u, "Trying to end one scope while in another!"
-            scope_end[u] = x
-            while len(popped_scope_stack) > 0:
-              ps = popped_scope_stack[-1]
-              if ps[0] is u:
-                for c in ps[2]: self._uops.append(c)
-                scope_stack.append(popped_scope_stack.pop(-1)[1])
-              else: break
+      elif x in scope_children:
+        scope_phi = [p for p in scope_children[x] if p.op is UOps.PHI]
+        phi_children = [u for p in scope_phi for u in phi_order[p]]
+        range_children = [r for p in phi_children for r in scope_children if p in scope_children[r] and r in self._uops]
+        if len(range_children) > 0:
+          placement_idx = min(self._uops.index(r) for r in range_children)
+          self._uops.insert(placement_idx, x)
+        else: self._uops.append(x)
+        scope_end[x] = x
+        scope_cursor[x] = x
+      else:
+        scopes = []
+        for u, ss in scope_children.items():
+          if x in ss: 
+            scopes.append(u)
+        if len(scopes)>0:
+          self._uops.insert(max(self._uops.index(scope_cursor[s]) for s in scopes)+1, x)
+          for s in scopes: scope_cursor[s] = x
+        elif any(u in self._uops for u in x.src):
+          placement_idx = max(self._uops.index(u) for u in x.src if u in self._uops)
+          self._uops.insert(placement_idx+1, x)
+        else: self._uops.append(x)
       for u in children[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
 
     # end scopes in toposort order
-    for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+    for u, x in scope_cursor.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+
+    # for i,u in enumerate(self._uops):
+    #   print(f"{i}  :{u}  ---  {[(s.op, s.arg) for s in scope_children if u in scope_children[s]]}")
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     try:

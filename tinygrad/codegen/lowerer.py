@@ -6,7 +6,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv, prod, dedup
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -72,14 +72,22 @@ class IndependentLowerer:
     self.output_count = len(ast.src)
 
     ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
+
+    cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
+    def ordered_lazyops(op):
+      if op not in cached_ordered_lazyops: cached_ordered_lazyops[op] = dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
+      return cached_ordered_lazyops[op]
+    self.reduceops = dedup([x for x in ordered_lazyops(ast) if x.op in ReduceOps])
+
     # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = ast.full_shape
     first_upcasted = len(full_shape)-ki.upcasted
     first_reduce = [x!=y for x,y in zip(ast.src[0].arg.st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
+    self.first_reduce = first_reduce
     local_loads = [x for x in ast.lazyops if x.op is BufferOps.LOAD and x.arg.idx == -1]
     # NOTE: this is taking the first one...there may be subtlelies here with multireduces
-    group_for_reduces = sum([x!=y for x,y in zip(
-      local_loads[0].arg.st.shape[first_reduce:first_upcasted], ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
+    group_for_reduces = sum([any(j!=y for j in x) for x,y in zip([[l.arg.st.shape[i] for l in local_loads] for i in range(len(ast.src[0].arg.st.shape[first_reduce:first_upcasted]))], ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
+    self.group_for_reduces = group_for_reduces
     global_dims = first_reduce-ki.local_dims
 
     if opts.has_local:
@@ -129,9 +137,15 @@ class IndependentLowerer:
                   (x.arg.idx, x.arg.idx < self.output_count))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
+        load_back = len(x.src) == 1 and x.src[0].op is BufferOps.STORE and x.src[0].src[0].op in ReduceOps and all(i-self.first_reduce < self.group_for_reduces for i in x.src[0].src[0].arg) and x.src[0].src[0] is not self.reduceops[-1]
+        zero = UOp(op=UOps.CONST, dtype=dtypes.bigint, src=(), arg=0)
+        if load_back: return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, zero) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread
-      if x.arg.idx != -1:
+      store_back = x.src[0].op in ReduceOps and all(i-self.first_reduce < self.group_for_reduces for i in x.src[0].arg) and x.src[0] is not self.reduceops[-1]
+      # do we really need this?? store for the local reduceop is already only to the first thread
+      # if store_back: idx = UOp(op=UOps.CONST, dtype=dtypes.bigint, src=(), arg=0)
+      if x.arg.idx != -1 or store_back:
         has_valid = True
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
