@@ -90,9 +90,10 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
   cache.setdefault((buf, st))
   if buf is not buf.base: st, buf = buf.st+st, buf.base
-  for x in buf.srcs: _recurse_reduceops(x, buf.srcs[0].st if buf.op in ReduceOps else st, realizes, outs, reduce_info, cache)
+  input_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
+  for x in buf.srcs: _recurse_reduceops(x, input_st, realizes, outs, reduce_info, cache)
   if buf.op in ReduceOps and buf not in reduce_info:
-    input_st, axis = ShapeTracker.from_shape(buf.srcs[0].st.shape), buf.arg
+    axis = buf.arg
     if not st.contiguous:
       assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
       assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
