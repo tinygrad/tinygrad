@@ -234,6 +234,8 @@ constant_folder = PatternMatcher([
   # ** two stage add/sub folding **
   ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
+  # sort adds
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat(name='x'), UPat(name='y'))), lambda x,y: (y+x) if x<y else None),
   # denest add const
   (UOp.var('x') + (UOp.var('y') + UOp.cvar('c1')), lambda x,y,c1: (x+y)+c1),
   # *** rules from symbolic ***
