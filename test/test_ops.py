@@ -4,7 +4,6 @@ import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from test.helpers import is_dtype_supported
 
 if CI:
   import warnings
@@ -513,6 +512,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
 
   def test_bitcast(self):
+    from test.helpers import is_dtype_supported
     dtype_pairs = [(torch.int8, dtypes.int8), (torch.uint8, dtypes.uint8), (torch.int16, dtypes.int16), (torch.uint16, dtypes.uint16),
                    (torch.int32, dtypes.int32), (torch.uint32, dtypes.uint32), (torch.int64, dtypes.int64), (torch.uint64, dtypes.uint64),
                    (torch.float16, dtypes.float16), (torch.float32, dtypes.float32), (torch.float64, dtypes.float64)]
