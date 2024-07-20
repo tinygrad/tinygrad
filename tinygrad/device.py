@@ -436,7 +436,7 @@ class HCQCompiled(Compiled):
     """
     Translates local gpu time (timestamp) into global cpu time.
     """
-    return gpu_time + (self.copy_g2c_timediff if is_copy else self.compute_g2c_timediff)
+    return gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff)
 
   def _prof_setup(self):
     if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
@@ -448,7 +448,7 @@ class HCQCompiled(Compiled):
       cpu_start_time = time.perf_counter_ns() / 1e3
       self.timeline_signal.wait(self.timeline_value - 1)
       return cpu_start_time - self.timeline_signal.timestamp
-    self.compute_g2c_timediff, self.copy_g2c_timediff = _sync_queue(self.hw_compute_queue_t), _sync_queue(self.hw_copy_queue_t)
+    self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff = _sync_queue(self.hw_compute_queue_t), _sync_queue(self.hw_copy_queue_t)
 
   def _prof_process_events(self):
     self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
