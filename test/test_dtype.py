@@ -242,13 +242,16 @@ class TestUint8DType(TestDType):
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == 'PYTHON', 'bug with casting in GLOBAL')
-  def test_shape_change_bitcast(self):
+  def test_shape_change_bitcast_simple(self):
     _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, None)
+
+  @unittest.skipIf(Device.DEFAULT == 'PYTHON' or not is_dtype_supported(dtypes.float16), 'bug with casting in GLOBAL')
+  def test_shape_change_bitcast(self):
     _test_bitcast(Tensor([100000], dtype=dtypes.float16), dtypes.int8, None)
     _test_bitcast(Tensor([100000, 100], dtype=dtypes.float16), dtypes.float32, None)
     _test_bitcast(Tensor([10,12], dtype=dtypes.int8), dtypes.float16, None)
 
-  @unittest.skipIf(Device.DEFAULT == 'PYTHON', 'bug with casting in GLOBAL')
+  @unittest.skipIf(Device.DEFAULT == 'PYTHON' or not is_dtype_supported(dtypes.float16), 'bug with casting in GLOBAL')
   def test_bitcast_fp16_to_int16(self):
     _test_bitcast(Tensor([1000], dtype=dtypes.float16), dtypes.int16, None)
 
