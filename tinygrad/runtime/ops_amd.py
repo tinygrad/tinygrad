@@ -362,6 +362,8 @@ class AMDAllocator(HCQAllocator):
 
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
 
+  def map(self, buf:HCQBuffer): self._gpu_map(buf)
+
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 
 @dataclass

@@ -339,6 +339,8 @@ class NVAllocator(HCQAllocator):
     if options.host: self.device._gpu_host_free(opaque)
     else: self.device._gpu_free(opaque)
 
+  def map(self, buf:HCQBuffer): self._gpu_map(buf)
+
 @dataclass
 class GPFifo:
   ring: memoryview

@@ -100,7 +100,7 @@ class HCQGraph(MultiGraphRunner):
       if isinstance(ji.prg, CompiledRunner): enqueue_queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        Device[src.device]._gpu_map(dest._buf) #type: ignore
+        Device[src.device].allocator.map(dest._buf)
         enqueue_queue.copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])
       self.op_cmd_idx[j] = (enqueue_queue, len(enqueue_queue) - 1)
