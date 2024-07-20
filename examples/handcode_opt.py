@@ -121,7 +121,10 @@ if __name__ == "__main__":
         print(f"                 kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS -- {colored(nm, 'green') if lin is sorted_choices[0][2] else nm}")
 
     tm, gflops, lin, nm = sorted_choices[0]
-    if getenv("SRC"): print(lin.to_program().src)
+    if getenv("SRC"):
+      print(si.ast)
+      print(lin.applied_opts)
+      print(lin.to_program().src)
     total_tm += tm
     running_gflops += gflops * tm
     if (key := str([str(m) for m in si.metadata] if si.metadata is not None else None)) not in usage: usage[key] = (0, 0)
