@@ -339,7 +339,8 @@ class Tensor:
         splits = tuple([min(self.shape[axis], sz*(i+1)) for i in range(len(devices))])
     else:
       assert splits is None, "splits only allowed for Tensor sharded on axis!"
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, splits), device=canonical_devices, requires_grad=self.requires_grad)
+    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, splits),
+                  device=canonical_devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):
     """

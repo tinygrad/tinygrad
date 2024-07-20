@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Union, Any, Tuple, List, Dict
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG, RING
+from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING
 from tinygrad.dtype import DType, ConstType
 from tinygrad.ops import BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer
