@@ -132,7 +132,11 @@ class CUDAAllocator(LRUAllocator):
     check(cuda.cuEventRecord(sync_event, None))
     check(cuda.cuCtxSetCurrent(dest_dev.context))
     check(cuda.cuStreamWaitEvent(None, sync_event, 0)) # sync the default stream on the dest dev
-  def offset(self, buf, size:int, offset:int): return ctypes.c_ulong(buf.value + offset)
+  def offset(self, buf, size:int, offset:int):
+    # print('OFFSET_FUNC', type(buf), buf) 
+    buf = ctypes.c_ulong(buf.value + offset)
+    # print('OFSET_BUF', type(buf), buf)
+    return buf
 
 class CUDADevice(Compiled):
   devices: List[CUDADevice] = []

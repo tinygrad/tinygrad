@@ -81,6 +81,7 @@ class Buffer:
       self._base.ensure_allocated()
       assert hasattr(self.allocator, "offset"), "offset function required for view"
       self._buf: Any = self.allocator.offset(self.base._buf, self.nbytes, self.offset)
+      # print('ALLOCATE', type(self._buf), self._buf)
     else:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
@@ -106,6 +107,7 @@ class Buffer:
            (f" offset:{self.offset}" if hasattr(self, "base") else "") + \
            (">" if self.options is None else f" {self.options=}>")
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
+    # print('AS_BUFFER_HIT', allow_zero_copy, force_zero_copy, hasattr(self.allocator, 'as_buffer'), self)
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
@@ -123,6 +125,7 @@ class Buffer:
     self.allocator.copyout(mv, self._buf)
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
+    # print('BUF_VIEW_HIT', self, self._base)
     assert offset < self.nbytes, "offset must be less than nbytes"
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
