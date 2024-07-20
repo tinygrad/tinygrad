@@ -48,7 +48,7 @@ def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_
     if clear_l2:
       with Context(DEBUG=0, BEAM=0, CAPTURING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
     tms.append(cast(float, car(input_bufs, var_vals, wait=True))*factor)
-    if early_stop is not None and early_stop < tms[-1]: break
+    if early_stop is not None and early_stop < min(tms): break
   return tms
 
 class TimeoutException(Exception): pass

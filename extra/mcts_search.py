@@ -68,7 +68,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       continue
     seen_libs[lib] = node
 
-    try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=5, early_stop=best_tm*10/1e6))*1e6
+    try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=10, early_stop=best_tm*10/1e6))*1e6
     except RuntimeError:
       remove_node(node)
       continue
