@@ -65,30 +65,29 @@ The `HCQCompiled` class defines the API for HCQ-compatible devices. This class s
 
 ::: tinygrad.device.HCQCompiled
     options:
-        members: [
-            "_alloc_signal",
-            "_free_signal",
-            "_read_signal",
-            "_read_timestamp",
-            "_set_signal",
-            "_wait_signal",
-            "_gpu2cpu_time",
-        ]
         show_source: false
 
 #### Signals
 
-Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a `value` and a `timestamp` within the same signal. The following Python code demonstrates the usage of signals:
+Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a `value` and a `timestamp` within the same signal. HCQ-compatible backend implementations should use `HCQSignal` as a base class.
+
+::: tinygrad.device.HCQSignal
+    options:
+        members: [value, timestamp, wait]
+        show_source: false
+
+The following Python code demonstrates the usage of signals:
 
 ```python
-signal = your_device._alloc_signal()
+signal = your_device.signal_t()
 
 HWComputeQueue().timestamp(signal) \
                 .signal(signal, value_to_fire) \
                 .submit(your_device)
 
-your_device._wait_signal(signal, value_to_fire)
-timestamp = your_device._read_timestamp()
+signal.wait(value_to_fire)
+signaled_value = signal.value # should be the same as `value_to_fire`
+timestamp = signal.timestamp
 ```
 
 ##### Synchronization signals
@@ -137,7 +136,7 @@ HWComputeQueue().wait(your_device.timeline_signal, your_device.timeline_value - 
 your_device.timeline_value += 1
 
 # Optionally wait for execution
-your_device._wait_signal(your_device.timeline_signal, your_device.timeline_value - 1)
+your_device.timeline_signal.wait(your_device.timeline_value - 1)
 ```
 
 ## HCQGraph
