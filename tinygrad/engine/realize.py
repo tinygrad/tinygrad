@@ -23,7 +23,7 @@ def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
       kb, k_opt = Kernel(ast, opts=renderer).required_optimizations(), k
       rawbufs = bufs_from_lin(kb, allocate=False)
-      if BEAM >= 20:  # > 20 is MCTS
+      if BEAM >= 50:  # >= 50 is MCTS
         from tinygrad.engine.mcts import mcts_search
         k = mcts_search(kb, rawbufs, BEAM.value)
       else:
