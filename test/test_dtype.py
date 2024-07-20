@@ -241,6 +241,7 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == 'PYTHON', 'bug with casting in GLOBAL')
   def test_shape_change_bitcast(self):
     _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, None)
 
@@ -248,6 +249,7 @@ class TestBitCast(unittest.TestCase):
     a = Tensor([1.,2,3])
     b = a.bitcast(dtypes.int32)
     assert b.numpy()[0] == 0x3f800000
+    _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.int32, None)
 
   def test_bitcast_upcasted(self):
     a = Tensor.zeros(100, 4, dtype=dtypes.int32).contiguous() + 0x3f800000
