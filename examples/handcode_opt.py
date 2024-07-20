@@ -78,7 +78,7 @@ if __name__ == "__main__":
   running_gflops = 0
   usage = {}
   for i,si in enumerate(sched):
-    if DEBUG >= 2: print(si.ast)
+    if DEBUG >= 3: print(si.ast)
 
     rawbufs = bufs_from_lin(Kernel(si.ast))
 
