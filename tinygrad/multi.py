@@ -142,8 +142,8 @@ class MultiLazyBuffer:
     # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
     new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.shape[:self.axis])) - 1
     if arg[new_axis] != self.shape[self.axis]:
-      # prod(arg[new_axis+1:]) has to divide into the gcd of [b * prod(self.shape[self.axis+1:]) for _,b in self.bounds]
-      assert all((b * prod(self.shape[self.axis+1:])) % prod(arg[new_axis+1:]) == 0 for b in self.splits), \
+      # prod(arg[new_axis+1:]) has to divide into the gcd of [lb.shape[self.axis * prod(self.shape[self.axis+1:]) for lb in self.lbs]
+      assert all((lb.shape[self.axis] * prod(self.shape[self.axis+1:])) % prod(arg[new_axis+1:]) == 0 for lb in self.lbs), \
                                 f"reshape cannot move items between shards {self.shape} {arg} {self.splits}"
     return MultiLazyBuffer([x.reshape(tuple(s if a != new_axis else
                               x.shape[self.axis] if s == self.shape[self.axis] else
