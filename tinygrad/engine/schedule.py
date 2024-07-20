@@ -199,13 +199,13 @@ def _last_recursive_child(xt:LazyBuffer, children, realizes, cache, first=True) 
     if (ret:=_last_recursive_child(xt_next, children, realizes, cache, False)): return ret
   return None
 
-def _buildup_st(xt:LazyBuffer, st:ShapeTracker, stop:LazyBuffer, realizes, sts:Dict[LazyBuffer, ShapeTracker], first=True):
-  if xt.base.realized is not None or xt in sts or (xt.base in realizes and not first and xt.base is not stop): return
+def _buildup_st(xt:LazyBuffer, st:ShapeTracker, realizes, sts:Dict[LazyBuffer, ShapeTracker], first=True):
+  if xt.base.realized is not None or xt in sts: return
   if xt is not xt.base: st, xt = xt.st+st, xt.base
   if xt.op in ReduceOps: st = ShapeTracker.from_shape(xt.srcs[0].shape)
-  sts.setdefault(xt, st)
-  if xt is stop: return
-  for x in xt.srcs: _buildup_st(x, st, stop, realizes, sts, False)
+  sts.setdefault(xt.base, st)
+  if first or xt.base not in realizes:
+    for x in xt.srcs: _buildup_st(x, st, realizes, sts, False)
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
@@ -224,6 +224,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
+  aranges: List[LazyBuffer] = []
   for r in allbufs:
     if r.op not in ReduceOps or r in realizes: continue
     group: Set[LazyBuffer] = set()
@@ -283,39 +284,32 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         reduce_for_op[tr] = r
       realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
-    if r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST:
-      can_fuse = True
-      if DEBUG_INDEX:=(getenv("DEBUG_INDEX")): print(f"checking {r}")
-      # check if tr can cleanly fuse with its children
-      for tr in group:
-        realized_children: Dict[LazyBuffer, None] = {}
-        @functools.lru_cache(None)
-        def _recurse_children(buf:LazyBuffer):
-          if buf in realizes and buf is not tr:
-            realized_children[buf] = None
-            return
-          for x in children[buf]: _recurse_children(x)
-        _recurse_children(tr)
-        print(f"realized_children={realized_children}")
-        # TODO: wrong
-        leaf = _last_recursive_child(tr, children, realizes, set())
-        raise Exception(leaf)
-        if leaf is None:
-          # nothing to fuse if there's no child
-          can_fuse = False
-          break
+    if r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: aranges.append(r)
+
+  def _check_arange(r:LazyBuffer, group:Set[LazyBuffer]) -> bool:
+    if DEBUG_INDEX:=(getenv("DEBUG_INDEX")): print(f"checking {r}")
+    # check if tr can cleanly fuse with its children
+    for tr in group:
+      descendants: Dict[LazyBuffer, None] = {}
+      @functools.lru_cache(None)
+      def _recurse_children(buf:LazyBuffer):
+        if buf in realizes and buf is not tr: return descendants.setdefault(buf)
+        for x in children[buf]: _recurse_children(x)
+      _recurse_children(tr)
+      if not descendants: return False
+      for d in descendants:
         sts: Dict[LazyBuffer, ShapeTracker] = {}
-        _buildup_st(leaf, leaf.st, tr, realizes, sts)
-        __tr,tr_view = sts.popitem()
-        assert tr is __tr, f"{tr} != {__tr} {r}"
-        if DEBUG_INDEX: print(tr_view.expr_idxs()[0].render())
-        # TODO: is there a better way to check idxs cleanness, ridx is ok, no ALU
-        if not isinstance(tr_view.expr_idxs()[0], Variable):
-          can_fuse = False
-          break
-      # TODO: what if only some children can fuse? can save an extra global_load
-      if can_fuse:
-        for x in group: del realizes[x]
+        output_st = ShapeTracker.from_shape(reduce_for_op[d].shape if d in reduce_for_op else d.shape)
+        _buildup_st(d, output_st, realizes, sts)
+        if not isinstance(sts[tr].expr_idxs()[0], Variable): return False
+    if DEBUG_INDEX: print(colored(f"fused {r}", "green"))
+    return True
+
+  for r in aranges:
+    # TODO: what if only some children can fuse? can save an extra global_load
+    group = {op for op,reduceop in reduce_for_op.items() if r is reduceop}
+    if _check_arange(r, group):
+      for x in group: del realizes[x]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
