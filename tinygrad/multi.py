@@ -136,16 +136,18 @@ class MultiLazyBuffer:
 
   def reshape(self, arg:Tuple[sint, ...]):
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None, self.real)
+    assert prod(self.shape) == prod(arg), "reshape must maintain prod(shape)"
     arg_acc:List[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
     # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
     # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
     new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.shape[:self.axis])) - 1
     if arg[new_axis] != self.shape[self.axis]:
-      assert self.shape[self.axis] % len(self.real_lbs) == 0, f"cannot reshape on-axis for uneven shard {self.axis} {self.shape} {len(self.real_lbs)}"
-      assert arg[new_axis] % len(self.real_lbs) == 0, f"new on-axis shape must divide evenly between devices {new_axis} {arg} {len(self.real_lbs)}"
+      # prod(arg[new_axis+1:]) has to divide into the gcd of [b * prod(self.shape[self.axis+1:]) for _,b in self.bounds]
+      assert all((b * prod(self.shape[self.axis+1:])) % prod(arg[new_axis+1:]) == 0 for b in self.splits), \
+                                f"reshape cannot move items between shards {self.shape} {arg} {self.splits}"
     return MultiLazyBuffer([x.reshape(tuple(s if a != new_axis else
                               x.shape[self.axis] if s == self.shape[self.axis] else
-                              s // len(self.real_lbs) for a,s in enumerate(arg))) for x in self.lbs],
+                              prod(x.shape[self.axis:]) // prod(arg[a+1:]) for a,s in enumerate(arg))) for x in self.lbs],
                            new_axis, self.real)
 
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]):
