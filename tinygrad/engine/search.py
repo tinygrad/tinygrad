@@ -115,7 +115,7 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> Dict[int, Kernel]:
     except KernelOptError: pass
   return acted_lins
 
-beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
+beam_pool, BEAM_DEBUG, BEAMGRAPH = None, getenv("BEAM_DEBUG"), getenv("BEAMGRAPH")
 def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True) -> Kernel:
   global beam_pool
   key = {"ast": lin.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device, "suffix": lin.opts.suffix}
@@ -134,6 +134,7 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True)
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
   if BEAM_DEBUG: print(f"BEAM_SEARCH:\n{lin.ast}")
   if DEBUG >= 2: print(f"   0.00s:                 from   1 ->   1 actions {lin.colored_shape()}")
+  if BEAMGRAPH: all_nodes: Dict[Tuple[str, Tuple[Opt, ...]], float] = {}
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
@@ -152,6 +153,7 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True)
         seen_libs.add(lib)
         try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
         except RuntimeError: continue # for runtime issues
+        if BEAMGRAPH: all_nodes[(acted_lins[i].name, tuple(acted_lins[i].applied_opts))] = min(tms)
         timed_lins.append((acted_lins[i], min(tms)))
         if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(cast(UOpGraph, p.uops).uops):5d} uops {compile_et*1e6:12.2f} us compile/{timed_lins[-1][1]*1e6:12.2f} us run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
         elif DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
@@ -165,6 +167,17 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True)
   except KeyboardInterrupt as e:
     if beam_pool is not None: beam_pool.terminate()
     raise e
+
+  if BEAMGRAPH:
+    print(f"generating beam graph from {len(all_nodes)} nodes")
+    from tinygrad.engine.graph import nx, save_graph, GRAPHPATH
+    G = nx.DiGraph()
+    G.add_node(tuple())
+    for (nm,gopts),tm in all_nodes.items():
+      edge_lbl = f"{str(gopts[-1].op)[7:]} {gopts[-1].axis} {gopts[-1].amt}"
+      G.add_node(gopts, label=f"{to_function_name(nm)}\n{edge_lbl}\n{tm*1e6:.2f} us")
+      G.add_edge(gopts[:-1], gopts)
+    save_graph(G, f"{GRAPHPATH}.beam", '-Grankdir=LR')
 
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
   if BEAM_DEBUG: print(f"BEAM_SEARCH: final tm={beam[0][1]*1e6:0.2f} us, applied_opts={beam[0][0].applied_opts}")
