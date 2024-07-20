@@ -436,8 +436,7 @@ class HCQCompiled(Compiled):
     """
     Translates local gpu time (timestamp) into global cpu time.
     """
-    if is_copy: return self.copy_cpu_start_time_us + (gpu_time - self.copy_gpu_start_time_us)
-    return self.cpu_start_time_us + (gpu_time - self.gpu_start_time_us)
+    return gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff)
 
   def _prof_setup(self):
     if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
@@ -448,9 +447,8 @@ class HCQCompiled(Compiled):
       self.timeline_value += 1
       cpu_start_time = time.perf_counter_ns() / 1e3
       self.timeline_signal.wait(self.timeline_value - 1)
-      return cpu_start_time, self.timeline_signal.timestamp
-    self.cpu_start_time_us, self.gpu_start_time_us = _sync_queue(self.hw_compute_queue_t)
-    self.copy_cpu_start_time_us, self.copy_gpu_start_time_us = _sync_queue(self.hw_copy_queue_t)
+      return cpu_start_time - self.timeline_signal.timestamp
+    self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff = _sync_queue(self.hw_compute_queue_t), _sync_queue(self.hw_copy_queue_t)
 
   def _prof_process_events(self):
     self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
@@ -526,7 +524,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
         ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
   def transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev, dest_dev):
-    src_dev._gpu_map(dest)
+    src_dev.allocator.map(dest)
 
     with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
       src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
@@ -540,6 +538,8 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
                                    .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
                                    .signal(dest_dev.timeline_signal, dest_dev.timeline_value).submit(dest_dev)
       dest_dev.timeline_value += 1
+
+  def map(self, buf:HCQBuffer): pass
 
   def offset(self, buf, size:int, offset:int) -> HCQBuffer:
     return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},

@@ -299,9 +299,9 @@ class AMDProgram(HCQProgram):
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
     entry_point = min(sh.header.sh_addr for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC)
-    self.group_segment_size = image[:-(len(image)%4)].cast("I")[entry_point//4]
-    self.private_segment_size = image[:-(len(image)%4)].cast("I")[entry_point//4 + 1]
-    self.kernargs_segment_size = image[:-(len(image)%4)].cast("I")[entry_point//4 + 2]
+    self.group_segment_size = image[entry_point:entry_point+4].cast("I")[0]
+    self.private_segment_size = image[entry_point+4:entry_point+8].cast("I")[0]
+    self.kernargs_segment_size = image[entry_point+8:entry_point+12].cast("I")[0]
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.device.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
@@ -362,6 +362,8 @@ class AMDAllocator(HCQAllocator):
 
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
 
+  def map(self, buf:HCQBuffer): self.device._gpu_map(buf._base if hasattr(buf, '_base') else buf)
+
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 
 @dataclass
@@ -380,7 +382,6 @@ class AMDDevice(HCQCompiled):
   gpus:List[pathlib.Path] = []
 
   def _gpu_map(self, mem):
-    mem = mem._base if hasattr(mem, '_base') else mem
     if self.gpu_id in getattr(mem, "mapped_gpu_ids", []): return
     mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_id])
     c_gpus = (ctypes.c_int32 * len(mem.mapped_gpu_ids))(*mem.mapped_gpu_ids)

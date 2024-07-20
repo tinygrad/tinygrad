@@ -1,5 +1,5 @@
 from typing import List, Optional
-import math, functools, time, random
+import math, functools, time, random, statistics
 from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Buffer, Device
@@ -39,7 +39,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       node.parent.children.remove(node)
 
   st = time.perf_counter()
-  best, best_tm = lin, math.inf
+  best, best_idx, best_tm = lin, 0, math.inf
   for i in range(amt):
     # tree traversal
     node = root
@@ -61,13 +61,13 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       continue
 
     p, lib, _ = compile_ret
-    try: tm = min(_time_program(p, lib, var_vals, rawbufs, early_stop=best_tm*10/1e6))*1e6
+    try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=5, early_stop=best_tm*10/1e6))*1e6
     except RuntimeError:
       remove_node(node)
       continue
 
-    if DEBUG>=2: print(f"\r{time.perf_counter() - st:7.2f}s: {tm:12.2f} us     best: {best_tm:12.2f} us         {i+1:4d}/{amt:4d}         {node.kernel.colored_shape()}\033[K", end="")  # noqa: E501
-    if tm < best_tm: best, best_tm = node.kernel, tm
+    if DEBUG>=2: print(f"\r{time.perf_counter() - st:7.2f}s: {tm:12.2f} us     best: {best_tm:12.2f} us @ {best_idx+1:4d}        {i+1:4d}/{amt:4d}         {node.kernel.colored_shape()}\033[K", end="")  # noqa: E501
+    if tm < best_tm: best, best_idx, best_tm = node.kernel, i, tm
 
     # backprop
     bnode: Optional[MCTSNode] = node

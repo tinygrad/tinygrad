@@ -136,7 +136,7 @@ HWComputeQueue().wait(your_device.timeline_signal, your_device.timeline_value - 
 your_device.timeline_value += 1
 
 # Optionally wait for execution
-your_device._wait_signal(your_device.timeline_signal, your_device.timeline_value - 1)
+your_device.timeline_signal.wait(your_device.timeline_value - 1)
 ```
 
 ## HCQGraph
