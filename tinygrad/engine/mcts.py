@@ -36,15 +36,13 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   for i in range(amt):
     # tree traversal
     node = root
-    while node.children is not None:
-      if len(node.children) == 0: break
-      #if DEBUG>=2: print(f"{node.t/node.n*1e6:6.2f} us {node.n:3d}", node.kernel.name)
-      ucb = sorted([(math.inf if child.n == 0 else (child.t/child.n) + C*math.sqrt(math.log(node.n)/child.n), child)
-                    for child in node.children], key=lambda x: x[0], reverse=True)  # pylint: disable=not-an-iterable
+    while node.children is not None and len(node.children) != 0:
+      #if DEBUG>=2: print(f"{(node.t/node.n)/best_tm:6.2f} value {node.n:3d}", node.kernel.name)
+      ucb = sorted([(math.inf if child.n == 0 else ((child.t/child.n)/best_tm) + C*math.sqrt(math.log(node.n)/child.n), child)
+                    for child in node.children], key=lambda x: x[0], reverse=True) # pylint: disable=not-an-iterable
       node = ucb[0][1]
 
-    # no more nodes?
-    if node.children is not None: break
+    if node.children is not None: break  # no more nodes?
 
     # node expansion
     expand_node(node)
@@ -58,15 +56,14 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       continue
 
     p, lib, _ = compile_ret
-    tm = min(_time_program(p, lib, var_vals, rawbufs, early_stop=best_tm*10))
-    if DEBUG>=2:
-      print(f"\r{time.perf_counter() - st:7.2f}s: {tm*1e6:12.2f} us     best: {best_tm*1e6:12.2f} us         {i:4d}/{amt:4d}         {node.kernel.colored_shape()}\033[K", end="")  # noqa: E501
+    tm = min(_time_program(p, lib, var_vals, rawbufs, early_stop=best_tm*10/1e6))*1e6
+    if DEBUG>=2: print(f"\r{time.perf_counter() - st:7.2f}s: {tm:12.2f} us     best: {best_tm:12.2f} us         {i+1:4d}/{amt:4d}         {node.kernel.colored_shape()}\033[K", end="")  # noqa: E501
     if tm < best_tm: best, best_tm = node.kernel, tm
 
     # backprop
     bnode: Optional[MCTSNode] = node
     while bnode is not None:
-      bnode.t += -(tm*1e6)
+      bnode.t += -tm
       bnode.n += 1
       bnode = bnode.parent
 
