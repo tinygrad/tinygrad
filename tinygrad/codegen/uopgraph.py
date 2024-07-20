@@ -130,7 +130,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 constant_folder = PatternMatcher([
   # CONTRACT before ALU/REDUCE/CAST
   (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.ALU, name="alu"),)),
-   lambda con, alu: UOp.alu(alu.arg, *tuple(UOp(UOps.CONTRACT, x.dtype.vec(con.dtype.count), (x,), con.arg) for x in alu.src))),
+   lambda con, alu: UOp(alu.op, con.dtype, tuple(UOp(UOps.CONTRACT, x.dtype.vec(con.dtype.count), (x,), con.arg) for x in alu.src), alu.arg)),
   (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.REDUCE, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, name="red"),)),
    lambda con, red: UOp(UOps.REDUCE, con.dtype, (UOp(UOps.CONTRACT, con.dtype, red.src[0:1], con.arg),)+red.src[1:], red.arg)),
   (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.CAST, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, src=(UPat(name="casted"),)),)),
@@ -414,7 +414,7 @@ def contract_math(alu):
   for x in alu.src:
     if x.op is UOps.ALU and x.arg is alu.arg: new_args += x.src
     else: new_args.append(x)
-  new_args = sorted(new_args)
+  new_args = sorted(new_args, reverse=True)
   return UOp.alu(alu.arg, *new_args)
 
 math_contractor = PatternMatcher([
