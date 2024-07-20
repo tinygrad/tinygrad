@@ -174,7 +174,8 @@ class PTXRenderer(Renderer):
           kernel = [f".reg .u32 %{args[1]};"] + kernel
         elif uop is UOps.CONST:
           assert dtype.count == 1
-          r[u] = const(args, dtype, mov=True)
+          n = next((x.dtype.count for x in uops.uops if x.op == UOps.VECTORIZE and all(s is u for s in x.src)), None) # type: ignore
+          r[u] = [const(args, dtype, mov=True) for _ in range(n)] if n else const(args, dtype, mov=True)
         elif uop is UOps.GEP: r[u] = r[src[0]][u.arg]
         elif uop is UOps.LOAD:
           assert src[0].dtype == dtypes.int64, "load isn't int64"
@@ -197,7 +198,7 @@ class PTXRenderer(Renderer):
           r[u] = r[src[0]]
         elif uop in {UOps.VECTORIZE}:
           assert src[0].dtype is not None and dtype.count > 1
-          r[u] = [r[x] for x in src] # type: ignore
+          r[u] = r[src[0]] if all(c.op == UOps.CONST for c in src) else [r[x] for x in src] # type: ignore
         elif uop in {UOps.CAST, UOps.BITCAST}:
           assert src[0].dtype is not None and dtype.count == 1
           _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
