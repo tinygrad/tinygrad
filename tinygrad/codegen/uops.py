@@ -75,7 +75,14 @@ class UOp:
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
-  def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
+  def alu(arg, *src:UOp, allow_folding=True):
+    if allow_folding and arg in {BinaryOps.ADD, BinaryOps.MUL} and any(x.op is UOps.ALU and x.arg is arg for x in src):
+      new_args: List[UOp] = []
+      for x in src:
+        if x.op is UOps.ALU and x.arg is arg: new_args += x.src
+        else: new_args.append(x)
+      return UOp(UOps.ALU, src[-1].dtype, tuple(sorted(new_args)), arg)
+    return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod

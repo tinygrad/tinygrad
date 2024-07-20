@@ -234,10 +234,6 @@ constant_folder = PatternMatcher([
   # ** two stage add/sub folding **
   ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
-  # sort adds
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat(name='x'), UPat(name='y'))), lambda x,y: (y+x) if x<y else None),
-  # denest add const
-  (UOp.var('x') + (UOp.var('y') + UOp.cvar('c1')), lambda x,y,c1: (x+y)+c1),
   # *** rules from symbolic ***
   # mod divides
   ((UOp.cvar('c')*UOp.var('x')) % UOp.cvar('c'), lambda x,c: x.const(0)),
@@ -412,6 +408,17 @@ expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST}, name="alu"), no_vectorized_alu),
 ])
 
+math_expander = PatternMatcher([
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, allow_any_len=True, name='alu'),
+    lambda alu: UOp.alu(BinaryOps.ADD,
+                        UOp.alu(BinaryOps.ADD, alu.src[0], alu.src[1], allow_folding=False), *alu.src[2:], allow_folding=False)
+                        if len(alu.src) > 2 else None),
+  (UPat(UOps.ALU, arg=BinaryOps.MUL, allow_any_len=True, name='alu'),
+    lambda alu: UOp.alu(BinaryOps.MUL,
+                        UOp.alu(BinaryOps.MUL, alu.src[0], alu.src[1], allow_folding=False), *alu.src[2:], allow_folding=False)
+                        if len(alu.src) > 2 else None),
+])
+
 # *** uop graph ***
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
@@ -495,6 +502,9 @@ class UOpGraph:
     # expand
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, expander+self.folder)
+
+    # math expand
+    sink = graph_rewrite(sink, math_expander+self.folder)
 
     # for PTX only
     if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
