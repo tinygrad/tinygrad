@@ -1,5 +1,5 @@
 from typing import List, Optional
-import math, functools, time, random
+import math, functools, time, random, statistics
 from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Buffer, Device
@@ -61,7 +61,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       continue
 
     p, lib, _ = compile_ret
-    try: tm = min(_time_program(p, lib, var_vals, rawbufs, early_stop=best_tm*10/1e6))*1e6
+    try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=5, early_stop=best_tm*10/1e6))*1e6
     except RuntimeError:
       remove_node(node)
       continue
