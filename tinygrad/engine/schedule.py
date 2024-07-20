@@ -1,4 +1,3 @@
-import functools
 import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -191,21 +190,18 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
-def _last_recursive_child(xt:LazyBuffer, children, realizes, cache, first=True) -> Optional[LazyBuffer]:
-  if xt in cache: return None
-  cache.add(xt)
-  if not first and xt in realizes: return xt
-  for xt_next in children[xt]:
-    if (ret:=_last_recursive_child(xt_next, children, realizes, cache, False)): return ret
-  return None
-
 def _buildup_st(xt:LazyBuffer, st:ShapeTracker, realizes, sts:Dict[LazyBuffer, ShapeTracker], first=True):
+  """buildup the ShapeTracker from the base LazyBuffer"""
   if xt.base.realized is not None or xt in sts: return
   if xt is not xt.base: st, xt = xt.st+st, xt.base
-  if xt.op in ReduceOps: st = ShapeTracker.from_shape(xt.srcs[0].shape)
-  sts.setdefault(xt.base, st)
-  if first or xt.base not in realizes:
+  sts.setdefault(xt, st:=ShapeTracker.from_shape(xt.srcs[0].shape) if xt.op in ReduceOps else st)
+  if first or xt not in realizes:
     for x in xt.srcs: _buildup_st(x, st, realizes, sts, False)
+
+def _recurse_children(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], children:Dict[LazyBuffer, Dict[LazyBuffer, None]], first=True):
+  """recursively find realized descendants"""
+  if buf in realizes and not first: return set((buf,))
+  return set.union(set(), *iter(_recurse_children(x, realizes, children, False) for x in children[buf]))
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
@@ -286,29 +282,21 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     else: reduce_for_op.update((tr, r) for tr in group)
     if r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: aranges.append(r)
 
-  def _check_arange(r:LazyBuffer, group:Set[LazyBuffer]) -> bool:
+  def _fold_arange(r:LazyBuffer, group:Set[LazyBuffer]) -> bool:
     if DEBUG_INDEX:=(getenv("DEBUG_INDEX")): print(f"checking {r}")
     # check if tr can cleanly fuse with its children
     for tr in group:
-      descendants: Dict[LazyBuffer, None] = {}
-      @functools.lru_cache(None)
-      def _recurse_children(buf:LazyBuffer):
-        if buf in realizes and buf is not tr: return descendants.setdefault(buf)
-        for x in children[buf]: _recurse_children(x)
-      _recurse_children(tr)
-      if not descendants: return False
+      if not (descendants:=_recurse_children(tr, realizes, children)): return False
       for d in descendants:
         sts: Dict[LazyBuffer, ShapeTracker] = {}
-        output_st = ShapeTracker.from_shape(reduce_for_op[d].shape if d in reduce_for_op else d.shape)
-        _buildup_st(d, output_st, realizes, sts)
+        _buildup_st(d, ShapeTracker.from_shape(reduce_for_op[d].shape if d in reduce_for_op else d.shape), realizes, sts)
         if not isinstance(sts[tr].expr_idxs()[0], Variable): return False
     if DEBUG_INDEX: print(colored(f"fused {r}", "green"))
     return True
-
   for r in aranges:
     # TODO: what if only some children can fuse? can save an extra global_load
     group = {op for op,reduceop in reduce_for_op.items() if r is reduceop}
-    if _check_arange(r, group):
+    if _fold_arange(r, group):
       for x in group: del realizes[x]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
