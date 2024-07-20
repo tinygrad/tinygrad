@@ -1,12 +1,12 @@
 from typing import List
 from extra.models.resnet import ResNet50
+from extra.mcts_search import mcts_search
 from examples.mlperf.helpers import get_mlperf_bert_model
 from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Compiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
-from tinygrad.engine.mcts import mcts_search
 from tinygrad.helpers import DEBUG, ansilen, getenv
 from tinygrad.ops import MetaOps
 from tinygrad.shape.symbolic import sym_infer
