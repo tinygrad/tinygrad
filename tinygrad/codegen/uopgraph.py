@@ -408,27 +408,6 @@ expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST}, name="alu"), no_vectorized_alu),
 ])
 
-def contract_math(alu):
-  if not any(x.op is UOps.ALU and x.arg is alu.arg for x in alu.src): return None
-  new_args: List[UOp] = []
-  for x in alu.src:
-    if x.op is UOps.ALU and x.arg is alu.arg: new_args += x.src
-    else: new_args.append(x)
-  new_args = sorted(new_args, reverse=True)
-  return UOp.alu(alu.arg, *new_args)
-
-math_contractor = PatternMatcher([
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, allow_any_len=True, name='alu'), contract_math),
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, allow_any_len=True, name='alu'), contract_math),
-])
-
-math_expander = PatternMatcher([
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, allow_any_len=True, name='alu'),
-    lambda alu: UOp.alu(alu.arg, UOp.alu(alu.arg, alu.src[0], alu.src[1]), *alu.src[2:]) if len(alu.src) > 2 else None),
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, allow_any_len=True, name='alu'),
-    lambda alu: UOp.alu(alu.arg, UOp.alu(alu.arg, alu.src[0], alu.src[1]), *alu.src[2:]) if len(alu.src) > 2 else None),
-])
-
 # *** uop graph ***
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
@@ -512,10 +491,6 @@ class UOpGraph:
     # expand
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, expander+self.folder)
-
-    # math expand
-    sink = graph_rewrite(sink, math_contractor)
-    sink = graph_rewrite(sink, math_expander+self.folder)
 
     # for PTX only
     if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
