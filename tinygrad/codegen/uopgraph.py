@@ -476,14 +476,6 @@ expander = PatternMatcher([
 
 # *** uop graph ***
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
-  if u in children: return
-  children[u] = []
-  for x in u.src:
-    get_children_dfs(x, children, in_degree)
-    children[x].append(u)
-  in_degree[u] = len(u.src)
-
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
   replace: Dict[UOp, UOp] = {}
@@ -565,7 +557,15 @@ class UOpGraph:
     # BFS toposort
     children: Dict[UOp, List[UOp]] = {}
     in_degree: Dict[UOp, int] = {}
-    get_children_dfs(sink, children, in_degree)
+    def get_children_dfs(u:UOp):
+      if u in children: return
+      children[u] = []
+      for x in u.src:
+        get_children_dfs(x)
+        children[x].append(u)
+      in_degree[u] = len(u.src)
+
+    get_children_dfs(sink)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
