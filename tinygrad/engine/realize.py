@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast, Generator, Tuple
 import time, pprint
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA
+from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, MCTS
 from tinygrad.ops import MetaOps, LazyOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
@@ -19,11 +19,15 @@ def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
   k = Kernel(ast, opts=renderer).required_optimizations()
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
-    if BEAM >= 1:
+    if BEAM >= 1 or MCTS >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
       kb, k_opt = Kernel(ast, opts=renderer).required_optimizations(), k
       rawbufs = bufs_from_lin(kb, allocate=False)
-      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+      if MCTS >= 1:
+        from tinygrad.engine.mcts import mcts_search
+        k = mcts_search(kb, rawbufs, MCTS.value)
+      else:
+        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
       if beam_compare:=getenv("BEAM_COMPARE", 1):
         # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
         lins: List[Tuple[str, Kernel]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
@@ -35,7 +39,7 @@ def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
         if beam_compare == 2:
           from tinygrad import Tensor
           all_outs: List[List[Tensor]] = []
-          with Context(DEBUG=0, BEAM=0, CAPTURING=0):
+          with Context(DEBUG=0, BEAM=0, CAPTURING=0, MCTS=0):
             rand_bufs = [Tensor.normal(buf.size, std=0.1, dtype=buf.dtype).data() if dtypes.is_float(buf.dtype) else \
                         (Tensor.randint(buf.size, low=0, high=2).cast(buf.dtype).data() if buf.dtype == dtypes.bool else \
                          Tensor.randint(buf.size, low=dtypes.min(buf.dtype), high=dtypes.max(buf.dtype), dtype=buf.dtype).data()) \
@@ -44,7 +48,7 @@ def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
             for buf,data in zip(rawbufs, rand_bufs): buf.ensure_allocated().copyin(data)
             time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True, disable_cache=True)
             all_outs.append([Tensor(bytes(buf.as_buffer()), dtype=buf.dtype) for buf in rawbufs[:len(ast.src)]])
-          with Context(DEBUG=0, BEAM=0, CAPTURING=0):
+          with Context(DEBUG=0, BEAM=0, CAPTURING=0, MCTS=0):
             for bufs in zip(*all_outs):
               for b in bufs[1:]:
                 if dtypes.is_float(bufs[0].dtype):
