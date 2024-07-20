@@ -325,8 +325,8 @@ class Tensor:
     Shards the tensor across the given devices. Optionally specify which axis to shard on, and how to split it across devices.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.empty(2, 3).shard((Device.DEFAULT, Device.DEFAULT), axis=1, splits=(2, 3))
-    print(t.lazydata)
+    t = Tensor.empty(2, 3)
+    print(t.shard((t.device, t.device), axis=1, splits=(2, 3)).lazydata)
     ```
 
     """
