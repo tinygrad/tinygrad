@@ -189,6 +189,58 @@ class TestLinearizer(unittest.TestCase):
     real_index = dataset.numpy()[idxs.numpy()].reshape(4, 1, 256, 1)
     helper_linearizer_ast((store, ), [dataset, idxs], wanna_output=[real_index])
 
+  # AssertionError: repeated stores in uops
+  @unittest.expectedFailure
+  def test_argmax_multireduce_axis0(self):
+    t = Tensor.randn(10, 20).realize()
+    t_max = t.max((0,)).realize()
+    real_argmax = np.argmax(t.numpy(), axis=0, keepdims=False).reshape(1, 20, 1)
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+     LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=True),))), src=( # noqa E501
+       LazyOp(BinaryOps.ADD, arg=None, src=(
+         LazyOp(BinaryOps.ADD, arg=None, src=(
+           LazyOp(BufferOps.CONST, arg=ConstBuffer(val=10, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()), # noqa E501
+           LazyOp(UnaryOps.NEG, arg=None, src=(
+             LazyOp(ReduceOps.MAX, arg=(0,), src=(
+               LazyOp(BinaryOps.MUL, arg=None, src=(
+                 LazyOp(UnaryOps.CAST, arg=dtypes.int, src=(
+                   LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                     LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(20, 1, 0), offset=0, mask=None, contiguous=True),))), src=()), # noqa E501
+                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=False),))), src=()),)), # noqa E501
+                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)), # noqa E501
+                 LazyOp(BinaryOps.ADD, arg=None, src=(
+                   LazyOp(ReduceOps.SUM, arg=(2,), src=(
+                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(11, 19), strides=(0, 0), offset=0, mask=((0, 11), (9, 19)), contiguous=False), View(shape=(10, 20, 10), strides=(1, 0, 20), offset=0, mask=None, contiguous=False)))), src=()),)), # noqa E501
+                   LazyOp(BufferOps.CONST, arg=ConstBuffer(val=10, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),)), # noqa E501
+         LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)) # noqa E501
+    helper_linearizer_ast(ast, [t, t_max], wanna_output=[real_argmax])
+
+  def test_argmax_multireduce_flat(self):
+    t = Tensor.randn(10, 20).realize()
+    t_max = t.max().realize()
+    real_argmax = np.argmax(t.numpy())
+    ast =  LazyOp(MetaOps.KERNEL, arg=None, src=(
+     LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=( # noqa E501
+       LazyOp(BinaryOps.ADD, arg=None, src=(
+         LazyOp(BinaryOps.ADD, arg=None, src=(
+           LazyOp(BufferOps.CONST, arg=ConstBuffer(val=200, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()), # noqa E501
+           LazyOp(UnaryOps.NEG, arg=None, src=(
+             LazyOp(ReduceOps.MAX, arg=(0,), src=(
+               LazyOp(BinaryOps.MUL, arg=None, src=(
+                 LazyOp(UnaryOps.CAST, arg=dtypes.int, src=(
+                   LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                     LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(200, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=()), # noqa E501
+                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)), # noqa E501
+                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)), # noqa E501
+                 LazyOp(BinaryOps.ADD, arg=None, src=(
+                   LazyOp(ReduceOps.SUM, arg=(1,), src=(
+                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(201, 399), strides=(0, 0), offset=0, mask=((0, 201), (199, 399)), contiguous=False), View(shape=(200, 200), strides=(1, 400), offset=0, mask=None, contiguous=False)))), src=()),)), # noqa E501
+                   LazyOp(BufferOps.CONST, arg=ConstBuffer(val=200, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),)), # noqa E501
+         LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),)) # noqa E501
+    helper_linearizer_ast(ast, [t, t_max], wanna_output=[real_argmax])
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_end_local(self):
@@ -1216,7 +1268,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
 def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp], inputs:List[Tensor], *args, **kwargs):
   if not isinstance(ast, LazyOp): ast = LazyOp(MetaOps.KERNEL, ast)
-  inbufs = [x.lazydata.buffer for x in inputs]
+  inbufs = [x.lazydata.base.buffer for x in inputs]
   outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
