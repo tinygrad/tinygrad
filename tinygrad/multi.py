@@ -44,7 +44,8 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
 
 def to_sharded(lbs:List[LazyBuffer], axis:int, splits: Tuple[int, ...]) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, splits={splits}")
-  return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(zip((0,) + splits, splits), lbs))]
+  bounds = zip((0,) + splits, splits)
+  return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
 class MultiLazyBuffer:
   def __init__(self, lbs:List[LazyBuffer], axis:Optional[int], real:Optional[List[bool]]=None):
