@@ -33,6 +33,11 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   root = MCTSNode(lin)
   _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
 
+  def remove_node(node):
+    if node.parent is not None:
+      assert node.parent.children is not None
+      node.parent.children.remove(node)
+
   st = time.perf_counter()
   best, best_tm = lin, math.inf
   for i in range(amt):
@@ -52,13 +57,15 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     # rollout
     _, compile_ret = _compile_fn((0, node.kernel))
     if compile_ret is None:
-      if node.parent is None: continue
-      assert node.parent.children is not None
-      node.parent.children.remove(node)
+      remove_node(node)
       continue
 
     p, lib, _ = compile_ret
-    tm = min(_time_program(p, lib, var_vals, rawbufs, early_stop=best_tm*10/1e6))*1e6
+    try: tm = min(_time_program(p, lib, var_vals, rawbufs, early_stop=best_tm*10/1e6))*1e6
+    except RuntimeError:
+      remove_node(node)
+      continue
+
     if DEBUG>=2: print(f"\r{time.perf_counter() - st:7.2f}s: {tm:12.2f} us     best: {best_tm:12.2f} us         {i+1:4d}/{amt:4d}         {node.kernel.colored_shape()}\033[K", end="")  # noqa: E501
     if tm < best_tm: best, best_tm = node.kernel, tm
 
