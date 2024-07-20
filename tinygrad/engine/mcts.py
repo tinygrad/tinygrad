@@ -1,5 +1,5 @@
 from typing import List, Optional
-import math, functools, time
+import math, functools, time, random
 from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Buffer, Device
@@ -14,7 +14,9 @@ class MCTSNode:
     self.children: Optional[List[MCTSNode]] = None
 
 def expand_node(node:MCTSNode):
+  assert node.children is None
   node.children = [MCTSNode(x, node) for x in get_kernel_actions(node.kernel, include_0=False).values()]
+  random.shuffle(node.children)
 
 C = math.sqrt(2)
 def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
