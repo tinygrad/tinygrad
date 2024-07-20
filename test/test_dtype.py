@@ -248,6 +248,10 @@ class TestBitCast(unittest.TestCase):
     _test_bitcast(Tensor([100000, 100], dtype=dtypes.float16), dtypes.float32, None)
     _test_bitcast(Tensor([10,12], dtype=dtypes.int8), dtypes.float16, None)
 
+  @unittest.skipIf(Device.DEFAULT == 'PYTHON', 'bug with casting in GLOBAL')
+  def test_bitcast_fp16_to_int16(self):
+    _test_bitcast(Tensor([1000], dtype=dtypes.float16), dtypes.int16, None)
+
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
     b = a.bitcast(dtypes.int32)
