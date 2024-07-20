@@ -130,7 +130,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
 constant_folder = PatternMatcher([
   # CONTRACT before ALU/REDUCE/CAST
   (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.ALU, name="alu"),)),
-   lambda con, alu: UOp(alu.op, con.dtype, tuple(UOp(UOps.CONTRACT, x.dtype.vec(con.dtype.count), (x,), con.arg) for x in alu.src), alu.arg)),
+   lambda con, alu: UOp.alu(alu.arg, *tuple(UOp(UOps.CONTRACT, x.dtype.vec(con.dtype.count), (x,), con.arg) for x in alu.src))),
   (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.REDUCE, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, name="red"),)),
    lambda con, red: UOp(UOps.REDUCE, con.dtype, (UOp(UOps.CONTRACT, con.dtype, red.src[0:1], con.arg),)+red.src[1:], red.arg)),
   (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.CAST, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, src=(UPat(name="casted"),)),)),
@@ -408,15 +408,25 @@ expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST}, name="alu"), no_vectorized_alu),
 ])
 
+def contract_math(alu):
+  if not any(x.op is UOps.ALU and x.arg is alu.arg for x in alu.src): return None
+  new_args: List[UOp] = []
+  for x in alu.src:
+    if x.op is UOps.ALU and x.arg is alu.arg: new_args += x.src
+    else: new_args.append(x)
+  new_args = sorted(new_args)
+  return UOp.alu(alu.arg, *new_args)
+
+math_contractor = PatternMatcher([
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, allow_any_len=True, name='alu'), contract_math),
+  (UPat(UOps.ALU, arg=BinaryOps.MUL, allow_any_len=True, name='alu'), contract_math),
+])
+
 math_expander = PatternMatcher([
   (UPat(UOps.ALU, arg=BinaryOps.ADD, allow_any_len=True, name='alu'),
-    lambda alu: UOp.alu(BinaryOps.ADD,
-                        UOp.alu(BinaryOps.ADD, alu.src[0], alu.src[1], allow_folding=False), *alu.src[2:], allow_folding=False)
-                        if len(alu.src) > 2 else None),
+    lambda alu: UOp.alu(alu.arg, UOp.alu(alu.arg, alu.src[0], alu.src[1]), *alu.src[2:]) if len(alu.src) > 2 else None),
   (UPat(UOps.ALU, arg=BinaryOps.MUL, allow_any_len=True, name='alu'),
-    lambda alu: UOp.alu(BinaryOps.MUL,
-                        UOp.alu(BinaryOps.MUL, alu.src[0], alu.src[1], allow_folding=False), *alu.src[2:], allow_folding=False)
-                        if len(alu.src) > 2 else None),
+    lambda alu: UOp.alu(alu.arg, UOp.alu(alu.arg, alu.src[0], alu.src[1]), *alu.src[2:]) if len(alu.src) > 2 else None),
 ])
 
 # *** uop graph ***
@@ -504,6 +514,7 @@ class UOpGraph:
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, expander+self.folder)
 
     # math expand
+    sink = graph_rewrite(sink, math_contractor)
     sink = graph_rewrite(sink, math_expander+self.folder)
 
     # for PTX only

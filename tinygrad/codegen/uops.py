@@ -14,7 +14,7 @@ class UOps(Enum):
   # ops that aren't rendered
   SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
-  CONST = auto(); SPECIAL = auto() # noqa: E702
+  SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
   # math ops
   CAST = auto(); BITCAST = auto(); VECTORIZE = auto() # noqa: E702
@@ -25,6 +25,8 @@ class UOps(Enum):
   BARRIER = auto(); IF = auto(); RANGE = auto() # noqa: E702
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
+  # const go last
+  CONST = auto()
 
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
 
@@ -75,13 +77,7 @@ class UOp:
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
-  def alu(arg, *src:UOp, allow_folding=True):
-    if allow_folding and arg in {BinaryOps.ADD, BinaryOps.MUL} and any(x.op is UOps.ALU and x.arg is arg for x in src):
-      new_args: List[UOp] = []
-      for x in src:
-        if x.op is UOps.ALU and x.arg is arg: new_args += x.src
-        else: new_args.append(x)
-      return UOp(UOps.ALU, src[-1].dtype, tuple(sorted(new_args)), arg)
+  def alu(arg, *src:UOp):
     return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
