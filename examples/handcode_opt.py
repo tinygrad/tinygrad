@@ -110,7 +110,7 @@ if __name__ == "__main__":
     # benchmark the programs
     choices = []
     for (lin, nm) in lins:
-      tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10)
+      tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
       ops = lin.to_program().op_estimate
       gflops = sym_infer(ops, {k:k.min for k in lin.ast.vars()})*1e-9/tm
       choices.append((tm, gflops, lin.linearize(), nm))
