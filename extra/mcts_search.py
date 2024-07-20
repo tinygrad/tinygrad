@@ -10,7 +10,7 @@ class MCTSNode:
     self.kernel = kernel
     self.t = 0
     self.n = 0
-    self.parent: Optional[MCTSNode] = parent
+    self.parents: List[MCTSNode] = [parent] if parent is not None else []
     self.children: Optional[List[MCTSNode]] = None
 
 def expand_node(node:MCTSNode):
@@ -34,12 +34,13 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
 
   def remove_node(node):
-    if node.parent is not None:
-      assert node.parent.children is not None
-      node.parent.children.remove(node)
+    for parent in node.parents:
+      assert parent.children is not None
+      parent.children.remove(node)
 
   st = time.perf_counter()
   best, best_idx, best_tm = lin, 0, math.inf
+  seen_libs = {}
   for i in range(amt):
     # tree traversal
     node = root
@@ -61,6 +62,12 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       continue
 
     p, lib, _ = compile_ret
+    if (sibling_node:=seen_libs.get(lib, None)) is not None:
+      remove_node(node)
+      # TODO: add second parent
+      continue
+    seen_libs[lib] = node
+
     try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=5, early_stop=best_tm*10/1e6))*1e6
     except RuntimeError:
       remove_node(node)
@@ -71,10 +78,11 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
 
     # backprop
     bnode: Optional[MCTSNode] = node
-    while bnode is not None:
+    while 1:
       bnode.t += -tm
       bnode.n += 1
-      bnode = bnode.parent
+      if len(bnode.parents) == 0: break
+      bnode = bnode.parents[0]  # both?
 
   if DEBUG>=2: print()
   if CACHELEVEL >= 1: diskcache_put("mcts_search", key, best.applied_opts)

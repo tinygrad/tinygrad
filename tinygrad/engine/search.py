@@ -61,7 +61,7 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tup
   try:
     x[1].linearize()
     if len(x[1].uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
-    p = x[1].to_program()
+    p = x[1].to_program(name_override="test")
     st = time.perf_counter()
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st
