@@ -6,6 +6,7 @@ from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Compiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.engine.mcts import mcts_search
 from tinygrad.helpers import DEBUG, ansilen, getenv
 from tinygrad.ops import MetaOps
 from tinygrad.shape.symbolic import sym_infer
@@ -98,6 +99,12 @@ if __name__ == "__main__":
     if beam:=getenv("BEAM"):
       lin = Kernel(si.ast, opts=device.renderer)
       lin = beam_search(lin, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
+      lins.append(lin)
+
+    # try MCTS
+    if mcts:=getenv("MCTS"):
+      lin = Kernel(si.ast, opts=device.renderer)
+      lin = mcts_search(lin, rawbufs, mcts)
       lins.append(lin)
 
     # benchmark the programs
