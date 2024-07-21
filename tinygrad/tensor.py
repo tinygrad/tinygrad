@@ -1041,8 +1041,8 @@ class Tensor:
     ```
     """
     assert index.ndim == self.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
-    assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
     dim = self._resolve_dim(dim)
+    assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
     index = index.to(self.device)
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return ((index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * x).sum(-1, acc_dtype=self.dtype)
@@ -1671,8 +1671,11 @@ class Tensor:
     xup = xup.shrink(noop_ + flatten(((0,o), (0,k)) for o,k in zip(o_, k_)))
     return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
 
+  def _padding2d(self, padding:Union[int, Tuple[int, ...]], dims:int) -> Sequence[int]:
+    return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
+
   # NOTE: these work for more than 2D
-  def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1):
+  def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, count_include_pad=True):
     """
     Applies average pooling over a tensor.
 
@@ -1684,11 +1687,15 @@ class Tensor:
     t = Tensor.arange(25).reshape(1, 1, 5, 5)
     print(t.avg_pool2d().numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.avg_pool2d(padding=1).numpy())
+    ```
     """
-    kernel_size = make_pair(kernel_size)
-    return self._pool(kernel_size, stride if stride is not None else kernel_size, dilation).mean(axis=tuple(range(-len(kernel_size), 0)))
+    padding_, axis = self._padding2d(padding, len(k_ := make_pair(kernel_size))), tuple(range(-len(k_), 0))
+    def pool(x:Tensor) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
+    return pool(self).mean(axis=axis) if count_include_pad else pool(self).sum(axis=axis) / pool(self.ones_like()).sum(axis=axis)
 
-  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1):
+  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0):
     """
     Applies max pooling over a tensor.
 
@@ -1700,9 +1707,12 @@ class Tensor:
     t = Tensor.arange(25).reshape(1, 1, 5, 5)
     print(t.max_pool2d().numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.max_pool2d(padding=1).numpy())
+    ```
     """
-    kernel_size = make_pair(kernel_size)
-    return self._pool(kernel_size, stride if stride is not None else kernel_size, dilation).max(axis=tuple(range(-len(kernel_size), 0)))
+    padding_ = self._padding2d(padding, len(k_ := make_pair(kernel_size)))
+    return self.pad2d(padding_, value=float('-inf'))._pool(k_, stride if stride is not None else k_, dilation).max(axis=tuple(range(-len(k_), 0)))
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype:Optional[DType]=None) -> Tensor:
     """
@@ -1721,7 +1731,7 @@ class Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"  # noqa: E501
     if isinstance(padding, (tuple,list)): assert len(padding) == 2*len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"  # noqa: E501
-    padding_ = [padding]*2*len(HW) if isinstance(padding, int) else (padding if len(padding) == 2*len(HW) else [p for p in padding for _ in range(2)][::-1])  # noqa: E501
+    padding_ = self._padding2d(padding, len(HW))
 
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
@@ -1911,6 +1921,33 @@ class Tensor:
     ```
     """
     return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device, dtype=dtypes.bool).where(0, self).cast(self.dtype)
+
+  def interpolate(self, size:Tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
+    """
+    Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
+
+    The interpolation algorithm is selected with `mode` which currently only supports `linear`.
+    To run `bilinear` or `trilinear`, pass in a 2D or 3D size.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2, 3, 4], [21, 22, 23, 24], [41, 42, 43, 44]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.interpolate(size=(2,3), mode="linear").numpy())
+    ```
+    """
+    assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
+    assert mode == "linear", "only supports linear interpolate"
+    x, expand = self, list(self.shape)
+    for i in range(-len(size), 0):
+      scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
+      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32), [1] * self.ndim
+      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+      reshape[i] = expand[i] = size[i]
+      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+      x = x.gather(i, low).lerp(x.gather(i, high), perc)
+    return x
 
   # ***** unary ops *****
 
@@ -2102,6 +2139,7 @@ class Tensor:
     ```
     """
     return self + (end - self) * weight
+
   def square(self):
     """
     Squares the tensor element-wise.

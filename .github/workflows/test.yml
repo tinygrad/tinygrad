@@ -79,7 +79,7 @@ jobs:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
     - name: Install dependencies
-      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[linting,testing,docs]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with ruff
@@ -94,6 +94,8 @@ jobs:
       run: |
         python docs/abstractions2.py
         python docs/abstractions3.py
+    - name: Test Docs Build
+      run: mkdocs build --strict
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test README
@@ -164,8 +166,10 @@ jobs:
         name: Test WINO=1
         run: GPU=1 DEBUG=2 WINO=1 python3 test/test_ops.py TestOps.test_simple_conv2d
       - if: ${{ matrix.task == 'optimage'}}
-        name: Test GPU IMAGE=2 ops
-        run: GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
+        name: Test GPU IMAGE=2 ops + training
+        run: |
+          GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
+          GPU=1 IMAGE=2 python3 test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot model compile and size
         run: |
@@ -216,6 +220,11 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
+      - name: Run process replay tests
+        run: |
+          export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+          export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+          cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   #testwebgpu:
   #  name: WebGPU Tests
