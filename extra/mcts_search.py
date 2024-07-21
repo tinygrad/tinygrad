@@ -18,9 +18,10 @@ class MCTSNode:
     self.parents: List[MCTSNode] = [parent] if parent is not None else []
     self.children: Optional[List[MCTSNode]] = None
 
-def expand_node(node:MCTSNode):
+def expand_node(node:MCTSNode) -> MCTSNode:
   assert node.children is None
   node.children = [MCTSNode(x, node) for x in get_kernel_actions(node.kernel, include_0=False).values()]
+  return random.choice(node.children)
 
 def sample_tree(node:MCTSNode, best_tm:float, temperature:float=1.0) -> MCTSNode:
   if node.children is None or len(node.children) == 0: return node
@@ -65,10 +66,10 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     # tree traversal
     node = sample_tree(root, best_tm, temperature=0.5)
     if node.children is not None: break  # no more nodes?
-    node.i = i  # when was node explored
 
     # node expansion
-    expand_node(node)
+    if node.n != 0: node = expand_node(node)
+    node.i = i  # when was node explored
 
     # rollout
     _, compile_ret = _compile_fn((0, node.kernel))
