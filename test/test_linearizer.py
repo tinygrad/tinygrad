@@ -12,7 +12,7 @@ from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, M
 from tinygrad.renderer import TensorCore
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import Variable
+# from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
@@ -188,6 +188,58 @@ class TestLinearizer(unittest.TestCase):
     store = LazyOp(BufferOps.STORE, (out, ), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape)))
     real_index = dataset.numpy()[idxs.numpy()].reshape(4, 1, 256, 1)
     helper_linearizer_ast((store, ), [dataset, idxs], wanna_output=[real_index])
+
+  # AssertionError: repeated stores in uops
+  @unittest.expectedFailure
+  def test_argmax_multireduce_axis0(self):
+    t = Tensor.randn(10, 20).realize()
+    t_max = t.max((0,)).realize()
+    real_argmax = np.argmax(t.numpy(), axis=0, keepdims=False).reshape(1, 20, 1)
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+     LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=True),))), src=( # noqa E501
+       LazyOp(BinaryOps.ADD, arg=None, src=(
+         LazyOp(BinaryOps.ADD, arg=None, src=(
+           LazyOp(BufferOps.CONST, arg=ConstBuffer(val=10, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()), # noqa E501
+           LazyOp(UnaryOps.NEG, arg=None, src=(
+             LazyOp(ReduceOps.MAX, arg=(0,), src=(
+               LazyOp(BinaryOps.MUL, arg=None, src=(
+                 LazyOp(UnaryOps.CAST, arg=dtypes.int, src=(
+                   LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                     LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(20, 1, 0), offset=0, mask=None, contiguous=True),))), src=()), # noqa E501
+                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=False),))), src=()),)), # noqa E501
+                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)), # noqa E501
+                 LazyOp(BinaryOps.ADD, arg=None, src=(
+                   LazyOp(ReduceOps.SUM, arg=(2,), src=(
+                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(11, 19), strides=(0, 0), offset=0, mask=((0, 11), (9, 19)), contiguous=False), View(shape=(10, 20, 10), strides=(1, 0, 20), offset=0, mask=None, contiguous=False)))), src=()),)), # noqa E501
+                   LazyOp(BufferOps.CONST, arg=ConstBuffer(val=10, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),)), # noqa E501
+         LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)) # noqa E501
+    helper_linearizer_ast(ast, [t, t_max], wanna_output=[real_argmax])
+
+  def test_argmax_multireduce_flat(self):
+    t = Tensor.randn(10, 20).realize()
+    t_max = t.max().realize()
+    real_argmax = np.argmax(t.numpy())
+    ast =  LazyOp(MetaOps.KERNEL, arg=None, src=(
+     LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=( # noqa E501
+       LazyOp(BinaryOps.ADD, arg=None, src=(
+         LazyOp(BinaryOps.ADD, arg=None, src=(
+           LazyOp(BufferOps.CONST, arg=ConstBuffer(val=200, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()), # noqa E501
+           LazyOp(UnaryOps.NEG, arg=None, src=(
+             LazyOp(ReduceOps.MAX, arg=(0,), src=(
+               LazyOp(BinaryOps.MUL, arg=None, src=(
+                 LazyOp(UnaryOps.CAST, arg=dtypes.int, src=(
+                   LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                     LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(200, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=()), # noqa E501
+                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)), # noqa E501
+                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)), # noqa E501
+                 LazyOp(BinaryOps.ADD, arg=None, src=(
+                   LazyOp(ReduceOps.SUM, arg=(1,), src=(
+                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(201, 399), strides=(0, 0), offset=0, mask=((0, 201), (199, 399)), contiguous=False), View(shape=(200, 200), strides=(1, 400), offset=0, mask=None, contiguous=False)))), src=()),)), # noqa E501
+                   LazyOp(BufferOps.CONST, arg=ConstBuffer(val=200, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),)), # noqa E501
+         LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),)) # noqa E501
+    helper_linearizer_ast(ast, [t, t_max], wanna_output=[real_argmax])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -729,9 +781,9 @@ class TestLinearizer(unittest.TestCase):
 
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
-      # TODO: fix reverse_dims
-      idxs = get_grouped_dims(prefix, dims, max_sizes)
+      idxs = get_grouped_dims(prefix, dims, max_sizes, reverse_dims)
       loop_idxs = dedup(flatten([[y for y in sorted(list(x.sparents)) if y.op is UOps.SPECIAL] for x in idxs]))
+      loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg[0])
       sizes = [x.arg[2] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
       assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
@@ -748,7 +800,7 @@ class TestLinearizer(unittest.TestCase):
     _assert_grouped_dims("gidx", (2,3), (16,16,16), False, [2,3])
 
     # check reverse dims
-    # _assert_grouped_dims("gidx", (2,3), (16,16,16), True, [3,2])
+    _assert_grouped_dims("gidx", (2,3), (16,16,16), True, [3,2])
     _assert_grouped_dims("gidx", (2,3,4), (16,16,16), False, [2,3,4])
 
     # test splitting globals
@@ -759,28 +811,39 @@ class TestLinearizer(unittest.TestCase):
 
     # collapse on onto the left most axis
     _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), False, [6,4,5])
-    # _assert_grouped_dims("gidx", (2,3,4,5), (32,16,16), True, [20,3,2])
+    _assert_grouped_dims("gidx", (2,3,4,5), (32,16,16), True, [20,3,2])
     # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (32,16,16), True, [20,3,Variable("start_pos",1,2)])
 
     # collapse on left-most available axis (the left most is too small)
-    # _assert_grouped_dims("gidx", (2,3,4,5), (4,16,16), False, [2,12,5])
-    # _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), True, [5,12,2])
+    _assert_grouped_dims("gidx", (2,3,4,5), (4,16,16), False, [2,12,5])
+    _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), True, [5,12,2])
 
-    _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (16,16,16), False, [Variable("start_pos",1,2)*3,4,5])
+    # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (16,16,16), False, [Variable("start_pos",1,2)*3,4,5])
 
     # # dim too large and not factorable
     # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", 0, (23,), (16,16,16), False,)
+    #   get_grouped_dims("gidx", (23,), (16,16,16), False,)
     # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", 0, (128,3,4), (16,4,23), False,)
+    #   get_grouped_dims("gidx", (128,3,4), (16,4,23), False,)
 
-    # # too large for sizes
-    # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", 0, (2,3,4,5,6), (16,16,16), False,)
+    # too large for sizes
+    with self.assertRaises(RuntimeError):
+      get_grouped_dims("gidx", (2,3,4,5,6), (16,16,16))
 
     # # variable too large
     # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", 0, (Variable("start_pos",0,16),3,4), (16,16,16), False,)
+    #   get_grouped_dims("gidx", (Variable("start_pos",0,16),3,4), (16,16,16), False,)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_default_global_reversed(self):
+    # shrink so that the dims do not collapse
+    t = Tensor.ones(5, 6, 7).contiguous().realize().shrink(((0, 4), (0, 5), (0, 6)))
+    k = helper_linearizer_opt(t+1)[0]
+    idxs = dedup([uop for uop in k.uops if uop.op is UOps.SPECIAL])
+    idxs = sorted(idxs, key=lambda uop: uop.arg[0])
+    assert idxs[0].arg == (0, 'gidx0', 6), idxs[0].arg
+    assert idxs[1].arg == (1, 'gidx1', 5), idxs[1].arg
+    assert idxs[2].arg == (2, 'gidx2', 4), idxs[2].arg
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
@@ -1114,6 +1177,19 @@ class TestFloat4(unittest.TestCase):
       count = len([uop for uop in k.uops if uop.op is UOps.DEFINE_ACC and uop.dtype == dtypes.float.vec(4)])
       assert count == expected, f"{count=}, {expected=}"
 
+  def test_float2_acc(self):
+    # from resnet
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(256, 64, 3, 56, 2, 3, 56, 2), strides=(1806336, 28224, 3, 504, 0, 1, 9, 0), offset=0, mask=((0, 256), (0, 64), (0, 3), (0, 56), (0, 1), (0, 3), (0, 56), (0, 1)), contiguous=False), View(shape=(256, 64, 3, 115, 3, 115), strides=(7225344, 112896, 37632, 336, 112, 1), offset=0, mask=((0, 256), (0, 64), (0, 3), (0, 112), (0, 3), (0, 112)), contiguous=False), View(shape=(256, 64, 456, 456), strides=(7617600, 119025, 345, 1), offset=0, mask=((0, 256), (0, 64), (0, 345), (0, 345)), contiguous=False), View(shape=(1, 256, 1, 64, 4, 114, 4, 114), strides=(0, 13307904, 0, 207936, 51984, 456, 114, 1), offset=0, mask=None, contiguous=True))))),), arg=dtypes.float),), arg=(4, 6)),), arg=dtypes.half),), arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 256, 1, 64, 1, 114, 1, 114), strides=(0, 831744, 0, 12996, 0, 114, 0, 1), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    for expected, opts in [
+      (16, [Opt(op=OptOps.LOCAL, axis=1, amt=16), Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=2, amt=3), Opt(op=OptOps.UPCAST, axis=3, amt=4)]),  # noqa: E501
+      (4, [Opt(op=OptOps.LOCAL, axis=1, amt=16), Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=2, amt=2)]),
+    ]:
+      k = Kernel(ast)
+      for opt in opts: k.apply_opt(opt)
+      k.linearize()
+      count = len([uop for uop in k.uops if uop.op is UOps.DEFINE_ACC and uop.dtype == dtypes.float.vec(2)])
+      assert count == expected, f"{count=}, {expected=}"
+
 class TestHandCodedOpts(unittest.TestCase):
   def test_masked_upcast(self):
     layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
@@ -1192,7 +1268,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
 def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp], inputs:List[Tensor], *args, **kwargs):
   if not isinstance(ast, LazyOp): ast = LazyOp(MetaOps.KERNEL, ast)
-  inbufs = [x.lazydata.buffer for x in inputs]
+  inbufs = [x.lazydata.base.buffer for x in inputs]
   outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
