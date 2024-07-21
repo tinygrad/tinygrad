@@ -80,6 +80,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
+    if buf not in reduce_info: return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)
     #if not st.contiguous: assert buf.srcs[0].base.op is MetaOps.CONST, f"reduceop late fixup not supported for input {buf.srcs[0].base}"
     st, arg = reduce_info[buf]
 
@@ -110,13 +111,11 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
         nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                               v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
       input_st = tmp + ShapeTracker(tuple(nv))
+      axis = axis + tuple(range(len(input_st.shape)-len(rshape), len(input_st.shape)))
     else:
-      # reshape to match the output st of the top reduce
-      if reduce_info:
-        top_reduce, (top_reduce_input_st, _) = list(reduce_info.items()).pop()
-        tmp, rshape = _permute_input(top_reduce.srcs[0], top_reduce.arg)
-        axis = axis + tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
-        #input_st = input_st.reshape(st.shape)
+      # reshape? to match the output st of the top reduce
+      # TODO: when to fold the next reshape?
+      if reduce_info: return
     reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
