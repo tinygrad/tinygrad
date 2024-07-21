@@ -6,7 +6,7 @@ import math, functools, time, random, statistics
 from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put, colored
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Buffer, Device
-from tinygrad.engine.search import _ensure_buffer_alloc, get_kernel_actions, _try_compile_linearized_w_idx, _time_program
+from tinygrad.engine.search import _ensure_buffer_alloc, get_kernel_actions, _time_program
 from tinygrad.ops import LazyOp
 
 class MCTSNode:
@@ -88,7 +88,6 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   dev = Device[lin.opts.device]
   root = MCTSNode(lin)
-  _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
 
   st = time.perf_counter()
   best, best_idx, best_tm = lin, 0, math.inf
@@ -108,14 +107,19 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     else:
       seen_asts[opt_ast] = node
 
+      # lowering
+      p = node.kernel.to_program(name_override="test")
+
       # rollout
       tm1 = time.perf_counter()
-      _, compile_ret = _compile_fn((0, node.kernel))
+      try:
+        lib = dev.compiler.compile(p.src)
+      except RuntimeError:
+        lib = None
       tm2 = time.perf_counter()
-      if compile_ret is None:
+      if lib is None:
         tm = math.inf
       else:
-        p, lib, _ = compile_ret
         if (sibling_node:=seen_libs.get(lib, None)) is not None:
           # NOTE: these should all be caught by the AST check, need to canonicalize
           # remove this node, it's a duplicate
