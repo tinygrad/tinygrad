@@ -341,8 +341,8 @@ class Kernel:
           for (tc_dim, tc_amt) in tc.threads:
             self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
         elif self.opts.device == "CLANG":
-          self.apply_opt(Opt(OptOps.UPCAST, 0, 4), append_opt=False)
-          self.apply_opt(Opt(OptOps.UPCAST, 1, 4), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+            self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
         elif self.opts.device in {"CUDA", "NV"}:
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)

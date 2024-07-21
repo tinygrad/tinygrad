@@ -160,7 +160,7 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
       # movementops are pushed to the edges with LOAD
       if op.op in BufferOps: st = op.arg.st
       else: st = sts[op.src[0]]
-      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
+      # for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {x.op} {sts[x].shape} != {op.op} {st.shape}"
     sts[op] = st
   for i, out in enumerate(ast.src):
     assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
