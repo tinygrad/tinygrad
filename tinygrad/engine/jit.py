@@ -20,12 +20,13 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   graphed_jit_cache: List[ExecItem] = []
   current_batch: List[ExecItem] = []
   current_device: Optional[Compiled] = None
+  jit_state = {}
 
   def flush_batch():
     nonlocal current_batch, current_device, max_batch_size
     try:
       if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
-      graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
+      graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals, jit_state)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
       graphed_jit_cache.append(ExecItem(graph_runner, cast(List[Optional[Buffer]], input_rawbuffers)))
@@ -68,11 +69,12 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
   return input_replace
 
 class GraphRunner(Runner):  # pylint: disable=abstract-method
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], jit_state):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.jc_idx_with_updatable_launch_dims = []
     self.jc_idx_with_updatable_var_vals = []
+    self.jit_state = jit_state
     op_estimate: sint = 0
     mem_estimate: sint = 0
     for j,ji in enumerate(jit_cache):
@@ -86,10 +88,10 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], jit_state):
     self.w_dependency_map: Dict[Any, Any] = {}
     self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
-    super().__init__(jit_cache, input_rawbuffers, var_vals)
+    super().__init__(jit_cache, input_rawbuffers, var_vals, jit_state)
 
   def _access_resources(self, read, write, new_dependency:Any):
     # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,

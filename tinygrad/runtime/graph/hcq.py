@@ -7,8 +7,8 @@ from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    super().__init__(jit_cache, input_rawbuffers, var_vals)
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], jit_state):
+    super().__init__(jit_cache, input_rawbuffers, var_vals, jit_state)
     self.devices = list(set(cast(Any, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
     # Allocate kernel args.
@@ -140,9 +140,18 @@ class HCQGraph(MultiGraphRunner):
     for j in self.jc_idx_with_updatable_var_vals:
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars): self.ji_args_vars[j][i] = var_vals[v]
 
+    if id(var_vals) != self.jit_state.get('cached_dims', -1):
+      self.jit_state['cached_dims'] = id(var_vals)
+      self.jit_state['dims_cache'] = {}
+    cache = self.jit_state['dims_cache']
     for j in self.jc_idx_with_updatable_launch_dims:
       queue, cmd_ptr = self.op_cmd_idx[j]
-      queue.update_exec(cmd_ptr, *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
+      prog = cast(CompiledRunner, self.jit_cache[j].prg).p
+      if tuple(prog.global_size) not in cache or tuple(prog.local_size) not in cache:
+        g, l = cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals)
+        cache[tuple(prog.global_size)] = g
+        cache[tuple(prog.local_size)] = l
+      queue.update_exec(cmd_ptr, cache[tuple(prog.global_size)], cache[tuple(prog.local_size)])
 
     for dev in self.devices:
       self.comp_queues[dev].update_wait(1, dev.timeline_signal, dev.timeline_value - 1).update_wait(2, value=self.kickoff_value) \
