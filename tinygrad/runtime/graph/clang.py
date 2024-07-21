@@ -5,7 +5,6 @@ from tinygrad.engine.jit import GraphRunner
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.shape.symbolic import Variable
-from tinygrad.runtime.ops_clang import ClangProgram
 from tinygrad.renderer.cstyle import ClangRenderer
 render_dtype = ClangRenderer().render_dtype
 
