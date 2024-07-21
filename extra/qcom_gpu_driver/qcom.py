@@ -128,7 +128,7 @@ class Qcom():
     buff1.push(reg=0xaa31, vals=[0x0]) #unknown
     buff1.push(reg=0xab00, vals=[0x2]) # ISAMMODE = ISAMMODE_CL
     buff1.push(opcode=0x26) # CP_WAIT_FOR_IDLE
-    buff1.push(reg=0xae0f, vals=[0x3f]) # SP_PERFCTR_ENABLE
+    buff1.push(reg=adreno.REG_A6XX_SP_PERFCTR_ENABLE, vals=[adreno.A6XX_SP_PERFCTR_ENABLE_CS])
     buff1.push(reg=0xb309, vals=[9]) # SP_TP_MODE_CNTL=ISAMMODE|UNK3
     buff1.push(opcode=0x26) # CP_WAIT_FOR_IDLE
     buff1.push(reg=0xb600, vals=[0]) # TPL1_DBG_ECO_CNTL
