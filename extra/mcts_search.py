@@ -36,6 +36,11 @@ def sample_tree(node:MCTSNode, best_tm:float, temperature:float=1.0) -> MCTSNode
   ucb_exp = np.exp(np.array(ucb_explored_children)/temperature)
   return sample_tree(np.random.choice(explored_children, p=ucb_exp/np.sum(ucb_exp)), best_tm, temperature)
 
+def backprop(bnode:MCTSNode, tm, strength=1.0):
+  if bnode.t > tm: bnode.t = tm
+  bnode.n += strength
+  for parent in bnode.parents: backprop(parent, tm, strength/len(bnode.parents))
+
 graph_mcts_cnt = 0
 C = math.sqrt(2)
 def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
@@ -58,7 +63,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   seen_libs: Dict[bytes, MCTSNode] = {}
   for i in range(amt):
     # tree traversal
-    node = sample_tree(root, best_tm, temperature=0.7)
+    node = sample_tree(root, best_tm, temperature=0.5)
     if node.children is not None: break  # no more nodes?
     node.i = i  # when was node explored
 
@@ -88,11 +93,6 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     if DEBUG>=2: print(f"\r{time.perf_counter() - st:7.2f}s: {tm:12.2f} us     best: {best_tm:12.2f} us @ {best_idx+1:4d}        {i+1:4d}/{amt:4d}         {node.kernel.colored_shape()}\033[K", end="")  # noqa: E501
 
     # backprop
-    def backprop(bnode:MCTSNode, tm, strength=1.0):
-      if bnode.t > tm: bnode.t = tm
-      bnode.n += strength
-      for parent in bnode.parents:
-        backprop(parent, tm, strength/len(bnode.parents))
     backprop(node, tm)
   if DEBUG>=2: print()
 
