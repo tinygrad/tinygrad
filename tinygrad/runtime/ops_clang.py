@@ -1,7 +1,7 @@
-import os, platform, subprocess, ctypes, pickle, tinygrad.runtime.autogen.libc as libc
+import os, platform, subprocess, ctypes, tinygrad.runtime.autogen.libc as libc
 from mmap import PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
 from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.runtime.support.elf import fixup_relocations
+from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.helpers import cpu_time_execution, OSX
 from tinygrad.renderer.cstyle import ClangRenderer
 
@@ -13,7 +13,7 @@ class ClangCompiler(Compiler):
     args = ('clang', '-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-Wall',
             '-Wno-unused-function', '-Wno-unused-command-line-argument', '-Werror', '-include', f'{os.path.dirname(__file__)}/support/tinymath.h',
             '-ffreestanding', '-nostdlib', '-ffixed-x18' if platform.machine() == "arm64" else '-Xclang=-fnative-half-type', '-', '-o', '-')
-    return fixup_relocations(subprocess.check_output(args, input=src.encode('utf-8')))
+    return bytes(elf_loader(subprocess.check_output(args, input=src.encode('utf-8')), prealloc={'kernel': 0}, strict=True)[0])
 
 class ClangProgram:
   def __init__(self, name:str, lib:bytes):
