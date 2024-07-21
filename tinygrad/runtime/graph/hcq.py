@@ -1,7 +1,7 @@
 import collections, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, to_mv, PROFILE
-from tinygrad.device import Buffer, BufferOptions, Compiled, Device
+from tinygrad.device import HCQAllocator, Buffer, BufferOptions, Compiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
@@ -100,7 +100,7 @@ class HCQGraph(MultiGraphRunner):
       if isinstance(ji.prg, CompiledRunner): enqueue_queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        Device[src.device]._gpu_map(dest._buf) #type: ignore
+        cast(HCQAllocator, Device[src.device].allocator).map(dest._buf)
         enqueue_queue.copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])
       self.op_cmd_idx[j] = (enqueue_queue, len(enqueue_queue) - 1)

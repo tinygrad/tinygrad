@@ -339,6 +339,8 @@ class NVAllocator(HCQAllocator):
     if options.host: self.device._gpu_host_free(opaque)
     else: self.device._gpu_free(opaque)
 
+  def map(self, buf:HCQBuffer): self.device._gpu_map(buf._base if hasattr(buf, '_base') else buf)
+
 @dataclass
 class GPFifo:
   ring: memoryview
@@ -437,7 +439,6 @@ class NVDevice(HCQCompiled):
                                        gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size, mapped_gpu_ids=[self.gpu_uuid])
 
   def _gpu_map(self, mem):
-    mem = mem._base if hasattr(mem, '_base') else mem
     if self.gpu_uuid in mem.mapped_gpu_ids: return
     mem.mapped_gpu_ids.append(self.gpu_uuid)
     self._gpu_uvm_map(mem.va_addr, mem.size, mem.hMemory, create_range=False)

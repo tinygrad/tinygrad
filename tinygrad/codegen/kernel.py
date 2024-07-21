@@ -753,9 +753,9 @@ class Kernel:
     if getenv("GRAPHUOPS"): self.uops.graph()
     return self
 
-  def to_program(self) -> Program:
+  def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
-    src = self.opts.render(name:=to_function_name(self.name), self.uops)
+    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
@@ -765,4 +765,4 @@ class Kernel:
     mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
-    return Program(self.name, src, self.opts.device, self.global_size, self.local_size, self.uops, ops * run_count, min(mem * run_count, mem_bytes))
+    return Program(ansiname, src, self.opts.device, self.global_size, self.local_size, self.uops, ops * run_count, min(mem * run_count, mem_bytes))

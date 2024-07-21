@@ -226,7 +226,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
 
   @unittest.expectedFailure
-  def test_mod_mul(self):
+  def test_mod_mul_large(self):
+    self.helper_test_variable((Variable("a", 0, 20)*10)%9, 0, 8, "(a%9)")
+
+  @unittest.expectedFailure
+  def test_mod_mul_small(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
 
   @unittest.expectedFailure
@@ -305,7 +309,6 @@ class TestSymbolic(unittest.TestCase):
   def test_div_factor(self):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
 
-  # TODO: this one should already work!
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
 

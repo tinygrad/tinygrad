@@ -97,5 +97,16 @@ class TestBEAM(unittest.TestCase):
     tm = time_linearizer(best_lin, bufs, allow_test_size=False, cnt=2, disable_cache=True)
     assert tm
 
+  def test_beam_unnamed_kernels(self):
+    a = Tensor.rand(100)
+    b = Tensor.rand(100)
+    si = (a+b).schedule()[-1]
+    lin = Kernel(si.ast)
+    bufs = bufs_from_lin(lin)
+    # TODO: beam should have better instrumentation so we don't have to check this indirect thing
+    kcount = len(Kernel.kernel_cnt)
+    beam_search(lin, bufs, 3, disable_cache=True)
+    self.assertEqual(kcount, len(Kernel.kernel_cnt))
+
 if __name__ == '__main__':
   unittest.main()
