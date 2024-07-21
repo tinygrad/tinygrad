@@ -1,15 +1,13 @@
 from __future__ import annotations
-import struct
-from typing import Tuple, Dict, List, Any
+from typing import Tuple, Dict, List, Optional, Any
 from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc
 
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
 
-def patchuint32(blob: memoryview, ploc: int, new: int): blob[ploc:ploc+4] = struct.pack("<I", struct.unpack("<I", blob[ploc:ploc+4])[0] | new)
-
-def elf_loader(blob:bytes, force_section_align:int=1, prealloc:Dict[str, int]={}, strict:bool=False) -> Tuple[memoryview, List[ElfSection], Any]:
+def elf_loader(blob:bytes, force_section_align:int=1, force_section:Optional[Dict[str, int]]=None) -> Tuple[memoryview, List[ElfSection], Any]:
+  if force_section is None: force_section = {} # pylint compains if {} is default
   def _elf_get_name(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
 
   header = libc.Elf64_Ehdr.from_buffer_copy(blob)
@@ -23,13 +21,14 @@ def elf_loader(blob:bytes, force_section_align:int=1, prealloc:Dict[str, int]={}
   symtab = [_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB][0]
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
+  # Set sh_addr for force preallocated sections
   for sh in progbits:
-    if sh.name in prealloc: sh.header.sh_addr = prealloc[sh.name]
+    if sh.name in force_section: sh.header.sh_addr = force_section[sh.name]
 
   # Prealloc image for all fixed addresses.
-  image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0 or sh.name in prealloc] + [0]))
+  image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0 or sh.name in force_section] + [0]))
   for sh in progbits:
-    if sh.header.sh_addr != 0 or sh.name in prealloc: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
+    if sh.header.sh_addr != 0 or sh.name in force_section: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
     else:
       image += b'\0' * (((align:=max(sh.header.sh_addralign, force_section_align)) - len(image) % align) % align) + sh.content
       sh.header.sh_addr = len(image) - len(sh.content)
@@ -40,18 +39,5 @@ def elf_loader(blob:bytes, force_section_align:int=1, prealloc:Dict[str, int]={}
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
     rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
     relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value + raddend, rtype) for roff, sym, rtype, raddend in rels]
-    for ploc,tgt,r_type in relocs:
-      rel = tgt - ploc
-      tgt_pg, ploc_pg = tgt >> 12, ploc >> 12
-      lo, hi = (tgt_pg-ploc_pg)&0b11,(tgt_pg-ploc_pg)>>2
-      if r_type in {0x2, 0x4}: patchuint32(image, ploc, 2**32+rel if rel < 0 else rel) # x86
-      elif r_type == 0x113: patchuint32(image, ploc, lo<<29 | hi<<5)  # R_AARCH64_ADR_PREL_PG_HI21
-      elif r_type == 0x115: patchuint32(image, ploc, (tgt&0xFFF)<<10) # R_AARCH64_ADD_ABS_LO12_NC
-      elif r_type in {0x11a, 0x11b}: patchuint32(image, ploc, 2**26+(rel>>2) if rel < 0 else (rel>>2)) # R_AARCH64_CALL26
-      elif r_type == 0x11c: patchuint32(image, ploc, (tgt&0xFFF)<<9) # R_AARCH64_LDST16_ABS_LO12_NC
-      elif r_type == 0x11d: patchuint32(image, ploc, (tgt&0xFFF)<<8) # R_AARCH64_LDST32_ABS_LO12_NC
-      elif r_type == 0x11e: patchuint32(image, ploc, (tgt&0xFFF)<<7) # R_AARCH64_LDST64_ABS_LO12_NC
-      elif r_type == 0x12b: patchuint32(image, ploc, (tgt&0xFFF)<<6) # R_AARCH64_LDST128_ABS_LO12_NC
-      elif strict: raise NotImplementedError(f"Encountered unknown relocation type {r_type:#x}")
 
   return memoryview(image), sections, relocs

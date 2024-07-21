@@ -1,4 +1,4 @@
-import os, platform, subprocess, ctypes, tinygrad.runtime.autogen.libc as libc
+import os, platform, subprocess, struct, ctypes, tinygrad.runtime.autogen.libc as libc
 from mmap import PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.runtime.support.elf import elf_loader
@@ -8,12 +8,28 @@ from tinygrad.renderer.cstyle import ClangRenderer
 if OSX: mac_libc = ctypes.CDLL(ctypes.util.find_library('c')) # needed for jit write protect and sys icache invalidate
 MAP_JIT = 0x0800 if OSX else 0
 
+def patchuint32(blob: memoryview, ploc: int, new: int): blob[ploc:ploc+4] = struct.pack("<I", struct.unpack("<I", blob[ploc:ploc+4])[0] | new)
+
 class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     args = ('clang', '-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-Wall',
             '-Wno-unused-function', '-Wno-unused-command-line-argument', '-Werror', '-include', f'{os.path.dirname(__file__)}/support/tinymath.h',
             '-ffreestanding', '-nostdlib', '-ffixed-x18' if platform.machine() == "arm64" else '-Xclang=-fnative-half-type', '-', '-o', '-')
-    return bytes(elf_loader(subprocess.check_output(args, input=src.encode('utf-8')), prealloc={'kernel': 0}, strict=True)[0])
+    image, _, relocs = elf_loader(subprocess.check_output(args, input=src.encode('utf-8')), force_section={'kernel': 0})
+    for ploc,tgt,r_type in relocs:
+      rel = tgt - ploc
+      tgt_pg, ploc_pg = tgt >> 12, ploc >> 12
+      lo, hi = (tgt_pg-ploc_pg)&0b11,(tgt_pg-ploc_pg)>>2
+      if r_type in {0x2, 0x4}: patchuint32(image, ploc, 2**32+rel if rel < 0 else rel) # x86
+      elif r_type == 0x113: patchuint32(image, ploc, lo<<29 | hi<<5)  # R_AARCH64_ADR_PREL_PG_HI21
+      elif r_type == 0x115: patchuint32(image, ploc, (tgt&0xFFF)<<10) # R_AARCH64_ADD_ABS_LO12_NC
+      elif r_type in {0x11a, 0x11b}: patchuint32(image, ploc, 2**26+(rel>>2) if rel < 0 else (rel>>2)) # R_AARCH64_CALL26
+      elif r_type == 0x11c: patchuint32(image, ploc, (tgt&0xFFF)<<9) # R_AARCH64_LDST16_ABS_LO12_NC
+      elif r_type == 0x11d: patchuint32(image, ploc, (tgt&0xFFF)<<8) # R_AARCH64_LDST32_ABS_LO12_NC
+      elif r_type == 0x11e: patchuint32(image, ploc, (tgt&0xFFF)<<7) # R_AARCH64_LDST64_ABS_LO12_NC
+      elif r_type == 0x12b: patchuint32(image, ploc, (tgt&0xFFF)<<6) # R_AARCH64_LDST128_ABS_LO12_NC
+      else: raise NotImplementedError(f"Encountered unknown relocation type {r_type:#x}")
+    return bytes(image)
 
 class ClangProgram:
   def __init__(self, name:str, lib:bytes):
