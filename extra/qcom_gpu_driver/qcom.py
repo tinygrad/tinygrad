@@ -155,7 +155,7 @@ class Qcom():
     buff2.push(reg=0xa9bd, vals=[0]) # SP_CS_PVT_MEM_HW_STACK_OFFSET
     buff2.push(opcode=0x34, vals=[0x40364000, consts_gpuaddr & 0xffffffff, (consts_gpuaddr >> 32) & 0xffffffff]) # CP_LOAD_STATE6_FRAG, load constants
     buff2.push(opcode=0x34, vals=[0xf60000,shader_gpuaddr & 0xffffffff, (shader_gpuaddr >> 32) & 0xffffffff]) # CP_LOAD_STATE6_FRAG, load shader
-    buff2.push(reg=0xa9bc, vals=[13]) # SP_CS_INSTRLEN
+    buff2.push(reg=0xa9bc, vals=[(len(SHADER) + 3) // 4 * 4]) # SP_CS_INSTRLEN
     buff2.push(opcode=0x31, vals=[0]) # CP_RUN_OPENCL
     # self.cmdbuff.push(opcode=0x46, vals=[4,0x460000,5,1]) # CP_EVENT_WRITE7
     # self.cmdbuff.push(opcode=0x46, vals=[0x31]) # CP_EVENT_WRITE7
