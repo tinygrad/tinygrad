@@ -7,7 +7,7 @@ from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop, KernelInfo
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -147,17 +147,6 @@ class Kernel:
     assert all_int(upcasted_shape), f"cannot upcast a symbolic amount {upcasted_shape=}"
     return list(zip(upcasted_shape, upcasted_stride,
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
-
-  # TODO: is there a better way to write this?
-  def acc_offsets(self, i:int) -> List[int]:
-    if self.upcasted == 0: return [0]
-    upcasted_i = self.upcasted_axis(i)
-    acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
-    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
-
-  def get_float4_upcast_dim(self, i:int) -> List[int]:
-    should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in (dtypes.float, dtypes.half) or isinstance(self.bufs[i].dtype, ImageDType))
-    return [x for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1] if should_upcast else []
 
   @property
   def first_reduce(self) -> int:
@@ -408,8 +397,6 @@ class Kernel:
               if self.full_shape[tc_opts.axes[0]] % upc == 0:
                 self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
                 break
-          # SWAP global
-          if self.global_dims > 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
       return True
     except KernelOptError:
       return False
@@ -541,8 +528,6 @@ class Kernel:
             if MV_THREADS_PER_ROW > 1: self.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
             if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
-            # SWAP global
-            if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
             return self
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
@@ -575,10 +560,7 @@ class Kernel:
             self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
 
     # no more opt if we are grouping
-    if self.group_for_reduces:
-      # SWAP global
-      if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
-      return self
+    if self.group_for_reduces: return self
 
     # **** below this line need to be optional and benchmarked ****
 
@@ -651,9 +633,6 @@ class Kernel:
           will_delete_shape = local_sz == self.full_shape[axis]
           self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
           if will_delete_shape: deleted_shape += 1
-
-    # SWAP global
-    if self.global_dims >= 3: self.apply_opt(Opt(OptOps.SWAP, 0, self.global_dims-1))
 
     return self
 
@@ -741,7 +720,7 @@ class Kernel:
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
           return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
       elif op.op is MetaOps.KERNEL:
-        arg = KernelInfo(self.local_dims, self.upcasted)
+        arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
@@ -765,17 +744,19 @@ class Kernel:
       self.local_size: Optional[List[int]] = [1,1,1]
       for u in uop_sink.parents:
         if u.op is UOps.SPECIAL:
-          if u.arg[1][0] == 'l': self.local_size[u.arg[0]] = u.arg[2]
-          else: self.global_size[u.arg[0]] = u.arg[2]
+          if u.arg[1][0] == 'i': self.local_size = None
+          if u.arg[1][0] == 'l':
+            assert self.local_size is not None
+            self.local_size[u.arg[0]] = u.arg[2]
+          else:
+            self.global_size[u.arg[0]] = u.arg[2]
     else:
       self.global_size, self.local_size = None, None
 
     # generate the UOpGraph
     self.uops:UOpGraph = UOpGraph(uop_sink, self.opts)
     if DEBUG >= 5: self.uops.print()
-    if getenv("GRAPHUOPS"):
-      self.uops.graph()
-      if getenv("GRAPHUOPS") == 2: exit(0)
+    if getenv("GRAPHUOPS"): self.uops.graph()
     return self
 
   def to_program(self) -> Program:
@@ -786,5 +767,8 @@ class Kernel:
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
     ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
     run_count = prod((self.global_size or []) + (self.local_size or []))
-    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
-                   self.uops, ops * run_count, min(mem * run_count, sum(arg.dtype.itemsize * arg.st.real_size() for arg in self.membufs)))
+    # group non-local MemBuffers by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
+    mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
+      itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
+                        key=lambda x: (x.op, x.arg.idx)))
+    return Program(self.name, src, self.opts.device, self.global_size, self.local_size, self.uops, ops * run_count, min(mem * run_count, mem_bytes))

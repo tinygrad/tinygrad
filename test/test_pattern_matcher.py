@@ -2,8 +2,8 @@ import unittest, itertools
 from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps # noqa: F401
-from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat, _match, constant_folder
+from tinygrad.codegen.uops import UOps, UOp, PatternMatcher, UPat, _match
+from tinygrad.codegen.uopgraph import UOpGraph, constant_folder
 
 class TestPatternMatcher(TestUOps):
   def test_simple_match(self):
@@ -141,6 +141,7 @@ class TestPatternMatcher(TestUOps):
     u1 = (c1 + c2) + c1
     u2 = (c2 + c1) + c1
     pat = UPat(UOps.ALU, src = (UPat(UOps.ALU, src=[UPat(name='a'), UPat(name='b')]), UPat(name='b')))
+    # TODO: why is this calling a private function?
     assert _match(u1, pat, {})
     assert _match(u2, pat, {})
 
