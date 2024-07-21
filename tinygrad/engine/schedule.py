@@ -134,7 +134,9 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
 # *** DAG creation: decide which LazyBuffers should realize ***
 
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None],\
-    children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer], scheduled=False):
+    children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer],\
+    double_reduces:Dict[LazyBuffer, None],
+    scheduled=False):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.realized is not None: return
   if GRAPH: log_lazybuffer(buf, scheduled)
@@ -149,11 +151,12 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       # this was causing "test_lil_model" to fail
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         simple_pads[buf.base] = None # don't realize image to image casts. this is part of a larger problem
-      elif FUSE_AS_ONE_KERNEL or hasattr(buf.base, "dont_realize"): pass
+      elif FUSE_AS_ONE_KERNEL: pass
       else: realizes[buf.base] = None
     # check all other pads for safe fusion
     elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
-    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets)
+    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
+  if buf.op in ReduceOps and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs: double_reduces[buf] = None
   allbufs[buf] = None
   if buf.forced_realize or buf.op in MetaOps: realizes[buf] = None
   if buf.op is MetaOps.ASSIGN:
@@ -166,7 +169,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   if buf.op is MetaOps.VIEW: realizes[buf.srcs[0].base] = None
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
-    _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets)
+    _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
 def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   if buf in realizes or buf.realized is not None: return True
@@ -199,7 +202,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   simple_pads: Dict[LazyBuffer, None] = {}
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
   assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
-  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, assign_targets, scheduled=True)
+  double_reduces:Dict[LazyBuffer, None] = {}
+  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, scheduled=True)
 
   # check if we have to realize pads
   for p in simple_pads:
@@ -268,6 +272,11 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         reduce_for_op[tr] = r
       if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
+
+  # fuse double_reduces
+  for reduceop in double_reduces:
+    input_to_reduce = reduceop.base.srcs[0].base
+    if len(children[input_to_reduce]) == 1: del realizes[input_to_reduce]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
