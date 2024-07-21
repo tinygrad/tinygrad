@@ -17,7 +17,6 @@ class ClangCompiler(Compiler):
 
 class ClangProgram:
   def __init__(self, name:str, lib:bytes):
-    exports, lib = pickle.loads(lib)
     self.map, self.mlen = libc.mmap(None, len(lib), PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANON | MAP_PRIVATE | MAP_JIT, -1, 0), len(lib)
     if OSX: mac_libc.pthread_jit_write_protect_np(False)
     ctypes.memmove(self.map, lib, len(lib))
@@ -25,7 +24,7 @@ class ClangProgram:
       mac_libc.pthread_jit_write_protect_np(True)
       mac_libc.sys_icache_invalidate(ctypes.c_void_p(self.map), ctypes.c_size_t(len(lib)))
     # TODO: clear instruction cache on linux
-    self.fxn = ctypes.cast(self.map+exports[name], ctypes.CFUNCTYPE(None))
+    self.fxn = ctypes.cast(self.map, ctypes.CFUNCTYPE(None))
   def __del__(self): libc.munmap(self.map, self.mlen)
   def __call__(self, *bufs, vals=(), wait=False):
     args = list(bufs) + list(vals)

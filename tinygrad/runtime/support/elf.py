@@ -1,13 +1,13 @@
 from __future__ import annotations
-import struct, pickle
-from typing import Dict, Tuple, List, Any
+import struct
+from typing import Tuple, Dict, List, Any
 from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc
 
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
 
-def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[ElfSection], Any, Dict[str, int]]:
+def elf_loader(blob:bytes, force_section_align:int=1, force_prealloc:Dict[str, int]={}) -> Tuple[memoryview, List[ElfSection], Any]:
   def _elf_get_name(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
 
   header = libc.Elf64_Ehdr.from_buffer_copy(blob)
@@ -21,10 +21,13 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[
   symtab = [_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB][0]
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
-  # Prealloc image for all fixed addresses.
-  image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0]))
   for sh in progbits:
-    if sh.header.sh_addr != 0: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
+    if sh.name in force_prealloc: sh.header.sh_addr = force_prealloc[sh.name]
+
+  # Prealloc image for all fixed addresses.
+  image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0 or sh.name in force_prealloc] + [0]))
+  for sh in progbits:
+    if sh.header.sh_addr != 0 or sh.name in force_prealloc: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
     else:
       image += b'\0' * (((align:=max(sh.header.sh_addralign, force_section_align)) - len(image) % align) % align) + sh.content
       sh.header.sh_addr = len(image) - len(sh.content)
@@ -36,17 +39,12 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[
     rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
     relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value + raddend, rtype) for roff, sym, rtype, raddend in rels]
 
-  # Exports
-  exports: Dict[str, int] = {}
-  for sym in symtab:
-    if sym.st_info == 0x12: exports[_elf_get_name(strtab, sym.st_name)] = sections[sym.st_shndx].header.sh_addr + sym.st_value
-
-  return memoryview(image), sections, relocs, exports
+  return memoryview(image), sections, relocs
 
 def patchuint32(blob: memoryview, ploc: int, new: int): blob[ploc:ploc+4] = struct.pack("<I", struct.unpack("<I", blob[ploc:ploc+4])[0] | new)
 
 def fixup_relocations(blob: bytes) -> bytes:
-  img, _, relocs, exports = elf_loader(blob)
+  img, _, relocs = elf_loader(blob, force_prealloc={'kernel': 0})
   for ploc,tgt,r_type in relocs:
     rel = tgt - ploc
     tgt_pg, ploc_pg = tgt >> 12, ploc >> 12
@@ -60,4 +58,4 @@ def fixup_relocations(blob: bytes) -> bytes:
     elif r_type == 0x11e: patchuint32(img, ploc, (tgt&0xFFF)<<7) # R_AARCH64_LDST64_ABS_LO12_NC
     elif r_type == 0x12b: patchuint32(img, ploc, (tgt&0xFFF)<<6) # R_AARCH64_LDST128_ABS_LO12_NC
     else: raise NotImplementedError(f"Encountered unknown relocation type {r_type:#x}")
-  return pickle.dumps((exports, bytes(img)))
+  return bytes(img)
