@@ -1714,7 +1714,7 @@ class TestOps(unittest.TestCase):
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True))
 
   def test_interpolate_bilinear(self):
-    for in_sz, out_sz in [((52,40),(29,31))]:
+    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="bilinear"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"), atol=1e-4)
@@ -1918,7 +1918,6 @@ class TestOps(unittest.TestCase):
     # indices cannot be negative (torch gather)
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
-    helper_test_op([(4,5,6)], lambda x: x.gather(dim=0, index=b), lambda x: x.gather(dim=0, index=a))
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=0, index=b), lambda x: x.gather(dim=0, index=a))
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=1, index=b), lambda x: x.gather(dim=1, index=a))
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=2, index=b), lambda x: x.gather(dim=2, index=a))

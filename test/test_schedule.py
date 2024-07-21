@@ -701,7 +701,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmin(-1)
-    run_schedule(check_schedule(out, 3))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
 
   # multireduce spec
@@ -709,7 +709,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmax(-1)
-    run_schedule(check_schedule(out, 3))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
 
   # multireduce spec
@@ -1246,7 +1246,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(10, 20).realize()
     out = x.argmax(1)
-    run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
+    run_schedule(check_schedule(out, 2))
 
 class CycleBitcast(Function):
   def forward(self, x: LazyBuffer, allow_buffer_view=True):
