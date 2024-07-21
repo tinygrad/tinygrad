@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, \
+from tinygrad.helpers import FUSE_ARANGE, GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, \
     merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -281,7 +281,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         reduce_for_op[tr] = r
       realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
-    if getenv("FUSE_ARANGE", 1) and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: aranges.append(r)
+    if FUSE_ARANGE and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: aranges.append(r)
 
   def _fold_arange(r:LazyBuffer, group:Set[LazyBuffer]) -> bool:
     if DEBUG_INDEX:=(getenv("DEBUG_INDEX")): print(f"checking {r}")
