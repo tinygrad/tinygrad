@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 import math, functools, time, random, statistics
 from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put
 from tinygrad.codegen.kernel import Kernel
@@ -10,7 +10,8 @@ class MCTSNode:
     self.kernel = kernel
     self.t = math.inf
     self.n = 0
-    self.parent: Optional[MCTSNode] = parent
+    self.i = -1
+    self.parents: List[MCTSNode] = [parent] if parent is not None else []
     self.children: Optional[List[MCTSNode]] = None
 
 def expand_node(node:MCTSNode):
@@ -34,12 +35,13 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
 
   def remove_node(node):
-    if node.parent is not None:
-      assert node.parent.children is not None
-      node.parent.children.remove(node)
+    for parent in node.parents:
+      assert parent.children is not None
+      parent.children.remove(node)
 
   st = time.perf_counter()
   best, best_idx, best_tm = lin, 0, math.inf
+  seen_libs: Dict[bytes, MCTSNode] = {}
   for i in range(amt):
     # tree traversal
     node = root
@@ -48,6 +50,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       ucb = sorted([(math.inf if child.n == 0 else -child.t/best_tm + C*math.sqrt(math.log(node.n)/child.n), child)
                     for child in node.children], key=lambda x: x[0], reverse=True) # pylint: disable=not-an-iterable
       node = ucb[0][1]
+    node.i = i  # when was node explored
 
     if node.children is not None: break  # no more nodes?
 
@@ -57,25 +60,45 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     # rollout
     _, compile_ret = _compile_fn((0, node.kernel))
     if compile_ret is None:
-      remove_node(node)
       tm = math.inf
     else:
       p, lib, _ = compile_ret
-      try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=5, early_stop=best_tm*10/1e6))*1e6
-      except RuntimeError:
+      if (sibling_node:=seen_libs.get(lib, None)) is not None:
+        # TODO: add parents to sibling_node?
         remove_node(node)
-        tm = math.inf
+        tm = sibling_node.t
+      else:
+        seen_libs[lib] = node
+        try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=5, early_stop=best_tm*10/1e6))*1e6
+        except RuntimeError:
+          tm = math.inf
 
     if tm < best_tm: best, best_idx, best_tm = node.kernel, i, tm
     if DEBUG>=2: print(f"\r{time.perf_counter() - st:7.2f}s: {tm:12.2f} us     best: {best_tm:12.2f} us @ {best_idx+1:4d}        {i+1:4d}/{amt:4d}         {node.kernel.colored_shape()}\033[K", end="")  # noqa: E501
 
     # backprop
-    bnode: Optional[MCTSNode] = node
-    while bnode is not None:
+    def backprop(bnode:MCTSNode, tm, strength=1.0):
       if bnode.t > tm: bnode.t = tm
-      bnode.n += 1
-      bnode = bnode.parent
-
+      bnode.n += strength
+      for parent in bnode.parents:
+        backprop(parent, tm, strength/len(bnode.parents))
+    backprop(node, tm)
   if DEBUG>=2: print()
+
+  if getenv("MCTSGRAPH"):
+    from tinygrad.engine.graph import nx, save_graph, GRAPHPATH
+    G = nx.DiGraph()
+    def add_node(node:MCTSNode):
+      if node.n == 0: return
+      for parent in node.parents: G.add_edge(parent, node)
+      gopts = node.kernel.applied_opts
+      edge_lbl = f"{str(gopts[-1].op)[7:]} {gopts[-1].axis} {gopts[-1].amt}" if len(gopts) else "ROOT"
+      G.add_node(node, label=f"{node.i}\n{edge_lbl}\nt {node.t:.2f}\nn {node.n}", fillcolor="#80ff8080", style='filled' if node.t == best_tm else '')
+      if node.children is not None:
+        for child in node.children: add_node(child)
+    add_node(root)
+    save_graph(G, f"{GRAPHPATH}.mcts", '-Grankdir=LR')
+    exit(0)
+
   if CACHELEVEL >= 1: diskcache_put("mcts_search", key, best.applied_opts)
   return best
