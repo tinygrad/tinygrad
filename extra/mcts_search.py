@@ -3,10 +3,11 @@ from typing import List, Optional, Dict, cast
 import numpy as np
 np.set_printoptions(suppress=True)
 import math, functools, time, random, statistics
-from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put, flatten
+from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put, colored
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.search import _ensure_buffer_alloc, get_kernel_actions, _try_compile_linearized_w_idx, _time_program
+from tinygrad.ops import LazyOp
 
 class MCTSNode:
   def __init__(self, kernel, parent=None):
@@ -92,29 +93,49 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   st = time.perf_counter()
   best, best_idx, best_tm = lin, 0, math.inf
   seen_libs: Dict[bytes, MCTSNode] = {}
+  seen_asts: Dict[LazyOp, MCTSNode] = {}
+  compile_time, runtime_time = 0, 0
   for i in range(amt):
     node = sample_tree(root, best_tm)  # sample and expand
     if node is None: break  # finished the whole tree
     node.i = i  # when was node explored
 
-    # rollout
-    _, compile_ret = _compile_fn((0, node.kernel))
-    if compile_ret is None:
-      tm = math.inf
+    opt_ast = node.kernel.get_optimized_ast()
+    if (sibling_node:=seen_asts.get(opt_ast, None)) is not None:
+      # early check for same optimized AST hit
+      remove_node(node)
+      tm = sibling_node.t
     else:
-      p, lib, _ = compile_ret
-      if (sibling_node:=seen_libs.get(lib, None)) is not None:
-        # remove this node, it's a duplicate
-        remove_node(node)
-        tm = sibling_node.t
+      seen_asts[opt_ast] = node
+
+      # rollout
+      tm1 = time.perf_counter()
+      _, compile_ret = _compile_fn((0, node.kernel))
+      tm2 = time.perf_counter()
+      if compile_ret is None:
+        tm = math.inf
       else:
-        seen_libs[lib] = node
-        try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=5, early_stop=best_tm*10/1e6))*1e6
-        except RuntimeError: tm = math.inf
-        node.tm = tm
+        p, lib, _ = compile_ret
+        if (sibling_node:=seen_libs.get(lib, None)) is not None:
+          # NOTE: these should all be caught by the AST check, need to canonicalize
+          # remove this node, it's a duplicate
+          remove_node(node)
+          tm = sibling_node.t
+        else:
+          seen_libs[lib] = node
+          try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=3, early_stop=best_tm*10/1e6))*1e6
+          except RuntimeError: tm = math.inf
+          node.tm = tm
+      tm3 = time.perf_counter()
+      compile_time += tm2-tm1
+      runtime_time += tm3-tm2
+
+      # mock rollout
+      #node.tm = tm = random.random() + 0.1
 
     if tm < best_tm: best, best_idx, best_tm = node.kernel, i, tm
-    if DEBUG>=2: print(f"\r{time.perf_counter() - st:7.2f}s: {tm:12.2f} us     best: {best_tm:12.2f} us @ {best_idx+1:4d}        {i+1:4d}/{amt:4d}         {node.kernel.colored_shape()}\033[K", end="")  # noqa: E501
+    et = time.perf_counter() - st
+    if DEBUG>=2: print(f"\r{et:7.2f}s {colored(f'{compile_time*100/et:3.0f}%', 'cyan')} {colored(f'{runtime_time*100/et:3.0f}%', 'red')}: {tm:12.2f} us     best: {best_tm:12.2f} us @ {best_idx+1:4d}      {i+1:4d}/{amt:4d}  {int(round((i+1)/et)):4d}/s     {node.kernel.colored_shape()}\033[K", end="")  # noqa: E501
 
     # backprop
     backprop(node, tm)

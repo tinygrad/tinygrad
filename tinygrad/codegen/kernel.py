@@ -681,6 +681,7 @@ class Kernel:
           if self.opts.device == "AMD":
             reduce_axes = [self.shape_len-self.upcasted]
             upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
+            # https://gpuopen.com/learn/wmma_on_rdna3/
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
             fix_st2 = None
           elif self.opts.device == "METAL":
