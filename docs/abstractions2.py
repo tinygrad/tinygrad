@@ -19,7 +19,7 @@ MallocAllocator.copyin(a, bytearray([2,0,0,0]))
 MallocAllocator.copyin(b, bytearray([3,0,0,0]))
 
 # compile a program to a binary
-lib = ClangCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
+lib = ClangCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }", 'add')
 
 # create a runtime for the program (ctypes.CDLL)
 fxn = ClangProgram("add", lib)
