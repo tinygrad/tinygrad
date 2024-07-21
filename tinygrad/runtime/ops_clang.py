@@ -28,14 +28,14 @@ class ClangJITCompiler(Compiler):
       rel = tgt - ploc
       tgt_pg, ploc_pg = tgt >> 12, ploc >> 12
       lo, hi = (tgt_pg-ploc_pg)&0b11,(tgt_pg-ploc_pg)>>2
-      if r_type in {0x2, 0x4}: patchuint32(image, ploc, 2**32+rel if rel < 0 else rel) # x86
-      elif r_type == 0x113: patchuint32(image, ploc, lo<<29 | hi<<5)  # R_AARCH64_ADR_PREL_PG_HI21
-      elif r_type == 0x115: patchuint32(image, ploc, (tgt&0xFFF)<<10) # R_AARCH64_ADD_ABS_LO12_NC
-      elif r_type in {0x11a, 0x11b}: patchuint32(image, ploc, 2**26+(rel>>2) if rel < 0 else (rel>>2)) # R_AARCH64_CALL26
-      elif r_type == 0x11c: patchuint32(image, ploc, (tgt&0xFFF)<<9) # R_AARCH64_LDST16_ABS_LO12_NC
-      elif r_type == 0x11d: patchuint32(image, ploc, (tgt&0xFFF)<<8) # R_AARCH64_LDST32_ABS_LO12_NC
-      elif r_type == 0x11e: patchuint32(image, ploc, (tgt&0xFFF)<<7) # R_AARCH64_LDST64_ABS_LO12_NC
-      elif r_type == 0x12b: patchuint32(image, ploc, (tgt&0xFFF)<<6) # R_AARCH64_LDST128_ABS_LO12_NC
+      if r_type in {libc.R_X86_64_PC32, libc.R_X86_64_PLT32}: patchuint32(image, ploc, 2**32+rel if rel < 0 else rel)
+      elif r_type == libc.R_AARCH64_ADR_PREL_PG_HI21: patchuint32(image, ploc, lo<<29 | hi<<5)
+      elif r_type == libc.R_AARCH64_ADD_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<10)
+      elif r_type in {libc.R_AARCH64_CALL26, libc.R_AARCH64_JUMP26}: patchuint32(image, ploc, 2**26+(rel>>2) if rel < 0 else (rel>>2))
+      elif r_type == libc.R_AARCH64_LDST16_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<9)
+      elif r_type == libc.R_AARCH64_LDST32_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<8)
+      elif r_type == libc.R_AARCH64_LDST64_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<7)
+      elif r_type == libc.R_AARCH64_LDST128_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<6)
       else: raise NotImplementedError(f"Encountered unknown relocation type {r_type:#x}")
     return bytes(image)
 
