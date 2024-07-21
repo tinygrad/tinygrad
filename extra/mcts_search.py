@@ -23,7 +23,7 @@ def expand_node(node:MCTSNode):
   random.shuffle(node.children)
 
 graph_mcts_cnt = 0
-C = 4
+C = 3
 def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   global graph_mcts_cnt
   # TODO: copied from BEAM
