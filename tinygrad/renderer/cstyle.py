@@ -179,7 +179,27 @@ class CStyleLanguage(Renderer):
           r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
         else: raise RuntimeError(f"failed to render {u}")
 
-    return self.render_kernel(name, kernel, bufs, uops)
+    k = self.render_kernel(name, kernel, bufs, uops)
+    if name == "r_3_4_5_4":
+      k = """
+      #include <metal_stdlib>
+using namespace metal;
+kernel void r_3_4_5_4(device float* data0, const device int* data1, const device int* data2, const device float* data3, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {
+  int gidx0 = gid.x; /* 5 */
+  int gidx1 = gid.y; /* 4 */
+  int gidx2 = gid.z; /* 3 */
+  int alu0 = ((gidx2*20)+(gidx1*5)+gidx0);
+  int val0 = *(data1+alu0);
+  float acc0 = 0.0f;
+  for (int ridx0 = 0; ridx0 < 4; ridx0++) {
+    int val1 = ridx0;
+    float val2 = *(data3+(gidx1*6)+gidx0+(ridx0*30));
+    acc0 = (acc0+((float)((!(val0!=val1)))*val2));
+  }
+  *(data0+alu0) = acc0;
+}
+      """
+    return k
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"

@@ -280,7 +280,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         reduce_for_op[tr] = r
       realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
-    if r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: aranges.append(r)
+    if getenv("FUSE_ARANGE", 1) and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: aranges.append(r)
 
   def _fold_arange(r:LazyBuffer, group:Set[LazyBuffer]) -> bool:
     if DEBUG_INDEX:=(getenv("DEBUG_INDEX")): print(f"checking {r}")
