@@ -101,7 +101,6 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
       pre_reduce = st.shape+tuple(s for i,s in enumerate(input_st.shape) if i in axis)
       axis = tuple(i+len(st.shape)-1 for i in axis)
       input_st = ShapeTracker((View.create(pre_reduce, st.views[-1].strides+input_st.real_strides()), ))
-      assert input_st.shape == pre_reduce, f"{input_st.shape} != {pre_reduce}"
     else:
       # reshape to match the output st of the top reduce
       if reduce_info:
@@ -285,9 +284,9 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
 
   def _fold_arange(r:LazyBuffer, group:Set[LazyBuffer]) -> bool:
     if DEBUG_INDEX:=(getenv("DEBUG_INDEX")): print(f"checking {r}")
-    # check if tr can cleanly fuse with its children
     for tr in group:
       if not (descendants:=_recurse_children(tr, realizes, children)): return False
+      # check if tr can cleanly fuse with its children
       for d in descendants:
         sts: Dict[LazyBuffer, ShapeTracker] = {}
         _buildup_st(d, ShapeTracker.from_shape(reduce_for_op[d].shape if d in reduce_for_op else d.shape), realizes, sts)
@@ -296,8 +295,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     return True
   for r in aranges:
     # TODO: what if only some children can fuse? can save an extra global_load
-    group = {op for op,reduceop in reduce_for_op.items() if r is reduceop}
-    if _fold_arange(r, group):
+    if _fold_arange(r, group:={op for op,reduceop in reduce_for_op.items() if r is reduceop}):
       for x in group: del realizes[x]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
