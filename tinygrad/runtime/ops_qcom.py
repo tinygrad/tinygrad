@@ -118,6 +118,10 @@ class HWCommandQueue():
     if opcode: self.q += [pkt7_hdr(opcode, len(vals)), *vals]
     if reg: self.q += [pkt4_hdr(reg, len(vals)), *vals]
 
+  def cmd(self, opcode: int, *vals: int): self.q += [pkt7_hdr(opcode, len(vals)), *vals]
+
+  def reg(self, reg: int, *vals: int): self.q += [pkt4_hdr(reg, len(vals)), *vals]
+
   def signal(self, signal, value=0):
     self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_FLUSH_TS | (adreno.EV_WRITE_USER_64B << adreno.CP_EVENT_WRITE7_0_WRITE_SRC__SHIFT), *data64_le(mv_address(signal)), *data64_le(value)])
     self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_INVALIDATE])
@@ -147,6 +151,68 @@ class HWCommandQueue():
 
     device._ioctl(0x4A, submit_req)
     self.q = []
+  
+  def exec(self, prg, global_size, local_size):
+    self.cmd(adreno.CP_SET_MARKER, adreno.RM6_COMPUTE)
+    self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc)
+    self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x60)
+    self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x0)
+    self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, 0x80)
+    self.reg(adreno.REG_A6XX_SP_CS_IBO_COUNT, 0x40)
+    self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, adreno.ISAMMODE_CL << adreno.A6XX_SP_MODE_CONTROL_ISAMMODE__SHIFT)
+    self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, adreno.A6XX_SP_PERFCTR_ENABLE_CS)
+    self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, adreno.ISAMMODE_CL | (1 << 3)) # ISAMMODE|UNK3
+    self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
+    self.reg(adreno.REG_A6XX_UCHE_UNKNOWN_0E12, 0x10000000)
+    self.reg(adreno.REG_A6XX_HLSQ_CS_CNTL, 0x140)
+    self.reg(adreno.REG_A6XX_SP_CS_CONFIG, 0x100)
+    self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, 0)
+
+    self.reg(
+      adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
+        3 | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT) | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT) | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT),
+        global_size[0], 0, global_size[1], 0, global_size[2], 0, # global size x,y,z followed by offsets
+        0xccc0cf, 0x2fc,
+        global_size[0], global_size[1], global_size[2], # global sizes again?
+    )
+
+    self.cmd(adreno.CP_RUN_OPENCL, 0)
+    self.cmd(adreno.CP_WAIT_FOR_IDLE)
+
+class QcomProgram:
+  def __init__(self, device: QcomDevice, name: str, lib: bytes):
+    self.device, self.name, self.lib = device, name, lib
+
+    self.private_gpu = self.device._gpu_alloc(0x202000, 0xC0F00)
+
+    image_offset, image_size = struct.unpack("I"), lib[0xC0:4], struct.unpack("I"), lib[0x100:4]
+    image = lib[image_offset:image_offset+image_size]
+    self.lib_gpu = self.device._gpu_alloc(len(self.image), 0x10C0A00, map_to_cpu=True)
+    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image_size)
+
+    self.consts_gpu = self.device._gpu_alloc(0x1000, 0xC0A00, map_to_cpu=True)
+    ctypes.memset(self.consts_gpu.va_addr, 0, 0x1000)
+
+  def _set_const(self, offset: int, val: int): ctypes.cast(self.consts_gpu.va_addr + offset, ctypes.POINTER(ctypes.c_uint64)).contents.value = val
+    
+  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    for i, arg in enumerate(args): self._set_const(0x140 + i * 0x10, arg)
+
+    q = HWCommandQueue()
+
+    q.reg(
+      adreno.REG_A6XX_SP_CS_CTRL_REG0,
+      # set max regs 16 for now, todo: optimize this
+      (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT) | (16 << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT) | (16 << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT),
+      0x41, 0, 0, # offsets
+      data64_le(self.lib_gpu.va_addr), data64_le(self.private_gpu.va_addr),
+    )
+
+    q.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, self.lib_gpu.size // 4)
+    q.cmd(adreno.CP_LOAD_STATE6_FRAG, 0xf60000, data64_le(self.lib_gpu.va_addr))
+    q.cmd(adreno.CP_LOAD_STATE6_FRAG, 0x40364000, data64_le(self.consts_gpu.va_addr))
+    q.exec(self, global_size, local_size)
+
 
 if __name__ == '__main__':
   device = QcomDevice()
