@@ -725,7 +725,6 @@ class Kernel:
 
   def linearize(self) -> Kernel:
     modified_ast = self.get_optimized_ast()
-
     if DEBUG >= 3:
       print(self.name)
       print(modified_ast)

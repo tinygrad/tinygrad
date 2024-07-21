@@ -7,6 +7,7 @@ from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
     merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -88,11 +89,10 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, \
       reduce_info, cache) for x in buf.srcs), arg))
 
-def _permute_input(input_to_reduce:LazyBuffer, top_reduce_axes:Tuple[int, ...]):
-  permute_axis = tuple(i for i in range(len(input_to_reduce.shape)) if i not in top_reduce_axes) + top_reduce_axes
-  tmp = input_to_reduce.st.permute(permute_axis)
-  rshape = tmp.shape[-len(top_reduce_axes):]
-  return tmp, rshape
+def _permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
+  permute_axis = tuple(i for i in range(len(input_st.shape)) if i not in axis) + axis
+  tmp = input_st.permute(permute_axis)
+  return tmp, tmp.shape[-len(axis):]
 
 def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
@@ -103,7 +103,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
   if buf.op in ReduceOps and buf not in reduce_info:
     axis = buf.arg
     if not st.contiguous:
-      tmp, rshape = _permute_input(buf.srcs[0], buf.arg)
+      tmp, rshape = _permute_reduce(input_st, axis)
       prshape = prod(rshape)
       strides = strides_for_shape(rshape)
       nv: List[View] = []
@@ -111,11 +111,13 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
         nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                               v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
       input_st = tmp + ShapeTracker(tuple(nv))
-      axis = axis + tuple(range(len(input_st.shape)-len(rshape), len(input_st.shape)))
     else:
-      # reshape? to match the output st of the top reduce
-      # TODO: when to fold the next reshape?
-      if reduce_info: return
+      if reduce_info:
+        top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
+        _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
+        new_axis = axis + tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
+        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
+        return
     reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):

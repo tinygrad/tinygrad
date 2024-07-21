@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata
 from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, reduce_st
 from tinygrad.shape.symbolic import sint, Variable
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
 from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
