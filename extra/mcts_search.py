@@ -1,6 +1,7 @@
+from __future__ import annotations
 from typing import List, Optional, Dict
 import math, functools, time, random, statistics
-from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put
+from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put, flatten
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.search import _ensure_buffer_alloc, get_kernel_actions, _try_compile_linearized_w_idx, _time_program
@@ -14,6 +15,7 @@ class MCTSNode:
     self.i = -1
     self.parents: List[MCTSNode] = [parent] if parent is not None else []
     self.children: Optional[List[MCTSNode]] = None
+  def all_parents(self) -> List[MCTSNode]: return self.parents + flatten([x.all_parents() for x in self.parents])
 
 def expand_node(node:MCTSNode):
   assert node.children is None
@@ -21,7 +23,7 @@ def expand_node(node:MCTSNode):
   random.shuffle(node.children)
 
 graph_mcts_cnt = 0
-C = math.sqrt(2)
+C = 4
 def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   global graph_mcts_cnt
   # TODO: copied from BEAM
@@ -67,7 +69,12 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     else:
       p, lib, _ = compile_ret
       if (sibling_node:=seen_libs.get(lib, None)) is not None:
-        # TODO: add parents to sibling_node? it was forming cycles
+        # sibiling node can be a parent of this node. ignore it then
+        #if sibling_node not in node.all_parents():
+        #  TODO: should we do this?
+        #  for p in node.parents:
+        #    sibling_node.parents.append(p)
+        #    if p.children is not None: p.children.append(sibling_node)
         remove_node(node)
         tm = sibling_node.t
       else:
