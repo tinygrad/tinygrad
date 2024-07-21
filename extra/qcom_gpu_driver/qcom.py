@@ -150,7 +150,7 @@ class Qcom():
     buff2.push(reg=0xb990, vals=[0xf01f,0x48,0,0x480,0,1,0,0xccc0cf,0x2fc,9,0x48,1]) # local size, global size, dimension
     buff2.push(reg=0x26) # CP_WAIT_FOR_IDLE
     buff2.push(reg=0xae03, vals=[0x20]) # SP_CHICKEN_BITS
-    buff2.push(reg=0xa9b0, vals=[0x100402, 0x41, 0, 0, shader_gpuaddr & 0xffffffff, (shader_gpuaddr >> 32) & 0xffffffff, 0, private_gpuaddr & 0xffffffff, (private_gpuaddr >> 32) & 0xffffffff, 0x101])
+    buff2.push(reg=0xa9b0, vals=[0x100402 | (16 << 1) | (16 << 7), 0x41, 0, 0, shader_gpuaddr & 0xffffffff, (shader_gpuaddr >> 32) & 0xffffffff, 0, private_gpuaddr & 0xffffffff, (private_gpuaddr >> 32) & 0xffffffff, 0x101])
     buff2.push(reg=0xa9bb, vals=[0x100]) # SP_CS_CONFIG
     buff2.push(reg=0xa9bd, vals=[0]) # SP_CS_PVT_MEM_HW_STACK_OFFSET
     buff2.push(opcode=0x34, vals=[0x40364000, consts_gpuaddr & 0xffffffff, (consts_gpuaddr >> 32) & 0xffffffff]) # CP_LOAD_STATE6_FRAG, load constants
