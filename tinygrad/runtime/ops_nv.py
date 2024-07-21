@@ -260,7 +260,7 @@ class NVProgram(HCQProgram):
           if typ & 0xffff == 0x1204: self.device._ensure_has_local_memory(val + 0x240)
 
     # Apply relocs
-    for apply_image_offset, rel_sym_offset, typ in relocs:
+    for apply_image_offset, rel_sym_offset, typ, _ in relocs:
       # These types are CUDA-specific, applying them here
       if typ == 2: image[apply_image_offset:apply_image_offset+8] = struct.pack('<Q', self.lib_gpu.va_addr + rel_sym_offset) # R_CUDA_64
       elif typ == 0x38: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) & 0xffffffff)

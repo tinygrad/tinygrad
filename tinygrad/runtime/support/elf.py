@@ -38,6 +38,6 @@ def elf_loader(blob:bytes, force_section_align:int=1, force_section:Optional[Dic
   for sh, trgt_sh_name, c_rels in rel + rela:
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
     rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
-    relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value + raddend, rtype) for roff, sym, rtype, raddend in rels]
+    relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
   return memoryview(image), sections, relocs

@@ -16,7 +16,7 @@ class ClangCompiler(Compiler):
             '-Wno-unused-function', '-Wno-unused-command-line-argument', '-Werror', '-include', f'{os.path.dirname(__file__)}/support/tinymath.h',
             '-ffreestanding', '-nostdlib', '-ffixed-x18' if platform.machine() == "arm64" else '-Xclang=-fnative-half-type', '-', '-o', '-')
     image, _, relocs = elf_loader(subprocess.check_output(args, input=src.encode('utf-8')), force_section={'kernel': 0})
-    for ploc,tgt,r_type in relocs:
+    for ploc,tgt,r_type in [(a,b+d,c) for a,b,c,d in relocs]:
       rel = tgt - ploc
       tgt_pg, ploc_pg = tgt >> 12, ploc >> 12
       lo, hi = (tgt_pg-ploc_pg)&0b11,(tgt_pg-ploc_pg)>>2
