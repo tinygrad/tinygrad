@@ -678,6 +678,8 @@ class Kernel:
           assert rsrc.op is BinaryOps.MUL
 
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
+            print(st1.shape)
+            print(self.shape_len)
             wd = self.global_dims
             tcd = self.shape_len-self.upcasted
             assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, "warp dims wrong"
@@ -688,8 +690,18 @@ class Kernel:
             permaxis += list(range(wd+len(warp_dims), tcd))
             for x,y in pattern_2: permaxis.append(y + (wd if x == 0 else tcd))
             permaxis += list(range(tcd+len(tcd_expand), self.shape_len+len(tcd_expand)-len(tcd_dims)))
-            new_shape = st1.shape
-            permaxis = range(9)
+            print(new_shape)
+            print(permaxis)
+            #new_shape = st1.shape
+            #permaxis = range(9)
+            # [0,1,6,7,3,4,5,2,8,9] most interesting so far, try to adjust just the lidx2 mult in
+            # 7652 gets us almost correct alu5, which other ones do  as well, but they're flipped so it
+            # we want int alu4 = (alu1+(ridx0*16)+(lidx2*2));
+            # int alu5 = (alu0+lidx2+alu2+(ridx0*65536));
+            #permaxis = [0,1,5,3,4,7,6,2,8,9] # this works!!!
+            #[0,1,6,3,4,5,2,7,8]
+            # new record (0.00136% wrong) permaxis = [0,1,6,3,4,7,5,2,8,9] (16,8), (2,8,8)
+            # permaxis = range(9)
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device == "AMD":
@@ -712,8 +724,8 @@ class Kernel:
               ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
           elif self.opts.device == "GPU":
             reduce_axes = [self.shape_len-self.upcasted]
-            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted) # how to vary?
-            fix_st1 = functools.partial(fix_st, (8,), (16,), (16,), (), ())
+            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
+            fix_st1 = functools.partial(fix_st, (8,), (16,8), (8,2,8), ((1,0),), ((1,2), (1,1), (0,0)))
             fix_st2 = None
           else:
             raise RuntimeError("unsupported device for tensor cores")
