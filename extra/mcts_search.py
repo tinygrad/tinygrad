@@ -5,7 +5,7 @@ np.set_printoptions(suppress=True)
 import math, functools, time, random, statistics
 from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put, colored, Profiling
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer, Device, CompileError
 from tinygrad.engine.search import _ensure_buffer_alloc, get_kernel_actions, _time_program
 from tinygrad.ops import LazyOp
 
@@ -39,9 +39,11 @@ def _sample_tree(node:MCTSNode, best_tm:float) -> MCTSNode:
   ucb_explored_children = []
   for child in node.children:
     if child.n == 0: unexplored_children.append(child)
-    elif not math.isinf(child.t):
-      explored_children.append(child)
-      ucb_explored_children.append(-child.t/best_tm + C*math.sqrt(math.log(node.n)/child.n))
+    else:
+      ucb = -child.t/best_tm + C*math.sqrt(math.log(node.n)/child.n)
+      if not math.isinf(ucb):
+        explored_children.append(child)
+        ucb_explored_children.append(ucb)
   if len(unexplored_children): return random.choice(unexplored_children)
   if not len(explored_children): return node
   ucb_exp = np.exp(np.array(ucb_explored_children)/TEMP)
@@ -114,7 +116,8 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       tm1 = time.perf_counter()
       try:
         lib = dev.compiler.compile(p.src)
-      except RuntimeError:
+      except CompileError:
+        # NOTE: many of these "compiler errors" are caused by bad code output from the lowerer
         lib = None
       tm2 = time.perf_counter()
       if lib is None:
