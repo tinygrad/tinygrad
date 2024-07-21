@@ -63,7 +63,7 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tup
     if len(x[1].uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
     p = x[1].to_program(name_override="test")
     st = time.perf_counter()
-    prog = compiler.compile(p.src)
+    prog = compiler.compile(p.src, p.function_name)
     et = time.perf_counter() - st
     ret = (p, prog, et)
   except RuntimeError:
@@ -193,7 +193,7 @@ def time_linearizer(lin:Kernel, rawbufs:List[Buffer], allow_test_size=True, max_
   rawbufs = _ensure_buffer_alloc(rawbufs)
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   p = lin.to_program()
-  tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
+  tms = _time_program(p, dev.compiler.compile(p.src, p.function_name), var_vals, rawbufs,
                       max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)

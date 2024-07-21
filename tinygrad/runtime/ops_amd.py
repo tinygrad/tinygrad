@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any
+from typing import Tuple, List, Optional, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, subprocess, time, array
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, hcq_profile, \
@@ -64,7 +64,7 @@ class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes:
+  def compile(self, src:str, fname:Optional[str]) -> bytes:
     try: return compile_hip(src, self.arch)
     except RuntimeError as e: raise CompileError(e) from e
 

@@ -196,7 +196,7 @@ class PythonRenderer(Renderer):
     return base64.b64encode(pickle.dumps(lops)).decode()
 
 class PythonCompiler(Compiler):
-  def compile(self, src:str) -> bytes: return base64.b64decode(src)
+  def compile(self, src:str, fname:Optional[str]) -> bytes: return base64.b64decode(src)
 
 class PythonAllocator(Allocator):
   def _alloc(self, size, options): return memoryview(bytearray(size))

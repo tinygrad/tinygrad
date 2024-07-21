@@ -11,15 +11,15 @@ class TestDeviceSpeed(unittest.TestCase):
 
   def test_empty_compile(self):
     with Timing("compiler "):
-      self.dev.compiler.compile(self.empty)
+      self.dev.compiler.compile(self.empty, None)
 
   def test_empty_compile_twice(self):
-    self.dev.compiler.compile(self.empty)
+    self.dev.compiler.compile(self.empty, None)
     with Timing("compiler "):
-      self.dev.compiler.compile(self.empty)
+      self.dev.compiler.compile(self.empty, None)
 
   def test_launch_speed(self):
-    prg_bin = self.dev.compiler.compile(self.empty)
+    prg_bin = self.dev.compiler.compile(self.empty, None)
     prg = self.dev.runtime("test", prg_bin)
     for _ in range(10): prg() # ignore first launches
     with Timing("launch 1000x "):
@@ -28,7 +28,7 @@ class TestDeviceSpeed(unittest.TestCase):
       for _ in range(1000): prg(wait=True)
 
   def test_profile_launch_speed(self):
-    prg_bin = self.dev.compiler.compile(self.empty)
+    prg_bin = self.dev.compiler.compile(self.empty, None)
     prg = self.dev.runtime("test", prg_bin)
     for _ in range(10): prg() # ignore first launches
     with Profiling():

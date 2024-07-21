@@ -174,12 +174,12 @@ class CompileError(Exception): pass
 
 class Compiler:
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
-  def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
-  def compile_cached(self, src:str) -> bytes:
-    if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
+  def compile(self, src:str, fname:Optional[str]) -> bytes: raise NotImplementedError("need a compile function")
+  def compile_cached(self, src:str, fname:Optional[str]) -> bytes:
+    if self.cachekey is None or (lib := diskcache_get(self.cachekey, {'src': src, 'fname': fname if fname is not None else ''})) is None:
       assert not getenv("ASSERT_COMPILE"), f"tried to compile with ASSERT_COMPILE set\n{src}"
-      lib = self.compile(src)
-      if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
+      lib = self.compile(src, fname)
+      if self.cachekey is not None: diskcache_put(self.cachekey, {'src': src, 'fname': fname if fname is not None else ''}, lib)
     return lib
 
 class Compiled:

@@ -53,7 +53,7 @@ class UOpsFuzzerRunner(CompiledRunner):
       if DEBUG >= 5: uops.print()
       self.p = replace(self.p, name=(name:=f"{init_name}fuzz{i}"), src=Device[self.p.dname].renderer.render(name, uops), uops=uops)
       if DEBUG >= 4: print(self.p.src)
-      self.lib = Device[self.p.dname].compiler.compile_cached(self.p.src)
+      self.lib = Device[self.p.dname].compiler.compile_cached(self.p.src, self.p.function_name)
       self.clprg = Device[self.p.dname].runtime(name, self.lib)
       for x in (rawbufs:=[init_globals[i[0]] for i in self.p.globals]): x.copyin(init_rawbufs[x])
       # verify

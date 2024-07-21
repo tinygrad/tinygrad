@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools
-from typing import Tuple
+from typing import Optional, Tuple
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import DEBUG, cpu_time_execution, cpu_objdump
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -10,7 +10,7 @@ class LLVMCompiler(Compiler):
   def __init__(self, device:LLVMDevice):
     self.device = device
     super().__init__("compile_llvm")
-  def compile(self, src:str) -> bytes:
+  def compile(self, src:str, fname:Optional[str]) -> bytes:
     mod = llvm.parse_assembly(src)
     mod.verify()
     self.device.optimizer.run(mod)

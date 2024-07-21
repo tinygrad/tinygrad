@@ -20,22 +20,22 @@ class TestDevice(unittest.TestCase):
 
 class MockCompiler(Compiler):
   def __init__(self, key): super().__init__(key)
-  def compile(self, src) -> bytes: return src.encode()
+  def compile(self, src, fname) -> bytes: return src.encode()
 
 class TestCompiler(unittest.TestCase):
   def test_compile_cached(self):
-    diskcache_put("key", "123", None) # clear cache
+    diskcache_put("key", {'src': "123", 'fname': ''}, None) # clear cache
     getenv.cache_clear()
     with patch.dict(os.environ, {"DISABLE_COMPILER_CACHE": "0"}, clear=True):
-      assert MockCompiler("key").compile_cached("123") == str.encode("123")
-      assert diskcache_get("key", "123") == str.encode("123")
+      assert MockCompiler("key").compile_cached("123", None) == str.encode("123")
+      assert diskcache_get("key", {'src': "123", 'fname':''}) == str.encode("123")
 
   def test_compile_cached_disabled(self):
-    diskcache_put("disabled_key", "123", None) # clear cache
+    diskcache_put("disabled_key", {'src': "123", 'fname': ''}, None) # clear cache
     getenv.cache_clear()
     with patch.dict(os.environ, {"DISABLE_COMPILER_CACHE": "1"}, clear=True):
-      assert MockCompiler("disabled_key").compile_cached("123") == str.encode("123")
-      assert diskcache_get("disabled_key", "123") is None
+      assert MockCompiler("disabled_key").compile_cached("123", None) == str.encode("123")
+      assert diskcache_get("disabled_key", {'src': "123", 'fname': ''}) is None
 
 if __name__ == "__main__":
   unittest.main()

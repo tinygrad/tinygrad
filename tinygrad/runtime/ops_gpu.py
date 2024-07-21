@@ -17,7 +17,7 @@ class CLCompiler(Compiler):
   def __init__(self, device:CLDevice, compile_key:str):
     self.device = device
     super().__init__(f"compile_cl_{compile_key}")
-  def compile(self, src:str) -> bytes:
+  def compile(self, src:str, fname:Optional[str]) -> bytes:
     program = checked(cl.clCreateProgramWithSource(self.device.context, 1, to_char_p_p([src.encode()]), None, status := ctypes.c_int32()), status)
     build_status: int = cl.clBuildProgram(program, 1, self.device.device_id, None, cl.clBuildProgram.argtypes[4](), None)
     if build_status != 0:

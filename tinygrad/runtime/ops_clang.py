@@ -4,7 +4,7 @@ from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
 
 class ClangCompiler(Compiler):
-  def compile(self, src:str) -> bytes:
+  def compile(self, src:str, fname) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
       subprocess.check_output(['clang', '-include', 'tgmath.h', '-shared', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-',

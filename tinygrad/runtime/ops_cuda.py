@@ -52,7 +52,7 @@ class PTXCompiler(Compiler):
     self.arch = arch
     self.version = "7.8" if arch >= "sm_89" else "7.5"
     super().__init__(f"compile_ptx_{self.arch}")
-  def compile(self, src:str) -> bytes: return src.replace("TARGET", self.arch).replace("VERSION", self.version).encode()
+  def compile(self, src:str, fname:Optional[str]) -> bytes: return src.replace("TARGET", self.arch).replace("VERSION", self.version).encode()
 
 class CUDACompiler(Compiler):
   def __init__(self, arch:str):
@@ -61,7 +61,7 @@ class CUDACompiler(Compiler):
     self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_cuda_{self.arch}")
-  def compile(self, src:str) -> bytes:
+  def compile(self, src:str, fname:Optional[str]) -> bytes:
     check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
     status = nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
 

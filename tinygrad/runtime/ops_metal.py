@@ -15,7 +15,7 @@ class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
     super().__init__("compile_metal")
-  def compile(self, src:str) -> bytes:
+  def compile(self, src:str, fname:Optional[str]) -> bytes:
     if self.device is None:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
