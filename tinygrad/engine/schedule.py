@@ -10,6 +10,7 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 from tinygrad.device import Buffer, Device
 
 # creation can recurse a lot
@@ -99,8 +100,8 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
       assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
       pre_reduce = st.shape+tuple(s for i,s in enumerate(input_st.shape) if i in axis)
       axis = tuple(i+len(st.shape)-1 for i in axis)
-      mid_reshape = tuple(1 if s not in input_st.shape else s for s in pre_reduce)
-      input_st = input_st.reshape(mid_reshape).expand(pre_reduce)
+      input_st = ShapeTracker((View.create(pre_reduce, st.views[-1].strides+input_st.real_strides()), ))
+      assert input_st.shape == pre_reduce, f"{input_st.shape} != {pre_reduce}"
     else:
       # reshape to match the output st of the top reduce
       if reduce_info:
