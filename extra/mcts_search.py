@@ -23,9 +23,15 @@ def expand_node(node:MCTSNode):
   assert node.children is None
   node.children = [MCTSNode(x, node) for x in get_kernel_actions(node.kernel, include_0=False).values()]
 
+def remove_node(node:MCTSNode):
+  for parent in node.parents:
+    assert parent.children is not None
+    parent.children.remove(node)
+    parent.removed_children.append(node)
+
 C = math.sqrt(2)
 TEMP = 0.5
-def sample_tree(node:MCTSNode, best_tm:float) -> MCTSNode:
+def _sample_tree(node:MCTSNode, best_tm:float) -> MCTSNode:
   if node.children is None or len(node.children) == 0: return node
   unexplored_children = []
   explored_children = []
@@ -38,18 +44,34 @@ def sample_tree(node:MCTSNode, best_tm:float) -> MCTSNode:
   if len(unexplored_children): return random.choice(unexplored_children)
   if not len(explored_children): return node
   ucb_exp = np.exp(np.array(ucb_explored_children)/TEMP)
-  return sample_tree(explored_children[np.random.choice(len(ucb_exp), p=ucb_exp/np.sum(ucb_exp))], best_tm)
+  return _sample_tree(explored_children[np.random.choice(len(ucb_exp), p=ucb_exp/np.sum(ucb_exp))], best_tm)
+
+# this will expand/remove sometimes
+def sample_tree(root:MCTSNode, best_tm:float) -> Optional[MCTSNode]:
+  if root.children is None: expand_node(root)
+  while root.children:
+    # tree traversal
+    node = _sample_tree(root, best_tm)
+
+    if node.children is not None and len(node.children) == 0:
+      remove_node(node)
+      continue
+
+    # node expansion
+    if node.n != 0:
+      if node.children is None: expand_node(node)
+      assert node.children is not None
+      if len(node.children) == 0:
+        remove_node(node)
+        continue
+      node = random.choice(node.children)
+    return node
+  return None
 
 def backprop(bnode:MCTSNode, tm, strength=1.0):
   if bnode.t > tm: bnode.t = tm
   bnode.n += strength
   for parent in bnode.parents: backprop(parent, tm, strength/len(bnode.parents))
-
-def remove_node(node:MCTSNode):
-  for parent in node.parents:
-    assert parent.children is not None
-    parent.children.remove(node)
-    parent.removed_children.append(node)
 
 graph_mcts_cnt = 0
 def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
@@ -65,31 +87,14 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   dev = Device[lin.opts.device]
   root = MCTSNode(lin)
-  expand_node(root)
   _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
 
   st = time.perf_counter()
   best, best_idx, best_tm = lin, 0, math.inf
   seen_libs: Dict[bytes, MCTSNode] = {}
   for i in range(amt):
-    while root.children:
-      # tree traversal
-      node = sample_tree(root, best_tm)
-
-      if node.children is not None and len(node.children) == 0:
-        remove_node(node)
-        continue
-
-      # node expansion
-      if node.n != 0:
-        if node.children is None: expand_node(node)
-        assert node.children is not None
-        if len(node.children) == 0:
-          remove_node(node)
-          continue
-        node = random.choice(node.children)
-      break
-    if root.children is not None and len(root.children) == 0: break
+    node = sample_tree(root, best_tm)  # sample and expand
+    if node is None: break  # finished the whole tree
     node.i = i  # when was node explored
 
     # rollout
@@ -105,8 +110,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       else:
         seen_libs[lib] = node
         try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=5, early_stop=best_tm*10/1e6))*1e6
-        except RuntimeError:
-          tm = math.inf
+        except RuntimeError: tm = math.inf
         node.tm = tm
 
     if tm < best_tm: best, best_idx, best_tm = node.kernel, i, tm
