@@ -17,11 +17,11 @@ class MCTSNode:
     self.i = -1
     self.parents: List[MCTSNode] = [parent] if parent is not None else []
     self.children: Optional[List[MCTSNode]] = None
+    self.removed_children: List[MCTSNode] = []
 
-def expand_node(node:MCTSNode) -> MCTSNode:
+def expand_node(node:MCTSNode):
   assert node.children is None
   node.children = [MCTSNode(x, node) for x in get_kernel_actions(node.kernel, include_0=False).values()]
-  return random.choice(node.children)
 
 def sample_tree(node:MCTSNode, best_tm:float, temperature:float=1.0) -> MCTSNode:
   if node.children is None or len(node.children) == 0: return node
@@ -42,6 +42,12 @@ def backprop(bnode:MCTSNode, tm, strength=1.0):
   bnode.n += strength
   for parent in bnode.parents: backprop(parent, tm, strength/len(bnode.parents))
 
+def remove_node(node:MCTSNode):
+  for parent in node.parents:
+    assert parent.children is not None
+    parent.children.remove(node)
+    parent.removed_children.append(node)
+
 graph_mcts_cnt = 0
 C = math.sqrt(2)
 def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
@@ -57,18 +63,30 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   dev = Device[lin.opts.device]
   root = MCTSNode(lin)
+  expand_node(root)
   _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
 
   st = time.perf_counter()
   best, best_idx, best_tm = lin, 0, math.inf
   seen_libs: Dict[bytes, MCTSNode] = {}
   for i in range(amt):
-    # tree traversal
-    node = sample_tree(root, best_tm, temperature=0.5)
-    if node.children is not None: break  # no more nodes?
+    while len(root.children):
+      # tree traversal
+      node = sample_tree(root, best_tm, temperature=0.5)
 
-    # node expansion
-    if node.n != 0: node = expand_node(node)
+      if node.children is not None and len(node.children) == 0:
+        remove_node(node)
+        continue
+
+      # node expansion
+      if node.n != 0:
+        expand_node(node)
+        if len(node.children) == 0:
+          remove_node(node)
+          continue
+        node = random.choice(node.children)
+      break
+    if len(root.children) == 0: break
     node.i = i  # when was node explored
 
     # rollout
@@ -79,9 +97,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       p, lib, _ = compile_ret
       if (sibling_node:=seen_libs.get(lib, None)) is not None:
         # remove this node, it's a duplicate
-        for parent in node.parents:
-          assert parent.children is not None
-          parent.children.remove(node)
+        remove_node(node)
         tm = sibling_node.t
       else:
         seen_libs[lib] = node
@@ -108,7 +124,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
       G.add_node(node, label=f"{node.i+1}\n{node.tm:.2f} us\n{edge_lbl}\nt {node.t:.2f}\nn {node.n}",
                  fillcolor="#80ff8080" if node.tm == best_tm else "#ffff8080", style='filled' if node.t == best_tm else '')
       if node.children is not None:
-        for child in node.children: add_node(child)
+        for child in node.children+node.removed_children: add_node(child)
     add_node(root)
     save_graph(G, f"{GRAPHPATH}.{graph_mcts_cnt}.mcts", '-Grankdir=LR')
     graph_mcts_cnt += 1
