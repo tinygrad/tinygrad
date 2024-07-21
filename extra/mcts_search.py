@@ -3,15 +3,15 @@ from typing import List, Optional, Dict, cast
 import numpy as np
 np.set_printoptions(suppress=True)
 import math, functools, time, random, statistics
-from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put, colored
+from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put, colored, Profiling
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.search import _ensure_buffer_alloc, get_kernel_actions, _time_program
 from tinygrad.ops import LazyOp
 
 class MCTSNode:
-  def __init__(self, kernel, parent=None):
-    self.kernel = kernel
+  def __init__(self, kernel:Kernel, parent=None):
+    self.kernel:Kernel = kernel
     self.t = math.inf
     self.n = 0
     self.tm = math.inf
@@ -93,7 +93,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   best, best_idx, best_tm = lin, 0, math.inf
   seen_libs: Dict[bytes, MCTSNode] = {}
   seen_asts: Dict[LazyOp, MCTSNode] = {}
-  compile_time, runtime_time = 0, 0
+  compile_time, runtime_time = 0.0, 0.0
   for i in range(amt):
     node = sample_tree(root, best_tm)  # sample and expand
     if node is None: break  # finished the whole tree
@@ -107,7 +107,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     else:
       seen_asts[opt_ast] = node
 
-      # lowering
+      # lowering (50% of the time)
       p = node.kernel.to_program(name_override="test")
 
       # rollout
@@ -127,7 +127,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
           tm = sibling_node.t
         else:
           seen_libs[lib] = node
-          try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=3, early_stop=best_tm*10/1e6))*1e6
+          try: tm = statistics.median(_time_program(p, lib, var_vals, rawbufs, cnt=3, early_stop=best_tm*5/1e6))*1e6
           except RuntimeError: tm = math.inf
           node.tm = tm
       tm3 = time.perf_counter()
