@@ -668,7 +668,7 @@ class Kernel:
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
-          if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0] 
+          if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
           assert rsrc.op is BinaryOps.MUL
 
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
