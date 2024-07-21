@@ -1,5 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional, Dict
+import numpy as np
+np.set_printoptions(suppress=True)
 import math, functools, time, random, statistics
 from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put, flatten
 from tinygrad.codegen.kernel import Kernel
@@ -15,15 +17,27 @@ class MCTSNode:
     self.i = -1
     self.parents: List[MCTSNode] = [parent] if parent is not None else []
     self.children: Optional[List[MCTSNode]] = None
-  def all_parents(self) -> List[MCTSNode]: return self.parents + flatten([x.all_parents() for x in self.parents])
 
 def expand_node(node:MCTSNode):
   assert node.children is None
   node.children = [MCTSNode(x, node) for x in get_kernel_actions(node.kernel, include_0=False).values()]
-  random.shuffle(node.children)
+
+def sample_tree(node:MCTSNode, best_tm:float, temperature:float=1.0) -> MCTSNode:
+  if node.children is None or len(node.children) == 0: return node
+  unexplored_children = []
+  explored_children = []
+  ucb_explored_children = []
+  for child in node.children:
+    if child.n == 0: unexplored_children.append(child)
+    else:
+      explored_children.append(child)
+      ucb_explored_children.append(-child.t/best_tm + C*math.sqrt(math.log(node.n)/child.n))
+  if len(unexplored_children): return random.choice(unexplored_children)
+  ucb_exp = np.exp(np.array(ucb_explored_children)/temperature)
+  return sample_tree(np.random.choice(explored_children, p=ucb_exp/np.sum(ucb_exp)), best_tm, temperature)
 
 graph_mcts_cnt = 0
-C = 3
+C = math.sqrt(2)
 def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   global graph_mcts_cnt
   # TODO: copied from BEAM
@@ -39,25 +53,14 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   root = MCTSNode(lin)
   _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
 
-  def remove_node(node):
-    for parent in node.parents:
-      assert parent.children is not None
-      parent.children.remove(node)
-
   st = time.perf_counter()
   best, best_idx, best_tm = lin, 0, math.inf
   seen_libs: Dict[bytes, MCTSNode] = {}
   for i in range(amt):
     # tree traversal
-    node = root
-    while node.children is not None and len(node.children) != 0:
-      #if DEBUG>=2: print(f"{(node.t/node.n)/best_tm:6.2f} value {node.n:3d}", node.kernel.name)
-      ucb = sorted([(math.inf if child.n == 0 else -child.t/best_tm + C*math.sqrt(math.log(node.n)/child.n), child)
-                    for child in node.children], key=lambda x: x[0], reverse=True) # pylint: disable=not-an-iterable
-      node = ucb[0][1]
-    node.i = i  # when was node explored
-
+    node = sample_tree(root, best_tm, temperature=0.7)
     if node.children is not None: break  # no more nodes?
+    node.i = i  # when was node explored
 
     # node expansion
     expand_node(node)
@@ -69,13 +72,10 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     else:
       p, lib, _ = compile_ret
       if (sibling_node:=seen_libs.get(lib, None)) is not None:
-        # sibiling node can be a parent of this node. ignore it then
-        #if sibling_node not in node.all_parents():
-        #  TODO: should we do this?
-        #  for p in node.parents:
-        #    sibling_node.parents.append(p)
-        #    if p.children is not None: p.children.append(sibling_node)
-        remove_node(node)
+        # remove this node, it's a duplicate
+        for parent in node.parents:
+          assert parent.children is not None
+          parent.children.remove(node)
         tm = sibling_node.t
       else:
         seen_libs[lib] = node
