@@ -14,10 +14,10 @@ class ClangGraph(GraphRunner):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
-    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src.replace('__attribute__((section("kernel"))) ', 'static ') for ji in jit_cache]))
+    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src.replace(ClangRenderer.kernel_prefix, '') for ji in jit_cache]))
     args = [f"{render_dtype(x.dtype)}* arg{i}" for i,x in enumerate(input_rawbuffers)]
     args += sorted([f"int {v.expr}" for v in var_vals])
-    code = ["__attribute__((section(\"kernel\"))) void batched("+','.join(args)+") {"]
+    code = [f"{ClangRenderer.kernel_prefix}void batched("+','.join(args)+") {"]
     for ji in jit_cache:
       args = []
       for buf in ji.bufs:
@@ -30,9 +30,9 @@ class ClangGraph(GraphRunner):
       code.append(f"  {cast(CompiledRunner, ji.prg).p.function_name}({','.join(args)});")
     code.append("}")
     if DEBUG >= 4: print("\n".join(code))
-    compiler = Device["CLANG"].compiler
-    assert compiler is not None
-    self.clprg = ClangProgram("batched", compiler.compile(prgs+"\n"+"\n".join(code))) # no point in caching the pointers
+    compiler, runtime = Device["CLANG"].compiler, Device["CLANG"].runtime
+    assert compiler is not None and runtime is not None
+    self.clprg = runtime("batched", compiler.compile(prgs+"\n"+"\n".join(code))) # no point in caching the pointers
 
   def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False):
     return cpu_time_execution(

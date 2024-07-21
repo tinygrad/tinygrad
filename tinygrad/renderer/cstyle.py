@@ -188,7 +188,7 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
 
   # language options
-  kernel_prefix = '__attribute__((section("kernel"))) '
+  kernel_prefix = '__attribute__((section("kernel"))) ' if getenv('FASTCLANG', 1) else ''
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16", dtypes.int8: "int8_t"}
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
