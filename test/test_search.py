@@ -103,6 +103,7 @@ class TestBEAM(unittest.TestCase):
     si = (a+b).schedule()[-1]
     lin = Kernel(si.ast)
     bufs = bufs_from_lin(lin)
+    # TODO: beam should have better instrumentation so we don't have to check this indirect thing
     kcount = len(Kernel.kernel_cnt)
     beam_search(lin, bufs, 3, disable_cache=True)
     self.assertEqual(kcount, len(Kernel.kernel_cnt))
