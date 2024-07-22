@@ -314,7 +314,6 @@ class NVProgram(HCQProgram):
       q.exec(self, kernargs_ptr, global_size, local_size)
 
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-
     self.device.timeline_value += 1
 
     if wait:
@@ -525,13 +524,6 @@ class NVDevice(HCQCompiled):
 
     self._setup_gpfifos()
     NVDevice.devices.append(self)
-
-  def synchronize(self):
-    self.timeline_signal.wait(self.timeline_value - 1)
-    self.cmdq_wptr = 0
-
-    if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
-    if PROFILE: self._prof_process_events()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
     notifier = self._gpu_system_alloc(48 << 20)
