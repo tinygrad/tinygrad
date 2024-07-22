@@ -443,6 +443,12 @@ class HCQCompiled(Compiled):
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferOptions(cpu_access=True))
     self.kernargs_ptr:int = self.kernargs_page.va_addr
 
+  def synchronize(self):
+    self.timeline_signal.wait(self.timeline_value - 1)
+
+    if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
+    if PROFILE: self._prof_process_events()
+
   def _gpu2cpu_time(self, gpu_time:float, is_copy:bool) -> float:
     """
     Translates local gpu time (timestamp) into global cpu time.

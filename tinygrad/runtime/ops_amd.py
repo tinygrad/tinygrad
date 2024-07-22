@@ -334,7 +334,6 @@ class AMDProgram(HCQProgram):
       q.exec(self, kernargs_ptr, global_size, local_size)
 
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-
     self.device.timeline_value += 1
 
     if wait:
@@ -470,12 +469,6 @@ class AMDDevice(HCQCompiled):
     return AMDQueueDesc(ring=to_mv(ring.va_addr, ring_size).cast("I"),
                         read_ptr=to_mv(queue.read_pointer_address, 8).cast("Q"), write_ptr=to_mv(queue.write_pointer_address, 8).cast("Q"),
                         doorbell=to_mv(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8).cast("Q"))
-
-  def synchronize(self):
-    self.timeline_signal.wait(self.timeline_value - 1)
-
-    if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
-    if PROFILE: self._prof_process_events()
 
   def invalidate_cache(self):
     AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
