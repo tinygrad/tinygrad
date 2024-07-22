@@ -102,6 +102,16 @@ class TestDType(unittest.TestCase):
         _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype.itemsize == self.DTYPE.itemsize and dtype != dtypes.bool else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
+  def test_shape_change_bitcast(self):
+    from tinygrad.lazy import view_supported_devices
+    if Device.DEFAULT not in view_supported_devices: raise unittest.SkipTest("no shape changing bitcast for devices without view support")
+    if Device.DEFAULT == "WEBGL": raise unittest.SkipTest("no bitcast in WebGL GLSL")
+    if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
+    list(map(
+      lambda dtype:
+        _test_bitcast(Tensor.arange(8, dtype=self.DTYPE), dtype) if dtype.itemsize != self.DTYPE.itemsize and dtype != dtypes.bool else None,
+     get_available_cast_dtypes(self.DTYPE)
+    ))
 
   def test_dtypes_fields(self):
     fields = dtypes.fields()
@@ -241,10 +251,16 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
-  def test_shape_change_bitcast(self):
-    _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [0, 80, 195, 71])
+  def test_bitcast_runtime_errors(self):
     with self.assertRaises(RuntimeError):
-      _test_bitcast(Tensor([1, 2, 3, 4], dtype=dtypes.float32).reshape(2,2).transpose(), dtypes.uint8)
+      # no shape changing bitcast for devices without view support
+      Tensor([0,1], dtype=dtypes.float32, device="PYTHON").bitcast(dtypes.uint8)
+      # bitcasting non-contiguous tensor is not supported
+      Tensor.empty((4,), dtype=dtypes.float32).reshape(2,2).transpose().bitcast(dtypes.uint8)
+      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
+      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16)
+      # should fail because backprop through bitcast is undefined
+      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True).bitcast(dtypes.float16)
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
