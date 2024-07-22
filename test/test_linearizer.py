@@ -190,7 +190,6 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast((store, ), [dataset, idxs], wanna_output=[real_index])
 
   # AssertionError: repeated stores in uops
-  @unittest.expectedFailure
   def test_argmax_multireduce_axis0(self):
     t = Tensor.randn(10, 20).realize()
     t_max = t.max((0,)).realize()
