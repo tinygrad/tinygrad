@@ -227,16 +227,16 @@ class TestOpt(unittest.TestCase):
     for axis in [0, 1]:
       for n in [4, 8, 16]:
         b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
-        with CLCache(allowed=3):
+        with CLCache(allowed=2):
           a = Tensor.ones(n, n).contiguous().sum(axis).reshape(n, 1).expand(n, n).sum(axis)
           a.realize()
         np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
 
-  def test_expand_reduce_is_not_folded_on_different_axes(self):
+  def test_expand_reduce_is_folded_on_different_axes(self):
     axis1, axis2 = 0, 1
     for n in [4, 8, 16]:
       b = torch.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
-      with CLCache(allowed=3):
+      with CLCache(allowed=2):
         a = Tensor.ones(n, n).contiguous().sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
         a.realize()
       np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
