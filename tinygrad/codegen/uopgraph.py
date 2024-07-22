@@ -473,10 +473,10 @@ class UOpGraph:
       if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
         if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
         return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
-      if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src:
-        if u.op is UOps.STORE and u.src[3] is gate: replace_source = replace_source[:3]
-        return UOp(u.op, u.dtype, replace_source, u.arg)
-      return u
+      replace_source = tuple(_replace_gates(x, gate) for x in u.src)
+      if u.op is UOps.STORE and u.src[3] is gate:
+        if replace_source != u.src: replace_source = replace_source[:3]
+      return UOp(u.op, u.dtype, replace_source, u.arg)
     sink_srcs = list(self.sink.src)
     for i, s in enumerate(sink_srcs):
       if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_replace_gates(s, s.src[3])) != s:

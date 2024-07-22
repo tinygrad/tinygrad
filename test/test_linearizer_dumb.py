@@ -4,6 +4,7 @@
 
 import unittest
 from tinygrad import Device, dtypes
+from tinygrad.codegen.uops import UOps
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps # noqa: F401 # pylint: disable=unused-import
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
@@ -31,6 +32,9 @@ class TestLinearizerDumb(unittest.TestCase):
     prg = k.to_program()
     prg.uops.print()
     print(prg.src)
+    Device[Device.DEFAULT].compiler.compile_cached(prg.src)
+    assert all(len(u.src) == 3 for u in k.uops if u.op is UOps.STORE), "must remove gates"
+    assert len([u for u in k.uops if u.op is UOps.IF]) == 1, "must have a single IF"
 
 if __name__ == '__main__':
   unittest.main()
