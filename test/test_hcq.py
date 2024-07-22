@@ -297,5 +297,80 @@ class TestHCQ(unittest.TestCase):
           TestHCQ.d0.timeline_value += 1
           TestHCQ.d0.synchronize()
 
+  def test_small_copies_from_host_buf(self):
+    buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
+
+    for i in range(256):
+      ctypes.memset(buf2._buf.va_addr, i, 1)
+
+      TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                  .copy(buf1._buf.va_addr, buf2._buf.va_addr, 1) \
+                                  .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+      TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+      TestHCQ.d0.timeline_value += 1
+
+      assert buf1.as_buffer()[0] == i
+
+  def test_small_copies_from_host_buf_intercopy(self):
+    buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf3 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
+
+    for i in range(256):
+      ctypes.memset(buf3._buf.va_addr, i, 1)
+
+      TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                  .copy(buf1._buf.va_addr, buf3._buf.va_addr, 1) \
+                                  .copy(buf2._buf.va_addr, buf1._buf.va_addr, 1) \
+                                  .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+      TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+      TestHCQ.d0.timeline_value += 1
+
+      assert buf2.as_buffer()[0] == i
+
+  def test_small_copies_from_host_buf_transfer(self):
+    _ = Device[f"{Device.DEFAULT}:1"]
+
+    buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(f"{Device.DEFAULT}:1", 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf3 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
+    TestHCQ.d0.allocator.map(buf2._buf)
+
+    for i in range(256):
+      ctypes.memset(buf3._buf.va_addr, i, 1)
+
+      TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                  .copy(buf1._buf.va_addr, buf3._buf.va_addr, 1) \
+                                  .copy(buf2._buf.va_addr, buf1._buf.va_addr, 1) \
+                                  .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+      TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+      TestHCQ.d0.timeline_value += 1
+
+      assert buf2.as_buffer()[0] == i
+
+  def test_memory_barrier(self):
+    buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf3 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
+
+    for i in range(256):
+      ctypes.memset(buf3._buf.va_addr, i, 1)
+
+      # Need memory_barrier after direct write to vram
+      TestHCQ.d0.hw_compute_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                     .memory_barrier() \
+                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+      TestHCQ.d0.timeline_value += 1
+
+      TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                  .copy(buf1._buf.va_addr, buf3._buf.va_addr, 1) \
+                                  .copy(buf2._buf.va_addr, buf1._buf.va_addr, 1) \
+                                  .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+      TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+      TestHCQ.d0.timeline_value += 1
+
+      assert buf2.as_buffer()[0] == i
+
 if __name__ == "__main__":
   unittest.main()
