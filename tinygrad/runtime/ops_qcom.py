@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Tuple, List, Any
 import time
 
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions
+from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions, HWCopyQueue, HCQBuffer, HWComputeQueue, HCQProgram
 import tinygrad.runtime.autogen.kgsl as kgsl
 import tinygrad.runtime.autogen.adreno as adreno
 import tinygrad.runtime.autogen.opencl as cl
@@ -110,8 +110,10 @@ class QcomAllocator(HCQCompatAllocator):
     # TODO(vpachkov): host?
     return self.device._gpu_free(opaque)
 
-class HWCommandQueue():
-  def __init__(self): self.q = []
+class QcomComputeQueue(HWComputeQueue):
+  def __init__(self):
+    self.q = []
+    super().__init__()
 
   def push(self, opcode=None, reg=None, vals = []):
     if opcode: self.q += [pkt7_hdr(opcode, len(vals)), *vals]
@@ -150,8 +152,10 @@ class HWCommandQueue():
 
     device._ioctl(0x4A, submit_req)
     self.q = []
+
+  def _memory_barrier(self): pass
   
-  def exec(self, prg, kernargs, global_size, local_size):
+  def _exec(self, prg, kernargs, global_size, local_size):
     self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0x40364000, data64_le(kernargs))
     self.cmd(adreno.CP_SET_MARKER, adreno.RM6_COMPUTE)
     self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc)
@@ -179,7 +183,11 @@ class HWCommandQueue():
     self.cmd(adreno.CP_RUN_OPENCL, 0)
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
 
-class QcomProgram:
+class QcomCopyQueue(HWCopyQueue, QcomComputeQueue):
+  def _copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
+    ctypes.memmove(dest.va_addr, src.va_addr, copy_size)
+
+class QcomProgram(HCQProgram):
   def __init__(self, device: QcomDevice, name: str, lib: bytes):
     self.device, self.name, self.lib = device, name, lib
 
@@ -190,16 +198,16 @@ class QcomProgram:
     self.lib_gpu = self.device._gpu_alloc(len(self.image), 0x10C0A00, map_to_cpu=True)
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image_size)
 
-    self.consts_gpu = self.device._gpu_alloc(0x1000, 0xC0A00, map_to_cpu=True)
-    ctypes.memset(self.consts_gpu.va_addr, 0, 0x1000)
+    # set constbuffer to be 1 page for now
+    super().__init__(self.device, kernargs_alloc_size=0x1000, kernargs_args_offset=0x140)
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
-    if len(bufs): to_mv(kernargs_ptr + 0x140, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
+    if len(bufs): to_mv(kernargs_ptr + self.kernargs_args_offset, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
     
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     kernargs_ptr = self.fill_kernargs(args, vals)
 
-    q = HWCommandQueue()
+    q = QcomComputeQueue()
 
     q.reg(
       adreno.REG_A6XX_SP_CS_CTRL_REG0,
@@ -223,7 +231,7 @@ if __name__ == '__main__':
   device._gpu_free(alloc)
 
   sig = device._alloc_signal()
-  queue = HWCommandQueue()
+  queue = QcomComputeQueue()
 
   lib = QcomCompiler('').compile('''
 __kernel void E_72_9_8_16_4(__global float* data0) {
