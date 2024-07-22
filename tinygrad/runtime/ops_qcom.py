@@ -7,13 +7,12 @@ import time
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions
 import tinygrad.runtime.autogen.kgsl as kgsl
 import tinygrad.runtime.autogen.adreno as adreno
-from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
-from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod, PROFILE
+import tinygrad.runtime.autogen.opencl as cl
+from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice, check, checked
+from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, data64_le, to_char_p_p, DEBUG, prod, PROFILE
 import tinygrad.runtime.autogen.libc as libc
 
 # if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl # noqa: F401
-
-def data64_le(data): return (data & 0xFFFFFFFF, (data >> 32) & 0xFFFFFFFF)
 
 def parity(val: int): return (~0x6996 >> ((val ^ (val >> 16) ^ (val >> 8) ^ (val >> 4)) & 0xf)) & 1
 
