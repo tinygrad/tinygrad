@@ -15,24 +15,23 @@ from tinygrad.engine.schedule import ScheduleItem
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
   if DEBUG >= 5:
-    from tinygrad.engine.graph import print_tree
-    print_tree(ast)
-  k = Kernel(ast, opts=renderer)
-  k.required_optimizations()
+    print(ast)
+  k = Kernel(ast, opts=renderer).required_optimizations()
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
-      kb, k_opt = Kernel(ast, opts=renderer), k
-      kb.required_optimizations()
+      kb, k_opt = Kernel(ast, opts=renderer).required_optimizations(), k
       rawbufs = bufs_from_lin(kb, allocate=False)
-      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+      if BEAM.value >= 100:
+        from extra.mcts_search import mcts_search
+        k = mcts_search(kb, rawbufs, BEAM.value)
+      else:
+        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
       if beam_compare:=getenv("BEAM_COMPARE", 1):
         # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
         lins: List[Tuple[str, Kernel]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
-        if used_tensor_cores:
-          lins.append(("hc", Kernel(ast, opts=renderer)))
-          lins[-1][1].hand_coded_optimizations()
+        if used_tensor_cores: lins.append(("hc", Kernel(ast, opts=renderer).hand_coded_optimizations()))
         timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
@@ -189,7 +188,7 @@ class ExecItem:
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is MetaOps.COPY or getenv("USE_COPY_KERNEL")
-  if si.ast.op is MetaOps.SINK:
+  if si.ast.op is MetaOps.KERNEL:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals], si.metadata)
   out = si.outputs[0]

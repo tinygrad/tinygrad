@@ -1,10 +1,12 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import fetch
-from tinygrad.nn import Linear, LayerNorm, Embedding
+from tinygrad.nn import Linear, LayerNorm, Embedding, Conv2d
 
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Union, Tuple, Dict
 from abc import ABC, abstractmethod
 from functools import lru_cache
+from PIL import Image
+import numpy as np
 import re, gzip
 
 @lru_cache()
@@ -231,9 +233,9 @@ class Open:
   """
   class MultiheadAttention:
     def __init__(self, dims:int, n_heads:int):
-      self.dims     = dims
-      self.n_heads  = n_heads
-      self.d_head   = self.dims // self.n_heads
+      self.dims    = dims
+      self.n_heads = n_heads
+      self.d_head  = self.dims // self.n_heads
 
       self.in_proj_bias   = Tensor.empty(3*dims)
       self.in_proj_weight = Tensor.empty(3*dims, dims)
@@ -243,13 +245,12 @@ class Open:
       T,B,C = x.shape
 
       proj = x.linear(self.in_proj_weight.T, self.in_proj_bias)
-      proj = proj.unflatten(-1, (3,C)).unsqueeze(0).transpose(0,-2)
-      q,k,v = proj.chunk(3)
+      proj = proj.unflatten(-1, (3,C)).unsqueeze(0).transpose(0, -2)
 
-      q,k,v = [y.reshape(T, B*self.n_heads, self.d_head).transpose(0, 1).reshape(B, self.n_heads, T, self.d_head) for y in (q,k,v)]
+      q,k,v = [y.reshape(T, B*self.n_heads, self.d_head).transpose(0, 1).reshape(B, self.n_heads, T, self.d_head) for y in proj.chunk(3)]
 
       attn_output = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-      attn_output = attn_output.permute(2,0,1,3).reshape(B*T, C)
+      attn_output = attn_output.permute(2, 0, 1, 3).reshape(T*B, C)
 
       attn_output = self.out_proj(attn_output)
       attn_output = attn_output.reshape(T, B, C)
@@ -265,7 +266,7 @@ class Open:
       return x.sequential([self.c_fc, Tensor.gelu, self.c_proj])
 
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/transformer.py#L210
-  class ResidualAttentionBlocks:
+  class ResidualAttentionBlock:
     def __init__(self, dims:int, n_heads:int, mlp_ratio:float):
       self.ln_1 = LayerNorm(dims)
       self.attn = Open.MultiheadAttention(dims, n_heads)
@@ -273,8 +274,11 @@ class Open:
       self.ln_2 = LayerNorm(dims)
       self.mlp  = Open.Mlp(dims, int(dims * mlp_ratio))
 
-    def __call__(self, x:Tensor, attn_mask:Optional[Tensor]=None) -> Tensor:
-      x = x + self.attn(self.ln_1(x), attn_mask=attn_mask)
+    def __call__(self, x:Tensor, attn_mask:Optional[Tensor]=None, transpose:bool=False) -> Tensor:
+      q_x = self.ln_1(x)
+      attn_out = self.attn(q_x.transpose(0, 1) if transpose else q_x, attn_mask=attn_mask)
+      attn_out = attn_out.transpose(0, 1) if transpose else attn_out
+      x = x + attn_out
       x = x + self.mlp(self.ln_2(x))
       return x
 
@@ -282,31 +286,24 @@ class Open:
   class ClipTransformer:
     def __init__(self, dims:int, layers:int, n_heads:int, mlp_ratio:float=4.0):
       self.resblocks = [
-        Open.ResidualAttentionBlocks(dims, n_heads, mlp_ratio) for _ in range(layers)
+        Open.ResidualAttentionBlock(dims, n_heads, mlp_ratio) for _ in range(layers)
       ]
 
     def __call__(self, x:Tensor, attn_mask:Optional[Tensor]=None) -> Tensor:
-      x = x.transpose(0, 1).contiguous()
       for r in self.resblocks:
-        x = r(x, attn_mask=attn_mask)
-      x = x.transpose(0, 1)
+        x = r(x, attn_mask=attn_mask, transpose=True)
       return x
 
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/model.py#L220
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/transformer.py#L661
   class ClipTextTransformer:
-    def __init__(self, dims:int, n_heads:int, layers:int, vocab_size:int=49408, ctx_length:int=77):
-      self.token_embedding = Embedding(vocab_size, dims)
-      self.positional_embedding = Tensor.empty(ctx_length, dims)
-      self.transformer = Open.ClipTransformer(dims, layers, n_heads)
-      self.ln_final = LayerNorm(dims)
-      self.text_projection = Tensor.empty(dims, dims)
-
-    @property
-    def attn_mask(self) -> Tensor:
-      if not hasattr(self, "_attn_mask"):
-        self._attn_mask = Tensor.full((77, 77), float("-inf")).triu(1)
-      return self._attn_mask
+    def __init__(self, width:int, n_heads:int, layers:int, vocab_size:int=49408, ctx_length:int=77):
+      self.token_embedding = Embedding(vocab_size, width)
+      self.positional_embedding = Tensor.empty(ctx_length, width)
+      self.transformer = Open.ClipTransformer(width, layers, n_heads)
+      self.ln_final = LayerNorm(width)
+      self.text_projection = Tensor.empty(width, width)
+      self.attn_mask = Tensor.full((77, 77), float("-inf")).triu(1).realize()
 
     def __call__(self, text:Tensor) -> Tensor:
       seq_len = text.shape[1]
@@ -317,6 +314,34 @@ class Open:
       x = self.ln_final(x)
 
       pooled = x[:, text.argmax(dim=-1)] @ self.text_projection
+      return pooled
+  
+  class ClipVisionTransformer:
+    def __init__(self, width:int, layers:int, d_head:int, image_size:int, patch_size:int):
+      grid_size = image_size // patch_size
+      n_heads = width // d_head
+      assert n_heads * d_head == width
+
+      self.conv1 = Conv2d(3, width, kernel_size=patch_size, stride=patch_size, bias=False)
+
+      self.class_embedding = Tensor.empty(width)
+      self.positional_embedding = Tensor.empty(grid_size * grid_size + 1, width)
+      self.transformer = Open.ClipTransformer(width, layers, n_heads)
+      self.ln_pre  = LayerNorm(width)
+      self.ln_post = LayerNorm(width)
+      self.proj = Tensor.empty(width, 1024)
+
+    def __call__(self, x:Tensor) -> Tensor:
+      x = self.conv1(x)
+      x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)
+      x = self.class_embedding.reshape(1, 1, -1).expand(x.shape[0], 1, -1).cat(x, dim=1)
+      x = x + self.positional_embedding
+
+      x = self.ln_pre(x)
+      x = self.transformer(x)
+      x = self.ln_post(x)
+
+      pooled = x[:, 0] @ self.proj
       return pooled
 
 
@@ -330,14 +355,15 @@ class FrozenOpenClipEmbedder(Embedder):
     self.input_key = "txt"
     self.ln_penultimate = ln_penultimate
 
+  def tokenize(self, text:str, device:Optional[str]=None) -> Tensor:
+    return Tensor(self.tokenizer.encode(text, pad_with_zeros=True), dtype=dtypes.int64, device=device).reshape(1,-1)
+
   def text_transformer_forward(self, x:Tensor, attn_mask:Optional[Tensor]=None):
     for r in self.model.transformer.resblocks:
       x, penultimate = r(x, attn_mask=attn_mask), x
-    return x.permute(1,0,2), penultimate.permute(1,0,2)
+    return x.permute(1, 0, 2), penultimate.permute(1, 0, 2)
 
-  def __call__(self, text:str) -> Union[Tensor,Tuple[Tensor,...]]:
-    tokens = Tensor(self.tokenizer.encode(text, pad_with_zeros=True), dtype=dtypes.int64).reshape(1,-1)
-
+  def embed_tokens(self, tokens:Tensor) -> Union[Tensor,Tuple[Tensor,...]]:
     x = self.model.token_embedding(tokens).add(self.model.positional_embedding).permute(1,0,2)
     x, penultimate = self.text_transformer_forward(x, attn_mask=self.model.attn_mask)
 
@@ -346,7 +372,87 @@ class FrozenOpenClipEmbedder(Embedder):
 
     if self.return_pooled:
       x = self.model.ln_final(x)
-      pooled = x[Tensor.arange(x.shape[0]), tokens.argmax(axis=-1).numpy().item()] @ self.model.text_projection
+      pooled = x[:, tokens.argmax(axis=-1).numpy().item()] @ self.model.text_projection
       return penultimate, pooled
     else:
       return penultimate
+
+  def __call__(self, text:str) -> Union[Tensor,Tuple[Tensor,...]]:
+    tokens = self.tokenize(text)
+    return self.embed_tokens(tokens)
+
+
+clip_configs: Dict = {
+  "ViT-H-14": {
+    "dims": 1024,
+    "vision_cfg": {
+      "width": 1280,
+      "layers": 32,
+      "d_head": 80,
+      "image_size": 224,
+      "patch_size": 14,
+    },
+    "text_cfg": {
+      "width": 1024,
+      "n_heads": 16,
+      "layers": 24,
+      "ctx_length": 77,
+      "vocab_size": 49408,
+    },
+    "return_pooled": False,
+    "ln_penultimate": True,
+  }
+}
+
+class OpenClipEncoder:
+  def __init__(self, dims:int, text_cfg:Dict, vision_cfg:Dict, **_):
+    self.visual = Open.ClipVisionTransformer(**vision_cfg)
+
+    text = Open.ClipTextTransformer(**text_cfg)
+    self.transformer = text.transformer
+    self.token_embedding = text.token_embedding
+    self.positional_embedding = text.positional_embedding
+    self.ln_final = text.ln_final
+    self.text_projection = text.text_projection
+
+    self.attn_mask = Tensor.full((77, 77), float("-inf")).triu(1).realize()
+    self.mean = Tensor([0.48145466, 0.45782750, 0.40821073]).reshape(-1, 1, 1)
+    self.std  = Tensor([0.26862954, 0.26130258, 0.27577711]).reshape(-1, 1, 1)
+
+  # TODO:
+  # Should be doable in pure tinygrad, would just require some work and verification.
+  # This is very desirable since it would allow for full generation->evaluation in a single JIT call.
+  def prepare_image(self, image:Image.Image) -> Tensor:
+    SIZE = 224
+    w, h = image.size
+    scale = min(SIZE / h, SIZE / w)
+    image = image.resize((max(int(w*scale),SIZE),max(int(h*scale),SIZE)), Image.Resampling.BICUBIC)
+    w, h = image.size
+    if w > SIZE:
+      left = (w - SIZE) // 2
+      image = image.crop((left, left+SIZE, 0, SIZE))
+    elif h > SIZE:
+      top = (h - SIZE) // 2
+      image = image.crop((0, SIZE, top, top+SIZE))
+
+    x = Tensor(np.array(image.convert('RGB')))
+    x = x.permute(2, 0, 1).cast(dtypes.float32) / 255.0
+    return (x - self.mean) / self.std
+
+  def encode_tokens(self, tokens:Tensor) -> Tensor:
+    x = self.token_embedding(tokens)
+    x = x + self.positional_embedding
+    x = self.transformer(x, attn_mask=self.attn_mask)
+    x = self.ln_final(x)
+    x = x[:, tokens.argmax(axis=-1)]
+    x = x @ self.text_projection
+    return x
+
+  def get_clip_score(self, tokens:Tensor, image:Tensor) -> Tensor:
+    image_features: Tensor = self.visual(image)
+    image_features /= image_features.square().sum([-1,-2], keepdim=True).sqrt() # Frobenius Norm
+
+    text_features = self.encode_tokens(tokens).squeeze(0)
+    text_features /= text_features.square().sum([-1,-2], keepdim=True).sqrt() # Frobenius Norm
+
+    return image_features @ text_features.T
