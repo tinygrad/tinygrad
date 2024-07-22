@@ -95,9 +95,8 @@ class CLDevice(Compiled):
     self.pending_copyin: List[memoryview] = []
 
     compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
-    cl_device_vendor = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_VENDOR, 256, buf := ctypes.create_string_buffer(256), None), buf.value.decode())[1]  # noqa: E501
-    if DEBUG >= 1: print(f"cl_device_vendor: {cl_device_vendor}")
-    renderer = IntelRenderer() if cl_device_vendor[:5] == "Intel" else OpenCLRenderer()
+    self.device_exts = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_EXTENSIONS, 4096, ctypes.byref(buf := ctypes.create_string_buffer(4096)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
+    renderer = IntelRenderer() if "cl_intel_subgroup_matrix_multiply_accumulate" in self.device_exts else OpenCLRenderer()
     super().__init__(device, CLAllocator(self), renderer, CLCompiler(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
