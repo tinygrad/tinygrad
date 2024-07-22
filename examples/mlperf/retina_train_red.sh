@@ -1,5 +1,6 @@
 #!/bin/bash
 
+export TINY_TYPE='tinyred'
 export PYTHONPATH='.'
 export MODEL='retinanet'
 export DEFAULT_FLOAT='HALF' GPUS=6 BS=96 BS_EVAL=36

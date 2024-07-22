@@ -352,7 +352,7 @@ def train_retinanet():
   WANDB = getenv('WANDB')
   config = {}
   SEED            = config['SEED']        = getenv("SEED", 42)
-  HOSTNAME        = config['HOST']        = getenv('SLURM_STEP_NODELIST', 'tiny')
+  HOSTNAME        = config['HOST']        = getenv('TINY_TYPE', 'other')
   EPOCHS          = config['EPOCHS']      = getenv('EPOCHS',4)
   BS              = config['BS']          = getenv('BS', 32)
   BS_EVAL         = config['BS_EVAL']     = getenv('BS_EVAL', BS if BS<32 else 32)
@@ -366,7 +366,7 @@ def train_retinanet():
   TEST            = config['TEST']        = getenv('TEST', 0)
   BENCHMARK       = config['BENCHMARK']   = getenv("BENCHMARK", 10000)
   EVAL_ONLY       = config['EVAL_ONLY']   = getenv('EVAL_ONLY')
-  CHKPT_PATH      = config['CHKPT_PATH']  = getenv('CHKPT_PATH', 'ckpts/retinanet_6xtiny_B96_E4.safe')
+  CHKPT_PATH      = config['CHKPT_PATH']  = getenv('CHKPT_PATH', f'ckpts/retinanet_6x{HOSTNAME}_B96_E4.safe')
   TRAIN_ONLY      = config['TRAIN_ONLY']  = getenv('TRAIN_ONLY')
   PART_BATCH      = config['PART_BATCH']  = getenv('PART_BATCH', 1)
 
