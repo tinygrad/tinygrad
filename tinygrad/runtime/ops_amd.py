@@ -4,7 +4,7 @@ import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, subp
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, hcq_profile, \
                             HCQSignal, HCQProgram, Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, to_mv, round_up, DEBUG, PROFILE, mv_address
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, PROFILE, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.support.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -54,7 +54,6 @@ COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
 def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
-def data64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
 def disasm(lib):
   asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
