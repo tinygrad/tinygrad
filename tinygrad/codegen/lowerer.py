@@ -4,7 +4,7 @@ import functools
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import getenv, all_int, get_contraction
@@ -33,7 +33,7 @@ if getenv("UOP_IS_SYMBOLIC"):
         if m[1] != sh: vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
     return iexpr, vexpr
 
-  def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
+  def st_to_uops(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
     idx, valid = _uop_view(st.views[-1], idxs, UOp.const(dtypes.bool, True))
     for view in reversed(st.views[0:-1]):
       view = view.minify()
@@ -43,13 +43,20 @@ if getenv("UOP_IS_SYMBOLIC"):
         idxs.append((idx//acc)%d)
         acc *= d
       idx, valid = _uop_view(view, idxs[::-1], valid)
+    if isinstance(dtype, ImageDType):
+      idx = UOp(UOps.VECTORIZE, dtypes.int.vec(3), ((idx // 4) % dtype.shape[1], (idx // (4 * dtype.shape[1])), idx % 4))
     return idx, valid
 else:
-  def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
+  def st_to_uops(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
     fake_idxs = [Variable(f"__idx{i}", 0, s-1) for i,s in enumerate(st.shape)]
     idx, valid = st.expr_idxs(fake_idxs)
     ctx = dict(zip(fake_idxs, idxs))
-    uidx, uvalid = idx.render(render_ops, ctx), valid.render(render_ops, ctx)
+    uvalid = valid.render(render_ops, ctx)
+    if isinstance(dtype, ImageDType):
+      image_idxs = (idx // 4) % dtype.shape[1], (idx // (4 * dtype.shape[1])), idx % 4
+      uidx = UOp(UOps.VECTORIZE, dtypes.int.vec(3), tuple(x.render(render_ops, ctx) for x in image_idxs))
+    else:
+      uidx = idx.render(render_ops, ctx)
     if uvalid.op is UOps.CONST: uvalid = UOp.const(dtypes.bool, uvalid.arg)
     assert uvalid.dtype == dtypes.bool
     return uidx, uvalid
@@ -97,9 +104,13 @@ class IndependentLowerer:
     global_dims = first_reduce-ki.local_dims
 
     if opts.has_local:
-      # define indexes for GPU-like execution
-      self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
-                  get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
+      if ki.dont_use_locals:
+        assert ki.local_dims == 0, "can't use locals if there's no local dims"
+        self.idxs = get_grouped_dims("idx", full_shape[:global_dims], opts.global_max, reverse=True)
+      else:
+        # define indexes for GPU-like execution
+        self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
+                    get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
     else:
       # all loops are RANGES
       self.idxs = [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, False))
@@ -130,7 +141,8 @@ class IndependentLowerer:
 
   def _to_uop(self, x:LazyOp) -> UOp:
     if x.op in BufferOps:
-      idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
+      idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs,
+        x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) and (not isinstance(x.arg, MemBuffer) or x.arg.idx == -1) else x.arg.dtype)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:

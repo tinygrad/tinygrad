@@ -53,15 +53,15 @@ ld_1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.int32, ShapeTracker.from_s
 ld_2 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.int32, ShapeTracker.from_shape((1,))))
 alu = LazyOp(BinaryOps.ADD, (ld_1, ld_2))
 st_0 = LazyOp(BufferOps.STORE, (alu,), MemBuffer(0, dtypes.int32, ShapeTracker.from_shape((1,))))
-sink = LazyOp(MetaOps.KERNEL, (st_0,))
+k = LazyOp(MetaOps.KERNEL, (st_0,))
 
 # convert the computation to a "linearized" format (print the format)
 from tinygrad.engine.realize import get_kernel, CompiledRunner
-lin = get_kernel(Device[DEVICE].renderer, sink).linearize()
-lin.uops.print()
+kernel = get_kernel(Device[DEVICE].renderer, k).linearize()
+kernel.uops.print()
 
 # compile a program (and print the source)
-fxn = CompiledRunner(lin.to_program())
+fxn = CompiledRunner(kernel.to_program())
 print(fxn.p.src)
 # NOTE: fxn.clprg is the ClangProgram
 
