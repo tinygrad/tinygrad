@@ -8,10 +8,12 @@ from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, Buf
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
+from tinygrad.helpers import getenv
 
 class TestLinearizerDumb(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")
   def test_unmerged_ifs(self):
+    raise Exception(getenv("RUN_PROCESS_REPLAY"))
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
       LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 1, 1, 1), strides=(25088, 0, 49, 7, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))), src=(
         LazyOp(BinaryOps.MAX, arg=None, src=(
