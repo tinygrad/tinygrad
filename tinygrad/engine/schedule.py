@@ -81,8 +81,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
+    # if we are merging the reduce, skip it
     if buf not in reduce_info: return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)
-    #if not st.contiguous: assert buf.srcs[0].base.op is MetaOps.CONST, f"reduceop late fixup not supported for input {buf.srcs[0].base}"
     st, arg = reduce_info[buf]
 
   # otherwise we fuse it like normal
@@ -113,11 +113,11 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
       input_st = tmp + ShapeTracker(tuple(nv))
     else:
       if reduce_info:
+        # merge this reduce with its parent
         top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
         _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
         new_axis = axis + tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
-        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
-        return
+        return reduce_info.setdefault(top_reduce, (top_reduce_input_st, new_axis))
     reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
@@ -264,7 +264,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
-    if forced_realize and (r.srcs[0].base.op is not MetaOps.CONST or any(x.shape != r.shape for x in children[r])):
+    if forced_realize:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
@@ -284,10 +284,9 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
       if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
 
-  # fuse double_reduces
+  # fuse double reduces with no other child
   for reduceop in double_reduces:
-    input_to_reduce = reduceop.base.srcs[0].base
-    if len(children[input_to_reduce]) == 1: del realizes[input_to_reduce]
+    if len(children[top_reduce:=reduceop.base.srcs[0].base]) == 1: del realizes[top_reduce]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
