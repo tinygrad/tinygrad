@@ -492,3 +492,8 @@ class AMDDevice(HCQCompiled):
     self.kernargs_ptr = self.kernargs.va_addr
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE: self._prof_process_events()
+
+  def invalidate_cache(self):
+    AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
+    self.timeline_value += 1
+    self.synchronize()
