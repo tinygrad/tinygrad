@@ -45,7 +45,7 @@ class UOp:
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self): return pretty_print(self, lambda x: f"UOp({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
   # *** uop syntactic sugar
-  def ufix(self, x): return UOp.const(self.dtype, x) if not isinstance(x, UOp) else x
+  def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return UOp(UOps.BITCAST, dtype, (self,))
   def name(self, name:Optional[str]): return UOp(UOps.VAR, src=(self,), arg=name)
