@@ -32,6 +32,7 @@ class TestLinearizerDumb(unittest.TestCase):
     prg.uops.print()
     print(prg.src)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
   def test_max_simplify_and_cancel(self):
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
       LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
