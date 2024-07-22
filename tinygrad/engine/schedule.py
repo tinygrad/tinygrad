@@ -6,8 +6,7 @@ from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer,
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
     merge_dicts, getenv, Metadata
-from tinygrad.shape.symbolic import Variable
-from tinygrad.shape.symbolic import sint
+from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -117,7 +116,8 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
         top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
         _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
         new_axis = axis + tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
-        return reduce_info.setdefault(top_reduce, (top_reduce_input_st, new_axis))
+        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
+        return
     reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
@@ -147,8 +147,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
 
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None],\
     children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer],\
-    double_reduces:Dict[LazyBuffer, None],
-    scheduled=False):
+    double_reduces:Dict[LazyBuffer, None], scheduled=False):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.realized is not None: return
   if GRAPH: log_lazybuffer(buf, scheduled)
