@@ -117,7 +117,7 @@ class IndependentLowerer:
                    for i,g in enumerate(full_shape[:first_reduce])]
 
     # reduce loops
-    self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True))
+    self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True, 'amx' if getenv('AMX',0) else 'red'))
       for i,g in enumerate(full_shape[first_reduce+group_for_reduces:first_upcasted], start=first_reduce+group_for_reduces)]
 
     # upcast loops
@@ -172,12 +172,14 @@ class IndependentLowerer:
       if x.op is ReduceOps.WMMA:
         wmma_sz, upcast_axis = x.arg[4], x.arg[6]
         ret = UOp(UOps.WMMA, dtype=dtype.vec(wmma_sz[2]), src=(
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=(upcast_axis[0],)),
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(con_sz := wmma_sz[0]), src=(in_uops[0],), arg=(upcast_axis[0],)),
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=(upcast_axis[1],)),
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
-        con = tuple(UOp(UOps.CONTRACT, dtype.vec(4), tuple([UOp(UOps.GEP, dtype, (ret,), i+j*4) for i in range(4)])) for j in range(4))
-        return UOp(UOps.EXPAND, dtype, con, arg=((upcast_axis[2], wmma_sz[2]//4),))
-        # return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=((upcast_axis[2], wmma_sz[2]),))
+        if x.arg[5] != "CLANG":
+          return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=((upcast_axis[2], wmma_sz[2]),))
+        def con(i):
+          return UOp(UOps.CONTRACT, dtype.vec(con_sz), tuple(UOp(UOps.GEP, dtype, (ret,), j + i * con_sz) for j in range(con_sz)), arg=(upcast_axis,))
+        return UOp(UOps.EXPAND, dtype, tuple(con(i) for i in range(con_sz)), arg=((upcast_axis[2], wmma_sz[2] // con_sz),))
       # NOTE: always using ridxs is fine here
       return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
