@@ -31,9 +31,8 @@ class TestLinearizerDumb(unittest.TestCase):
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
-    #prg.uops.print()
+    prg.uops.print()
     print(prg.src)
-    #print("\n".join(prg.src.splitlines()[-4:]))
 
 if __name__ == '__main__':
   unittest.main()
