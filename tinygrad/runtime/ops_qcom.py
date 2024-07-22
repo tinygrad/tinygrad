@@ -151,7 +151,8 @@ class HWCommandQueue():
     device._ioctl(0x4A, submit_req)
     self.q = []
   
-  def exec(self, prg, global_size, local_size):
+  def exec(self, prg, kernargs, global_size, local_size):
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0x40364000, data64_le(kernargs))
     self.cmd(adreno.CP_SET_MARKER, adreno.RM6_COMPUTE)
     self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc)
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x60)
@@ -192,10 +193,11 @@ class QcomProgram:
     self.consts_gpu = self.device._gpu_alloc(0x1000, 0xC0A00, map_to_cpu=True)
     ctypes.memset(self.consts_gpu.va_addr, 0, 0x1000)
 
-  def _set_const(self, offset: int, val: int): ctypes.cast(self.consts_gpu.va_addr + offset, ctypes.POINTER(ctypes.c_uint64)).contents.value = val
+  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
+    if len(bufs): to_mv(kernargs_ptr + 0x140, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
     
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    for i, arg in enumerate(args): self._set_const(0x140 + i * 0x10, arg)
+    kernargs_ptr = self.fill_kernargs(args, vals)
 
     q = HWCommandQueue()
 
@@ -209,8 +211,7 @@ class QcomProgram:
 
     q.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, self.lib_gpu.size // 4)
     q.cmd(adreno.CP_LOAD_STATE6_FRAG, 0xf60000, data64_le(self.lib_gpu.va_addr))
-    q.cmd(adreno.CP_LOAD_STATE6_FRAG, 0x40364000, data64_le(self.consts_gpu.va_addr))
-    q.exec(self, global_size, local_size)
+    q.exec(self, kernargs_ptr, global_size, local_size)
 
 
 if __name__ == '__main__':
