@@ -120,7 +120,7 @@ class CStyleLanguage(Renderer):
       elif uop in {UOps.ENDRANGE, UOps.ENDIF}:
         depth -= 1
         kk("}")
-        if u.src[0].arg[1] and self.device == "CLANG" and AMX: kk("AMX_SET(0);")
+        if u.src[0].arg[1] and self.device == "CLANG" and AMX: kk("AMX_SET(1);")
       elif uop is UOps.STORE:
         assert src[0].dtype is not None and src[2].dtype is not None
         rendered_store = self.render_store(r[src[0]], src[0].dtype, r[src[2]], src[2].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
@@ -128,7 +128,7 @@ class CStyleLanguage(Renderer):
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE:
-          if args[1] and self.device == "CLANG" and AMX: kk("AMX_SET(1);")
+          if args[1] and self.device == "CLANG" and AMX: kk("AMX_SET(0);")
           kk(f"for (int {(expr := ssa('ridx',u))} = {r[src[0]]}; {expr} < {r[src[1]]}; {expr}++) {{")
           depth += 1
         elif uop is UOps.ALU:
@@ -183,6 +183,10 @@ class CStyleLanguage(Renderer):
 
     return self.render_kernel(name, kernel, bufs, uops)
 
+def _make_clang_dtype(dtype):
+  vec, elems, header = dtype.name, ', '.join(_nms[:dtype.count]), ', '.join([f"{dtype.scalar().name} {x}" for x in _nms[:dtype.count]])
+  return f"typedef struct {{ {dtype.scalar().name} {elems}; }} {vec}; {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
+
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
   supports_float4 = bool(AMX)
@@ -190,6 +194,10 @@ class ClangRenderer(CStyleLanguage):
   has_local = False
   global_max = None
   tensor_cores = [TensorCore(dims=(4,4,4), threads=[(0,4),(1,4)], thread_local_sizes=[[4],[4],[4,4]], dtype_in=dtypes.float, dtype_out=dtypes.float)]
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    prefix = [_make_clang_dtype(dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   # language options
   buffer_suffix = " restrict"
