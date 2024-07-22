@@ -285,7 +285,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
 
   # fuse double reduces with no other child
   for reduceop in double_reduces:
-    if len(children[top_reduce:=reduceop.base.srcs[0].base]) == 1: del realizes[top_reduce]
+    top_reduce = reduceop.base.srcs[0].base
+    if len(children[top_reduce]) == 1: del realizes[top_reduce]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
