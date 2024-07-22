@@ -380,7 +380,7 @@ class Kernel:
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
 
-      if (tc_opts:=self.tensor_core_opts) is not None and not AMX: #AMX only has one set of accumulators
+      if (tc_opts:=self.tensor_core_opts) is not None and not AMX: #AMX has one set of accumulators
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
@@ -738,7 +738,6 @@ class Kernel:
     verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)
-    print(uop_sink)
 
     # extract global/local sizes
     if self.opts.has_local:

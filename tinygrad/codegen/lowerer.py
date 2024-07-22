@@ -117,7 +117,7 @@ class IndependentLowerer:
                    for i,g in enumerate(full_shape[:first_reduce])]
 
     # reduce loops
-    self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True, 'amx' if AMX else 'red'))
+    self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True))
       for i,g in enumerate(full_shape[first_reduce+group_for_reduces:first_upcasted], start=first_reduce+group_for_reduces)]
 
     # upcast loops
