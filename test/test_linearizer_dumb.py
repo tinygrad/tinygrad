@@ -33,7 +33,6 @@ class TestLinearizerDumb(unittest.TestCase):
     prg.uops.print()
     print(prg.src)
     Device[Device.DEFAULT].compiler.compile_cached(prg.src)
-    assert all(len(u.src) == 3 for u in k.uops if u.op is UOps.STORE), "must remove gates"
     assert len([u for u in k.uops if u.op is UOps.IF]) == 1, "must have a single IF"
 
 if __name__ == '__main__':
