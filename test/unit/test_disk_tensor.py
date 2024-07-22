@@ -52,7 +52,7 @@ class TestRawDiskBuffer(unittest.TestCase):
     # ground truth = https://evanw.github.io/float-toy/
     _, tmp = tempfile.mkstemp()
     devices = ["DISK"]
-    if device._Device().DEFAULT == "METAL":d.append("METAL")
+    if device._Device().DEFAULT == "METAL":devices.append("METAL")
     for d in devices:
       t = Tensor.empty((128, 128), dtype=dtypes.uint8, device=f"{d}:{tmp}")
       _test_bitcasted(t, dtypes.float16, 0.0)
