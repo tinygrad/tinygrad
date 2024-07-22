@@ -109,15 +109,24 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
       for v in st.views:
         nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                               v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
+      # TODO: generalize this
       input_st = tmp + ShapeTracker(tuple(nv))
+      """
+      pre_reduce = st.shape+tuple(s for i,s in enumerate(input_st.shape) if i in axis)
+      axis = tuple(i+len(st.shape)-1 for i in axis)
+      input_st = ShapeTracker((View.create(pre_reduce, st.views[-1].strides+input_st.real_strides()),))
+      """
     else:
       if reduce_info:
-        # merge this reduce with its parent
         top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
-        _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
-        new_axis = axis + tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
-        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
-        return
+        if buf.op is buf.srcs[0].base.op:
+          # merge this reduce with its parent
+          _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
+          new_axis = axis + tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
+          reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
+          return
+        # reshape this reduce per its top axis
+        input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
     reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
