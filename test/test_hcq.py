@@ -22,8 +22,8 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.kernargs_ba_ptr = TestHCQ.d0.kernargs_ptr
     TestHCQ.kernargs_ab_ptr = TestHCQ.d0.kernargs_ptr + TestHCQ.runner.clprg.kernargs_alloc_size
 
-    TestHCQ.runner.clprg.fill_kernargs(TestHCQ.kernargs_ba_ptr, [TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
-    TestHCQ.runner.clprg.fill_kernargs(TestHCQ.kernargs_ab_ptr, [TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf])
+    TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf], kernargs_ptr=TestHCQ.kernargs_ba_ptr)
+    TestHCQ.runner.clprg.fill_kernargs([TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf], kernargs_ptr=TestHCQ.kernargs_ab_ptr)
 
   def setUp(self):
     TestHCQ.d0.synchronize()
