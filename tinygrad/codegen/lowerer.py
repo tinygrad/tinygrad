@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, all_int, get_contraction, AMX
+from tinygrad.helpers import getenv, all_int, get_contraction
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -170,9 +170,9 @@ class IndependentLowerer:
     if x.op in ReduceOps:
       dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
       if x.op is ReduceOps.WMMA:
-        wmma_sz, upcast_axis = x.arg[4], x.arg[6]
+        wmma_sz, upcast_axis, con_sz = x.arg[4], x.arg[6], x.arg[4][0]
         ret = UOp(UOps.WMMA, dtype=dtype.vec(wmma_sz[2]), src=(
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(con_sz := wmma_sz[0]), src=(in_uops[0],), arg=(upcast_axis[0],)),
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=(upcast_axis[0],)),
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=(upcast_axis[1],)),
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         if x.arg[5] != "CLANG":
