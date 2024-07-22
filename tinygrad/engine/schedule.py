@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, GlobalCounters, colored, prod, dedup,\
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, colored, prod, dedup,\
     all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -204,6 +204,19 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
+def _buildup_st(xt:LazyBuffer, st:ShapeTracker, realizes, sts:Dict[LazyBuffer, ShapeTracker], first=True):
+  """buildup the ShapeTracker from the base LazyBuffer"""
+  if xt.base.realized is not None or xt in sts: return
+  if xt is not xt.base: st, xt = xt.st+st, xt.base
+  sts.setdefault(xt, st:=ShapeTracker.from_shape(xt.srcs[0].shape) if xt.op in ReduceOps else st)
+  if first or xt not in realizes:
+    for x in xt.srcs: _buildup_st(x, st, realizes, sts, False)
+
+def _recurse_children(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], children:Dict[LazyBuffer, Dict[LazyBuffer, None]], first=True):
+  """recursively find realized descendants"""
+  if buf in realizes and not first: return set((buf,))
+  return set.union(set(), *iter(_recurse_children(x, realizes, children, False) for x in children[buf]))
+
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
@@ -222,6 +235,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
+  const_reduces: List[LazyBuffer] = []
   for r in allbufs:
     if r.op not in ReduceOps or r in realizes: continue
 
@@ -282,6 +296,23 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         reduce_for_op[tr] = r
       realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
+    if FUSE_ARANGE and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: const_reduces.append(r)
+
+  def _fold_arange(r:LazyBuffer, group:Set[LazyBuffer]) -> bool:
+    if DEBUG_INDEX:=(getenv("DEBUG_INDEX")): print(f"checking {r}")
+    for tr in group:
+      if not (descendants:=_recurse_children(tr, realizes, children)): return False
+      # check if tr can cleanly fuse with its children
+      for d in descendants:
+        sts: Dict[LazyBuffer, ShapeTracker] = {}
+        _buildup_st(d, ShapeTracker.from_shape(reduce_for_op[d].shape if d in reduce_for_op else d.shape), realizes, sts)
+        if not isinstance(sts[tr].expr_idxs()[0], Variable): return False
+    if DEBUG_INDEX: print(colored(f"fused {r}", "green"))
+    return True
+  for r in const_reduces:
+    # TODO: what if only some children can fuse? can save an extra global_load
+    if _fold_arange(r, group:={op for op,reduceop in reduce_for_op.items() if r is reduceop}):
+      for x in group: del realizes[x]
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
