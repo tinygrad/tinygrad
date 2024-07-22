@@ -23,7 +23,11 @@ def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
       kb, k_opt = Kernel(ast, opts=renderer).required_optimizations(), k
       rawbufs = bufs_from_lin(kb, allocate=False)
-      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+      if BEAM.value >= 100:
+        from extra.mcts_search import mcts_search
+        k = mcts_search(kb, rawbufs, BEAM.value)
+      else:
+        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
       if beam_compare:=getenv("BEAM_COMPARE", 1):
         # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
         lins: List[Tuple[str, Kernel]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]

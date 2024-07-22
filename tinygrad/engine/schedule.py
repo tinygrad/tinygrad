@@ -4,13 +4,14 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup, all_int, \
-    merge_dicts, getenv, Metadata
-from tinygrad.shape.symbolic import Variable
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, FUSE_CONV_BW, GlobalCounters, colored, prod, dedup,\
+    all_int, merge_dicts, getenv, Metadata
+from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer, Device
+from tinygrad.shape.view import View, strides_for_shape
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -79,12 +80,18 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
-    if not st.contiguous: assert buf.srcs[0].base.op is MetaOps.CONST, f"reduceop late fixup not supported for input {buf.srcs[0].base}"
+    # if we are merging the reduce, skip it
+    if buf not in reduce_info: return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)
     st, arg = reduce_info[buf]
 
   # otherwise we fuse it like normal
   return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, \
       reduce_info, cache) for x in buf.srcs), arg))
+
+def _permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
+  permute_axis = tuple(i for i in range(len(input_st.shape)) if i not in axis) + axis
+  tmp = input_st.permute(permute_axis)
+  return tmp, tmp.shape[-len(axis):]
 
 def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer], reduce_info:Dict, cache):
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
@@ -95,17 +102,22 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
   if buf.op in ReduceOps and buf not in reduce_info:
     axis = buf.arg
     if not st.contiguous:
-      assert prod(buf.st.shape) < prod(st.shape), f"reduceop late fixup must be an expand {buf.st.shape} >= {st.shape}"
-      assert len(st.views) == 1, f"reduceop late fixup must have one view {st}"
-      pre_reduce = st.shape+tuple(s for i,s in enumerate(input_st.shape) if i in axis)
-      axis = tuple(i+len(st.shape)-1 for i in axis)
-      mid_reshape = tuple(1 if s not in input_st.shape else s for s in pre_reduce)
-      input_st = input_st.reshape(mid_reshape).expand(pre_reduce)
+      tmp, rshape = _permute_reduce(input_st, axis)
+      prshape = prod(rshape)
+      strides = strides_for_shape(rshape)
+      nv: List[View] = []
+      for v in st.views:
+        nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
+                              v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
+      input_st = tmp + ShapeTracker(tuple(nv))
     else:
-      # reshape to match the output st of the top reduce
       if reduce_info:
-        top_reduce_input_st, top_reduce_axes = deque(reduce_info.values(), 1).pop()
-        input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
+        # merge this reduce with its parent
+        top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
+        _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
+        new_axis = axis + tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
+        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
+        return
     reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
@@ -134,7 +146,8 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
 # *** DAG creation: decide which LazyBuffers should realize ***
 
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None],\
-    children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer], scheduled=False):
+    children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer],\
+    double_reduces:Dict[LazyBuffer, None], scheduled=False):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.realized is not None: return
   if GRAPH: log_lazybuffer(buf, scheduled)
@@ -152,7 +165,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       elif not FUSE_AS_ONE_KERNEL: realizes[buf.base] = None
     # check all other pads for safe fusion
     elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
-    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets)
+    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
+  if buf.op in ReduceOps and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
   allbufs[buf] = None
   if buf.forced_realize or buf.op in MetaOps: realizes[buf] = None
   if buf.op is MetaOps.ASSIGN:
@@ -165,7 +179,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   if buf.op is MetaOps.VIEW: realizes[buf.srcs[0].base] = None
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
-    _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets)
+    _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
 def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   if buf in realizes or buf.realized is not None: return True
@@ -198,7 +212,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   simple_pads: Dict[LazyBuffer, None] = {}
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
   assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
-  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, assign_targets, scheduled=True)
+  double_reduces: Dict[LazyBuffer, None] = {}
+  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, scheduled=True)
 
   # check if we have to realize pads
   for p in simple_pads:
@@ -248,7 +263,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
-    if forced_realize and (r.srcs[0].base.op is not MetaOps.CONST or any(x.shape != r.shape for x in children[r])):
+    if forced_realize:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
@@ -267,6 +282,12 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         reduce_for_op[tr] = r
       if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
+
+  # fuse double reduces with no other child
+  if FUSE_CONV_BW:
+    for reduceop in double_reduces:
+      top_reduce = reduceop.base.srcs[0].base
+      if len(children[top_reduce]) == 1: del realizes[top_reduce]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
