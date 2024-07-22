@@ -330,7 +330,7 @@ class TestHCQ(unittest.TestCase):
       assert buf2.as_buffer()[0] == i
 
   def test_small_copies_from_host_buf_transfer(self):
-    d1 = Device[f"{Device.DEFAULT}:1"]
+    _ = Device[f"{Device.DEFAULT}:1"]
 
     buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(f"{Device.DEFAULT}:1", 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
