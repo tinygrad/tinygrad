@@ -1,6 +1,6 @@
 import pathlib, tempfile, unittest
 import numpy as np
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, device
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import Timing, fetch, temp, CI
@@ -49,36 +49,38 @@ class TestRawDiskBuffer(unittest.TestCase):
       with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
         f.readinto(tst)
   def test_bitcasts_on_disk(self):
-    _, tmp = tempfile.mkstemp()
     # ground truth = https://evanw.github.io/float-toy/
-    t = Tensor.empty((128, 128), dtype=dtypes.uint8, device=f"disk:{tmp}") # uint8
-    # all zeroes
-    _test_bitcasted(t, dtypes.float16, 0.0)
-    _test_bitcasted(t, dtypes.uint16, 0)
-    _test_bitcasted(t, dtypes.float32, 0.0)
-    _test_bitcasted(t, dtypes.uint32, 0)
-    # pi in float16 stored via int16
-    t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
-    _test_bitcasted(t, dtypes.float16, 3.140625)
-    _test_bitcasted(t, dtypes.float32, 50.064727)
-    _test_bitcasted(t, dtypes.uint16, 0x4248)
-    _test_bitcasted(t, dtypes.uint32, 0x42484248)
-    # pi in float32 stored via float32
-    t.bitcast(dtypes.float32).assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
-    _test_bitcasted(t, dtypes.float32, 3.1415927)
-    _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
-    # doesn't suport normal cast
-    with self.assertRaises(RuntimeError):
-      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16)
+    _, tmp = tempfile.mkstemp()
+    for d in ["DISK",device._Device().DEFAULT]:
+      t = Tensor.empty((128, 128), dtype=dtypes.uint8, device=f"{d}:{tmp}")
+      _test_bitcasted(t, dtypes.float16, 0.0)
+      _test_bitcasted(t, dtypes.uint16, 0)
+      _test_bitcasted(t, dtypes.float32, 0.0)
+      _test_bitcasted(t, dtypes.uint32, 0)
+      # pi in float16 stored via int16
+      t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
+      _test_bitcasted(t, dtypes.float16, 3.140625)
+      _test_bitcasted(t, dtypes.float32, 50.064727)
+      _test_bitcasted(t, dtypes.uint16, 0x4248)
+      _test_bitcasted(t, dtypes.uint32, 0x42484248)
+      # pi in float32 stored via float32
+      t.bitcast(dtypes.float32).assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
+      _test_bitcasted(t, dtypes.float32, 3.1415927)
+      _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
 
-    # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
-    with self.assertRaises(RuntimeError):
-      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
-      Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+      # doesn't suport normal cast
+      if d.startswith("DISK"):
+        with self.assertRaises(RuntimeError):
+          Tensor.empty((4,), dtype=dtypes.int16, device=f"{d}:{tmp}").cast(dtypes.float16)
 
-    with self.assertRaises(RuntimeError):
-      # should fail because backprop through bitcast is undefined
-      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+        # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
+        with self.assertRaises(RuntimeError):
+          # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
+          Tensor.empty((3,), dtype=dtypes.int8, device=f"{d}:{tmp}").bitcast(dtypes.float16)
+
+        with self.assertRaises(RuntimeError):
+          # should fail because backprop through bitcast is undefined
+          Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device=f"{d}:{tmp}").bitcast(dtypes.float16)
 
     pathlib.Path(tmp).unlink()
 
