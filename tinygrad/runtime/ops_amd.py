@@ -494,6 +494,6 @@ class AMDDevice(HCQCompiled):
     if PROFILE: self._prof_process_events()
 
   def invalidate_cache(self):
-    AMDComputeQueue().memory_barrier().signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-    self.device.timeline_value += 1
+    AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
+    self.timeline_value += 1
     self.synchronize()
