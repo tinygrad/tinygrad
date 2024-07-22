@@ -8,7 +8,6 @@ from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, Buf
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.helpers import getenv
 
 class TestLinearizerDumb(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")
