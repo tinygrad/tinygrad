@@ -588,4 +588,7 @@ class NVDevice(HCQCompiled):
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
 
-  def invalidate_caches(self): rmctrl.fb_flush_gpu_cache(self.fd_ctl, self.root, self.subdevice, flags=((1 << 2) | (1 << 3) | (1 << 4)))
+  def invalidate_caches(self):
+    rmctrl.fb_flush_gpu_cache(self.fd_ctl, self.root, self.subdevice,
+      flags=((nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_WRITE_BACK_YES << 2) | (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_INVALIDATE_YES << 3) |
+             (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE << 4)))
