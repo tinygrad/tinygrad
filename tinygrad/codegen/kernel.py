@@ -694,7 +694,7 @@ class Kernel:
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device == "CLANG":
             reduce_axes, fix_st1, fix_st2 = [], None, None
-            upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
+            upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted, self.shape_len-self.upcasted)
           elif self.opts.device in {"CUDA", "NV"}:
             reduce_axes = [self.shape_len-self.upcasted, self.shape_len-self.upcasted+1]
             upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted+2, self.shape_len-self.upcasted+2)
