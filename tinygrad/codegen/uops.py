@@ -43,7 +43,9 @@ class UOp:
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
-  def __repr__(self): return pretty_print(self, lambda x: f"UOp({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
+  #def __repr__(self): return pretty_print(self, lambda x: f"UOp({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
+  def __repr__(self):
+    return f"{str(self.op):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.op for x in self.src]):32s} {self.arg}"
   # *** uop syntactic sugar
   def ufix(self, x): return UOp.const(self.dtype, x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
@@ -177,7 +179,7 @@ def type_verify(uops):
     if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU: assert src[2].dtype == dtypes.bool and src[3].dtype == dtype
     if uop is UOps.STORE:
       assert dtype is None, f"{uop} dtype must be None, got {dtype}"
-      if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
+      #if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
     if uop is UOps.ALU:
       if arg in UnaryOps:
         assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"

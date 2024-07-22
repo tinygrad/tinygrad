@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import replace
 from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING
 import functools, itertools, heapq, math
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
@@ -473,12 +474,20 @@ class UOpGraph:
       if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
         if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
         return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
-      if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
+      if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src:
+        if u.op is UOps.STORE and replace_source[3] is gate: replace_source = replace_source[:3]
+        return UOp(u.op, u.dtype, replace_source, u.arg)
+      if u.op is UOps.STORE:
+        assert len(u.src) == 4
+        assert gate is u.src[3]
+        if_uop = UOp(UOps.IF, None, (gate,))
+        replace_source = u.src[:3]+(if_uop,)
+        return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
     sink_srcs = list(self.sink.src)
     for i, s in enumerate(sink_srcs):
       if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_replace_gates(s, s.src[3])) != s:
-        sink_srcs[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
+        sink_srcs[i] = UOp(rw.op, rw.dtype, rw.src, rw.arg)
     sink = UOp(UOps.SINK, None, tuple(sink_srcs))
 
     # do graph rewrite
