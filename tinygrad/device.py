@@ -411,9 +411,17 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQProgram:
-  def __init__(self, kernargs_alloc_size:int, kernargs_args_offset:int=0):
-    self.kernargs_alloc_size, self.kernargs_args_offset = kernargs_alloc_size, kernargs_args_offset
-  def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
+  def __init__(self, device:HCQCompiled, kernargs_alloc_size:int, kernargs_args_offset:int=0):
+    self.device, self.kernargs_alloc_size, self.kernargs_args_offset = device, kernargs_alloc_size, kernargs_args_offset
+
+  def fill_kernargs(self, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None):
+    """
+    Fills arguments for the kernel, optionally allocating space from device if kernargs_ptr is not set.
+    """
+    self._fill_kernargs(ptr:=(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size)), bufs, vals)
+    return ptr
+
+  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
 
 class HCQCompiled(Compiled):
   """
@@ -432,11 +440,22 @@ class HCQCompiled(Compiled):
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
+    self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferOptions(cpu_access=True))
+    self.kernargs_ptr:int = self.kernargs_page.va_addr
+
   def _gpu2cpu_time(self, gpu_time:float, is_copy:bool) -> float:
     """
     Translates local gpu time (timestamp) into global cpu time.
     """
     return gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff)
+
+  def _alloc_kernargs(self, alloc_size:int) -> int:
+    """
+    Allocates space for arguments passed to the kernel.
+    """
+    if self.kernargs_ptr >= (self.kernargs_page.va_addr + self.kernargs_page.size - alloc_size): self.kernargs_ptr = self.kernargs_page.va_addr
+    self.kernargs_ptr = (res:=self.kernargs_ptr) + alloc_size
+    return res
 
   def _prof_setup(self):
     if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)

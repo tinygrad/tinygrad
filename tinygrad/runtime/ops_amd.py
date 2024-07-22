@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, cast
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, subprocess, time, array
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, hcq_profile, \
@@ -322,31 +322,27 @@ class AMDProgram(HCQProgram):
 
     self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
-    super().__init__(kernargs_alloc_size=self.kernargs_segment_size)
+    super().__init__(self.device, kernargs_alloc_size=self.kernargs_segment_size)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
+    if hasattr(self, 'lib_gpu'): cast(AMDDevice, self.device)._gpu_free(self.lib_gpu)
 
-  def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
+  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     if (given:=len(bufs)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
     if len(bufs): to_mv(kernargs_ptr, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
     if len(vals): to_mv(kernargs_ptr + len(bufs) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if self.device.kernargs_ptr + self.kernargs_alloc_size > (self.device.kernargs.va_addr + self.device.kernargs.size):
-      self.device.kernargs_ptr = self.device.kernargs.va_addr
-
-    self.fill_kernargs(self.device.kernargs_ptr, args, vals)
+    kernargs_ptr = self.fill_kernargs(args, vals)
 
     q = AMDComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
     with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-      q.exec(self, self.device.kernargs_ptr, global_size, local_size)
+      q.exec(self, kernargs_ptr, global_size, local_size)
 
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
 
     self.device.timeline_value += 1
-    self.device.kernargs_ptr += self.kernargs_alloc_size
 
     if wait:
       self.device.timeline_signal.wait(self.device.timeline_value - 1)
@@ -446,9 +442,6 @@ class AMDDevice(HCQCompiled):
       self._gpu_map(AMDDevice.event_page)
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
 
-    self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-    self.kernargs_ptr = self.kernargs.va_addr
-
     # Scratch setup
     max_cu_id = self.properties['simd_count'] // self.properties['simd_per_cu'] - 1
     max_wave_id = self.properties['max_waves_per_simd'] * self.properties['simd_per_cu'] - 1
@@ -488,8 +481,6 @@ class AMDDevice(HCQCompiled):
   def synchronize(self):
     self.timeline_signal.wait(self.timeline_value - 1)
 
-    # reset kernargs
-    self.kernargs_ptr = self.kernargs.va_addr
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE: self._prof_process_events()
 
