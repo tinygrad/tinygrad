@@ -470,7 +470,7 @@ class AMDDevice(HCQCompiled):
                         read_ptr=to_mv(queue.read_pointer_address, 8).cast("Q"), write_ptr=to_mv(queue.write_pointer_address, 8).cast("Q"),
                         doorbell=to_mv(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8).cast("Q"))
 
-  def invalidate_cache(self):
+  def invalidate_caches(self):
     AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
     self.synchronize()
