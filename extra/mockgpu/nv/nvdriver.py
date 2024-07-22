@@ -165,6 +165,7 @@ class NVDriver(VirtDriver):
       params.workSubmitToken = gpu_fifo.token
     elif struct.cmd == nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE: pass
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_PERF_BOOST: pass
+    elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE: pass
     else: raise RuntimeError(f"Unknown {struct.cmd} to rm_control")
     return 0
 
