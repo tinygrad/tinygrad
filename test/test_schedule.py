@@ -248,14 +248,15 @@ class TestSchedule(unittest.TestCase):
       check_schedule([img.grad, c1.weight.grad], 4)
 
   def test_fold_batchnorm_backward(self):
-    with Tensor.train():
-      x = Tensor.empty((2, 16, 8, 8)).contiguous()
-      bn = nn.BatchNorm2d(16)
-      bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
-      fw = bn(x).contiguous_backward().relu().contiguous()
-      fw.sum().backward()
-      # TODO: this is too many
-      check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
+    with Context(FUSE_CONV_BW=1):
+      with Tensor.train():
+        x = Tensor.empty((2, 16, 8, 8)).contiguous()
+        bn = nn.BatchNorm2d(16)
+        bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
+        fw = bn(x).contiguous_backward().relu().contiguous()
+        fw.sum().backward()
+        # TODO: this is too many
+        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
