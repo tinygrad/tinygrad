@@ -1,7 +1,18 @@
-import unittest
+import unittest, struct
 from tinygrad import Tensor, dtypes
 
 # format types: https://docs.python.org/3/library/struct.html
+
+class TestTensorBytes(unittest.TestCase):
+  def test_bytes(self):
+    lst = Tensor(bytes(b"\xaa\xbb\xcc\xdd"))
+    assert lst.tolist() == [170, 187, 204, 221]
+
+  def test_float_bytes(self):
+    lst = Tensor(bytes(struct.pack("ff", 0.234, 0.8585)), dtype=dtypes.float32)
+    assert lst.shape == (2,)
+    assert abs(lst.tolist()[0] - 0.234) < 1e-6
+    assert abs(lst.tolist()[1] - 0.8585) < 1e-6
 
 class TestTensorData(unittest.TestCase):
   def test_data(self):

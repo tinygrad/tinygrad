@@ -14,6 +14,7 @@
 ::: tinygrad.Tensor.cat
 ::: tinygrad.Tensor.stack
 ::: tinygrad.Tensor.repeat
+::: tinygrad.Tensor.repeat_interleave
 ::: tinygrad.Tensor.split
 ::: tinygrad.Tensor.chunk
 ::: tinygrad.Tensor.squeeze

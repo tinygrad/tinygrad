@@ -9,10 +9,10 @@ class Model:
     self.layers: List[Callable[[Tensor], Tensor]] = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
       nn.Conv2d(32, 32, 5), Tensor.relu,
-      nn.BatchNorm2d(32), Tensor.max_pool2d,
+      nn.BatchNorm(32), Tensor.max_pool2d,
       nn.Conv2d(32, 64, 3), Tensor.relu,
       nn.Conv2d(64, 64, 3), Tensor.relu,
-      nn.BatchNorm2d(64), Tensor.max_pool2d,
+      nn.BatchNorm(64), Tensor.max_pool2d,
       lambda x: x.flatten(1), nn.Linear(576, 10)]
 
   def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
@@ -27,7 +27,7 @@ if __name__ == "__main__":
   def train_step() -> Tensor:
     with Tensor.train():
       opt.zero_grad()
-      samples = Tensor.randint(512, high=X_train.shape[0])
+      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
       # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
       loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
       opt.step()

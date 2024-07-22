@@ -8,7 +8,8 @@ import unittest, pickle
 
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.codegen.uops import UOp, UOps, UOpGraph
+from tinygrad.codegen.uops import UOp, UOps
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.ops import BinaryOps
 import functools
 
@@ -201,7 +202,6 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_no_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
 
-  @unittest.expectedFailure
   def test_mod_factor(self):
     # NOTE: even though the mod max is 50, it can't know this without knowing about the mul
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
@@ -226,7 +226,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
 
   @unittest.expectedFailure
-  def test_mod_mul(self):
+  def test_mod_mul_large(self):
+    self.helper_test_variable((Variable("a", 0, 20)*10)%9, 0, 8, "(a%9)")
+
+  @unittest.expectedFailure
+  def test_mod_mul_small(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
 
   @unittest.expectedFailure
@@ -305,15 +309,12 @@ class TestSymbolic(unittest.TestCase):
   def test_div_factor(self):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
 
-  # TODO: this one should already work!
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
 
-  @unittest.expectedFailure
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
 
-  @unittest.expectedFailure
   def test_mul_div_factor_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//8, 0, 5, "(a//2)")
 

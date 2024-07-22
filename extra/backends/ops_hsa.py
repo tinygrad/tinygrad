@@ -5,8 +5,8 @@ import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t, getenv, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
-from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
-from tinygrad.runtime.driver.hip_comgr import compile_hip
+from tinygrad.runtime.support.hsa import check, scan_agents, find_memory_pool, AQLQueue
+from tinygrad.runtime.support.hip_comgr import compile_hip
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 
 class HSAProfiler:

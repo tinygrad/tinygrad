@@ -118,7 +118,7 @@ def benchmark_model(m, devices, validate_outs=False):
 
       ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
       onnx_out = ort_sess.run(output_names, np_inputs)
-      onnx_out = dict([*[(name,x) for name, x in zip(output_names, onnx_out)]])
+      onnx_out = dict([*list(zip(output_names, onnx_out))])
 
       assert_allclose(tinygrad_out, onnx_out, rtol=rtol, atol=atol)
       print(f"{m:16s}outputs validated on {device=} with rtol={rtol:.1e}, atol={atol:.1e}")

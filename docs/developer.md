@@ -44,3 +44,13 @@ Creating `ExecItem`, which has a run method
         members: true
 
 Lists of `ExecItem` can be condensed into a single ExecItem with the Graph API (rename to Queue?)
+
+## Runtime
+
+Runtimes are responsible for device-specific interactions. They handle tasks such as initializing devices, allocating memory, loading/launching programs, and more. You can find more information about the runtimes API on the [runtime overview page](runtime/overview.md).
+
+All runtime implementations can be found in the [runtime directory](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime).
+
+### HCQ Compatible Runtimes
+
+HCQ API is a lower-level API for defining runtimes. Interaction with HCQ-compatible devices occurs at a lower level, with commands issued directly to hardware queues. Some examples of such backends are [NV](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_nv.py) and [AMD](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_amd.py), which are userspace drivers for NVIDIA and AMD devices respectively. You can find more information about the API on [HCQ overview page](runtime/hcq.md)

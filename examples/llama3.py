@@ -12,6 +12,7 @@ class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
   def __init__(self, model_path: str):
     mergeable_ranks = load_tiktoken_bpe(model_path)
+    self.num_base_tokens = len(mergeable_ranks)
     special_tokens = [
       "<|begin_of_text|>",
       "<|end_of_text|>",
@@ -36,7 +37,7 @@ class Tokenizer:
   @property
   def stop_tokens(self): return {self.special_tokens["<|end_of_text|>"], self.special_tokens["<|eot_id|>"]}
 
-  def decode(self, toks): return self.model.decode(toks)
+  def decode(self, toks): return self.model.decode([t for t in toks if t < self.num_base_tokens])
   def encode(self, text, allow_special=False):
     return self.model.encode(text, allowed_special="all" if allow_special else set(), disallowed_special=set())
 
@@ -181,7 +182,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
 TEMPERATURE = 0.85
 TOP_K = 25
 TOP_P = 0.9
-ALPHA_F = 1.1
+ALPHA_F = 0.1
 ALPHA_P = 0.0
 
 last_seen_toks = []
@@ -320,7 +321,7 @@ if __name__ == "__main__":
       toks = [tokenizer.bos_id]
       for message in rjson["messages"]:
         toks += encode_message(message["role"], message["content"])
-      if message["role"] == "user":
+      if len(rjson["messages"]) > 0 and message["role"] == "user":
         toks += encode_role("assistant")
       return json.dumps(toks)
 

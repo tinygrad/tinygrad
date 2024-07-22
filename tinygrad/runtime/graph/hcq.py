@@ -1,7 +1,7 @@
-import collections, array, time
+import collections, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, to_mv, PROFILE
-from tinygrad.device import Buffer, BufferOptions, Compiled, Device
+from tinygrad.device import HCQAllocator, Buffer, BufferOptions, Compiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
@@ -28,13 +28,9 @@ class HCQGraph(MultiGraphRunner):
       self.kargs_addrs[j] = kernargs_ptrs[ji.prg.device]
       kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
 
-      self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_offset, len(ji.bufs) * 8).cast('Q')
-      self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_offset + len(ji.bufs) * 8, len(ji.prg.p.vars) * 4).cast('I')
-      for i in range(len(ji.bufs)): self.ji_args_bufs[j][i] = cast(Buffer, ji.bufs[i])._buf.va_addr
-      for i in range(len(ji.prg.p.vars)): self.ji_args_vars[j][i] = var_vals[ji.prg.p.vars[i]]
-
-      # NV needs constbuffer to be set
-      if ji.prg.device.dname.startswith("NV"): to_mv(self.kargs_addrs[j], 0x160).cast('I')[:] = array.array('I', ji.prg.clprg.constbuffer_0)
+      ji.prg.clprg.fill_kernargs([cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], self.kargs_addrs[j])
+      self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset, len(ji.bufs) * 8).cast('Q')
+      self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset + len(ji.bufs) * 8, len(ji.prg.p.vars) * 4).cast('I')
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any
@@ -44,9 +40,9 @@ class HCQGraph(MultiGraphRunner):
     self.comp_queues: Dict[Compiled, Any] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
     self.copy_queues: Dict[Compiled, Any] = {dev: dev.hw_copy_queue_t() for dev in self.devices}
 
-    self.signal_sched: Dict[int, Tuple[List, Optional[int], Optional[List]]] = {} # Dict[ji_idx, (deps, sigval, prof_info)]
-    self.signals: Dict[Any, Any] = {q: self.devices[0]._get_signal(value=0) for q in list(self.comp_queues.values())+list(self.copy_queues.values())}
-    self.dev_kickoff_signal = {dev: self.devices[0]._get_signal(value=0) for dev in self.devices + ['CPU']} # Dict[dev, signal]
+    self.signal_sched: Dict[int, Tuple[List, Any, Optional[int], Optional[List]]] = {} # Dict[ji_idx, (deps, signal, sigval, prof_info)]
+    self.signals = {q: self.devices[0].signal_t(value=0) for q in list(self.comp_queues.values())+list(self.copy_queues.values())}
+    self.dev_kickoff_signal = {dev: self.devices[0].signal_t(value=0) for dev in self.devices + ['CPU']} # Dict[dev, signal]
     self.kickoff_value = 0
 
     self.save_devs: Dict[Any, Set] = {q: set() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
@@ -74,15 +70,15 @@ class HCQGraph(MultiGraphRunner):
       # Go through all dependencies and, if we need the signal from that ji, enable it by setting the signal value in the signal schedule.
       for sig, val in deps:
         if id(sig) in [id(x) for x in self.signals.values()]:
-          self.signal_sched[val - 1] = self.signal_sched[val - 1][:1] + (val,) + self.signal_sched[val - 1][2:]
+          self.signal_sched[val - 1] = self.signal_sched[val - 1][:2] + (val,) + self.signal_sched[val - 1][3:]
 
       prof_ji_desc = ji.prg.clprg.name if isinstance(ji.prg, CompiledRunner) else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
-      prof_info = ([enqueue_dev._get_signal() for _ in range(2)] + [enqueue_dev, prof_ji_desc, isinstance(ji.prg, BufferXfer)]) if PROFILE else None
-      self.signal_sched[j] = (deps, None if isinstance(ji.prg, CompiledRunner) else (j + 1), prof_info)
+      prof_info = ([enqueue_dev.signal_t() for _ in range(2)] + [enqueue_dev, prof_ji_desc, isinstance(ji.prg, BufferXfer)]) if PROFILE else None
+      self.signal_sched[j] = (deps, out_signal, None if isinstance(ji.prg, CompiledRunner) else (j + 1), prof_info)
       self.last_ji[enqueue_queue] = j
 
     # Build hardware queues.
-    self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
+    self.op_cmd_idx: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
     self.kickoff_wait_cmds: Dict[Any, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
 
@@ -91,7 +87,7 @@ class HCQGraph(MultiGraphRunner):
                            .wait(self.dev_kickoff_signal['CPU'], self.kickoff_value).signal(self.dev_kickoff_signal[dev], self.kickoff_value)
 
     for j,ji in enumerate(self.jit_cache):
-      deps, signal_value, prof_info = self.signal_sched[j]
+      deps, signal, signal_val, prof_info = self.signal_sched[j]
       enqueue_queue = self.copy_queues[Device[ji.bufs[1].device]] if isinstance(ji.prg, BufferXfer) else self.comp_queues[ji.prg.device] #type:ignore
 
       # Encode waits and start profile timestamp (if needed).
@@ -101,15 +97,15 @@ class HCQGraph(MultiGraphRunner):
       if prof_info: enqueue_queue.timestamp(prof_info[0])
 
       # Encode main commands based on ji type.
-      if isinstance(ji.prg, CompiledRunner):
-        enqueue_queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals),
-                           signal=self.signals[enqueue_queue] if signal_value is not None else None, signal_value=signal_value)
-        self.exec_ptrs[j] = (enqueue_queue, len(enqueue_queue) - 1)
+      if isinstance(ji.prg, CompiledRunner): enqueue_queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        Device[src.device]._gpu_map(dest._buf) #type: ignore
-        enqueue_queue.copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes).signal(self.signals[enqueue_queue], signal_value)
+        cast(HCQAllocator, Device[src.device].allocator).map(dest._buf)
+        enqueue_queue.copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])
+      self.op_cmd_idx[j] = (enqueue_queue, len(enqueue_queue) - 1)
+
+      if signal_val is not None: enqueue_queue.signal(signal, signal_val)
 
       # Encode finish profile timestamp (if needed).
       if prof_info: enqueue_queue.timestamp(prof_info[1])
@@ -117,7 +113,7 @@ class HCQGraph(MultiGraphRunner):
     for dev in self.devices:
       for dep_dev in list(self.copy_to_devs[dev]) + [dev]:
         if (last_j:=self.last_ji[self.copy_queues[dep_dev]]) is None: continue
-        self.comp_queues[dev].wait(self.signals[self.copy_queues[dep_dev]], self.signal_sched[last_j][1])
+        self.comp_queues[dev].wait(self.signals[self.copy_queues[dep_dev]], self.signal_sched[last_j][2])
 
       self.comp_queues[dev].signal(dev.timeline_signal, dev.timeline_value)
       if hasattr(self.comp_queues[dev], 'bind'): self.comp_queues[dev].bind(dev)
@@ -126,24 +122,26 @@ class HCQGraph(MultiGraphRunner):
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
     self.kickoff_value += 1
-    for dev in self.devices: dev._wait_signal(dev.timeline_signal, self.graph_timeline[dev])
-    for queue in self.comp_queues.values(): self.devices[0]._set_signal(self.signals[queue], 0)
-    for queue in self.copy_queues.values(): self.devices[0]._set_signal(self.signals[queue], 0)
-    self.devices[0]._set_signal(self.dev_kickoff_signal['CPU'], self.kickoff_value)
+    for dev in self.devices: dev.timeline_signal.wait(self.graph_timeline[dev])
+    for queue in self.comp_queues.values(): self.signals[queue].value = 0
+    for queue in self.copy_queues.values(): self.signals[queue].value = 0
+    self.dev_kickoff_signal['CPU'].value = self.kickoff_value
 
     if PROFILE and self.kickoff_value > 1:
-      for _,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): #type: ignore
-        dev.raw_prof_records += [(dev._read_timestamp(st), dev._read_timestamp(en), desc, is_cp)]
+      for _,_,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): #type: ignore
+        dev.raw_prof_records += [(st.timestamp, en.timestamp, desc, is_cp)]
 
     # Update rawbuffers
-    for (j,i),input_idx in self.input_replace.items(): self.ji_args_bufs[j][i] = input_rawbuffers[input_idx]._buf.va_addr
+    for (j,i),input_idx in self.input_replace.items():
+      if j in self.ji_args_bufs: self.ji_args_bufs[j][i] = input_rawbuffers[input_idx]._buf.va_addr
+      else: self.op_cmd_idx[j][0].update_copy(self.op_cmd_idx[j][1], **{('dest' if i == 0 else 'src'): input_rawbuffers[input_idx]._buf.va_addr})
 
     # Update var_vals
     for j in self.jc_idx_with_updatable_var_vals:
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars): self.ji_args_vars[j][i] = var_vals[v]
 
     for j in self.jc_idx_with_updatable_launch_dims:
-      queue, cmd_ptr = self.exec_ptrs[j]
+      queue, cmd_ptr = self.op_cmd_idx[j]
       queue.update_exec(cmd_ptr, *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
 
     for dev in self.devices:
@@ -160,7 +158,7 @@ class HCQGraph(MultiGraphRunner):
 
     if wait:
       st = time.perf_counter()
-      for dev in self.devices: dev._wait_signal(dev.timeline_signal, self.graph_timeline[dev])
+      for dev in self.devices: dev.timeline_signal.wait(self.graph_timeline[dev])
       return time.perf_counter() - st
     return None
 
@@ -177,11 +175,10 @@ class HCQGraph(MultiGraphRunner):
     return [(self.signals[k], max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()] + sync_signals
 
   def __del__(self):
-    for dev in self.devices: dev._wait_signal(dev.timeline_signal, self.graph_timeline[dev])
+    for dev in self.devices: dev.timeline_signal.wait(self.graph_timeline[dev])
 
     # Graph is destructed. No need to keep signals any more, so return them as part of profiling.
     if PROFILE and self.kickoff_value > 1:
-      for _,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): dev.sig_prof_records += [(st, en, desc, is_cp)] #type: ignore
+      for _,_,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): dev.sig_prof_records += [(st, en, desc, is_cp)] #type: ignore
 
-    self.devices[0].signals_pool += list(self.dev_kickoff_signal.values()) + list(self.signals.values()) # type: ignore
     for dev, buf in self.kernargs_bufs.items(): dev.allocator._free(buf, BufferOptions(cpu_access=True))

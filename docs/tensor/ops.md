@@ -3,6 +3,8 @@
 ::: tinygrad.Tensor.sum
 ::: tinygrad.Tensor.max
 ::: tinygrad.Tensor.min
+::: tinygrad.Tensor.any
+::: tinygrad.Tensor.all
 ::: tinygrad.Tensor.mean
 ::: tinygrad.Tensor.var
 ::: tinygrad.Tensor.std
@@ -24,6 +26,7 @@
 ::: tinygrad.Tensor.cumsum
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
+::: tinygrad.Tensor.interpolate
 
 ## Unary Ops (math)
 
@@ -106,3 +109,5 @@
 ::: tinygrad.Tensor.bitcast
 ::: tinygrad.Tensor.float
 ::: tinygrad.Tensor.half
+::: tinygrad.Tensor.int
+::: tinygrad.Tensor.bool

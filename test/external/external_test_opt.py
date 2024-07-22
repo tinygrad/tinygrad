@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from tinygrad import GlobalCounters, Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing
 from tinygrad.tensor import _to_np_dtype
@@ -25,7 +25,7 @@ class CLCache:
     capturing.append(self)
     print("cache: entering")
     return self
-  def __exit__(self, type, value, traceback):
+  def __exit__(self, _type, value, traceback):
     capturing.clear()
     print(f"cache: exiting with size {self.count}", f"allowed {self.allowed}" if self.allowed is not None else "")
     if self.allowed is not None:
@@ -224,22 +224,24 @@ class TestOpt(unittest.TestCase):
 
   # TODO with PUSH_PERMUTES these could be 2
   def test_expand_reduce_is_folded_on_same_axis(self):
-    for axis in [0, 1]:
+    with Context(FUSE_CONV_BW=1):
+      for axis in [0, 1]:
+        for n in [4, 8, 16]:
+          b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
+          with CLCache(allowed=2):
+            a = Tensor.ones(n, n).contiguous().sum(axis).reshape(n, 1).expand(n, n).sum(axis)
+            a.realize()
+          np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
+
+  def test_expand_reduce_is_folded_on_different_axes(self):
+    with Context(FUSE_CONV_BW=1):
+      axis1, axis2 = 0, 1
       for n in [4, 8, 16]:
-        b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
-        with CLCache(allowed=3):
-          a = Tensor.ones(n, n).contiguous().sum(axis).reshape(n, 1).expand(n, n).sum(axis)
+        b = torch.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
+        with CLCache(allowed=2):
+          a = Tensor.ones(n, n).contiguous().sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
           a.realize()
         np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
-
-  def test_expand_reduce_is_not_folded_on_different_axes(self):
-    axis1, axis2 = 0, 1
-    for n in [4, 8, 16]:
-      b = torch.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
-      with CLCache(allowed=3):
-        a = Tensor.ones(n, n).contiguous().sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
-        a.realize()
-      np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()

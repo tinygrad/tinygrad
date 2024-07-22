@@ -27,7 +27,7 @@ l1n, l2n = l1.numpy(), l2.numpy()
 from tinygrad.nn.optim import SGD
 optim = SGD([l1, l2])
 
-X, Y = X_train[samples:=Tensor.randint(128, high=X_train.shape[0])], Y_train[samples]
+X, Y = X_train[(samples:=Tensor.randint(128, high=X_train.shape[0]))], Y_train[samples]
 optim.zero_grad()
 model(X).sparse_categorical_crossentropy(Y).backward()
 optim._step()   # this will step the optimizer without running realize
@@ -48,7 +48,7 @@ for si in schedule: print(str(si)[:80])
 # 4. Lower a schedule.
 
 from tinygrad.engine.realize import lower_schedule_item, ExecItem
-lowered: List[ExecItem] = [ExecItem(lower_schedule_item(si), list(si.bufs)) for si in tqdm(schedule)]
+lowered: List[ExecItem] = [ExecItem(lower_schedule_item(si).prg, list(si.bufs)) for si in tqdm(schedule)]
 
 # *****
 # 5. Run the schedule

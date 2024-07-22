@@ -1,8 +1,8 @@
 import unittest
 import numpy as np
-from tinygrad import Device, dtypes, Tensor, Variable
+from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.dtype import ImageDType
-from tinygrad.codegen.linearizer import to_image_idx
+from tinygrad.engine.realize import lower_schedule
 
 @unittest.skipIf(Device.DEFAULT != "GPU", "only images on GPU")
 class TestImageDType(unittest.TestCase):
@@ -29,6 +29,11 @@ class TestImageDType(unittest.TestCase):
     it = Tensor.randn(4).cast(dtypes.imagef((1,1,4))).realize()
     out = (it*2).realize()
     assert isinstance(out.lazydata.base.realized.dtype, ImageDType)
+
+  def test_sum(self):
+    it = Tensor.rand(8).cast(dtypes.imagef((1,2,4))).realize()
+    itn = it.numpy()
+    np.testing.assert_allclose(np.sum(itn), it.sum().numpy(), rtol=1e-6)
 
   def test_shrink_max(self):
     it = Tensor.randn(8).cast(dtypes.imagef((1,2,4))).realize()
@@ -64,14 +69,21 @@ class TestImageDType(unittest.TestCase):
     it = data.cast(dtypes.imageh((9,27,4))).realize()
     assert it.lazydata.base.realized._buf != b1
 
-class TestImageIdx(unittest.TestCase):
-  def test_to_image_idx_real1(self):
-    gidx0 = Variable('gidx0', 0, 511)
-    base_idx = (((gidx0*4)%32)*32)+((gidx0//8)%32)
-    base_valid = gidx0<256
-    (idx, idy), valid = to_image_idx((4, 64, 4), base_idx, base_valid)
-    print(idx, idy, idx.min, idx.max, idy.min, idy.max, valid)
-    assert valid.min == 0
+  # issue caused by: don't realize image to image casts. this is part of a larger problem
+  def test_lil_model(self):
+    with Context(IMAGE=2):
+      x = Tensor.zeros(1, 1)
+      w1 = Tensor.zeros(1, 8, requires_grad=True)
+      w2 = Tensor.zeros(8, 2)
+      loss = x.image_dot(w1).image_dot(w2).float().max()
+      loss.backward()
+      sched = w1.grad.schedule()
+      for s,ei in zip(sched, lower_schedule(sched[:])):
+        ei.run()
+        if s.outputs[0].dtype is dtypes.float:
+          lst = s.outputs[0].as_buffer().cast("f").tolist()
+          print(lst)
+          assert not np.any(np.isnan(lst))
 
 if __name__ == '__main__':
   unittest.main()

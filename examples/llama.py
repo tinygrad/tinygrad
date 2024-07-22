@@ -8,8 +8,8 @@ from typing import List
 import argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from tinygrad.helpers import Context, Timing, Profiling, getenv, DEBUG, colored
-from tinygrad import Tensor, Device, GlobalCounters, dtypes, nn
+from tinygrad import Tensor, Device, GlobalCounters, nn
+from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
@@ -197,8 +197,6 @@ class LLaMa:
     tokenizer = MODEL_PARAMS[model_gen]['tokenizer'](model_file=str(tokenizer_path))
     assert tokenizer.vocab_size() == params["args"]["vocab_size"], f"{tokenizer.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
-    jit = bool(getenv("JIT", 1))
-
     if quantize == "int8":
       from llama3 import Int8Linear
       linear = Int8Linear
@@ -208,7 +206,7 @@ class LLaMa:
     else:
       linear = nn.Linear
 
-    model = Transformer(**params["args"], linear=linear, max_context=MAX_CONTEXT, jit=jit)
+    model = Transformer(**params["args"], linear=linear, max_context=MAX_CONTEXT, jit=bool(JIT))
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
@@ -462,7 +460,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       outputted += user_prompt
 
     new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
-    assert toks == new_toks[:len(toks)]
+    assert toks == new_toks[:len(toks)] or args.gen == "3"
     toks = new_toks
     assert outputted == llama.tokenizer.decode(toks)
 
@@ -492,7 +490,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       outputted = cur
 
       # stop after you have your answer
-      if chatbot and outputted.endswith(end_delim): break
+      if chatbot and end_delim in outputted[-10:]: break
     if not chatbot: break
 
   # validate output!

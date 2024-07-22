@@ -1,9 +1,9 @@
 from typing import List, Tuple
-from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.engine.search import get_linearizer_actions, actions
+from tinygrad.codegen.kernel import Kernel
+from tinygrad.engine.search import get_kernel_actions, actions
 
 _net = None
-def beam_q_estimate(beam:List[Tuple[Linearizer, float]]) -> List[Tuple[Linearizer, float]]:
+def beam_q_estimate(beam:List[Tuple[Kernel, float]]) -> List[Tuple[Kernel, float]]:
   global _net
   if _net is None:
     from tinygrad.nn.state import load_state_dict, safe_load
@@ -19,7 +19,7 @@ def beam_q_estimate(beam:List[Tuple[Linearizer, float]]) -> List[Tuple[Linearize
   base_tms = []
   for lin,tm in beam:
     lin_feats = lin_to_feats(lin)
-    for a,v in get_linearizer_actions(lin, include_0=False).items():
+    for a,v in get_kernel_actions(lin, include_0=False).items():
       acts = np.zeros(len(actions))
       acts[a-1] = 1.0
       feats.append(np.concatenate([lin_feats, acts]))

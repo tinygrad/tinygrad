@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
-import itertools, urllib.request, subprocess, shutil, math, json
+import itertools, urllib.request, subprocess, shutil, math, json, contextvars
+from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
@@ -25,6 +26,7 @@ def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https
 def all_same(items:List[T]): return all(x == items[0] for x in items)
 def all_int(t: Sequence[Any]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
+def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
@@ -33,6 +35,8 @@ def fully_flatten(l): return [item for sublist in l for item in (fully_flatten(s
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def round_up(num, amt:int): return (num+amt-1)//amt * amt
+def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
+def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"  # noqa: E501
   return {k:v for d in ds for k,v in d.items()}
@@ -58,7 +62,7 @@ def get_child(obj, key):
 def get_shape(x) -> Tuple[int, ...]:
   if not isinstance(x, (list, tuple)): return ()
   subs = [get_shape(xi) for xi in x]
-  if not all_same([sub for sub in subs]): raise ValueError(f"inhomogeneous shape from {x}")
+  if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
@@ -101,9 +105,21 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
-WINO, THREEFRY, CACHECOLLECTING = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CACHECOLLECTING", 1)
+WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
-MULTIOUTPUT, PROFILE = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0)
+MULTIOUTPUT, PROFILE, TRANSCENDENTAL = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("TRANSCENDENTAL", 1)
+USE_TC, TC_OPT = ContextVar("TC", 1), ContextVar("TC_OPT", 0)
+FUSE_AS_ONE_KERNEL, FUSE_CONV_BW = ContextVar("FUSE_AS_ONE_KERNEL", 0), ContextVar("FUSE_CONV_BW", 0)
+
+@dataclass(frozen=True)
+class Metadata:
+  name: str
+  caller: str
+  backward: bool = False
+  def __hash__(self): return hash(self.name)
+  def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
+  def __str__(self): return self.name + (" bw" if self.backward else "")
+_METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
 
 # **************** global state Counters ****************
 
@@ -168,7 +184,7 @@ class ProfileLogger:
       self.mjson.append({"name": name, "ph": "X", "pid": self.actors[actor_name], "tid": self.subactors.get(subactor_key, -1), "ts":st, "dur":et-st})
 
     ProfileLogger.writers -= 1
-    if ProfileLogger.writers == 0:
+    if ProfileLogger.writers == 0 and len(self.mjson) > 0:
       with open(self.path, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
       print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/ to open it.")
 
@@ -184,7 +200,8 @@ def db_connection():
   global _db_connection
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
-    _db_connection = sqlite3.connect(CACHEDB)
+    _db_connection = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
+    _db_connection.execute("PRAGMA journal_mode=WAL")
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
 
@@ -234,12 +251,12 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
-  else: fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
+  else: fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / (name or hashlib.md5(url.encode('utf-8')).hexdigest())
   if not fp.is_file() or not allow_caching:
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}: ")
+      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): progress_bar.update(f.write(chunk))
@@ -277,34 +294,43 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
+# *** tqdm
+
 class tqdm:
-  def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:int=-1, rate:int=100):
+  def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:Optional[int]=None, rate:int=100):
     self.iter, self.desc, self.dis, self.unit, self.unit_scale, self.rate = iterable, f"{desc}: " if desc else "", disable, unit, unit_scale, rate
-    self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, len(iterable) if total==-1 else total
+    self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, getattr(iterable, "__len__", lambda:0)() if total is None else total
     self.update(0)
   def __iter__(self):
-    try:
-      for item in self.iter:
-        yield item
-        self.update(1)
-    finally: self.update(close=True)
+    for item in self.iter:
+      yield item
+      self.update(1)
+    self.update(close=True)
   def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
-    if (self.i % self.skip != 0 and not close) or self.dis: return
-    prog, dur, term = self.n/self.t if self.t else -1, time.perf_counter()-self.st, shutil.get_terminal_size().columns
-    if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
-    def fmt(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t!=-1 else '?'
-    def scl(x): return x/1000**int(math.log(x,1000))
-    def fn(x): return (f"{scl(x):.{3-math.ceil(math.log10(scl(x)))}f}"[:4]+(f"{[' ','k','M','G','T','P'][int(math.log(x,1000))]}") if x else '0.00')
-    if self.t: unit_text = f"{fn(self.n)}/{fn(self.t)}" if self.unit_scale else f"{self.n}/{self.t}"
-    else: unit_text = f"{fn(self.n)}{self.unit}" if self.unit_scale else f"{self.n}{self.unit}"
-    it_text = f"{fn(self.n/dur)}" if self.n and self.unit_scale else f"{self.n/dur:5.2f}" if self.n else "?"
-    if self.t: suf = f'| {unit_text} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {it_text}{self.unit}/s]'
-    else: suf = f'{unit_text} [{fmt(dur)}, {it_text}{self.unit}/s]'
-    sz = max(term-5-len(suf)-len(self.desc), 1)
-    bar = f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}' if self.t else f'\r{self.desc}{suf}{" "*term}'
-    print(bar[:term+1],flush=True,end='\n'*close,file=sys.stderr)
+    if self.dis or (not close and self.i % self.skip != 0): return
+    prog, dur, ncols = self.n/self.t if self.t else 0, time.perf_counter()-self.st, shutil.get_terminal_size().columns
+    if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1)
+    def fmt(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([int(t)//3600,int(t)%3600//60,int(t)%60]) if i or x)
+    def fn(x): return (f"{x/1000**int(g:=math.log(x,1000)):.{int(3-3*math.fmod(g,1))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(g)].strip()) if x else '0.00'
+    unit_text = f'{fn(self.n)}{f"/{fn(self.t)}" if self.t else self.unit}' if self.unit_scale else f'{self.n}{f"/{self.t}" if self.t else self.unit}'
+    it_text = (fn(self.n/dur) if self.unit_scale else f"{self.n/dur:5.2f}") if self.n else "?"
+    tm = f'{fmt(dur)}<{fmt(dur/prog-dur) if self.n else "?"}' if self.t else fmt(dur)
+    suf = f'{unit_text} [{tm}, {it_text}{self.unit}/s]'
+    sz = max(ncols-len(self.desc)-5-2-len(suf), 1)
+    bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
+    print(bar[:ncols+1],flush=True,end='\n'*close,file=sys.stderr)
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+
+def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
+  def dfs(x:Any, cache:dict):
+    for s in srcfn(x) or []:
+      cache.setdefault(s, [len(cache), 0, False])[1] += 1
+      if cache[s][1] == 1: dfs(s, cache)
+  if cache is None: dfs(x, cache:={})
+  if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
+  cx[2], srcs = True, ('None' if srcfn(x) is None else''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
+  return f"{' '*d} {f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
