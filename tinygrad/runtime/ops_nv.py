@@ -290,12 +290,12 @@ class NVProgram(HCQProgram):
     self.max_threads = ((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    super().__init__(kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
+    super().__init__(self.device, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
 
-  def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
+  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
     if MOCKGPU: self.constbuffer_0[0:2] = [len(bufs), len(vals)]
     kernargs = [arg_half for arg in bufs for arg_half in data64_le(arg.va_addr)] + list(vals)
@@ -306,20 +306,15 @@ class NVProgram(HCQProgram):
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
 
-    if self.device.kernargs_ptr >= (self.device.kernargs_page.va_addr + self.device.kernargs_page.size - self.kernargs_alloc_size):
-      self.device.kernargs_ptr = self.device.kernargs_page.va_addr
-
-    self.fill_kernargs(self.device.kernargs_ptr, args, vals)
+    kernargs_ptr = self.fill_kernargs(args, vals)
 
     q = NVComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
     with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-      q.exec(self, self.device.kernargs_ptr, global_size, local_size)
+      q.exec(self, kernargs_ptr, global_size, local_size)
 
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-
     self.device.timeline_value += 1
-    self.device.kernargs_ptr += self.kernargs_alloc_size
 
     if wait:
       self.device.timeline_signal.wait(self.device.timeline_value - 1)
@@ -519,9 +514,6 @@ class NVDevice(HCQCompiled):
     self.cmdq: memoryview = to_mv(self.cmdq_page.va_addr, 0x200000).cast("I")
     self.cmdq_wptr: int = 0 # in bytes
 
-    self.kernargs_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x4000000, map_to_cpu=True)
-    self.kernargs_ptr: int = self.kernargs_page.va_addr
-
     sm_info = nv_gpu.NV2080_CTRL_GR_INFO(index=nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION)
     rmctrl.gr_get_info(self.fd_ctl, self.root, self.subdevice, grInfoListSize=1, grInfoList=ctypes.addressof(sm_info))
     self.arch: str = f"sm_{(sm_info.data>>8)&0xff}{(val>>4) if (val:=sm_info.data&0xff) > 0xf else val}"
@@ -532,13 +524,6 @@ class NVDevice(HCQCompiled):
 
     self._setup_gpfifos()
     NVDevice.devices.append(self)
-
-  def synchronize(self):
-    self.timeline_signal.wait(self.timeline_value - 1)
-    self.cmdq_wptr = 0
-
-    if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
-    if PROFILE: self._prof_process_events()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
     notifier = self._gpu_system_alloc(48 << 20)
@@ -586,3 +571,8 @@ class NVDevice(HCQCompiled):
     NVComputeQueue().setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
+
+  def invalidate_caches(self):
+    rmctrl.fb_flush_gpu_cache(self.fd_ctl, self.root, self.subdevice,
+      flags=((nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_WRITE_BACK_YES << 2) | (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_INVALIDATE_YES << 3) |
+             (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE << 4)))

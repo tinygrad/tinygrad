@@ -246,8 +246,9 @@ constant_folder = PatternMatcher([
   (UOp.var("x") * UOp.cvar("c0") + UOp.var("x") * UOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
   # (x*c0)+(y*c0) -> (x+y)*c0
   #((UOp.var("x") * UOp.cvar("c0")) + (UOp.var("y") * UOp.cvar("c0")), lambda x,y,c0: c0*(x+y)),
-  # (x*c0)//c0 -> x
-  ((UOp.var("x") * UOp.cvar("c0")) // UOp.cvar("c0"), lambda x,c0: x if c0.arg != 0 else None),
+  # mul div
+  ((UOp.var("x") * UOp.cvar("c0")) // UOp.cvar("c1"),
+   lambda x,c0,c1: x*(c0.arg//gcd)//(c1.arg//gcd) if c1.arg!=0 and (gcd:=math.gcd(c0.arg,c1.arg))> 1 else None),
   # (x*x2)/x2 -> x
   ((UOp.var("x") * UOp.var("x2")) / UOp.var("x2"), lambda x,x2: x),
   # (x//c0)//c1 -> x//(c0*c1)
@@ -467,20 +468,20 @@ class UOpGraph:
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
-    # fixup gated stores with an IF block to save extra local loads
+    # replace UOps.STORE gate with an IF block
     @functools.lru_cache(None)
-    def _dfs(u:UOp, gate:UOp) -> UOp:
+    def _replace_gates(u:UOp, gate:UOp) -> UOp:
       if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
         if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
         return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
-      if (replace_source:=tuple(_dfs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
+      if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src:
+        if u.op is UOps.STORE and u.src[3] is gate: replace_source = replace_source[:3]
+        return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
     sink_srcs = list(self.sink.src)
     for i, s in enumerate(sink_srcs):
-      # breaks for WMMA
-      if all(x.op is not UOps.WMMA for x in s.parents):
-        if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_dfs(s, s.src[3])) != s:
-          sink_srcs[i] = UOp(rw.op, rw.dtype, rw.src[:3], rw.arg)
+      if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_replace_gates(s, s.src[3])) != s:
+        sink_srcs[i] = UOp(rw.op, rw.dtype, rw.src, rw.arg)
     sink = UOp(UOps.SINK, None, tuple(sink_srcs))
 
     # do graph rewrite

@@ -312,11 +312,9 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
 
-  @unittest.expectedFailure
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
 
-  @unittest.expectedFailure
   def test_mul_div_factor_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//8, 0, 5, "(a//2)")
 
