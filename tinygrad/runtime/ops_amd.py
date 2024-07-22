@@ -233,7 +233,7 @@ class AMDCopyQueue(HWCopyQueue):
   def _update_copy(self, cmd_idx, dest=None, src=None):
     for i in range(self.copy_cmds_per_copy[cmd_idx]):
       if src is not None: self._patch(cmd_idx, offset=3+i*7, data=[*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
-      if dest is not None: self._patch(cmd_idx, offset=7+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
+      if dest is not None: self._patch(cmd_idx, offset=5+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
 
   def _signal(self, signal, value=0):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._value_addr), value])
