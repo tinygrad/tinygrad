@@ -98,8 +98,7 @@ class LazyBuffer:
       return create_lazybuffer(self.device, self.st, dtype, MetaOps.CONST, dtypes.as_const(self.base.arg, dtype))
     new_shape = self.shape
     if bitcast and self.dtype.itemsize != dtype.itemsize:
-      if self.device.split(":")[0] not in view_supported_devices: raise RuntimeError("device doesn't support shape changing bitcast")
-      if not self.st.contiguous: raise RuntimeError("must be contiguous for shape changing bitcast")
+      if not self.can_view(): raise RuntimeError("must be viewable for shape changing bitcast")
       if not all_int(new_shape): raise RuntimeError("shape changing bitcast with symbolic shape isn't supported yet")
       # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
       if not (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
