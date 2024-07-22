@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, all_int, get_contraction
+from tinygrad.helpers import getenv, all_int, get_contraction, AMX
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -117,7 +117,7 @@ class IndependentLowerer:
                    for i,g in enumerate(full_shape[:first_reduce])]
 
     # reduce loops
-    self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True, 'amx' if getenv('AMX',0) else 'red'))
+    self.idxs += [UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(g)), (i, True, 'amx' if AMX else 'red'))
       for i,g in enumerate(full_shape[first_reduce+group_for_reduces:first_upcasted], start=first_reduce+group_for_reduces)]
 
     # upcast loops

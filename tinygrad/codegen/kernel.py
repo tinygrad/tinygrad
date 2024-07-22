@@ -8,7 +8,7 @@ from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, Cons
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, AMX, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
@@ -314,7 +314,7 @@ class Kernel:
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
-    if use_tensor_cores and (self.opts.has_local or getenv("AMX",0)) and self.reduceop is not None and self.reduceop.op is ReduceOps.SUM:
+    if use_tensor_cores and (self.opts.has_local or AMX) and self.reduceop is not None and self.reduceop.op is ReduceOps.SUM:
       for tc in self.opts.tensor_cores:
         tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
         # can only fuse reduces with the same tc options
@@ -380,7 +380,7 @@ class Kernel:
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
 
-      if (tc_opts:=self.tensor_core_opts) is not None and not getenv("AMX", 0):
+      if (tc_opts:=self.tensor_core_opts) is not None and not AMX: #AMX only has one set of accumulators
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
