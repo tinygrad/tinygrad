@@ -180,7 +180,6 @@ class ProfileLogger:
         self.subactors[subactor_key] = (tid:=len(self.subactors))
         self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
 
-      print(et-st, st, et)
       self.mjson.append({"name": name, "ph": "X", "pid": self.actors[actor_name], "tid": self.subactors.get(subactor_key, -1), "ts":st, "dur":et-st})
 
     ProfileLogger.writers -= 1
