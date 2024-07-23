@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Any, Set, cast, List, Union, DefaultDict, Callable, Dict
-import functools, itertools
+import functools, itertools, math
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -73,6 +73,7 @@ class UOp:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def _const(dtype:Optional[DType], b:ConstType|Variable):
+    # TODO: min/max for const Variable?
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
@@ -97,6 +98,14 @@ class UOp:
       if self.arg is BinaryOps.ADD: return all(x.divides(v) for x in self.src)
       if self.arg is BinaryOps.MUL: return any(x.divides(v) for x in self.src)
     return False # generic false if we aren't sure
+  @functools.cached_property
+  def vmax(self) -> UOp:
+    if self.op is UOps.DEFINE_VAR: return self.src[1]
+    return UOp.const(dtypes.float, math.inf)
+  @functools.cached_property
+  def vmin(self) -> UOp:
+    if self.op is UOps.DEFINE_VAR: return self.src[0]
+    return UOp.const(dtypes.float, -math.inf)
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
