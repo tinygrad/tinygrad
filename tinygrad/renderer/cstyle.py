@@ -208,12 +208,9 @@ class ClangRenderer(CStyleLanguage):
     prefix = [_make_clang_dtype(dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
     if AMX: prefix += ['#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")', '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")'] # noqa: E501
     for name, (N, M, K), dtype_in, _, _, _, _, _ in set([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      amx_op = {dtypes.double:10, dtypes.float:12, dtypes.half:15}
-      prefix += [f"void __ST_{dtype_in.vec(K).name}({dtype_in.vec(K).name}* acc, int zreg){{ AMX(5, acc, 1ull<<62 | (zreg*1ull)<<56); }}",
-        f"""void __{name}({dtype_in.vec(N).name} data1, {dtype_in.vec(M).name} data2){{
-  AMX(0, (int *) (&data2), 1ull<<62); AMX(1, (int *) (&data1), 1ull<<62);
-  AMX({amx_op[dtype_in]}, 0, 0ull); AMX({amx_op[dtype_in]}, 0, 1ull<<20 | 64<<10); AMX({amx_op[dtype_in]}, 0, 2ull<<20 | 64); AMX({amx_op[dtype_in]}, 0, 3ull<<20 | 64<<10 | 64);
-}}""",]  # noqa: E501
+      prefix += \
+      [f"void __ST_{dtype_in.vec(K).name}({dtype_in.vec(K).name}* acc, int zreg){{ AMX(5, acc, 0ull<<62 | (zreg*1ull)<<56); }}",
+       f"void __{name}({dtype_in.vec(N).name} data1, {dtype_in.vec(M).name} data2){{ AMX(0, (int *) (&data2), 0ull<<62); AMX(1, (int *) (&data1), 0ull<<62); AMX(12, 0, 0ull); }}"]  # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   # language options
