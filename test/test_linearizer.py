@@ -783,7 +783,7 @@ class TestLinearizer(unittest.TestCase):
       idxs = get_grouped_dims(prefix, dims, max_sizes, reverse_dims)
       loop_idxs = dedup(flatten([[y for y in sorted(list(x.sparents)) if y.op is UOps.SPECIAL] for x in idxs]))
       loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg[0])
-      sizes = [x.arg[2] for x in loop_idxs]
+      sizes = [x.arg[1] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
       assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
       assert sizes == expected_sizes, f"expected sizes={expected_sizes}, got {sizes=}"
@@ -840,9 +840,9 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(t+1)[0]
     idxs = dedup([uop for uop in k.uops if uop.op is UOps.SPECIAL])
     idxs = sorted(idxs, key=lambda uop: uop.arg[0])
-    assert idxs[0].arg == (0, 'gidx0', 6), idxs[0].arg
-    assert idxs[1].arg == (1, 'gidx1', 5), idxs[1].arg
-    assert idxs[2].arg == (2, 'gidx2', 4), idxs[2].arg
+    assert idxs[0].arg == ('gidx0', 6), idxs[0].arg
+    assert idxs[1].arg == ('gidx1', 5), idxs[1].arg
+    assert idxs[2].arg == ('gidx2', 4), idxs[2].arg
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):

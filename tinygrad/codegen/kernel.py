@@ -740,12 +740,12 @@ class Kernel:
       self.local_size: Optional[List[int]] = [1,1,1]
       for u in uop_sink.parents:
         if u.op is UOps.SPECIAL:
-          if u.arg[1][0] == 'i': self.local_size = None
-          if u.arg[1][0] == 'l':
+          if u.arg[0][0] == 'i': self.local_size = None
+          if u.arg[0][0] == 'l':
             assert self.local_size is not None
-            self.local_size[u.arg[0]] = u.arg[2]
+            self.local_size[int(u.arg[0][-1])] = u.arg[1]
           else:
-            self.global_size[u.arg[0]] = u.arg[2]
+            self.global_size[int(u.arg[0][-1])] = u.arg[1]
     else:
       self.global_size, self.local_size = None, None
 

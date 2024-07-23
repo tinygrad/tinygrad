@@ -139,8 +139,8 @@ class CStyleLanguage(Renderer):
           if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('alu',u)} = {val};")
         elif uop is UOps.SPECIAL:
-          kk(f"int {args[1]} = {self.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
-          r[u] = args[1]
+          kk(f"int {args[0]} = {self.code_for_workitem[args[0][0]](args[0][-1])}; /* {args[1]} */")
+          r[u] = args[0]
         elif uop is UOps.DEFINE_VAR:
           assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
           seen_vars.add(args.expr)
@@ -226,7 +226,7 @@ class MetalRenderer(CStyleLanguage):
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
   uses_ptr_arithmetic = True
-  code_for_workitem = {"g": lambda x: f"gid.{chr(120+x)}", "l": lambda x: f"lid.{chr(120+x)}"}
+  code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
@@ -274,8 +274,8 @@ class CUDARenderer(CStyleLanguage):
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
   float4 = "make_float4"
-  code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
-                       "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"}
+  code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
+                       "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+x)}+threadIdx.{chr(120+int(x))})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
@@ -385,7 +385,7 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def get_kernel_modifier(self, uops:UOpGraph) -> str:
-    requiredMaxThreadsPerBlock = prod(u.arg[2] for u in uops if u.op is UOps.SPECIAL and u.arg[1][0] == "l")
+    requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
