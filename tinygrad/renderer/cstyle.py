@@ -149,7 +149,11 @@ class CStyleLanguage(Renderer):
           if len(src) > 3 and src[2].op is UOps.ALU: val = self.code_for_op[TernaryOps.WHERE](r[src[2]], val, r[src[3]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
-          kk(f"{r[src[0]]} = {r[src[1]]};")
+          if 'amx_wmma' in r[src[1]]:
+            zreg = src[0].arg[0]*(dtype.itemsize//dtype.count)
+            kk(f"__ST_{dtype.name}(&{r[src[0]]}, {(zreg + (2 if zreg>=64 else 0)) % 64});")
+          else:
+            kk(f"{r[src[0]]} = {r[src[1]]};")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}:
           assert len(src) == 1 or (uop is UOps.VECTORIZE and len(src) > 1), "Invalid source length for operation"
@@ -172,8 +176,11 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
-        elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
+        elif uop is UOps.WMMA:
+          if self.device == 'CLANG': kk(f"__{args[0]}({r[src[0]]}, {r[src[1]]}); // {ssa('amx_wmma',u)}")
+          else: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
+        elif uop is UOps.DEFINE_ACC:
+          kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
@@ -199,6 +206,13 @@ class ClangRenderer(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = [_make_clang_dtype(dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
     if AMX: prefix += ['#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")', '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")'] # noqa: E501
+    for name, (N, M, K), dtype_in, _, _, _, _, _ in set([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+      amx_op = {dtypes.double:10, dtypes.float:12, dtypes.half:15}
+      prefix += [f"void __ST_float4({dtype_in.vec(K).name}* acc, int zreg){{ AMX(5, acc, 1ull<<62 | (zreg*1ull)<<56); }}",
+        f"""void __{name}({dtype_in.vec(N).name} data1, {dtype_in.vec(M).name} data2){{
+  AMX(0, (int *) (&data2), 1ull<<62); AMX(1, (int *) (&data1), 1ull<<62);
+  AMX({amx_op[dtype_in]}, 0, 0ull); AMX({amx_op[dtype_in]}, 0, 1ull<<20 | 64<<10); AMX({amx_op[dtype_in]}, 0, 2ull<<20 | 64); AMX({amx_op[dtype_in]}, 0, 3ull<<20 | 64<<10 | 64);
+}}""",]  # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   # language options
