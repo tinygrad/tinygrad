@@ -194,11 +194,12 @@ def _make_clang_dtype(dtype):
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
   supports_float4 = bool(AMX)
-  float4 = "make_float4"
   has_local = False
   global_max = None
   tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [64])]
-  tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], thread_local_sizes=[[sz],[sz],[sz,sz]], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types] # noqa:E501
+  if AMX:
+    float4 = "make_float4"
+    tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], thread_local_sizes=[[sz],[sz],[sz,sz]], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types] # noqa:E501
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = [_make_clang_dtype(dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
