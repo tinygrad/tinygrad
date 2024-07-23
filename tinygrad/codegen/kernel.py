@@ -683,18 +683,18 @@ class Kernel:
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device == "AMD":
-            reduce_axes, upcast_axis = [upcast_offset], (upcast_offset, upcast_offset, upcast_offset+1)
+            reduce_axes, upcast_axes = [upcast_offset], (upcast_offset, upcast_offset, upcast_offset+1)
             # https://gpuopen.com/learn/wmma_on_rdna3/
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
             fix_st2 = None
           elif self.opts.device == "METAL":
-            reduce_axes, upcast_axis = [upcast_offset], (upcast_offset+1, upcast_offset+1, upcast_offset+1)
+            reduce_axes, upcast_axes = [upcast_offset], (upcast_offset+1, upcast_offset+1, upcast_offset+1)
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device == "CLANG":
-            reduce_axes, upcast_axis, fix_st1, fix_st2 = [], (upcast_offset+1, upcast_offset, upcast_offset+1), None, None
+            reduce_axes, upcast_axes, fix_st1, fix_st2 = [], (upcast_offset+1, upcast_offset, upcast_offset+1), None, None
           elif self.opts.device in {"CUDA", "NV"}:
-            reduce_axes, upcast_axis = [upcast_offset, upcast_offset+1], (upcast_offset, upcast_offset+2, upcast_offset+2)
+            reduce_axes, upcast_axes = [upcast_offset, upcast_offset+1], (upcast_offset, upcast_offset+2, upcast_offset+2)
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
             fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
               ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
@@ -705,7 +705,7 @@ class Kernel:
 
           assert apply_to_st is None, "double tensor core? not supported"
           wmma_sz = [prod(l) for l in tc.thread_local_sizes]
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, upcast_axis, tuple(reduce_axes))
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, upcast_axes, tuple(reduce_axes))
           ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
           new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
           return LazyOp(op.op, (ret,), new_reduce_axes) if new_reduce_axes else ret
