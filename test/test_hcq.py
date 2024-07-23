@@ -1,6 +1,6 @@
-import unittest, ctypes, struct
+import unittest, ctypes, struct, contextlib, tempfile, pathlib, json, time
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import CI, getenv, Context, PROFILE, PROFILEPATH
 from tinygrad.device import Buffer, BufferOptions, HCQCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner
@@ -19,11 +19,8 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.runner = get_runner(TestHCQ.d0.dname, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
 
-    TestHCQ.kernargs_ba_ptr = TestHCQ.d0.kernargs_ptr
-    TestHCQ.kernargs_ab_ptr = TestHCQ.d0.kernargs_ptr + TestHCQ.runner.clprg.kernargs_alloc_size
-
-    TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf], kernargs_ptr=TestHCQ.kernargs_ba_ptr)
-    TestHCQ.runner.clprg.fill_kernargs([TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf], kernargs_ptr=TestHCQ.kernargs_ab_ptr)
+    TestHCQ.kernargs_ba_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
+    TestHCQ.kernargs_ab_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf])
 
   def setUp(self):
     TestHCQ.d0.synchronize()
@@ -371,6 +368,69 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_value += 1
 
       assert buf2.as_buffer()[0] == i
+
+@contextlib.contextmanager
+def helper_collect_profile(*devs):
+  for dev in devs: dev._prof_setup()
+
+  profile_dict = {}
+  _, tmp = tempfile.mkstemp()
+  with Context(PROFILE=1, PROFILEPATH=tmp):
+    try: yield profile_dict
+    finally:
+      for dev in devs:
+        dev.synchronize()
+        dev._prof_finalize()
+
+  for k,v in json.loads(pathlib.Path(tmp).read_text()).items(): profile_dict[k] = v
+  pathlib.Path(tmp).unlink()
+
+def helper_profile_filter_node(profile, **kwargs):
+  assert len(profile) > 0, "Empty profile"
+  assert 'traceEvents' in profile, "traceEvents should present"
+  return [x for x in profile['traceEvents'] if all(x[k] == v for k,v in kwargs.items())]
+
+@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
+class TestProfiler(unittest.TestCase):
+  @classmethod
+  def setUpClass(self):
+    TestProfiler.d0 = Device[Device.DEFAULT]
+
+    TestProfiler.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
+    TestProfiler.b = self.a + 1
+    si = create_schedule([self.b.lazydata])[-1]
+
+    TestProfiler.runner = get_runner(TestProfiler.d0.dname, si.ast)
+    TestProfiler.b.lazydata.buffer.allocate()
+
+    TestProfiler.kernargs_ba_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])
+    TestProfiler.kernargs_ab_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.a.lazydata.buffer._buf, TestProfiler.b.lazydata.buffer._buf])
+
+  def test_profile_kernel_run(self):
+    runner_name = TestProfiler.runner.clprg.name
+    with helper_collect_profile(TestProfiler.d0) as profile:
+      TestProfiler.runner([TestProfiler.b.lazydata.buffer, TestProfiler.a.lazydata.buffer], var_vals={})
+
+    kernel_node = helper_profile_filter_node(profile, name=runner_name)
+    assert len(kernel_node) == 1, "node not found"
+    kernel_node = kernel_node[0]
+
+    assert abs(kernel_node['ts'] - time.perf_counter_ns() / 1e3) < 30 * 1e6, "timestimp is not in 30s range"
+    assert 0 < kernel_node['dur'] < 10 * 1e6, "duration is not in 10s range"
+
+  def test_profile_copyin(self):
+    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated()
+
+    with helper_collect_profile(TestProfiler.d0) as profile:
+      buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
+
+    kernel_node = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}")
+    print(kernel_node)
+    assert len(kernel_node) == 1, "node not found"
+    kernel_node = kernel_node[0]
+
+    assert abs(kernel_node['ts'] - time.perf_counter_ns() / 1e3) < 30 * 1e6, "timestimp is not in 30s range"
+    assert 0 < kernel_node['dur'] < 10 * 1e6, "duration is not in 10s range"
 
 if __name__ == "__main__":
   unittest.main()

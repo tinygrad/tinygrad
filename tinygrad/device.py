@@ -481,7 +481,9 @@ class HCQCompiled(Compiled):
 
   def _prof_finalize(self):
     for st, en, name, is_cp in self.raw_prof_records:
+      print(st, en, st < en, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp))
       self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
+    self.raw_prof_records = []
     del self.profile_logger
 
   def _wrap_timeline_signal(self):
