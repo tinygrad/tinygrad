@@ -272,6 +272,26 @@ class TestGatedStoreRewrite(unittest.TestCase):
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, UOps.STORE)
 
+  # scaled down version of TestLinearizerDumb.test_unmerged_ifs
+  @unittest.expectedFailure
+  def test_merge_ifs_alt(self):
+    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, True))
+    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), (0, 'gidx0', 4))
+    idx = gidx0*UOp.const(dtypes.int, 2)
+    val = UOp.const(dtypes.float, 42.0)
+    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    stores = [UOp.store(gmem0, idx, val, gate), UOp.store(gmem1, idx, val, gate)]
+    uops = UOpGraph(stores)
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    ifs = [u for u in uops if u.op is UOps.IF]
+    endifs = [u for u in uops if u.op is UOps.ENDIF]
+    self.assertEqual(len(ifs), 1)
+    self.assertEqual(len(endifs), 1)
+    gated_uops = tuple(uops.uops[uops.uops.index(ifs[0])+1:uops.uops.index(endifs[0])])
+    self.assertEqual(len(gated_uops), 2)
+    for x in gated_uops: self.assertIs(x.op, UOps.STORE)
+
 class TestLocalAccess(unittest.TestCase):
   # NOTE: this is failing on METAL CI, no idea why. Works locally.
   @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "failing only in CI")
