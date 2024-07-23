@@ -203,7 +203,7 @@ class OpenCLRenderer(CStyleLanguage):
   float4 = "(float4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   uses_vload = True
-  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong", dtypes.bfloat16: "ushort" }
+  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.render_dtype(var_dtype)}({x})" if bitcast else super().render_cast(x, var_dtype)
 
@@ -213,9 +213,13 @@ class OpenCLRenderer(CStyleLanguage):
 
 class IntelRenderer(OpenCLRenderer):
   device, kernel_prefix = "GPU", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
-  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], thread_local_sizes=[[2,8], [16], [8]], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float)]]  # noqa: E501
-  def render_kernel(self, function_name, kernel, bufs, uops, prefix=[]) -> str:
-    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): prefix.append(f"""{arg[3].name}8 __{arg[0]}({arg[2].name}16 a, {arg[2].name}16 b, {arg[3].name}8 c) {{\n    return intel_sub_group_f16_f16_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""") # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], thread_local_sizes=[[2,8], [16], [8]], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]]  # noqa: E501
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    prefix = []
+    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+      dt = "f16" if arg[2] == dtypes.float16 else "bf16"
+      prefix.append(f"""{arg[3].name}8 __{arg[0]}({arg[2].name}16 a, {arg[2].name}16 b, {arg[3].name}8 c) {{
+    return intel_sub_group_{dt}_{dt}_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix or None)
 
 class MetalRenderer(CStyleLanguage):
