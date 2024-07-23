@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import difflib, pickle, multiprocessing, os, logging
+import difflib, pickle, multiprocessing, os, logging, sqlite3
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
 
 PAGE_SIZE = 100
+REF = os.getenv("GITHUB_REF_NAME", "")
+MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 TABLE_NAME = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
 ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
-REF = os.getenv("GITHUB_REF_NAME", "")
-SKIP_PROCESS_REPLAY = int((k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")) or REF == "master"
-MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
+SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "") or REF == "master"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 
@@ -57,17 +57,16 @@ if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
     logging.info("skipping process replay.")
     exit(0)
-  try:
-    conn = db_connection()
-    cur = conn.cursor()
-    row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
-    conn.commit()
-    cur.close()
-    offsets = range(0, row_count, PAGE_SIZE)
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-      list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
-      pool.close()
-      pool.join()
-  except Exception as e:
-    if ASSERT_DIFF: raise e
-    logging.warn(f"PROCESS REPLAY ERRORED:\n {e}.")
+  conn = db_connection()
+  cur = conn.cursor()
+  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  except sqlite3.OperationalError as e:
+    logging.warn(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+    exit(0)
+  conn.commit()
+  cur.close()
+  offsets = range(0, row_count, PAGE_SIZE)
+  with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+    list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
+    pool.close()
+    pool.join()
