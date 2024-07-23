@@ -29,7 +29,7 @@ def process_replay(offset:int):
         for opt in applied_opts: k.apply_opt(opt)
         good_src = k.opts.render(name, k.linearize().uops)
     except Exception as e:
-      logging.warn("FAILED TO RECREATE KERNEL")
+      logging.warning("FAILED TO RECREATE KERNEL")
       logging.info(ast)
       logging.info(applied_opts)
       logging.info(e)
@@ -47,7 +47,7 @@ def process_replay(offset:int):
         logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
       if ASSERT_DIFF: raise e
       if changed > MAX_DIFF_PCT:
-        logging.warn(f"detected changes in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
+        logging.warning(f"detected changes in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
         early_stop.set()
         break
   conn.commit()
@@ -61,7 +61,7 @@ if __name__ == "__main__":
   cur = conn.cursor()
   try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
   except sqlite3.OperationalError:
-    logging.warn(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+    logging.warning(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
     exit(0)
   conn.commit()
   cur.close()
