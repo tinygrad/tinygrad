@@ -1,6 +1,6 @@
-import unittest, ctypes, struct
+import unittest, ctypes, struct, contextlib, tempfile, pathlib, json, time, atexit
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import CI, getenv, Context
 from tinygrad.device import Buffer, BufferOptions, HCQCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner
@@ -19,11 +19,8 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.runner = get_runner(TestHCQ.d0.dname, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
 
-    TestHCQ.kernargs_ba_ptr = TestHCQ.d0.kernargs_ptr
-    TestHCQ.kernargs_ab_ptr = TestHCQ.d0.kernargs_ptr + TestHCQ.runner.clprg.kernargs_alloc_size
-
-    TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf], kernargs_ptr=TestHCQ.kernargs_ba_ptr)
-    TestHCQ.runner.clprg.fill_kernargs([TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf], kernargs_ptr=TestHCQ.kernargs_ab_ptr)
+    TestHCQ.kernargs_ba_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
+    TestHCQ.kernargs_ab_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf])
 
   def setUp(self):
     TestHCQ.d0.synchronize()
@@ -371,6 +368,112 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_value += 1
 
       assert buf2.as_buffer()[0] == i
+
+@contextlib.contextmanager
+def helper_collect_profile(*devs):
+  for dev in devs: dev._prof_setup()
+
+  profile_dict = {}
+  _, tmp = tempfile.mkstemp()
+  with Context(PROFILE=1, PROFILEPATH=tmp):
+    try: yield profile_dict
+    finally:
+      for dev in devs:
+        dev.synchronize()
+        dev._prof_finalize()
+        atexit.unregister(dev._prof_finalize)
+
+  for k,v in json.loads(pathlib.Path(tmp).read_text()).items(): profile_dict[k] = v
+  pathlib.Path(tmp).unlink()
+
+def helper_profile_filter_node(profile, **kwargs):
+  assert len(profile) > 0, "Empty profile"
+  assert 'traceEvents' in profile, "traceEvents should present"
+  return [x for x in profile['traceEvents'] if all(x[k] == v for k,v in kwargs.items())]
+
+def helper_profile_parse_pids(profile):
+  pids, tids = {}, {}
+  procs = helper_profile_filter_node(profile, name='process_name')
+  for proc in procs: pids[proc['pid']] = proc['args']['name']
+  threads = helper_profile_filter_node(profile, name='thread_name')
+  for th in threads: tids[th['tid']] = th['args']['name']
+  return pids, tids
+
+def helper_validate_node(node, duration_s=10, ts_age_s=30, profile=None, pid_name=None, tid_name=None):
+  pids, tids = helper_profile_parse_pids(profile)
+  assert abs(node['ts'] - time.perf_counter_ns() / 1e3) < ts_age_s * 1e6, "timestimp is not in 30s range"
+  assert 0 < node['dur'] < duration_s * 1e6, "duration is not in 10s range"
+  assert pid_name is None or pids[node['pid']] == pid_name
+  assert tid_name is None or tids[node['tid']] == tid_name
+
+@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
+class TestProfiler(unittest.TestCase):
+  @classmethod
+  def setUpClass(self):
+    TestProfiler.d0 = Device[Device.DEFAULT]
+
+    TestProfiler.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
+    TestProfiler.b = self.a + 1
+    si = create_schedule([self.b.lazydata])[-1]
+
+    TestProfiler.runner = get_runner(TestProfiler.d0.dname, si.ast)
+    TestProfiler.b.lazydata.buffer.allocate()
+
+    TestProfiler.kernargs_ba_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])
+    TestProfiler.kernargs_ab_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.a.lazydata.buffer._buf, TestProfiler.b.lazydata.buffer._buf])
+
+  def test_profile_kernel_run(self):
+    runner_name = TestProfiler.runner.clprg.name
+    with helper_collect_profile(TestProfiler.d0) as profile:
+      TestProfiler.runner([TestProfiler.b.lazydata.buffer, TestProfiler.a.lazydata.buffer], var_vals={})
+
+    kernel_node = helper_profile_filter_node(profile, name=runner_name)[0]
+    helper_validate_node(kernel_node, profile=profile, pid_name=Device.DEFAULT, tid_name="COMPUTE")
+
+  def test_profile_copyin(self):
+    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated()
+
+    with helper_collect_profile(TestProfiler.d0) as profile:
+      buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
+
+    copyin_node = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}")[0]
+    helper_validate_node(copyin_node, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
+
+  def test_profile_multiops(self):
+    runner_name = TestProfiler.runner.clprg.name
+    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated()
+
+    with helper_collect_profile(TestProfiler.d0) as profile:
+      buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
+      TestProfiler.runner([buf1, TestProfiler.a.lazydata.buffer], var_vals={})
+      buf1.as_buffer()
+
+    copyin_node = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}")[0]
+    helper_validate_node(copyin_node, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
+
+    kernel_node = helper_profile_filter_node(profile, name=runner_name)[0]
+    helper_validate_node(kernel_node, profile=profile, pid_name=Device.DEFAULT, tid_name="COMPUTE")
+
+    copyout_node = helper_profile_filter_node(profile, name=f"{Device.DEFAULT} -> CPU")[0]
+    helper_validate_node(copyout_node, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
+
+    assert copyin_node['ts'] + copyin_node['dur'] < kernel_node['ts'], "timestamp not aranged"
+    assert kernel_node['ts'] + kernel_node['dur'] < copyout_node['ts'], "timestamp not aranged"
+
+  def test_profile_multidev(self):
+    d1 = Device[f"{Device.DEFAULT}:1"]
+    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated()
+
+    with helper_collect_profile(TestProfiler.d0, d1) as profile:
+      buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
+      buf2.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
+
+    copyin_node_1 = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}")[0]
+    helper_validate_node(copyin_node_1, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
+
+    copyin_node_2 = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}:1")[0]
+    helper_validate_node(copyin_node_2, profile=profile, pid_name=f"{Device.DEFAULT}:1", tid_name="DMA")
 
 if __name__ == "__main__":
   unittest.main()
