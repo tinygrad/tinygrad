@@ -214,11 +214,8 @@ class OpenCLRenderer(CStyleLanguage):
 class IntelRenderer(OpenCLRenderer):
   device, kernel_prefix = "GPU", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
   tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], thread_local_sizes=[[2,8], [16], [8]], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float)]]  # noqa: E501
-  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix = []
-    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      prefix.append(f"""{arg[3].name}8 __{arg[0]}({arg[2].name}16 a, {arg[2].name}16 b, {arg[3].name}8 c) {{
-    return intel_sub_group_f16_f16_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""")
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=[]) -> str:
+    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): prefix.append(f"""{arg[3].name}8 __{arg[0]}({arg[2].name}16 a, {arg[2].name}16 b, {arg[3].name}8 c) {{\n    return intel_sub_group_f16_f16_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""") # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, prefix or None)
 
 class MetalRenderer(CStyleLanguage):
@@ -226,7 +223,6 @@ class MetalRenderer(CStyleLanguage):
   shared_max = 32768
   tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
-
   # language options
   kernel_prefix = "kernel "
   buffer_prefix = "device "
