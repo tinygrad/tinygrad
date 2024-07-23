@@ -3,8 +3,8 @@ import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, temp
 from typing import Tuple, List, Any, cast, Union, Dict
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
-                            HCQProgram, HCQSignal, hcq_profile, Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, to_char_p_p, DEBUG, prod, PROFILE
+                            HCQProgram, HCQSignal, Compiler, CompileError, BufferOptions
+from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler, PTXCompiler, PTX
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
@@ -290,7 +290,7 @@ class NVProgram(HCQProgram):
     self.max_threads = ((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    super().__init__(self.device, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
+    super().__init__(self.device, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
@@ -305,20 +305,7 @@ class NVProgram(HCQProgram):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
-
-    kernargs_ptr = self.fill_kernargs(args, vals)
-
-    q = NVComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
-
-    with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-      q.exec(self, kernargs_ptr, global_size, local_size)
-
-    q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-    self.device.timeline_value += 1
-
-    if wait:
-      self.device.timeline_signal.wait(self.device.timeline_value - 1)
-      return (sig_en.timestamp - sig_st.timestamp) / 1e6
+    return super().__call__(*args, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
 class NVAllocator(HCQAllocator):
   def __init__(self, device:NVDevice): super().__init__(device)
