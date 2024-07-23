@@ -451,7 +451,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not(self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.threads)), "can't upcast TC locals")
-      check(amt <= 8, "don't upcast more than 8")
+      check(amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCASTMID:                  # white
@@ -729,6 +729,7 @@ class Kernel:
     if DEBUG >= 3:
       print(self.name)
       print(modified_ast)
+      print(self.applied_opts)
     verify_lazyop(modified_ast)
 
     uop_sink = lazyop_to_uop(modified_ast, self.opts)
