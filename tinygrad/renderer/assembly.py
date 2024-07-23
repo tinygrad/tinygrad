@@ -173,8 +173,8 @@ class PTXRenderer(Renderer):
           r[u] = "%" + args[1]
           kernel = [f".reg .u32 %{args[1]};"] + kernel
         elif uop is UOps.CONST:
-          if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
-          else: r[u] = const(args, dtype, mov=True)
+          assert dtype.count == 1
+          r[u] = const(args, dtype, mov=True)
         elif uop is UOps.GEP: r[u] = r[src[0]][u.arg]
         elif uop is UOps.LOAD:
           assert src[0].dtype == dtypes.int64, "load isn't int64"
