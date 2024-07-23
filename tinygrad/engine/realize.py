@@ -65,8 +65,9 @@ def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
 # **************** Runners ****************
 
 class Runner:
-  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
-    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
+  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0, lds_estimate:sint=0):
+    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate, self.lds_estimate = \
+      True, display_name, dname, op_estimate, mem_estimate, lds_estimate
   @property
   def device(self): return Device[self.dname]
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
@@ -80,7 +81,7 @@ class CompiledRunner(Runner):
     self.p:Program = p
     self.lib:bytes = precompiled if precompiled is not None else Device[p.dname].compiler.compile_cached(p.src)
     self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
-    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate)
+    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate, p.lds_estimate)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
@@ -175,13 +176,14 @@ class ExecItem:
     et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += (op_estimate:=sym_infer(self.prg.op_estimate, var_vals))
-      GlobalCounters.global_mem += (mem_estimate:=sym_infer(self.prg.mem_estimate, var_vals))
+      GlobalCounters.global_ops += (op_est:=sym_infer(self.prg.op_estimate, var_vals))
+      GlobalCounters.global_mem += (mem_est:=sym_infer(self.prg.mem_estimate, var_vals))
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
+        lds_est = sym_infer(self.prg.lds_estimate, var_vals)
         ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
-        print(f"{colored(f'*** {self.prg.dname[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(38-ansilen(self.prg.display_name))} arg {len(self.bufs):3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
-              (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)" +  # noqa: E501
+        print(f"{colored(f'*** {self.prg.dname[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(38-ansilen(self.prg.display_name))} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
+              (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_est/((et or 1e-20)*1e9):8.2f} GFLOPS {mem_est/((et or 1e-20)*1e9):6.1f}|{lds_est/((et or 1e-20)*1e9):<7.1f}GB/s)" +  # noqa: E501
                f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}"))
       self.prg.first_run = False
     return et
