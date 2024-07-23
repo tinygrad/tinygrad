@@ -1,14 +1,15 @@
 import os
 import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from types import SimpleNamespace
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, cast
 import time
 
-from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, HCQCompatAllocRes, Compiler, CompileError, BufferOptions, HWCopyQueue, HCQBuffer, HWComputeQueue, HCQProgram
+from tinygrad.device import Compiler, CompileError, BufferOptions, HWCopyQueue, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator
 import tinygrad.runtime.autogen.kgsl as kgsl
 import tinygrad.runtime.autogen.adreno as adreno
 import tinygrad.runtime.autogen.opencl as cl
-from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice, check, checked
+import tinygrad.runtime.autogen.libc as libc
+from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice, check, checked, OpenCLRenderer
 from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, data64_le, to_char_p_p, DEBUG, prod, PROFILE
 import tinygrad.runtime.autogen.libc as libc
 
@@ -24,9 +25,23 @@ def pkt4_hdr(reg: int, cnt: int):
 
 class QcomCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
+  
+class QcomSignal(HCQSignal):
+  def __init__(self, value=0, **kwargs):
+    self._signal = QcomDevice.signals_pool.pop()
+    self._signal[0] = value
+  def __del__(self): QcomDevice.signals_pool.append(self._signal)
+  def _get_value(self) -> int: return self._signal[0]
+  def _get_timestamp(self) -> float: return self._signal[1] / 1e3
+  def _set_value(self, new_value:int): self._signal[0] = new_value
+  def wait(self, value:int, timeout:int=10000):
+    start_time = time.time() * 1000
+    while time.time() * 1000 - start_time < timeout:
+      if self._signal[0] >= value: return
+    raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
 MAP_FIXED = 0x10
-class QcomDevice:
+class QcomDevice(HCQCompiled):
   signals_page:Any = None
   signals_pool: List[Any] = []
 
@@ -34,11 +49,11 @@ class QcomDevice:
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
     QcomDevice.signals_page = self._gpu_alloc(16 * 65536, flags=0xC0A00, map_to_cpu=True, uncached=True)
     QcomDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
-    cr = kgsl.struct_kgsl_drawctxt_create(flags=(2<<20) | 0x10 | 0x2)
-    self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
-    self.context_id = cr.drawctxt_id
 
-  def ctx(self):
+    super().__init__(device, QcomAllocator(self), OpenCLRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
+                     QcomSignal, QcomComputeQueue, QcomCopyQueue, timeline_signals=(QcomSignal(), QcomSignal()))
+
+  def _ctx(self):
     cr = kgsl.struct_kgsl_drawctxt_create(flags=(2<<20) | 0x10 | 0x2)
     self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
     self.context_id = cr.drawctxt_id
@@ -50,7 +65,7 @@ class QcomDevice:
     return ret
 
   def _gpu_alloc(self, size:int, flags:int=0, map_to_cpu=False, uncached=False):
-    size = round_up(size, align:=(2 << 20))
+    size = round_up(size, align:=(4 << 10))
     flags |= ((align << kgsl.KGSL_MEMALIGN_SHIFT) & kgsl.KGSL_MEMALIGN_MASK)
     if uncached: flags |= ((kgsl.KGSL_CACHEMODE_UNCACHED << kgsl.KGSL_CACHEMODE_SHIFT) & kgsl.KGSL_CACHEMODE_MASK)
 
@@ -67,44 +82,17 @@ class QcomDevice:
     free = kgsl.struct_kgsl_gpuobj_free(id=opaque.info.id)
     self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_FREE, free)
 
-  @classmethod
-  def _read_signal(self, sig): return sig[0]
-
-  @classmethod
-  def _read_timestamp(self, sig): return sig[1]
-
-  @classmethod
-  def _set_signal(self, sig, value): sig[0] = value
-
-  @classmethod
-  def _alloc_signal(self, value=0, **kwargs) -> memoryview:
-    self._set_signal(sig := self.signals_pool.pop(), value)
-    return sig
-
-  @classmethod
-  def _free_signal(self, sig): self.signals_pool.append(sig)
-
-  @classmethod
-  def _wait_signal(self, signal, value=0, timeout=10000):
-    start_time = time.time() * 1000
-    while time.time() * 1000 - start_time < timeout:
-      if signal[0] >= value: return
-    raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
-
-  def _gpu2cpu_time(self, gpu_time, is_copy): return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e3
-
-  def synchronize(self):
-    self._wait_signal(self.timeline_signal, self.timeline_value - 1)
-
-    if self.timeline_value > (1 << 63): self._wrap_timeline_signal()
-    if PROFILE: self._prof_process_events()
-
-class QcomAllocator(HCQCompatAllocator):
+class QcomAllocator(HCQAllocator):
   def __init__(self, device:QcomDevice): super().__init__(device)
 
-  def _alloc(self, size:int, options:BufferOptions) -> HCQCompatAllocRes:
+  def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     # TODO(vpachkov): host?
-    return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access)
+    return self.device._gpu_alloc(size, map_to_cpu=True)
+  
+  def copyin(self, dest:HCQBuffer, src:memoryview): 
+    ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
+  def copyout(self, dest:memoryview, src:HCQBuffer):
+    ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
   
   def _free(self, opaque, options:BufferOptions):
     # TODO(vpachkov): host?
@@ -123,15 +111,20 @@ class QcomComputeQueue(HWComputeQueue):
 
   def reg(self, reg: int, *vals: int): self.q += [pkt4_hdr(reg, len(vals)), *vals]
 
-  def signal(self, signal, value=0):
-    self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_FLUSH_TS | (adreno.EV_WRITE_USER_64B << adreno.CP_EVENT_WRITE7_0_WRITE_SRC__SHIFT), *data64_le(mv_address(signal)), *data64_le(value)])
+  def _signal(self, signal, value=0):
+    self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_FLUSH_TS | (adreno.EV_WRITE_USER_64B << adreno.CP_EVENT_WRITE7_0_WRITE_SRC__SHIFT), *data64_le(mv_address(signal._signal)), *data64_le(value)])
     self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_INVALIDATE])
 
-  def timestamp(self, signal):
-    self.push(opcode=adreno.CP_REG_TO_MEM, vals=[0x40000980,  *data64_le(mv_address(signal))])
+  def _timestamp(self, signal):
+    # doesnt really work right now
+    pass
+    self.push(opcode=adreno.CP_REG_TO_MEM, vals=[0x40000980,  *data64_le(mv_address(signal._signal))])
     self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_INVALIDATE])
 
-  def submit(self, device: QcomDevice):
+  def _wait(self, signal, value=0):
+    self.cmd(adreno.CP_WAIT_FOR_IDLE)
+
+  def _submit(self, device: QcomDevice):
     # TODO(vpachkov): split objs based on cmd stream size
     obj = kgsl.struct_kgsl_command_object()
     cmdbytes = array.array('I', self.q)
@@ -148,7 +141,7 @@ class QcomComputeQueue(HWComputeQueue):
     submit_req.cmdsize = ctypes.sizeof(kgsl.struct_kgsl_command_object)
     submit_req.numcmds = 1
     #TODO: not recreating context sometimes results to EDEADLK
-    submit_req.context_id = device.ctx()
+    submit_req.context_id = device._ctx()
 
     device._ioctl(0x4A, submit_req)
     self.q = []
@@ -156,7 +149,20 @@ class QcomComputeQueue(HWComputeQueue):
   def _memory_barrier(self): pass
   
   def _exec(self, prg, kernargs, global_size, local_size):
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0x40364000, data64_le(kernargs))
+    if local_size is not None: global_size = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
+
+    self.reg(
+      adreno.REG_A6XX_SP_CS_CTRL_REG0,
+      # set max regs 16 for now, todo: optimize this
+      (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT) | (16 << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT) | (16 << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT),
+      0x41, 0, 0, # offsets
+      *data64_le(prg.lib_gpu.va_addr), 0, *data64_le(prg.private_gpu.va_addr), prg.private_gpu.size,
+    )
+
+    self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.lib_gpu.size // 4)
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0xf60000, *data64_le(prg.lib_gpu.va_addr))
+
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0x40364000, *data64_le(kernargs))
     self.cmd(adreno.CP_SET_MARKER, adreno.RM6_COMPUTE)
     self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc)
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x60)
@@ -174,10 +180,11 @@ class QcomComputeQueue(HWComputeQueue):
 
     self.reg(
       adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
+        # kernel dimenstion = 3
         3 | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT) | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT) | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT),
         global_size[0], 0, global_size[1], 0, global_size[2], 0, # global size x,y,z followed by offsets
         0xccc0cf, 0x2fc,
-        global_size[0], global_size[1], global_size[2], # global sizes again?
+        1,1,1, # HLSQ_CS_KERNEL_GROUP_[X,Y,Z] seems always ones
     )
 
     self.cmd(adreno.CP_RUN_OPENCL, 0)
@@ -191,15 +198,15 @@ class QcomProgram(HCQProgram):
   def __init__(self, device: QcomDevice, name: str, lib: bytes):
     self.device, self.name, self.lib = device, name, lib
 
-    self.private_gpu = self.device._gpu_alloc(0x202000, 0xC0F00)
+    self.private_gpu = self.device._gpu_alloc(0x101, 0xC0F00)
 
-    image_offset, image_size = struct.unpack("I"), lib[0xC0:4], struct.unpack("I"), lib[0x100:4]
-    image = lib[image_offset:image_offset+image_size]
-    self.lib_gpu = self.device._gpu_alloc(len(self.image), 0x10C0A00, map_to_cpu=True)
+    image_offset, image_size = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0]
+    image = bytearray(lib[image_offset:image_offset+image_size])
+    self.lib_gpu = self.device._gpu_alloc(len(image), 0x10C0A00, map_to_cpu=True)
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image_size)
 
     # set constbuffer to be 1 page for now
-    super().__init__(self.device, kernargs_alloc_size=0x1000, kernargs_args_offset=0x140)
+    super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=0x140)
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     if len(bufs): to_mv(kernargs_ptr + self.kernargs_args_offset, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
@@ -230,7 +237,7 @@ if __name__ == '__main__':
   print(ptr[0])
   device._gpu_free(alloc)
 
-  sig = device._alloc_signal()
+  sig = QcomSignal()
   queue = QcomComputeQueue()
 
   lib = QcomCompiler('').compile('''
@@ -256,5 +263,5 @@ __kernel void E_72_9_8_16_4(__global float* data0) {
   for i in range(1, 10):
     queue.signal(sig, i)
     queue.submit(device)
-    device._wait_signal(sig, i)
-    print(sig[0])
+    sig.wait(i)
+    print(sig.value)
