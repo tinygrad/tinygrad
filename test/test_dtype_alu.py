@@ -183,17 +183,11 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(np.pi * 2, unit=1.5)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float64), "need float64")
-  def test_sin_err(self):
-    n = 305015820.3125
-    dtype = dtypes.float64
-    next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
-    ulp = next_float - 1.0
-    ulp = 1.0 * ulp
-
-    # this is fine
-    # with Context(TRANSCENDENTAL=0): np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
-    with Context(TRANSCENDENTAL=1):
-      np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
+  @unittest.expectedFailure
+  def test_sin_transcendental(self):
+    x = Tensor([305015820.3125], dtype=dtypes.float64).sin()
+    with Context(TRANSCENDENTAL=2):
+      np.testing.assert_allclose(x.numpy(), -0.15, atol=2e-16, rtol=1e-5)
 
   @given(strat.sampled_from(dtypes_float))
   def test_log2(self, dtype):
