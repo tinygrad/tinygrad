@@ -2,9 +2,9 @@ from __future__ import annotations
 from typing import Tuple, List, Any, cast
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, subprocess, time, array
 from dataclasses import dataclass
-from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, hcq_profile, \
+from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, \
                             HCQSignal, HCQProgram, Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, PROFILE, mv_address
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.support.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -311,7 +311,7 @@ class AMDProgram(HCQProgram):
 
     # If required, allocate space for the dispatch packet in the kernargs to pass it to the GPU.
     args_alloc_sz = self.kernargs_segment_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.kernel_code_properties & 0x2 else 0)
-    super().__init__(self.device, kernargs_alloc_size=args_alloc_sz)
+    super().__init__(self.device, self.name, kernargs_alloc_size=args_alloc_sz)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): cast(AMDDevice, self.device)._gpu_free(self.lib_gpu)
@@ -320,21 +320,6 @@ class AMDProgram(HCQProgram):
     if (given:=len(bufs)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
     if len(bufs): to_mv(kernargs_ptr, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
     if len(vals): to_mv(kernargs_ptr + len(bufs) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
-
-  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    kernargs_ptr = self.fill_kernargs(args, vals)
-
-    q = AMDComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
-
-    with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-      q.exec(self, kernargs_ptr, global_size, local_size)
-
-    q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-    self.device.timeline_value += 1
-
-    if wait:
-      self.device.timeline_signal.wait(self.device.timeline_value - 1)
-      return (sig_en.timestamp - sig_st.timestamp) / 1e6
 
 class AMDAllocator(HCQAllocator):
   def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
