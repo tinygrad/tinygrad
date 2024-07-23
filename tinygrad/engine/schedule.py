@@ -303,15 +303,15 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     if FUSE_ARANGE and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: const_reduces.append(r)
 
   def _fold_arange(r:LazyBuffer, group:Set[LazyBuffer]) -> bool:
-    if DEBUG_INDEX:=(getenv("DEBUG_INDEX")): print(f"checking {r}")
+    if DEBUG_ARANGE:=(getenv("DEBUG_ARANGE")): print(f"checking {r}")
     for tr in group:
       if not (descendants:=_recurse_children(tr, realizes, children)): return False
       # check if tr can cleanly fuse with its children
       for d in descendants:
         sts: Dict[LazyBuffer, ShapeTracker] = {}
         _buildup_st(d, ShapeTracker.from_shape(reduce_for_op[d].shape if d in reduce_for_op else d.shape), realizes, sts)
-        if not isinstance(sts[tr].expr_idxs()[0], Variable): return False
-    if DEBUG_INDEX: print(colored(f"fused {r}", "green"))
+        return len(sts[tr].views) == 1
+    if DEBUG_ARANGE: print(colored(f"fused {r}", "green"))
     return True
   for r in const_reduces:
     # TODO: what if only some children can fuse? can save an extra global_load
