@@ -179,6 +179,7 @@ def type_verify(uops):
       assert dtype is None, f"{uop} dtype must be None, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
     if uop is UOps.ALU:
+      assert dtype.count == 1, "wide ALU is not supported"
       if arg in UnaryOps:
         assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
       elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
@@ -216,10 +217,12 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       elif u.op is UOps.STORE:
         dont_count = dont_count.union(u.src[1].sparents)
         if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
+      elif u.op is UOps.IF:
+        dont_count = dont_count.union(u.src[0].sparents)
   for u in uops:
     if u.op is UOps.RANGE:
       mult_stack.append(mults)
-      mults *= uop_alu_resolve(u.src[1])
+      mults *= uop_alu_resolve(u.src[1]) - uop_alu_resolve(u.src[0])
     elif u.op is UOps.ENDRANGE:
       mults = mult_stack.pop(-1)
     elif u.op is UOps.LOAD:
