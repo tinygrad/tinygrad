@@ -11,7 +11,7 @@ import numpy as np
 np.set_printoptions(linewidth=160)
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored, getenv, CI
+from tinygrad.helpers import colorize_float, getenv, CI
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
@@ -25,15 +25,6 @@ elif str(torch_device) == "cuda":
   def sync(): torch.cuda.synchronize()
 else:
   def sync(): pass
-
-def colorize_float(x):
-  ret = f"{x:7.2f}x"
-  if x < 0.75:
-    return colored(ret, 'green')
-  elif x > 1.15:
-    return colored(ret, 'red')
-  else:
-    return colored(ret, 'yellow')
 
 save_ops, save_mem = 0, 0
 CNT = getenv("CNT", 8)

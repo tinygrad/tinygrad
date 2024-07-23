@@ -1,17 +1,10 @@
 import itertools
 from tinygrad import Device
 from tinygrad.engine.realize import CompiledRunner
-from tinygrad.helpers import getenv, colored
+from tinygrad.helpers import getenv, colorize_float
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.engine.search import bufs_from_lin
 from tinygrad.runtime.ops_cuda import PTXCompiler, PTXRenderer, CUDACompiler
-
-# move to helpers?
-def colorize_float(x):
-  ret = f"{x:7.2f}x"
-  if x < 0.75: return colored(ret, 'green')
-  elif x > 1.15: return colored(ret, 'red')
-  else: return colored(ret, 'yellow')
 
 if __name__ == "__main__":
   ast_strs = load_worlds(filter_reduce=False, filter_novariable=True)

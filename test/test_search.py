@@ -15,7 +15,7 @@ from tinygrad.shape.view import View
 
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
-    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is MetaOps.SINK][0]
+    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is MetaOps.KERNEL][0]
     out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
     memops = {x.arg.idx:x.arg.st.real_size() for x in si.ast.lazyops if x.op is BufferOps.LOAD}
     rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
@@ -23,7 +23,7 @@ class TestTimeLinearizer(unittest.TestCase):
     assert tm > 0 and tm != float('inf')
 
   def test_bufs_from_lin(self):
-    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is MetaOps.SINK][0]
+    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is MetaOps.KERNEL][0]
     rawbufs = bufs_from_lin(lin:=Kernel(si.ast))
     assert len(rawbufs) == len(lin.membufs)
     assert all(r is not None for r in rawbufs)
@@ -65,13 +65,13 @@ class TestBEAM(unittest.TestCase):
     capturing.clear()
     self.assertNotEqual(k_beam_0[-1].prg.p.src, k_beam_1[-1].prg.p.src)
 
-  def test_get_linearizer_actions(self):
+  def test_get_kernel_actions(self):
     from test.test_linearizer import helper_realized_ast
     a = Tensor.rand(4, 3)
     b = Tensor.rand(3)
     realized_ast, _ = helper_realized_ast(a @ b)
-    from tinygrad.engine.search import get_linearizer_actions
-    lins = get_linearizer_actions(Kernel(realized_ast), False).values()
+    from tinygrad.engine.search import get_kernel_actions
+    lins = get_kernel_actions(Kernel(realized_ast), False).values()
 
     # ensure amt=0 are not duplicated
     if Opt(OptOps.UPCAST, 0, 0) in actions:
@@ -96,6 +96,17 @@ class TestBEAM(unittest.TestCase):
     # need disable_cache to trigger.
     tm = time_linearizer(best_lin, bufs, allow_test_size=False, cnt=2, disable_cache=True)
     assert tm
+
+  def test_beam_unnamed_kernels(self):
+    a = Tensor.rand(100)
+    b = Tensor.rand(100)
+    si = (a+b).schedule()[-1]
+    lin = Kernel(si.ast)
+    bufs = bufs_from_lin(lin)
+    # TODO: beam should have better instrumentation so we don't have to check this indirect thing
+    kcount = len(Kernel.kernel_cnt)
+    beam_search(lin, bufs, 3, disable_cache=True)
+    self.assertEqual(kcount, len(Kernel.kernel_cnt))
 
 if __name__ == '__main__':
   unittest.main()

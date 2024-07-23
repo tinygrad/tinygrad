@@ -361,13 +361,13 @@ class TestTinygrad(unittest.TestCase):
   def test_item_to_tensor_to_item(self):
     for a in [0, 1, 2, 3, -1, -100, 100, -101.1, 2.345, 100.1, True, False]:
       item = Tensor(a).item()
-      assert type(item) == type(a), a
+      assert type(item) is type(a), a
       np.testing.assert_allclose(item, a), a
       buffered_item = Tensor([a]).item()
-      assert type(buffered_item) == type(a), a
+      assert type(buffered_item) is type(a), a
       np.testing.assert_allclose(buffered_item, a), a
       reshaped_item = Tensor([a]).reshape((1, 1, 1, 1, 1)).item()
-      assert type(reshaped_item) == type(a), a
+      assert type(reshaped_item) is type(a), a
       np.testing.assert_allclose(reshaped_item, a), a
 
   def test_no_bool(self):
