@@ -681,6 +681,7 @@ class Kernel:
           if self.opts.device == "AMD":
             reduce_axes = [self.shape_len-self.upcasted]
             upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
+            # https://gpuopen.com/learn/wmma_on_rdna3/
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
             fix_st2 = None
           elif self.opts.device == "METAL":
@@ -753,16 +754,18 @@ class Kernel:
     if getenv("GRAPHUOPS"): self.uops.graph()
     return self
 
-  def to_program(self) -> Program:
+  def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
-    src = self.opts.render(name:=to_function_name(self.name), self.uops)
+    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
     ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
     run_count = prod((self.global_size or []) + (self.local_size or []))
     # group non-local MemBuffers by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
+    # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
-    return Program(self.name, src, self.opts.device, self.global_size, self.local_size, self.uops, ops * run_count, min(mem * run_count, mem_bytes))
+    return Program(ansiname, src, self.opts.device, self.global_size, self.local_size, self.uops,
+                   ops * run_count, min(mem * run_count, mem_bytes), mem * run_count)

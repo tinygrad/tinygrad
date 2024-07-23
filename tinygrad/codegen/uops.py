@@ -15,7 +15,7 @@ class UOps(Enum):
   SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
-  NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
+  NOOP = auto(); GEP = auto() # noqa: E702
   # math ops
   CAST = auto(); BITCAST = auto(); VECTORIZE = auto() # noqa: E702
   ALU = auto(); REDUCE = auto(); WMMA = auto() # noqa: E702
@@ -28,7 +28,6 @@ class UOps(Enum):
 
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
 
-def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(frozen=True, eq=False)
 class UOp:
   op: UOps
@@ -36,7 +35,7 @@ class UOp:
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def commutative(self) -> bool:
-    return self.op is UOps.UNMUL or (self.op is UOps.ALU and \
+    return (self.op is UOps.ALU and \
       self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
   @functools.cached_property
   def cmp_tuple(self):
@@ -45,24 +44,26 @@ class UOp:
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self): return pretty_print(self, lambda x: f"UOp({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
+  # *** uop syntactic sugar
+  def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return UOp(UOps.BITCAST, dtype, (self,))
   def name(self, name:Optional[str]): return UOp(UOps.VAR, src=(self,), arg=name)
   def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
-  def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
-  def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)
-  def __sub__(self, x): return UOp.alu(BinaryOps.ADD, self, -ufix(self.dtype, x))
-  def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
-  def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
-  def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
-  def __truediv__(self, x): return UOp.alu(BinaryOps.MUL, self, UOp.alu(UnaryOps.RECIP, ufix(self.dtype, x)))
-  def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
-  def __xor__(self, x): return UOp.alu(BinaryOps.XOR, self, ufix(self.dtype, x))
-  def __and__(self, x): return UOp.alu(BinaryOps.AND, self, ufix(self.dtype, x))
-  def __or__(self, x): return UOp.alu(BinaryOps.OR, self, ufix(self.dtype, x))
-  def ne(self, x): return UOp.alu(BinaryOps.CMPNE, self, ufix(self.dtype, x))
+  def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, self.ufix(x))
+  def __radd__(self, x): return UOp.alu(BinaryOps.ADD, self, self.ufix(x))
+  def __sub__(self, x): return UOp.alu(BinaryOps.ADD, self, self.ufix(-x))
+  def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, self.ufix(x))
+  def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, self.ufix(x), self)
+  def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, self.ufix(x))
+  def __truediv__(self, x): return UOp.alu(BinaryOps.MUL, self, UOp.alu(UnaryOps.RECIP, self.ufix(x)))
+  def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, self.ufix(x))
+  def __xor__(self, x): return UOp.alu(BinaryOps.XOR, self, self.ufix(x))
+  def __and__(self, x): return UOp.alu(BinaryOps.AND, self, self.ufix(x))
+  def __or__(self, x): return UOp.alu(BinaryOps.OR, self, self.ufix(x))
+  def ne(self, x): return UOp.alu(BinaryOps.CMPNE, self, self.ufix(x))
   def eq(self, x): return -self.ne(x)
-  def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
+  def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, self.ufix(x))
   def ge(self, x): return -self.lt(x)
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
   def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
@@ -88,7 +89,7 @@ class UOp:
   def parents(self) -> Set[UOp]: return set.union(set(self.src), *[x.parents for x in self.src])
   @property  # parents with self
   def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
-  def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.op is UOps.DEFINE_VAR])
+  def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def divides(self, v):
     if self.op is UOps.CONST:
       return self.arg%v == 0
@@ -178,8 +179,8 @@ def type_verify(uops):
       assert dtype is None, f"{uop} dtype must be None, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
     if uop is UOps.ALU:
-      if arg in UnaryOps:
-        assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
+      assert dtype.count == 1, f"wide ALU is not supported on {dtype}"
+      if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
       elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
         assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
         assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
@@ -189,8 +190,7 @@ def type_verify(uops):
       elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
         # the distance to shift isn't typechecked
         assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-      elif arg in BinaryOps:
-        assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
+      elif arg in BinaryOps: assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
       elif arg == TernaryOps.WHERE:
         assert src[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {src[0].dtype=} != {dtypes.bool}"
         assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
@@ -215,10 +215,12 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       elif u.op is UOps.STORE:
         dont_count = dont_count.union(u.src[1].sparents)
         if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
+      elif u.op is UOps.IF:
+        dont_count = dont_count.union(u.src[0].sparents)
   for u in uops:
     if u.op is UOps.RANGE:
       mult_stack.append(mults)
-      mults *= uop_alu_resolve(u.src[1])
+      mults *= uop_alu_resolve(u.src[1]) - uop_alu_resolve(u.src[0])
     elif u.op is UOps.ENDRANGE:
       mults = mult_stack.pop(-1)
     elif u.op is UOps.LOAD:
