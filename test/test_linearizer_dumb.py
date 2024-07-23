@@ -4,6 +4,7 @@
 
 import unittest
 from tinygrad import Device, dtypes
+from tinygrad.codegen.uops import UOps
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps # noqa: F401 # pylint: disable=unused-import
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
@@ -29,8 +30,13 @@ class TestLinearizerDumb(unittest.TestCase):
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
-    prg.uops.print()
+    k.uops.print()
     print(prg.src)
+    Device[Device.DEFAULT].compiler.compile_cached(prg.src)
+    with self.assertRaises(AssertionError):
+      gate_count = len([x for x in prg.src.splitlines() if "if" in x])
+      assert gate_count == 1, f"must have only one gate {gate_count} != 1"
+      assert len([u for u in k.uops if u.op is UOps.IF]) == 1, "must have a single IF"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
   def test_max_simplify_and_cancel(self):
