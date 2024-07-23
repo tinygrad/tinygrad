@@ -11,7 +11,7 @@ from tinygrad.codegen.uops import UOps
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer
+from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, ClangRenderer
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -175,6 +175,11 @@ class PythonProgram:
             # (i, j), C, D (4 elements on 32 threads)
             def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
             ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+          elif arg[5] == "CLANG":
+            def a_elem(x, i, j, _): return x[j][i]
+            def b_elem(x, i, j, _): return x[i][j]
+            def c_map(_, elem): return (elem%16, elem//16)
+            ul[i] = wmma_helper(1, 1, 16, 16, 256, a_elem, b_elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
@@ -190,6 +195,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
+    if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
 
   def render(self, name:str, uops:UOpGraph) -> str:
     lops = [(u.op, u.dtype, [uops.uops.index(v) for v in u.src], u.arg) for u in uops]
