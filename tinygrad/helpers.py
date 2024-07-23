@@ -117,6 +117,7 @@ class Metadata:
   def __hash__(self): return hash(self.name)
   def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
   def __str__(self): return self.name + (" bw" if self.backward else "")
+  def pretty(self): return f"Metadata('{self.name}', '{self.caller}', {self.backward})"
 _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
 
 # **************** global state Counters ****************
@@ -323,7 +324,7 @@ class tqdm:
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
 
-def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
+def pretty_print(x:Any, rep:Callable = lambda x: 'LazyOp({x.op}, arg={x.arg}, src=(%s))', srcfn=lambda x: x.src, cache=None, d=0)->str:
   def dfs(x:Any, cache:dict):
     for s in srcfn(x) or []:
       cache.setdefault(s, [len(cache), 0, False])[1] += 1
@@ -331,4 +332,4 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   if cache is None: dfs(x, cache:={})
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
   cx[2], srcs = True, ('None' if srcfn(x) is None else''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
-  return f"{' '*d} {f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
+  return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Union, Optional, Any, Tuple, List
 from tinygrad.dtype import dtypes, DType, ConstType
-from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata
+from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, pretty_print
 from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, reduce_st
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -49,8 +49,9 @@ class LazyBuffer:
   def __del__(self):
     if hasattr(self, 'buffer'): self.buffer.ref(-1)
 
-  def __repr__(self) -> str:
-    return f"<LB {self.device} {self.shape} {str(self.dtype)[7:]} {self.st if self.base != self else (self.op, self.realized)}>"
+  def __repr__(self):
+    return pretty_print(self, srcfn=lambda x: [] if x._base else x.srcs, rep=lambda x: f'LazyBuffer("{x.device}", {x.st}, {x.dtype},\
+                        metadata=({x.metadata.pretty()}), ' + (f'base={x._base}' if x._base else f'op={x.op}, arg={x.arg}') + ', srcs=(%s))')
 
   @property
   def realized(self) -> Optional[Buffer]:
