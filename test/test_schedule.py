@@ -714,19 +714,21 @@ class TestSchedule(unittest.TestCase):
 
   # multireduce spec
   def test_argmin_multireduce_fusion(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(4, 32).realize()
-    out = x.argmin(-1)
-    run_schedule(check_schedule(out, 2))
-    np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
+    with Context(FUSE_ARANGE=1):
+      Tensor.manual_seed(0)
+      x = Tensor.randn(4, 32).realize()
+      out = x.argmin(-1)
+      run_schedule(check_schedule(out, 2))
+      np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
 
   # multireduce spec
   def test_argmax_multireduce_fusion(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(4, 32).realize()
-    out = x.argmax(-1)
-    run_schedule(check_schedule(out, 2))
-    np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
+    with Context(FUSE_ARANGE=1):
+      Tensor.manual_seed(0)
+      x = Tensor.randn(4, 32).realize()
+      out = x.argmax(-1)
+      run_schedule(check_schedule(out, 2))
+      np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
 
   # multireduce spec
   def test_scaled_dot_product_attention_multireduce_fusion(self):
@@ -1259,18 +1261,20 @@ class TestSchedule(unittest.TestCase):
     b = CycleBitcast.apply(a, allow_buffer_view=False)
     check_schedule(b, 1)
 
-  def test_reduceop_reshape_dont_push(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(10, 20).realize()
-    out = x.argmax(1)
-    run_schedule(check_schedule(out, 2))
+  def test_reduceop_reshape_can_push(self):
+    with Context(FUSE_ARANGE=1):
+      Tensor.manual_seed(0)
+      x = Tensor.randn(10, 20).realize()
+      out = x.argmax(1)
+      run_schedule(check_schedule(out, 2))
 
   def test_tiny_argmax(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(10, 20).realize()
-    out = x.argmax(1)
-    run_schedule(check_schedule(out, 2))
-    np.testing.assert_allclose(out.numpy(), np.argmax(x.numpy(), 1))
+    with Context(FUSE_ARANGE=1):
+      Tensor.manual_seed(0)
+      x = Tensor.randn(10, 20).realize()
+      out = x.argmax(1)
+      run_schedule(check_schedule(out, 2))
+      np.testing.assert_allclose(out.numpy(), np.argmax(x.numpy(), 1))
 
 class CycleBitcast(Function):
   def forward(self, x: LazyBuffer, allow_buffer_view=True):
