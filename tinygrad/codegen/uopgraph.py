@@ -236,6 +236,9 @@ constant_folder = PatternMatcher([
   # NOTE: this can be wrong for loaded NaN
   (UOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   (UOp.var('x') - UOp.var('x'), lambda x: x.const(0)),   # x-x -> 0
+  # lt folding
+  (UOp.var('x').lt(UOp.cvar('c')),
+   lambda x,c: UOp.const(dtypes.bool, True) if x.vmax.arg < c.arg else UOp.const(dtypes.bool, False) if x.vmin.arg >= c.arg else None),
   # ** load/store folding **
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.load(UOp.var("buf"), UOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
