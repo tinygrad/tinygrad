@@ -665,7 +665,7 @@ class Kernel:
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
-          rsrc = op.src[0]
+          rsrc, upcast_offset = op.src[0], self.shape_len-self.upcasted
           if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
           assert rsrc.op is BinaryOps.MUL
 
@@ -683,22 +683,18 @@ class Kernel:
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device == "AMD":
-            reduce_axes = [self.shape_len-self.upcasted]
-            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
+            reduce_axes, upcast_axis = [upcast_offset], (upcast_offset, upcast_offset, upcast_offset+1)
             # https://gpuopen.com/learn/wmma_on_rdna3/
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
             fix_st2 = None
           elif self.opts.device == "METAL":
-            reduce_axes = [self.shape_len-self.upcasted]
-            upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1)
+            reduce_axes, upcast_axis = [upcast_offset], (upcast_offset+1, upcast_offset+1, upcast_offset+1)
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device == "CLANG":
-            reduce_axes, fix_st1, fix_st2 = [], None, None
-            upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
+            reduce_axes, upcast_axis, fix_st1, fix_st2 = [], (upcast_offset+1, upcast_offset, upcast_offset+1), None, None
           elif self.opts.device in {"CUDA", "NV"}:
-            reduce_axes = [self.shape_len-self.upcasted, self.shape_len-self.upcasted+1]
-            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted+2, self.shape_len-self.upcasted+2)
+            reduce_axes, upcast_axis = [upcast_offset, upcast_offset+1], (upcast_offset, upcast_offset+2, upcast_offset+2)
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
             fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
               ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
