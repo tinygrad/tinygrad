@@ -60,7 +60,7 @@ if __name__ == "__main__":
   conn = db_connection()
   cur = conn.cursor()
   try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
-  except sqlite3.OperationalError as e:
+  except sqlite3.OperationalError:
     logging.warn(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
     exit(0)
   conn.commit()
