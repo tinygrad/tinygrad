@@ -30,9 +30,6 @@ class PTXRenderer(Renderer):
 .address_size 64
 .visible .entry"""
   barrier = "bar.sync\t0;"
-  gid = [f'%ctaid.{chr(120+i)}' for i in range(3)]
-  gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
-  lid = [f'%tid.{chr(120+i)}' for i in range(3)]
   asm_for_op: Dict[Op, Callable] = {
     UnaryOps.NEG: lambda d,a,dt,name:
       f"not.pred {d}, {a};" if name == "pred" else f"sub.{name} {d}, 0, {a};" if dtypes.is_unsigned(dt) else f"neg.{name} {d}, {a};",
@@ -169,7 +166,7 @@ class PTXRenderer(Renderer):
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {ssa('acc', u)}, {const(src[0].arg, dtype)};")
         elif uop is UOps.SPECIAL:
           assert args[0][0] != "i", "idx not supported"
-          kk(f"mov.u32 %{args[0]}, {(self.gid if args[0][0] == 'g' else self.lid)[int(args[0][-1])]};")
+          kk(f"mov.u32 %{args[0]}, %{'ctaid' if args[0][0] == 'g' else 'tid'}.{chr(120+int(args[0][-1]))};")
           r[u] = "%" + args[0]
           kernel = [f".reg .u32 %{args[0]};"] + kernel
         elif uop is UOps.DEFINE_VAR:
