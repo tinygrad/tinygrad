@@ -406,7 +406,9 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
   try: yield (st, en)
   finally:
     if enabled and queue is not None: queue.timestamp(en)
-    elif enabled: queue_type().timestamp(en).submit(dev)
+    elif enabled:
+      queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
+      dev.timeline_value += 1
 
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
@@ -496,6 +498,7 @@ class HCQCompiled(Compiled):
   def _prof_finalize(self):
     for st, en, name, is_cp in self.raw_prof_records:
       self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
+    self.raw_prof_records = []
     del self.profile_logger
 
   def _wrap_timeline_signal(self):

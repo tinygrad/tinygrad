@@ -107,8 +107,8 @@ class ContextVar:
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
 WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
-MULTIOUTPUT, PROFILE, TRANSCENDENTAL = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("TRANSCENDENTAL", 1)
-USE_TC, TC_OPT = ContextVar("TC", 1), ContextVar("TC_OPT", 0)
+MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
+USE_TC, TC_OPT, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("TRANSCENDENTAL", 1)
 FUSE_AS_ONE_KERNEL, FUSE_CONV_BW = ContextVar("FUSE_AS_ONE_KERNEL", 0), ContextVar("FUSE_CONV_BW", 0)
 
 @dataclass(frozen=True)
@@ -165,7 +165,6 @@ class ProfileLogger:
   mjson: List[Dict] = []
   actors: Dict[str, int] = {}
   subactors: Dict[Tuple[str, str], int] = {}
-  path = getenv("PROFILE_OUTPUT_FILE", temp("tinygrad_profile.json"))
 
   def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
 
@@ -185,8 +184,8 @@ class ProfileLogger:
 
     ProfileLogger.writers -= 1
     if ProfileLogger.writers == 0 and len(self.mjson) > 0:
-      with open(self.path, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
-      print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/ to open it.")
+      with open(PROFILEPATH.value, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
+      print(f"Saved profile to {PROFILEPATH.value}. Use https://ui.perfetto.dev/ to open it.")
 
 # *** universal database cache ***
 
