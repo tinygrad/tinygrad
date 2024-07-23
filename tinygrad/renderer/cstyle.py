@@ -149,11 +149,8 @@ class CStyleLanguage(Renderer):
           if len(src) > 3 and src[2].op is UOps.ALU: val = self.code_for_op[TernaryOps.WHERE](r[src[2]], val, r[src[3]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
-          if 'amx_wmma' in r[src[1]]:
-            zreg = src[0].arg[0]*(dtype.itemsize//dtype.count)
-            kk(f"__ST_{dtype.name}(&{r[src[0]]}, {(zreg + (2 if zreg>=64 else 0)) % 64});")
-          else:
-            kk(f"{r[src[0]]} = {r[src[1]]};")
+          if 'amx_wmma' not in r[src[1]]: kk(f"{r[src[0]]} = {r[src[1]]};")
+          else: kk(f"__ST_{dtype.name}(&{r[src[0]]}, {((zreg:=src[0].arg[0]*(dtype.itemsize//dtype.count))+(2 if zreg>=64 else 0))%64});")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}:
           assert len(src) == 1 or (uop is UOps.VECTORIZE and len(src) > 1), "Invalid source length for operation"
@@ -179,8 +176,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.WMMA:
           if self.device == 'CLANG': kk(f"__{args[0]}({r[src[0]]}, {r[src[1]]}); // {ssa('amx_wmma',u)}")
           else: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.DEFINE_ACC:
-          kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
+        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
