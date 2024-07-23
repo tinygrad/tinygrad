@@ -169,7 +169,7 @@ class PTXRenderer(Renderer):
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {ssa('acc', u)}, {const(src[0].arg, dtype)};")
         elif uop is UOps.SPECIAL:
           assert args[0][0] != "i", "idx not supported"
-          kk(f"mov.u32 %{args[0]}, {(self.gid if args[0][0] == 'g' else self.lid)[args[0]]};")
+          kk(f"mov.u32 %{args[0]}, {(self.gid if args[0][0] == 'g' else self.lid)[int(args[0][-1])]};")
           r[u] = "%" + args[0]
           kernel = [f".reg .u32 %{args[0]};"] + kernel
         elif uop is UOps.DEFINE_VAR:
