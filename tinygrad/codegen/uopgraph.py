@@ -213,7 +213,7 @@ constant_folder = PatternMatcher([
   (UOp(UOps.GEP, src=(UOp.cvar("x"),)).name("root"), lambda root,x: root.const(x.arg)),
   # max -2147483648
   (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
-  # bool < False is always false, True < bool is always false
+  # bool < False is always false, True < bool is always false  # TODO: replace these with generic cmp
   (UOp.var().lt(UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
   (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
@@ -239,8 +239,8 @@ constant_folder = PatternMatcher([
   (UOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   (UOp.var('x') - UOp.var('x'), lambda x: x.const(0)),   # x-x -> 0
   # lt folding
-  (UOp.var('x').lt(UOp.cvar('c')),
-   lambda x,c: UOp.const(dtypes.bool, True) if x.vmax.arg < c.arg else UOp.const(dtypes.bool, False) if x.vmin.arg >= c.arg else None),
+  (UOp.var('x').lt(UOp.var('y')),
+   lambda x,y: UOp.const(dtypes.bool, True) if x.vmax.arg < y.vmin.arg else UOp.const(dtypes.bool, False) if x.vmin.arg >= y.vmax.arg else None),
   # ** load/store folding **
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.load(UOp.var("buf"), UOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
