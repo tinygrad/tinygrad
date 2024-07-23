@@ -545,7 +545,8 @@ class Kernel:
         for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
             try: # may fail due to excessive smem usage
-              self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+              if len(self.reduceops) < 2:
+                self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
               break
             except KernelOptError: pass
 
@@ -606,11 +607,11 @@ class Kernel:
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast.
     if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and (self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
       if (s:=self.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
-        for r in self.reduceops:
+        # for r in self.reduceops:
+        self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
+        # if it's small, upcast a second reduce dimension too
+        if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and (s2:=self.full_unupcasted_shape[-1]) <= 3 and isinstance(s2, int):
           self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
-          # if it's small, upcast a second reduce dimension too
-          if self.first_reduce < (self.shape_len-self.upcasted) and s <= 3 and (s2:=self.full_unupcasted_shape[-1]) <= 3 and isinstance(s2, int):
-            self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
       else:
         for splits in [4]:
           if self.full_unupcasted_shape[-1]%splits == 0:
@@ -667,9 +668,12 @@ class Kernel:
         idx = self.bufs.index(op.arg)
         arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
       elif op.op in ReduceOps:
+        print("reduce with initial arg=",op.arg)
+        print("self.first_reduce,self.group_for_reduces",self.first_reduce,self.group_for_reduces)
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
+        print("  new arg=",arg)
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
           if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
@@ -716,14 +720,23 @@ class Kernel:
           new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
           return LazyOp(op.op, (ret,), new_reduce_axes) if len(new_reduce_axes) else ret
         if self.group_for_reduces:
-          # print("fixing up reduceop=",op is not self.reduceops[-1]) # check if it's the last
+          print("fixing up reduceop=",op is not self.reduceops[-1]) # check if it's the last
           start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
           mask = tuple(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] for i in range(self.global_dims, self.global_dims+self.local_dims+self.group_for_reduces))
-          sts = ShapeTracker.from_shape(tuple([1] * self.global_dims + [x if mask[i] else 1 for i,x in enumerate(list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]))] + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])) # noqa: E501
+          sts = ShapeTracker.from_shape(tuple([1] * self.global_dims + [x if mask[i] or i < self.first_reduce else 1 for i,x in enumerate(list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]))] + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])) # noqa: E501
+          print("fixing up store to: ", sts.shape)
+          print("  [1] * self.global_dims=",[1] * self.global_dims)
+          print("  masked=",[x if mask[i] else 1 for i,x in enumerate(list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]))])
+          print("  upcasted=",[1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce))
+          print("  [x[0] for x in self.upcasted_axis(0)])=",[x[0] for x in self.upcasted_axis(0)])
           local_buffer = MemBuffer(-1, start.dtype, sts)
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
-          grouped_reduce =  LazyOp(op.op, (local_load,), tuple(i for j,i in enumerate(range(self.first_reduce, self.first_reduce+self.group_for_reduces)) if mask[j+(self.global_dims-self.first_reduce)]))
+          print("grouped_reduce arg=")
+          # print("  ", tuple(mask[j+(self.global_dims-self.first_reduce)] for j,i in enumerate(range(self.first_reduce, self.first_reduce+self.group_for_reduces))))
+          print("  ", tuple(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+          print("  ", tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
+          grouped_reduce =  LazyOp(op.op, (local_load,), tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
           print("grouped_reduce: ", grouped_reduce.arg)
           print("masked: ", tuple((i,mask[j]) for j,i in enumerate(range(self.first_reduce, self.first_reduce+self.group_for_reduces))))
           print("self.global_dims=",self.global_dims)
@@ -742,6 +755,10 @@ class Kernel:
   # **** this is the lowerer ****
 
   def linearize(self) -> Kernel:
+    print("linearizing kernel:")
+    print("  self.full_shape=",self.full_shape)
+    print("  self.first_reduce=",self.first_reduce)
+    print("  self.group_for_reduces=",self.group_for_reduces)
     modified_ast = self.get_optimized_ast()
 
     if DEBUG >= 3:

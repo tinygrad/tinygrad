@@ -611,42 +611,57 @@ class UOpGraph:
 
     scope_end: Dict[UOp, UOp] = {}
     self._uops = []
-    scope_cursor: Dict[UOp, UOp] = {}
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
-
+      if x in scope_children: scope_end[x] = x
       if x.op is UOps.DEFINE_ACC:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
-      elif x in scope_children:
-        scope_phi = [p for p in scope_children[x] if p.op is UOps.PHI]
-        phi_children = [u for p in scope_phi for u in phi_order[p]]
-        range_children = [r for p in phi_children for r in scope_children if p in scope_children[r] and r in self._uops]
-        if len(range_children) > 0:
-          placement_idx = min(self._uops.index(r) for r in range_children)
-          self._uops.insert(placement_idx, x)
-        else: self._uops.append(x)
-        scope_end[x] = x
-        scope_cursor[x] = x
-      else:
-        scopes = []
-        for u, ss in scope_children.items():
-          if x in ss: 
-            scopes.append(u)
-        if len(scopes)>0:
-          self._uops.insert(max(self._uops.index(scope_cursor[s]) for s in scopes)+1, x)
-          for s in scopes: scope_cursor[s] = x
-        elif any(u in self._uops for u in x.src):
-          placement_idx = max(self._uops.index(u) for u in x.src if u in self._uops)
-          self._uops.insert(placement_idx+1, x)
-        else: self._uops.append(x)
-      for u in children[x]:
+      else: self._uops.append(x)
+      for u, ss in scope_children.items():
+        if x in ss:
+          ss.remove(x)
+          if len(ss) == 0: scope_end[u] = x
+      for u in reversed(children[x]):
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
+    # scope_cursor: Dict[UOp, UOp] = {}
+    # while queue:
+    #   p,x = heapq.heappop(queue)
+    #   if DEBUG >= 7: print(p,x)
+
+    #   if x.op is UOps.DEFINE_ACC:
+    #     idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
+    #     self._uops.insert(idx, x)
+    #   elif x in scope_children:
+    #     scope_phi = [p for p in scope_children[x] if p.op is UOps.PHI]
+    #     phi_children = [u for p in scope_phi for u in phi_order[p]]
+    #     range_children = [r for p in phi_children for r in scope_children if p in scope_children[r] and r in self._uops]
+    #     if len(range_children) > 0:
+    #       placement_idx = min(self._uops.index(r) for r in range_children)
+    #       self._uops.insert(placement_idx, x)
+    #     else: self._uops.append(x)
+    #     scope_end[x] = x
+    #     scope_cursor[x] = x
+    #   else:
+    #     scopes = []
+    #     for u, ss in scope_children.items():
+    #       if x in ss: 
+    #         scopes.append(u)
+    #     if len(scopes)>0:
+    #       self._uops.insert(max(self._uops.index(scope_cursor[s]) for s in scopes)+1, x)
+    #       for s in scopes: scope_cursor[s] = x
+    #     elif any(u in self._uops for u in x.src):
+    #       placement_idx = max(self._uops.index(u) for u in x.src if u in self._uops)
+    #       self._uops.insert(placement_idx+1, x)
+    #     else: self._uops.append(x)
+    #   for u in children[x]:
+    #     in_degree[u] -= 1
+    #     if in_degree[u] == 0: push(u)
 
     # end scopes in toposort order
-    for u, x in scope_cursor.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+    for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     # for i,u in enumerate(self._uops):
     #   print(f"{i}  :{u}  ---  {[(s.op, s.arg) for s in scope_children if u in scope_children[s]]}")
