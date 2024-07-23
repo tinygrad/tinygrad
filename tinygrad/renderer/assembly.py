@@ -172,6 +172,10 @@ class PTXRenderer(Renderer):
           kk(f"mov.u32 %{args[1]}, {(self.gid if args[1][0] == 'g' else self.lid)[args[0]]};")
           r[u] = "%" + args[1]
           kernel = [f".reg .u32 %{args[1]};"] + kernel
+        elif uop is UOps.DEFINE_VAR:
+          bufs.append((args.expr, dtype))
+          r[u] = f"%{args.expr}"
+          kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.CONST:
           if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
           else: r[u] = const(args, dtype, mov=True)
@@ -205,10 +209,6 @@ class PTXRenderer(Renderer):
           # TODO: we should sum these, and fetch 0xC000 from somewhere
           assert args[1]*dtype.itemsize <= 0xC000, "too large local"
           kk(*self.render_local(ssa('local', u, self.types[dtypes.ulong]), args[0], args[1], dtype))
-        elif uop is UOps.DEFINE_VAR:
-          bufs.append((args.expr, dtype))
-          r[u] = f"%{args.expr}"
-          kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", dtype))
           r[u] = f"%{nm}"

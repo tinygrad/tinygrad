@@ -84,10 +84,8 @@ class PythonProgram:
         elif uop is UOps.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is UOps.SPECIAL:
-          if arg[1][0] == 'g':
-            ul[i] = [idxs[2-arg[0]]] * warp_size
-          elif arg[1][0] == 'l':
-            ul[i] = [x[2-arg[0]] for x in warp]
+          if arg[1][0] == 'g': ul[i] = [idxs[2-arg[0]]] * warp_size
+          elif arg[1][0] == 'l': ul[i] = [x[2-arg[0]] for x in warp]
         elif uop is UOps.CONST:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
