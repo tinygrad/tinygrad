@@ -440,7 +440,7 @@ class TestNN(unittest.TestCase):
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(3, len([item for item in schedule if item.ast.op is MetaOps.SINK]), "first run realizes arange, weight, and embedding")
+    self.assertEqual(3, len([item for item in schedule if item.ast.op is MetaOps.KERNEL]), "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
     b = Tensor([[1, 2, 3],
@@ -448,7 +448,7 @@ class TestNN(unittest.TestCase):
                 [7, 8, 9]])
     result = layer(b)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(1, len([item for item in schedule if item.ast.op is MetaOps.SINK]), "second run realizes embedding only")
+    self.assertEqual(1, len([item for item in schedule if item.ast.op is MetaOps.KERNEL]), "second run realizes embedding only")
     run_schedule(schedule)
 
   def test_load_state_dict(self):

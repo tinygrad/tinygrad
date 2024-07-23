@@ -141,6 +141,11 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.SPECIAL:
           kk(f"int {args[1]} = {self.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
           r[u] = args[1]
+        elif uop is UOps.DEFINE_VAR:
+          assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
+          seen_vars.add(args.expr)
+          bufs.append((args.expr, (dtype,False)))
+          r[u] = args.expr
         elif uop is UOps.LOAD:
           val = self.render_load(dtype, r[src[0]], src[0].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
           # NOTE: this relies on the load not happening if it's in the unselected branch
@@ -162,11 +167,6 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_LOCAL:
           kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
-        elif uop is UOps.DEFINE_VAR:
-          assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
-          seen_vars.add(args.expr)
-          bufs.append((args.expr, (dtype,False)))
-          r[u] = args.expr
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
