@@ -453,14 +453,11 @@ def train_unet3d():
 
   print(f"Training on {GPUS}")
   
-  if BENCHMARK:
-    print("Benchmarking UNet3D")
-  else:
-    print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epoch(s) afterwards")
+  if BENCHMARK: print("Benchmarking UNet3D")
+  else: print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epoch(s) afterwards")
 
-  if not PREPROCESSED_DIR.exists():
-    preprocess_dataset(get_train_files(), PREPROCESSED_DIR, False)
-    preprocess_dataset(get_val_files(), PREPROCESSED_DIR, True)
+  if not (PREPROCESSED_DIR / "train").exists(): preprocess_dataset(get_train_files(), PREPROCESSED_DIR, False)
+  if not (PREPROCESSED_DIR / "val").exists(): preprocess_dataset(get_val_files(), PREPROCESSED_DIR, True)
 
   for epoch in range(1, NUM_EPOCHS + 1):
     with Context(BEAM=TRAIN_BEAM):
