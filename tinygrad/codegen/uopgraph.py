@@ -213,9 +213,6 @@ constant_folder = PatternMatcher([
   (UOp(UOps.GEP, src=(UOp.cvar("x"),)).name("root"), lambda root,x: root.const(x.arg)),
   # max -2147483648
   (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
-  # bool < False is always false, True < bool is always false  # TODO: replace these with generic cmp
-  (UOp.var().lt(UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
-  (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UOp.var().where(UOp.var("val"), UOp.var("val")), lambda val: val),
   (UOp.cvar('gate').where(UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
