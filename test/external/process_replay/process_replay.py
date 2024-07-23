@@ -57,13 +57,17 @@ if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
     logging.info("skipping process replay.")
     exit(0)
-  conn = db_connection()
-  cur = conn.cursor()
-  row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
-  conn.commit()
-  cur.close()
-  offsets = range(0, row_count, PAGE_SIZE)
-  with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-    list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
-    pool.close()
-    pool.join()
+  try:
+    conn = db_connection()
+    cur = conn.cursor()
+    row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+    conn.commit()
+    cur.close()
+    offsets = range(0, row_count, PAGE_SIZE)
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+      list(tqdm(pool.imap(process_replay, offsets), total=len(offsets)))
+      pool.close()
+      pool.join()
+  except Exception as e:
+    if ASSERT_DIFF: raise e
+    logging.warn(f"PROCESS REPLAY ERRORED:\n {e}.")
