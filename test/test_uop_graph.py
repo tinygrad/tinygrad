@@ -222,7 +222,7 @@ class TestUOpGraph(TestUOps):
   def test_fold_gated_load_local(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
     smem = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.int), (), ("temp", 1))
-    lidx = UOp(UOps.SPECIAL, dtypes.int, (), (0, "lidx1", 16))
+    lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(UOps.STORE, None, (smem, lidx, UOp.load(glbl0, lidx, dtype=dtypes.int)))
     barrier = UOp(UOps.BARRIER, None, (st, ))
     ld0 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+1, UOp.const(dtypes.bool, False), UOp.const(dtypes.int, 2), barrier))

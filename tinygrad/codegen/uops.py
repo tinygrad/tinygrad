@@ -205,7 +205,7 @@ def type_verify(uops):
         assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
 
 def uop_alu_resolve(u:UOp) -> sint:
-  if u.op is UOps.SPECIAL: return u.arg[2]-1
+  if u.op is UOps.SPECIAL: return u.arg[1]-1
   if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
   if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
