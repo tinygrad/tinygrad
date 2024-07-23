@@ -73,8 +73,8 @@ class UOp:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def _const(dtype:Optional[DType], b:ConstType|Variable):
-    # TODO: min/max for const Variable?
-    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
+    # TODO: fix dtype of b.max after Variable is just an UOp
+    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (UOp.const(dtypes.int, b.min), UOp.const(dtypes.int, cast(int,b.max))), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
@@ -101,10 +101,12 @@ class UOp:
   @functools.cached_property
   def vmax(self) -> UOp:
     if self.op is UOps.DEFINE_VAR: return self.src[1]
+    if self.op is UOps.CONST: return self
     return UOp.const(dtypes.float, math.inf)
   @functools.cached_property
   def vmin(self) -> UOp:
     if self.op is UOps.DEFINE_VAR: return self.src[0]
+    if self.op is UOps.CONST: return self
     return UOp.const(dtypes.float, -math.inf)
 
 class UPat:
