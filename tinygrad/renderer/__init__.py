@@ -25,6 +25,7 @@ class Program:
   uops:Optional[UOpGraph]=None
   op_estimate:sint=0
   mem_estimate:sint=0
+  lds_estimate:sint=0
 
   @functools.cached_property
   def vars(self) -> List[Variable]: return [] if self.uops is None else self.uops.vars()

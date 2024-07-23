@@ -766,4 +766,4 @@ class Kernel:
     mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
-    return Program(ansiname, src, self.opts.device, self.global_size, self.local_size, self.uops, ops * run_count, min(mem * run_count, mem_bytes))
+    return Program(ansiname, src, self.opts.device, self.global_size, self.local_size, self.uops, ops * run_count, mem_bytes, mem * run_count)
