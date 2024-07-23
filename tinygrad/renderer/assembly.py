@@ -168,10 +168,10 @@ class PTXRenderer(Renderer):
             for uu in r[u]: kk(f"mov.b{self.types[dtype.scalar()][1:]} {uu}, {const(src[0].arg, dtype.scalar())};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {ssa('acc', u)}, {const(src[0].arg, dtype)};")
         elif uop is UOps.SPECIAL:
-          assert args[1][0] != "i", "idx not supported"
-          kk(f"mov.u32 %{args[1]}, {(self.gid if args[1][0] == 'g' else self.lid)[args[0]]};")
-          r[u] = "%" + args[1]
-          kernel = [f".reg .u32 %{args[1]};"] + kernel
+          assert args[0][0] != "i", "idx not supported"
+          kk(f"mov.u32 %{args[0]}, {(self.gid if args[0][0] == 'g' else self.lid)[int(args[0][-1])]};")
+          r[u] = "%" + args[0]
+          kernel = [f".reg .u32 %{args[0]};"] + kernel
         elif uop is UOps.DEFINE_VAR:
           bufs.append((args.expr, dtype))
           r[u] = f"%{args.expr}"
