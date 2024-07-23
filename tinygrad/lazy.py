@@ -11,6 +11,7 @@ from weakref import ref, ReferenceType, WeakValueDictionary
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
+  print("create_lazybuffer", base, len(srcs))
   if st.size == 0: op, arg, srcs, base = MetaOps.CONST, 0, (), None
   if op is MetaOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, Variable) else arg, True
 
@@ -50,8 +51,9 @@ class LazyBuffer:
     if hasattr(self, 'buffer'): self.buffer.ref(-1)
 
   def __repr__(self):
-    return pretty_print(self, srcfn=lambda x: [] if x._base else x.srcs, rep=lambda x: f'LazyBuffer("{x.device}", {x.st}, {x.dtype},\
-                        metadata=({x.metadata.pretty()}), ' + (f'base={x._base}' if x._base else f'op={x.op}, arg={x.arg}') + ', srcs=(%s))')
+    return pretty_print(self, srcfn=lambda x: getattr(x, 'srcs', ()),
+      rep=lambda x: f'LazyBuffer("{x.device}", {x.st}, {x.dtype}, metadata=({x.metadata.pretty() if x.metadata else None}), '\
+        + (f'base={x._base}' if x._base else f'op={x.op}, arg={x.arg}') + ', srcs=(%s))')
 
   @property
   def realized(self) -> Optional[Buffer]:
