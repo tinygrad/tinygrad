@@ -17,7 +17,8 @@ render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.bigint, sel
                     DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//variable_to_uop(self.b, ctx),
                     ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%variable_to_uop(self.b, ctx),
                     LtNode: lambda self, ops, ctx: self.a.render(ops, ctx).lt(variable_to_uop(self.b, ctx)),
-  Variable: lambda self,ops,ctx: ctx[self] if ctx is not None and self in ctx else UOp(UOps.DEFINE_VAR, dtypes.int32, (), self),
+  Variable: lambda self,ops,ctx: ctx[self] if ctx is not None and self in ctx else \
+    UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, self.min), UOp.const(dtypes.int, self.max)), self),
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
@@ -75,7 +76,7 @@ def _limit_dims(dims:Tuple[sint, ...], max_sizes:Tuple[int, ...]):
 def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]], reverse=False) -> List[UOp]:
   if reverse: dims = dims[::-1]
   limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
-  ret = raw_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (), (i, f"{prefix}{i}", s)) for i,s in enumerate(limited)]
+  ret = raw_idxs = [UOp(UOps.SPECIAL, dtypes.bigint, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
   if limited != dims:
     ret = []
     # cast for mypy, get_contraction won't be None
@@ -172,8 +173,8 @@ class IndependentLowerer:
       if x.op is ReduceOps.WMMA:
         wmma_sz, upcast_axis, con_sz = x.arg[4], x.arg[6], x.arg[4][0]
         ret = UOp(UOps.WMMA, dtype=dtype.vec(wmma_sz[2]), src=(
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=(upcast_axis[0],)),
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=(upcast_axis[1],)),
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=upcast_axis[0]),
+          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=upcast_axis[1]),
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         if x.arg[5] == "CLANG":
           def con(i, sz):

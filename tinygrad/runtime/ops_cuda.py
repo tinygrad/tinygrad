@@ -74,7 +74,7 @@ def cuda_disassemble(lib, arch):
     with open(fn + ".ptx", "wb") as f: f.write(lib)
     subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn+".ptx"], check=True)
     print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
-  except Exception as e: print("failed to generate SASS", str(e))
+  except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
 
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes):

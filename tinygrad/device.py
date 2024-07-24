@@ -406,22 +406,58 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
   try: yield (st, en)
   finally:
     if enabled and queue is not None: queue.timestamp(en)
-    elif enabled: queue_type().timestamp(en).submit(dev)
+    elif enabled:
+      queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
+      dev.timeline_value += 1
 
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQProgram:
-  def __init__(self, device:HCQCompiled, kernargs_alloc_size:int, kernargs_args_offset:int=0):
-    self.device, self.kernargs_alloc_size, self.kernargs_args_offset = device, kernargs_alloc_size, kernargs_args_offset
+  def __init__(self, device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
+    self.device, self.name, self.kernargs_alloc_size, self.kernargs_args_offset = device, name, kernargs_alloc_size, kernargs_args_offset
 
-  def fill_kernargs(self, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None):
+  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> int:
     """
-    Fills arguments for the kernel, optionally allocating space from device if kernargs_ptr is not set.
+    Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
+
+    Args:
+      bufs: Buffers to be written to kernel arguments.
+      vals: Values to be written to kernel arguments.
+      kernargs_ptr: Optional pointer to pre-allocated kernel arguments memory.
+
+    Returns:
+      Pointer to the filled kernel arguments.
     """
     self._fill_kernargs(ptr:=(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size)), bufs, vals)
     return ptr
+  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
 
-  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
+  def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
+               vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
+    """
+    Enqueues the program for execution with the given arguments and dimensions.
+
+    Args:
+      bufs: Buffer arguments to execute the kernel with.
+      global_size: Specifies the global work size for kernel execution (equivalent to CUDA's grid size).
+      local_size: Specifies the local work size for kernel execution (equivalent to CUDA's block size).
+      vals: Value arguments to execute the kernel with.
+      wait: If True, waits for the kernel to complete execution.
+
+    Returns:
+      Execution time of the kernel if 'wait' is True, otherwise None.
+    """
+
+    q = self.device.hw_compute_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
+
+    with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
+      q.exec(self, self.fill_kernargs(bufs, vals), global_size, local_size)
+
+    q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+    self.device.timeline_value += 1
+
+    if wait: self.device.timeline_signal.wait(self.device.timeline_value - 1)
+    return ((sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class HCQCompiled(Compiled):
   """
@@ -482,6 +518,7 @@ class HCQCompiled(Compiled):
   def _prof_finalize(self):
     for st, en, name, is_cp in self.raw_prof_records:
       self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
+    self.raw_prof_records = []
     del self.profile_logger
 
   def _wrap_timeline_signal(self):

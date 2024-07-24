@@ -73,7 +73,8 @@ class UOp:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def _const(dtype:Optional[DType], b:ConstType|Variable):
-    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
+    # TODO: fix dtype of b.max after Variable is just an UOp
+    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (UOp.const(dtypes.int, b.min), UOp.const(dtypes.int, cast(int,b.max))), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
@@ -89,7 +90,7 @@ class UOp:
   def parents(self) -> Set[UOp]: return set.union(set(self.src), *[x.parents for x in self.src])
   @property  # parents with self
   def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
-  def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.op is UOps.DEFINE_VAR])
+  def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def divides(self, v):
     if self.op is UOps.CONST:
       return self.arg%v == 0
@@ -97,6 +98,21 @@ class UOp:
       if self.arg is BinaryOps.ADD: return all(x.divides(v) for x in self.src)
       if self.arg is BinaryOps.MUL: return any(x.divides(v) for x in self.src)
     return False # generic false if we aren't sure
+  @functools.cached_property
+  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None else self.const(dtypes.min(cast(DType, self.dtype)))
+  @functools.cached_property
+  def vmax(self) -> UOp: return x if (x:=self._min_max[1]) is not None else self.const(dtypes.max(cast(DType, self.dtype)))
+  @functools.cached_property
+  def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
+    # NOTE: returned UOp is assumed to be CONST
+    if self.op in (UOps.DEFINE_VAR, UOps.RANGE): return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else None
+    # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
+    if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
+    if self.op is UOps.CONST: return self, self
+    if self.op is UOps.ALU:
+      if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(cast(DType, self.dtype)):
+        return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
+    return None, None
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
@@ -179,8 +195,8 @@ def type_verify(uops):
       assert dtype is None, f"{uop} dtype must be None, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
     if uop is UOps.ALU:
-      if arg in UnaryOps:
-        assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
+      assert dtype.count == 1, f"wide ALU is not supported on {dtype}"
+      if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
       elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
         assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
         assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
@@ -190,14 +206,13 @@ def type_verify(uops):
       elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
         # the distance to shift isn't typechecked
         assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-      elif arg in BinaryOps:
-        assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
+      elif arg in BinaryOps: assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
       elif arg == TernaryOps.WHERE:
         assert src[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {src[0].dtype=} != {dtypes.bool}"
         assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
 
 def uop_alu_resolve(u:UOp) -> sint:
-  if u.op is UOps.SPECIAL: return u.arg[2]-1
+  if u.op is UOps.SPECIAL: return u.arg[1]-1
   if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
   if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
@@ -216,10 +231,12 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       elif u.op is UOps.STORE:
         dont_count = dont_count.union(u.src[1].sparents)
         if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
+      elif u.op is UOps.IF:
+        dont_count = dont_count.union(u.src[0].sparents)
   for u in uops:
     if u.op is UOps.RANGE:
       mult_stack.append(mults)
-      mults *= uop_alu_resolve(u.src[1])
+      mults *= uop_alu_resolve(u.src[1]) - uop_alu_resolve(u.src[0])
     elif u.op is UOps.ENDRANGE:
       mults = mult_stack.pop(-1)
     elif u.op is UOps.LOAD:
