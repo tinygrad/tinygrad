@@ -383,7 +383,7 @@ class Kernel:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
-          if (self.opts.device == "CLANG" and AMX): return True #works, but ultra slow with hand-coded TC opts
+          if (self.opts.device == "CLANG" and AMX): return True # breaks when upcasting both M and N
           # hand-coded TC opts
           def late_upcast_tc(tc_dim: int):
             if tc_opts.axes_exist[tc_dim]:
@@ -392,7 +392,7 @@ class Kernel:
           late_upcast_tc(1) # attempt to upcast M
           late_upcast_tc(0) # attempt to upcast N
 
-          if self.tensor_core and tc_opts.axes_exist[0] and not (self.opts.device == "CLANG" and AMX): # attempt to local N, CLANG does not support locals
+          if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
             for upc in [4,2]:
               if self.full_shape[tc_opts.axes[0]] % upc == 0:
                 self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
