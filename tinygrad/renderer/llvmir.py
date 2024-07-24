@@ -33,7 +33,7 @@ dtype_to_llvm_dtype = { dtypes.bool:ir.IntType(1), dtypes.int8:ir.IntType(8), dt
   dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.float64:ir.DoubleType() }
 
 def cast(bb, val, input_type, output_type, bitcast=False):
-  assert input_type != output_type, f"upat didn't work? {input_type} == {output_type}"
+  if input_type == output_type: return val
   llvm_type = dtype_to_llvm_dtype[output_type]
   if bitcast: return bb[-1].bitcast(val, llvm_type)
 
