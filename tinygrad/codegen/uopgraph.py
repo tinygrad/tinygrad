@@ -239,6 +239,9 @@ constant_folder = PatternMatcher([
   # lt folding
   (UOp.var('x').lt(UOp.var('y')),
    lambda x,y: UOp.const(dtypes.bool, True) if x.vmax.arg < y.vmin.arg else UOp.const(dtypes.bool, False) if x.vmin.arg >= y.vmax.arg else None),
+  # c0*x<c1 for positive int c0,c1
+  ((UOp.cvar('c0',dtypes.int)*UOp.var('x')).lt(UOp.cvar('c1',dtypes.int)),
+   lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if c0.arg > 0 and c1.arg > 0 else None),
   # ** load/store folding **
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.load(UOp.var("buf"), UOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
