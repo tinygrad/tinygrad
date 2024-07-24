@@ -432,7 +432,7 @@ class HCQProgram:
     return ptr
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
 
-  def __call__(self, *bufs:Tuple[HCQBuffer, ...], global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
+  def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
                vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:
     """
     Enqueues the program for execution with the given arguments and dimensions.
@@ -456,9 +456,8 @@ class HCQProgram:
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
 
-    if wait:
-      self.device.timeline_signal.wait(self.device.timeline_value - 1)
-      return (sig_en.timestamp - sig_st.timestamp) / 1e6
+    if wait: self.device.timeline_signal.wait(self.device.timeline_value - 1)
+    return ((sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class HCQCompiled(Compiled):
   """
