@@ -193,9 +193,7 @@ class PTXRenderer(Renderer):
             for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {r[src[0]]}, {r[src[1]]};")
           r[u] = r[src[0]]
-        elif uop in {UOps.VECTORIZE}:
-          assert src[0].dtype is not None and dtype.count > 1
-          r[u] = [r[x] for x in src] # type: ignore
+        elif uop is UOps.VECTORIZE: r[u] = [r[x] for x in src] # type: ignore
         elif uop in {UOps.CAST, UOps.BITCAST}:
           assert src[0].dtype is not None and dtype.count == 1
           _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
