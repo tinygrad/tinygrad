@@ -4,8 +4,8 @@ from collections import defaultdict
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph, PatternMatcher, UPat
+from tinygrad.codegen.uops import UOps, UOp, PatternMatcher, UPat
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Renderer, TensorCore
 
 def render_val(x, dtype):
@@ -30,9 +30,6 @@ class PTXRenderer(Renderer):
 .address_size 64
 .visible .entry"""
   barrier = "bar.sync\t0;"
-  gid = [f'%ctaid.{chr(120+i)}' for i in range(3)]
-  gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
-  lid = [f'%tid.{chr(120+i)}' for i in range(3)]
   asm_for_op: Dict[Op, Callable] = {
     UnaryOps.NEG: lambda d,a,dt,name:
       f"not.pred {d}, {a};" if name == "pred" else f"sub.{name} {d}, 0, {a};" if dtypes.is_unsigned(dt) else f"neg.{name} {d}, {a};",
@@ -168,10 +165,14 @@ class PTXRenderer(Renderer):
             for uu in r[u]: kk(f"mov.b{self.types[dtype.scalar()][1:]} {uu}, {const(src[0].arg, dtype.scalar())};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {ssa('acc', u)}, {const(src[0].arg, dtype)};")
         elif uop is UOps.SPECIAL:
-          assert args[1][0] != "i", "idx not supported"
-          kk(f"mov.u32 %{args[1]}, {(self.gid if args[1][0] == 'g' else self.lid)[args[0]]};")
-          r[u] = "%" + args[1]
-          kernel = [f".reg .u32 %{args[1]};"] + kernel
+          assert args[0][0] != "i", "idx not supported"
+          kk(f"mov.u32 %{args[0]}, %{'ctaid' if args[0][0] == 'g' else 'tid'}.{chr(120+int(args[0][-1]))};")
+          r[u] = "%" + args[0]
+          kernel = [f".reg .u32 %{args[0]};"] + kernel
+        elif uop is UOps.DEFINE_VAR:
+          bufs.append((args.expr, dtype))
+          r[u] = f"%{args.expr}"
+          kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.CONST:
           if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
           else: r[u] = const(args, dtype, mov=True)
@@ -205,10 +206,6 @@ class PTXRenderer(Renderer):
           # TODO: we should sum these, and fetch 0xC000 from somewhere
           assert args[1]*dtype.itemsize <= 0xC000, "too large local"
           kk(*self.render_local(ssa('local', u, self.types[dtypes.ulong]), args[0], args[1], dtype))
-        elif uop is UOps.DEFINE_VAR:
-          bufs.append((args.expr, dtype))
-          r[u] = f"%{args.expr}"
-          kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", dtype))
           r[u] = f"%{nm}"
@@ -262,7 +259,7 @@ ptx_matcher = PatternMatcher([
                                UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="alu"), UPat(UOps.CONST, name="const")]))),
     lambda root, alu, const: UOp(root.op, root.dtype,
       (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
-       UOp.const(const.dtype, root.src[0].dtype.itemsize)*const)+root.src[2:])),
+       const.const(root.src[0].dtype.itemsize)*const)+root.src[2:])),
   (UPat({UOps.LOAD, UOps.STORE}, name="root", allow_any_len=True, src=(UPat({UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL}),
                                                                               UPat(UOps.CONST, name="const"))),
     lambda root, const: UOp(root.op, root.dtype,

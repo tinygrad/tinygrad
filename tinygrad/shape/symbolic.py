@@ -43,6 +43,7 @@ class Node:
     if b == 1: return self
     return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
+  def __lshift__(self, b:int): return self*2**b
 
   # *** complex ops ***
 
@@ -231,7 +232,7 @@ class RedNode(Node):
   def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = self.get_bounds()
-  def vars(self) -> Set[Variable]: return set.union(*[x.vars() for x in self.nodes], set())
+  def vars(self) -> Set[Variable]: return set().union(*[x.vars() for x in self.nodes])
   def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class SumNode(RedNode):

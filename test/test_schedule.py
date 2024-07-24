@@ -11,10 +11,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps
 from tinygrad.helpers import DEBUG, flatten, getenv
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
-from test.helpers import is_dtype_supported
+from test.helpers import is_dtype_supported, Context
 from tinygrad.function import Function
 from tinygrad.lazy import LazyBuffer, view_supported_devices
 
@@ -28,16 +27,16 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
         for i,out in enumerate(s.outputs):
           seen.add(out)
   sched = create_schedule(flatten([r.lazydata.lbs for r in t]), seen)
-  if filter_sink: sched = [s for s in sched if s.ast.op is MetaOps.SINK]
+  if filter_sink: sched = [s for s in sched if s.ast.op is MetaOps.KERNEL]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
       print("kernel", i+1)
-      print_tree(s.ast)
+      print(s.ast)
   if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (sink) ops linearize
   for s in sched:
-    if s.ast.op is not MetaOps.SINK: continue
+    if s.ast.op is not MetaOps.KERNEL: continue
     l = Kernel(s.ast)
     l.hand_coded_optimizations()
     l.linearize()
@@ -223,25 +222,41 @@ class TestSchedule(unittest.TestCase):
           check_schedule(opt.schedule_step(), cnt)
 
   def test_fold_conv_relu_backward(self):
-    c1 = nn.Conv2d(3,16,3, bias=False)
-    c1.weight.requires_grad = True
+    with Context(FUSE_CONV_BW=1):
+      c1 = nn.Conv2d(3,16,3, bias=False)
+      c1.weight.requires_grad = True
 
-    # run
-    img = Tensor.rand(2,3,64,64, requires_grad=True)
-    c1(img).relu().mean().backward()
-    # TODO: this should be 4, not 5
-    # img.grad is requiring two reduces
-    check_schedule([img.grad, c1.weight.grad], 5)
+      # run
+      img = Tensor.rand(2,3,64,64, requires_grad=True)
+      c1(img).relu().mean().backward()
+      check_schedule([img.grad, c1.weight.grad], 4)
+
+  # TODO: add cast
+  @unittest.expectedFailure
+  def test_fold_conv_relu_backward_half(self):
+    with Context(FUSE_CONV_BW=1):
+      old_float = dtypes.default_float
+      dtypes.default_float = dtypes.float16
+
+      c1 = nn.Conv2d(3,16,3, bias=False)
+      c1.weight.requires_grad = True
+
+      # run
+      img = Tensor.rand(2,3,64,64, requires_grad=True)
+      c1(img).relu().mean().backward()
+      dtypes.default_float = old_float
+      check_schedule([img.grad, c1.weight.grad], 4)
 
   def test_fold_batchnorm_backward(self):
-    with Tensor.train():
-      x = Tensor.empty((2, 16, 8, 8)).contiguous()
-      bn = nn.BatchNorm2d(16)
-      bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
-      fw = bn(x).contiguous_backward().relu().contiguous()
-      fw.sum().backward()
-      # TODO: this is too many
-      check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
+    with Context(FUSE_CONV_BW=1):
+      with Tensor.train():
+        x = Tensor.empty((2, 16, 8, 8)).contiguous()
+        bn = nn.BatchNorm2d(16)
+        bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
+        fw = bn(x).contiguous_backward().relu().contiguous()
+        fw.sum().backward()
+        # TODO: this is too many
+        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -936,16 +951,17 @@ class TestSchedule(unittest.TestCase):
       check_schedule(opt.schedule_step(), 9)
 
   def test_sgd_4convs_fuse(self):
-    with Tensor.train():
-      img = Tensor.empty(2,3,64,64)
-      c1 = nn.Conv2d(3,4,3,bias=False)
-      c2 = nn.Conv2d(4,8,3,bias=False)
-      c3 = nn.Conv2d(8,16,3,bias=False)
-      c4 = nn.Conv2d(16,32,3,bias=False)
-      opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
-      opt.zero_grad()
-      c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 22)
+    with Context(FUSE_CONV_BW=1):
+      with Tensor.train():
+        img = Tensor.empty(2,3,64,64)
+        c1 = nn.Conv2d(3,4,3,bias=False)
+        c2 = nn.Conv2d(4,8,3,bias=False)
+        c3 = nn.Conv2d(8,16,3,bias=False)
+        c4 = nn.Conv2d(16,32,3,bias=False)
+        opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
+        opt.zero_grad()
+        c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
+        check_schedule(opt.schedule_step(), 19)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
