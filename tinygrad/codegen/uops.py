@@ -34,6 +34,8 @@ class UOp:
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  def __post_init__(self):
+    if self.commutative(): super().__setattr__('src', tuple(sorted(self.src)))
   def commutative(self) -> bool:
     return (self.op is UOps.ALU and \
       self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})

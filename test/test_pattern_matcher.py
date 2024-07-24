@@ -105,7 +105,7 @@ class TestPatternMatcher(TestUOps):
     c5 = UOp(UOps.ALU, dtypes.float, (c3,c1), BinaryOps.ADD)
     self.assertEqual(matcher.rewrite(c3), None)
     self.assertEqual(matcher.rewrite(c4), c4)
-    self.assertEqual(matcher.rewrite(c5), None)
+    self.assertEqual(matcher.rewrite(c5), c5)
 
   def test_src_permutations(self):
     matcher = PatternMatcher([(UPat(UOps.ALU, name="x", src=[UPat(UOps.CONST), UPat(UOps.ALU)]), lambda x: x)])
