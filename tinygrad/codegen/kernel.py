@@ -671,6 +671,8 @@ class Kernel:
         print("reduce with initial arg=",op.arg)
         print("self.first_reduce,self.group_for_reduces",self.first_reduce,self.group_for_reduces)
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
+        print("self.sts[reduce_idx]=",self.sts[reduce_idx].shape)
+        print("self.sts[reduce_idx+1]=",self.sts[reduce_idx+1].shape)
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
         print("  new arg=",arg)
@@ -750,15 +752,13 @@ class Kernel:
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    return fixup_ast(self.ast)
+    fixedup = fixup_ast(self.ast)
+    print_tree(fixedup)
+    return fixedup
 
   # **** this is the lowerer ****
 
   def linearize(self) -> Kernel:
-    print("linearizing kernel:")
-    print("  self.full_shape=",self.full_shape)
-    print("  self.first_reduce=",self.first_reduce)
-    print("  self.group_for_reduces=",self.group_for_reduces)
     modified_ast = self.get_optimized_ast()
 
     if DEBUG >= 3:

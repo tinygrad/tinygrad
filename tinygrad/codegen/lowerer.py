@@ -87,21 +87,8 @@ class IndependentLowerer:
     local_loads = [x for x in ast.lazyops if x.op is BufferOps.LOAD and x.arg.idx == -1]
     # NOTE: this is taking the first one...there may be subtlelies here with multireduces
     group_for_reduces = sum([any(j!=y for j in x) for x,y in zip([[l.arg.st.shape[i] for l in local_loads] for i in range(first_reduce,first_upcasted)], ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
-    print("group for reduces: ")
-    print("  l0: ", [any(j!=y for j in x) for x,y in zip([[l.arg.st.shape[i] for l in local_loads] for i in range(first_reduce,first_upcasted)], ast.src[0].arg.st.shape[first_reduce:first_upcasted])])
-    print("  l1: ", [(x,y) for x,y in zip([[l.arg.st.shape[i] for l in local_loads] for i in range(first_reduce,first_upcasted)], ast.src[0].arg.st.shape[first_reduce:first_upcasted])])
-    print("local_loads:")
-    for l in local_loads: print("  ", l.arg.st.shape)
-    print("local_loads sliced:")
-    for i in range(first_reduce,first_upcasted): print("  ",[l.arg.st.shape[i] for l in local_loads])
-    print("  arg.src[0]", ast.src[0].arg.st.shape)
     self.group_for_reduces = group_for_reduces
     global_dims = first_reduce-ki.local_dims
-
-    print("lowerer with full_shape=", full_shape)
-    print("  first_reduce=",first_reduce)
-    print("  first_upcasted=",first_upcasted)
-    print("  group_for_reduces=",group_for_reduces)
 
     if opts.has_local:
       # define indexes for GPU-like execution
@@ -127,14 +114,6 @@ class IndependentLowerer:
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.bigint, (UOp.const(dtypes.bigint, 0), variable_to_uop(full_shape[a])), (1000+a, True))
 
     self.uop_cache: Dict[LazyOp, UOp] = {}
-    print("idxs=")
-    for i in self.idxs: 
-      print("  ", i)
-      for s in i.src: print("    ", s)
-    print("ridxs=")
-    for r in self.ridxs: 
-      print("  ", r)
-      for s in r.src: print("    ", s)
     return self.to_uop(ast)
 
   def to_uop(self, x:LazyOp) -> UOp:
@@ -161,27 +140,15 @@ class IndependentLowerer:
         load_back = len(x.src) == 1 and x.src[0].op is BufferOps.STORE and x.src[0].src[0].op in ReduceOps and all(i-self.first_reduce < self.group_for_reduces for i in x.src[0].src[0].arg) and x.src[0].src[0] is not self.reduceops[-1]
         zero = UOp(op=UOps.CONST, dtype=dtypes.bigint, src=(), arg=0)
         if load_back:
-          print("load back?")
           return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, zero) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
-        print("not! a load back")
-        print("  loading=", x.arg)
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread
       store_back = x.src[0].op in ReduceOps and all(i-self.first_reduce < self.group_for_reduces for i in x.src[0].arg) and x.src[0] is not self.reduceops[-1]
       # do we really need this?? store for the local reduceop is already only to the first thread
-      # if store_back: idx = UOp(op=UOps.CONST, dtype=dtypes.bigint, src=(), arg=0)
       if x.arg.idx != -1 or store_back:
-        print("x.arg.idx != -1 or store_back", x.arg.idx != -1, store_back)
         has_valid = True
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
-      else: print("NOT! x.arg.idx != -1 or store_back")
-      print("creating store with idx: ", idx)
-      print("  storing=",x.arg.st)
-      # for s in idx.src: 
-      #   print("    ", s)
-      #   for ss in s.src: print("      ", ss)
-      print("  and gate: ", valid)
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
@@ -199,6 +166,7 @@ class IndependentLowerer:
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=((upcast_axis[2], wmma_sz[2]),))
       # NOTE: always using ridxs is fine here
       print("rendering reduce with x.arg=",x.arg)
+      print("  -> ", tuple(self.ridxs[i] for i in x.arg))
       return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
 
