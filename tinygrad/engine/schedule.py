@@ -217,9 +217,8 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
   # search descendants of the reduceop that can cleanly group
   descendants: Set[LazyBuffer] = set()
-  for tr in group:
-    _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
-    if tr in descendants: descendants.clear()
+  for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
+  if any(tr in group for tr in descendants): descendants.clear()
   return group.union(descendants)
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
