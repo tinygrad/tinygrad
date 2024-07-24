@@ -106,18 +106,18 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
         nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                               v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
       input_st = tmp + ShapeTracker(tuple(nv))
-    else:
-      if reduce_info:
-        top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
-        _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
-        new_axis = tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
-        if buf.op is buf.srcs[0].base.op:
-          # merge this reduce with its parent
-          reduce_info[top_reduce] = (top_reduce_input_st, axis+new_axis)
-          return
-        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
-        # reshape this reduce per its top axis
-        input_st = input_st.reshape(tuple(1 if i in new_axis else s for i,s in enumerate(top_reduce_input_st.shape)))
+    elif reduce_info:
+      # TODO: is this generic enough?
+      top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
+      _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
+      new_axis = tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
+      if buf.op is buf.srcs[0].base.op:
+        # merge this reduce with its parent
+        reduce_info[top_reduce] = (top_reduce_input_st, axis+new_axis)
+        return
+      reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
+      # reshape this reduce per its top axis
+      input_st = input_st.reshape(tuple(1 if i in new_axis else s for i,s in enumerate(top_reduce_input_st.shape)))
     reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
@@ -212,6 +212,7 @@ def _buildup_st(xt:LazyBuffer, st:ShapeTracker, realizes, sts:Dict[LazyBuffer, S
   if first or xt not in realizes:
     for x in xt.srcs: _buildup_st(x, st, realizes, sts, False)
 
+# TODO cache this
 def _recurse_children(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], children:Dict[LazyBuffer, Dict[LazyBuffer, None]], first=True):
   """recursively find realized descendants"""
   if buf in realizes and not first: return set((buf,))
@@ -304,8 +305,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         return len(sts[tr].views) == 1
     if DEBUG_ARANGE: print(colored(f"fused {r}", "green"))
     return True
+  # TODO: what if only some children can fuse? can save an extra global_load
   for r in const_reduces:
-    # TODO: what if only some children can fuse? can save an extra global_load
     if _fold_arange(r, group:={op for op,reduceop in reduce_for_op.items() if r is reduceop}):
       for x in group: del realizes[x]
 
