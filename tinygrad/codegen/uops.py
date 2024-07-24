@@ -103,11 +103,11 @@ class UOp:
   @functools.cached_property
   def vmax(self) -> UOp: return self._min_max[1]
   @functools.cached_property
-  def _min_max(self):
+  def _min_max(self) -> Tuple[UOp, UOp]:
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.DEFINE_VAR: return self.src[0], self.src[1]
     if self.op is UOps.SPECIAL:
-      return self.const(0), self.const(self.arg[1]) if isinstance(self.arg[1], int) else self.const(dtypes.max(cast(DType, self.dtype)))
+      return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else self.const(dtypes.max(cast(DType, self.dtype)))
     if self.op is UOps.CONST: return self, self
     return self.const(dtypes.min(cast(DType, self.dtype))), self.const(dtypes.max(cast(DType, self.dtype)))
 
