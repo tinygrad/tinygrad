@@ -100,12 +100,15 @@ class UOp:
     return False # generic false if we aren't sure
   @functools.cached_property
   def vmax(self) -> UOp:
+    # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.DEFINE_VAR: return self.src[1]
+    if self.op is UOps.SPECIAL and isinstance(self.arg[1], int): return self.const(self.arg[1])
     if self.op is UOps.CONST: return self
     return self.const(dtypes.max(cast(DType, self.dtype)))
   @functools.cached_property
   def vmin(self) -> UOp:
     if self.op is UOps.DEFINE_VAR: return self.src[0]
+    if self.op is UOps.SPECIAL: return self.const(0)
     if self.op is UOps.CONST: return self
     return self.const(dtypes.min(cast(DType, self.dtype)))
 
