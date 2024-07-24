@@ -176,7 +176,7 @@ class PythonProgram:
           elif arg[5] == "CLANG":
             def elem(x, i, j, _): return x[i+j][0]
             def c_map(_, elem): return (elem%16, elem//16)
-            ul[i] = wmma_helper(1, 1, 16, 16, 256, elem, elem, c_map)
+            ul[i] = wmma_helper(1, 1, arg[4][0], arg[4][1], arg[4][2], elem, elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
