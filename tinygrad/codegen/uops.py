@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Any, Set, cast, List, Union, DefaultDict, Callable, Dict
-import functools, itertools, math
+import functools, itertools
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -102,12 +102,12 @@ class UOp:
   def vmax(self) -> UOp:
     if self.op is UOps.DEFINE_VAR: return self.src[1]
     if self.op is UOps.CONST: return self
-    return UOp.const(dtypes.float, math.inf)
+    return self.const(dtypes.max(cast(DType, self.dtype)))
   @functools.cached_property
   def vmin(self) -> UOp:
     if self.op is UOps.DEFINE_VAR: return self.src[0]
     if self.op is UOps.CONST: return self
-    return UOp.const(dtypes.float, -math.inf)
+    return self.const(dtypes.min(cast(DType, self.dtype)))
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
