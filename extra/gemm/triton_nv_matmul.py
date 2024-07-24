@@ -79,10 +79,15 @@ if __name__ == "__main__":
   src = compiled.asm["ptx"]
   # specify the shared memory here so we don't need to do it dynamically
   src = src.replace(".extern .shared .align 16 .b8 global_smem[];", f".shared .align 16 .b8 global_smem[{compiled.metadata.shared}];")
+  # useless comment spam
+  src = src.replace("\t// begin inline asm\n", "")
+  src = src.replace("\t// end inline asm\n", "")
+  # remove debug sections
+  src = src.split("\t.file")[0]
   assert '.extern .shared' not in src
   prg = Program("matmul_kernel", src, dname=Device.DEFAULT,
                 global_size=[M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1], local_size=[32*compiled.metadata.num_warps, 1, 1],
-                op_estimate=2*M*K*N, mem_estimate=M*K+K*N+M*N)
+                op_estimate=2*M*K*N, mem_estimate=A.nbytes() + B.nbytes() + C.nbytes())
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
   tflops = []
   for i in range(5):
