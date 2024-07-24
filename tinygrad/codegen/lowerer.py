@@ -178,9 +178,9 @@ class IndependentLowerer:
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         if x.arg[5] == "CLANG":
           def con(i, sz):
-            return UOp(UOps.CONTRACT, dtype.vec(sz), tuple(UOp(UOps.GEP, dtype, (ret,), j + i * sz) for j in range(sz)), arg=(upcast_axis,))
-          return UOp(UOps.EXPAND, dtype, tuple(con(i, con_sz) for i in range(con_sz)), arg=((upcast_axis[2], wmma_sz[2] // con_sz),))
-        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=((upcast_axis[2], wmma_sz[2]),))
+            return UOp(UOps.CONTRACT, dtype.vec(sz), tuple(UOp(UOps.GEP, dtype, (ret,), j + i * sz) for j in range(sz)), arg=(upcast_axis[2],))
+          return UOp(UOps.EXPAND, dtype, tuple(con(i, con_sz) for i in range(con_sz)), arg=upcast_axis[2],)
+        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axis[2])
       # NOTE: always using ridxs is fine here
       return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
