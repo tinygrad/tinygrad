@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export TINY_TYPE='tinygreen'
+export TINY_TYPE='tinyred'
 export PYTHONPATH='.'
 export MODEL='retinanet'
 export DEFAULT_FLOAT='HALF' GPUS=6 BS=96 BS_EVAL=36
@@ -13,6 +13,6 @@ export WANDB=1
 # Download dataset if missing
 python3 extra/datasets/openimages.py
 
-CUDA=1 TRAIN_ONLY=1 python3 examples/mlperf/model_train.py
+TRAIN_ONLY=1 python3 examples/mlperf/model_train.py
 
-CUDA=1 EVAL_ONLY=1 python3 examples/mlperf/model_train.py
+EVAL_ONLY=1 python3 examples/mlperf/model_train.py
