@@ -170,7 +170,9 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
-        elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
+        elif uop is UOps.WMMA:
+          if self.device == "CLANG": kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]});")
+          else: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
         elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
@@ -184,7 +186,8 @@ class CStyleLanguage(Renderer):
 
 def _make_clang_dtype(dtype):
   vec, elems, header = dtype.name, ', '.join(_nms[:dtype.count]), ', '.join([f"{dtype.scalar().name} {x}" for x in _nms[:dtype.count]])
-  return f"""typedef struct {{ union {{ struct {{ {dtype.scalar().name} {elems}; }}; {dtype.scalar().name} data[{dtype.count}]; }}; }} {vec}; {vec} make_{vec}({header}) {{ {vec} r={{{{{{{elems}}}}}}}; return r; }}"""  #noqa: E501
+  if dtype.count > 16: return f"""typedef struct {{ {dtype.scalar().name} data[{dtype.count}]; }} {vec};"""
+  return f"""typedef struct {{ union {{ struct {{ {dtype.scalar().name} {elems}; }}; {dtype.scalar().name} data[{dtype.count}]; }}; }} {vec};\n{vec} make_{vec}({header}) {{ {vec} r={{{{{{{elems}}}}}}}; return r; }}"""  #noqa: E501
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
@@ -193,7 +196,7 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
   if AMX:
     float4 = "make_float4"
-    tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [64])]
+    tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [16])]
     tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], thread_local_sizes=[[sz],[sz],[sz,sz]], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types] # noqa:E501
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
