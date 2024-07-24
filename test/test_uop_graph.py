@@ -316,7 +316,6 @@ class TestExpander(unittest.TestCase):
     self.assertListEqual([x.arg for x in sink.src[0].src], [0,4])
     self.assertListEqual([x.arg for x in sink.src[6].src], [10,14])
 
-  @unittest.skip("TODO: add support for this")
   def test_contract_multi_axis(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(16)), ((1,2),(2,2),(3,2),(4,2)))
     sink = expander_rewrite(UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), ((3,2),(2,2))))
@@ -328,7 +327,7 @@ class TestExpander(unittest.TestCase):
 
   def test_contract_mid(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(8)), ((1,2),(2,2),(3,2)))
-    con = UOp(UOps.CONTRACT, dtypes.int.vec(2), (e1,), (2,))
+    con = UOp(UOps.CONTRACT, dtypes.int.vec(2), (e1,), ((2,2),))
     sink = expander_rewrite(con)
     assert sink.op is UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((1,2),(3,2))
     assert sink.src[0].op is UOps.VECTORIZE and len(sink.src[0].src) == 2

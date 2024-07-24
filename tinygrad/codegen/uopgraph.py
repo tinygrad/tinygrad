@@ -382,24 +382,17 @@ def do_contract(con:UOp):
   ex = con.src[0]
   assert con.dtype is not None
   # CONTRACT without EXPAND repeats the element VECTORIZED
-  if ex.op is not UOps.EXPAND: return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
-  # simple CONTRACT and EXPAND cancel out
-  if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg[0][0] in con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
-  # complex CONTRACT may only remove one axis from EXPAND
-  assert len(con.arg) == 1, "contract arg one is all that's supported"
-  assert con.arg[0][1] == con.dtype.count, "dtype size mismatch"
-  try:
-    split_index = ex.arg.index(con.arg[0])
-  except ValueError:
-    # CONTRACT without EXPAND (still) repeats the element VECTORIZED
+  if ex.op is not UOps.EXPAND or not all(x in ex.arg for x in con.arg):
+    assert ex.op is not UOps.EXPAND or not any(x in ex.arg for x in con.arg), "partial contract not supported"
     return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
-  assert con.dtype.count == ex.arg[split_index][1], "contract arg must match"
-  number_after = prod([x[1] for x in ex.arg[split_index+1:]])
-  to_join = [ex.src[i:i+number_after] for i in range(0, len(ex.src), number_after)]
+  # simple CONTRACT and EXPAND cancel out
+  if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg[0] in con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
+  # complex CONTRACT may remove several axes from EXPAND
   srcs = []
-  for i in range(0, len(to_join), con.dtype.count):
-    srcs += [UOp(UOps.VECTORIZE, con.dtype, tuple(src)) for src in zip(*to_join[i:i+con.dtype.count])]
-  return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x != con.arg[0]))
+  for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
+    lsrcs = [ex.src[_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})] for lrpk in _choices_from_args(con.arg)]
+    srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(lsrcs)))
+  return UOp(UOps.EXPAND, con.dtype, tuple(srcs), new_ex_args)
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
