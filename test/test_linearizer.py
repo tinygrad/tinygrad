@@ -1694,6 +1694,7 @@ class TestKernelOpts(unittest.TestCase):
       assert result[0] == "COMPARE_ERROR"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_tensor_core_opts(self):
     N = 128
     Tensor.manual_seed(1552)
