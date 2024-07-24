@@ -386,7 +386,7 @@ def do_contract(con:UOp):
     assert ex.op is not UOps.EXPAND or not any(x in ex.arg for x in con.arg), "partial contract not supported"
     return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # simple CONTRACT and EXPAND cancel out
-  if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg[0] in con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
+  if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg == con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
   # complex CONTRACT may remove several axes from EXPAND
   srcs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
