@@ -386,7 +386,7 @@ class Kernel:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
-          if (self.opts.device == "CLANG" and AMX): return True #AMX has one set of accumulators
+          if (self.opts.device == "CLANG" and AMX): return True #works, but ultra slow with hand-coded TC opts
           # hand-coded TC opts
           def late_upcast_tc(tc_dim: int):
             if tc_opts.axes_exist[tc_dim]:
