@@ -50,8 +50,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:Dict[LazyBuffer, int], outputs:Tupl
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if isinstance(arg, Variable):
-      var_val, arg = arg.unbind()
-      var_vals[var_val] = arg
+      arg, var_val = arg.unbind()
+      var_vals[arg] = var_val
     else: assert isinstance(arg, get_args(ConstType)), f"cannot create ConstBuffer with value {arg}"
     return LazyOp(BufferOps.CONST, (), ConstBuffer(arg, buf.dtype, unbound_st))
 
