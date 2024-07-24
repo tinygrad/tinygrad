@@ -344,6 +344,7 @@ class Kernel:
         elif self.opts.device == "CLANG":
           for (tc_dim, tc_amt) in tc.threads:
             self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+          # self.apply_opt(Opt(OptOps.UNROLL, 0, 4), append_opt=False)
         elif self.opts.device in {"CUDA", "NV"}:
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
@@ -381,10 +382,11 @@ class Kernel:
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
 
-      if (tc_opts:=self.tensor_core_opts) is not None and not (self.opts.device == "CLANG" and AMX): #AMX has one set of accumulators
+      if (tc_opts:=self.tensor_core_opts) is not None:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
+          if (self.opts.device == "CLANG" and AMX): return True #AMX has one set of accumulators
           # hand-coded TC opts
           def late_upcast_tc(tc_dim: int):
             if tc_opts.axes_exist[tc_dim]:
@@ -455,7 +457,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not(self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.threads)), "can't upcast TC locals")
-      check(amt <= 8 or ((self.opts.device == "CLANG" and bool(AMX)) and amt <= 16), "don't upcast more than 8 or 16 for AMX")
+      check(amt <= 8 or (self.opts.device == "CLANG" and bool(AMX) and amt <= 16), "don't upcast more than 8 or 16 for AMX")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCASTMID:                  # white

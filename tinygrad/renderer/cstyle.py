@@ -94,7 +94,7 @@ class CStyleLanguage(Renderer):
   def render(self, name:str, uops:UOpGraph) -> str:
     kernel = []
     bufs: List[Tuple[str, Tuple[DType, bool]]] = []
-    depth = 1
+    depth, amx_set_ptr = 1, 0
     def kk(s): kernel.append("  "*depth+s)
 
     c: DefaultDict[str, int] = defaultdict(int)
@@ -120,7 +120,9 @@ class CStyleLanguage(Renderer):
       elif uop in {UOps.ENDRANGE, UOps.ENDIF}:
         depth -= 1
         kk("}")
-        if uop is UOps.ENDRANGE and u.src[0].arg[1] and self.device == "CLANG" and AMX: kk("AMX_SET(1);")
+        if uop is UOps.ENDRANGE and u.src[0].arg[1] and self.device == "CLANG" and AMX and amx_set_ptr:
+          kk("AMX_SET(1);")
+          amx_set_ptr = 0
       elif uop is UOps.STORE:
         assert src[0].dtype is not None and src[2].dtype is not None
         rendered_store = self.render_store(r[src[0]], src[0].dtype, r[src[2]], src[2].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
@@ -128,7 +130,10 @@ class CStyleLanguage(Renderer):
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE:
-          if args[1] and self.device == "CLANG" and AMX: kk("AMX_SET(0);")
+          if args[1] and self.device == "CLANG" and AMX:
+            if amx_set_ptr: kernel.pop(amx_set_ptr)
+            amx_set_ptr = len(kernel)
+            kk("AMX_SET(0);")
           kk(f"for (int {(expr := ssa('ridx',u))} = {r[src[0]]}; {expr} < {r[src[1]]}; {expr}++) {{")
           depth += 1
         elif uop is UOps.ALU:
@@ -202,13 +207,15 @@ class ClangRenderer(CStyleLanguage):
     tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], thread_local_sizes=[[sz],[sz],[sz,sz]], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types] # noqa:E501
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix = [_make_clang_dtype(dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
-    if AMX: prefix += ['#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")', '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")'] # noqa: E501
+    prefix, macros, i = [_make_clang_dtype(dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)], [], 0
+    if not any("WMMA" in l for l in kernel):
+      while i < len(kernel):
+        if "AMX" not in kernel[i]: i += 1
+        else: kernel.pop(i) # clean AMX flags form kernel
     for name, (N, M, K), dtype_in, _, _, _, _, _ in set([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      prefix += \
-      [f"void __ST_{dtype_in.vec(K).name}({dtype_in.vec(K).name}* acc, int zreg){{ AMX(5, acc, 0ull<<62 | (zreg*1ull)<<56); }}",
-       f"void __{name}({dtype_in.vec(N).name} data1, {dtype_in.vec(M).name} data2){{ AMX(0, (int *) (&data2), 0ull<<62); AMX(1, (int *) (&data1), 0ull<<62); AMX(12, 0, 0ull); }}"]  # noqa: E501
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+      macros = ['#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")', '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")'] # noqa: E501
+      prefix += [f"void __ST_{dtype_in.vec(K).name}({dtype_in.vec(K).name}* acc, int zreg){{ AMX(5, acc, 0ull<<62 | (zreg*1ull)<<56); }}", f"void __{name}({dtype_in.vec(N).name} data1, {dtype_in.vec(M).name} data2){{ AMX(0, (int *) (&data2), 0ull<<62); AMX(1, (int *) (&data1), 0ull<<62); AMX(12, 0, 0ull); }}"]  # noqa: E501
+    return super().render_kernel(function_name, kernel, bufs, uops, macros + prefix)
 
   # language options
   buffer_suffix = " restrict"
