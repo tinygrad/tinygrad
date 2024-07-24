@@ -172,6 +172,9 @@ class TestSymbolic(unittest.TestCase):
   def test_add_min_max(self):
     self.helper_test_variable(Variable("a", 0, 8) * 2 + 12, 12, 16+12, "((a*2)+12)")
 
+  def test_div_remove(self):
+    self.helper_test_variable(Variable("a", 0, 7) // 20, 0, 0, "0")
+
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
 
@@ -179,6 +182,10 @@ class TestSymbolic(unittest.TestCase):
   def test_div_neg_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // -2, -4, 0, "((((a*-1)+8)//2)+-4)")
     self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "((((a*-1)+6)//2)+-3)")
+
+  @unittest.expectedFailure
+  def test_sum_div_remove(self):
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 20, 0, 0, "0")
 
   def test_sum_div_min_max(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
@@ -309,7 +316,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 10)*4)//8, 0, 5, "(a//2)")
 
   @unittest.expectedFailure
-  def test_div_remove(self):
+  def test_sum_div_partial_remove(self):
     self.helper_test_variable(Node.sum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
 
   @unittest.expectedFailure
