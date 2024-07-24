@@ -49,13 +49,9 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   if buf.op is MetaOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
-    if isinstance(buf.arg, Variable):
-      val, var_val = buf.arg.unbind()
-      var_vals.__setitem__(val, var_val)
-    else:
-      assert isinstance(buf.arg, get_args(ConstType)), f"cannot create ConstBuffer with value {buf.arg}"
-      val = buf.arg
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(val, buf.dtype, unbound_st))
+    if isinstance(arg, Variable): var_vals.update([arg:=arg.unbind()])
+    else: assert isinstance(arg, get_args(ConstType)), f"cannot create ConstBuffer with value {arg}"
+    return LazyOp(BufferOps.CONST, (), ConstBuffer(arg[0] if isinstance(arg, tuple) else arg, buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized is not None or (buf in realizes and buf not in outputs):
@@ -119,7 +115,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
           # merge this reduce with its parent
           reduce_info[top_reduce] = (top_reduce_input_st, axis+new_axis)
           return
-        else: reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
+        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
         # reshape this reduce per its top axis
         input_st = input_st.reshape(tuple(1 if i in new_axis else s for i,s in enumerate(top_reduce_input_st.shape)))
     reduce_info[buf] = (input_st, axis)
@@ -196,7 +192,7 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
   """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
   if (tr, st) in cache: return
   cache.add((tr, st))
-  if tr in realizes:
+  if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
     if not st.contiguous or st.size != r.st.size or tr in reduce_for_op: group.add(r)
@@ -220,6 +216,23 @@ def _recurse_children(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], children:
   """recursively find realized descendants"""
   if buf in realizes and not first: return set((buf,))
   return set.union(set(), *iter(_recurse_children(x, realizes, children, False) for x in children[buf]))
+
+def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],\
+    realizes:Dict[LazyBuffer, None], group:Set[LazyBuffer]) -> Set[LazyBuffer]:
+  # create a multi output kernel if the LazyBuffers can cleanly group
+  cache: Set[LazyBuffer] = set()
+  rc_parents = deque(group)
+  while rc_parents:
+    if (p:=rc_parents.pop()) in cache: continue
+    cache.add(p)
+    # max one reduceop per kernel
+    if p.op in ReduceOps: return set()
+    rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+  # search descendants of the reduceop that can cleanly group
+  descendants: Set[LazyBuffer] = set()
+  for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
+  if any(tr in group for tr in descendants): descendants.clear()
+  return group.union(descendants)
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
@@ -250,29 +263,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     if not forced_realize and len(group) > 1:
-      # create a multi output kernel if the LazyBuffers can cleanly group
-      cache: Set[LazyBuffer] = set()
-      rc_parents, rc_children = deque(group), deque(group)
-      while rc_parents:
-        if (p:=rc_parents.pop()) in cache: continue
-        cache.add(p)
-        # max one reduceop per kernel
-        if p.op in ReduceOps:
-          forced_realize = True
-          break
-        rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
-      # search descendants of the reduceop that can cleanly group
-      cache.clear()
-      realized_descendants: Set[LazyBuffer] = set()
-      while rc_children and not forced_realize:
-        if (c:=rc_children.pop()) in cache: continue
-        cache.add(c)
-        if c.op in ReduceOps or not c.st.contiguous or c.st.size != r.st.size or c in reduce_for_op:
-          realized_descendants.clear()
-          break
-        if c in realizes and c not in group: realized_descendants.add(c)
-        rc_children.extend(x for x in children[c] if x.realized is None and x.device == r.device)
-      group.update(realized_descendants)
+      group = _get_isolated_children(r, reduce_for_op, children, realizes, group)
     # can only fuse assign if no other assign_target is used in the kernel
     if not forced_realize and any(x.op is MetaOps.ASSIGN for x in group):
       parents = deque((r, *group))
@@ -281,7 +272,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
-    if forced_realize:
+    if forced_realize or not group:
       tr = r
       if can_chase:
         # can chase this down to contiguous children

@@ -222,7 +222,7 @@ class TestUOpGraph(TestUOps):
   def test_fold_gated_load_local(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
     smem = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.int), (), ("temp", 1))
-    lidx = UOp(UOps.SPECIAL, dtypes.int, (), (0, "lidx1", 16))
+    lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(UOps.STORE, None, (smem, lidx, UOp.load(glbl0, lidx, dtype=dtypes.int)))
     barrier = UOp(UOps.BARRIER, None, (st, ))
     ld0 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+1, UOp.const(dtypes.bool, False), UOp.const(dtypes.int, 2), barrier))
@@ -285,14 +285,14 @@ class TestExpander(unittest.TestCase):
 
   def test_contract_simple(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
-    con = UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), (1,))
+    con = UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), ((1,4),))
     sink = expander_rewrite(con)
     assert sink.op is UOps.VECTORIZE and len(sink.src) == 4
     self.assertListEqual([x.arg for x in sink.src], [0,1,2,3])
 
   def test_contract_axis_1(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(16)), ((1,4),(2,4)))
-    con = UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), (1,))
+    con = UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), ((1,4),))
     sink = expander_rewrite(con)
     assert sink.op is UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((2,4),)
     assert sink.src[0].op is UOps.VECTORIZE and len(sink.src[0].src) == 4
@@ -301,16 +301,33 @@ class TestExpander(unittest.TestCase):
 
   def test_contract_axis_2(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(16)), ((1,4),(2,4)))
-    con = UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), (2,))
+    con = UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), ((2,4),))
     sink = expander_rewrite(con)
     assert sink.op is UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((1,4),)
     assert sink.src[0].op is UOps.VECTORIZE and len(sink.src[0].src) == 4
     self.assertListEqual([x.arg for x in sink.src[0].src], [0,1,2,3])
     self.assertListEqual([x.arg for x in sink.src[3].src], [12,13,14,15])
 
+  def test_contract_axis_2_big(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(16)), ((1,2),(2,2),(3,2),(4,2)))
+    con = UOp(UOps.CONTRACT, dtypes.int.vec(2), (e1,), ((2,2),))
+    sink = expander_rewrite(con)
+    assert sink.op is UOps.EXPAND and sink.arg == ((1, 2), (3, 2), (4, 2))
+    self.assertListEqual([x.arg for x in sink.src[0].src], [0,4])
+    self.assertListEqual([x.arg for x in sink.src[6].src], [10,14])
+
+  def test_contract_multi_axis(self):
+    e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(16)), ((1,2),(2,2),(3,2),(4,2)))
+    sink = expander_rewrite(UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), ((3,2),(2,2))))
+    assert sink.op is UOps.EXPAND and sink.arg == ((1, 2), (4, 2))
+    self.assertListEqual([x.arg for x in sink.src[0].src], [0,4,2,6])
+    sink = expander_rewrite(UOp(UOps.CONTRACT, dtypes.int.vec(4), (e1,), ((2,2),(3,2))))
+    assert sink.op is UOps.EXPAND and sink.arg == ((1, 2), (4, 2))
+    self.assertListEqual([x.arg for x in sink.src[0].src], [0,2,4,6])
+
   def test_contract_mid(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(8)), ((1,2),(2,2),(3,2)))
-    con = UOp(UOps.CONTRACT, dtypes.int.vec(2), (e1,), (2,))
+    con = UOp(UOps.CONTRACT, dtypes.int.vec(2), (e1,), ((2,2),))
     sink = expander_rewrite(con)
     assert sink.op is UOps.EXPAND and len(sink.src) == 4 and sink.arg == ((1,2),(3,2))
     assert sink.src[0].op is UOps.VECTORIZE and len(sink.src[0].src) == 2

@@ -73,7 +73,8 @@ class UOp:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def _const(dtype:Optional[DType], b:ConstType|Variable):
-    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
+    # TODO: fix dtype of b.max after Variable is just an UOp
+    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (UOp.const(dtypes.int, b.min), UOp.const(dtypes.int, cast(int,b.max))), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
@@ -97,6 +98,22 @@ class UOp:
       if self.arg is BinaryOps.ADD: return all(x.divides(v) for x in self.src)
       if self.arg is BinaryOps.MUL: return any(x.divides(v) for x in self.src)
     return False # generic false if we aren't sure
+  @functools.cached_property
+  def vmin(self) -> UOp: return self._min_max[0]
+  @functools.cached_property
+  def vmax(self) -> UOp: return self._min_max[1]
+  @functools.cached_property
+  def _min_max(self) -> Tuple[UOp, UOp]:
+    # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
+    if self.op in (UOps.DEFINE_VAR, UOps.RANGE):
+      return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else self.const(dtypes.max(cast(DType, self.dtype)))
+    if self.op is UOps.SPECIAL:
+      return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else self.const(dtypes.max(cast(DType, self.dtype)))
+    if self.op is UOps.CONST: return self, self
+    if self.op is UOps.ALU and self.arg is UnaryOps.NEG and self.dtype != dtypes.bool:
+      nmin, nmax = self.src[0]._min_max
+      return self.const(-nmax.arg), self.const(-nmin.arg)
+    return self.const(dtypes.min(cast(DType, self.dtype))), self.const(dtypes.max(cast(DType, self.dtype)))
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
@@ -196,7 +213,7 @@ def type_verify(uops):
         assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
 
 def uop_alu_resolve(u:UOp) -> sint:
-  if u.op is UOps.SPECIAL: return u.arg[2]-1
+  if u.op is UOps.SPECIAL: return u.arg[1]-1
   if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
   if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
