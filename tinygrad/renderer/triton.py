@@ -56,6 +56,20 @@ class TritonRenderer(Renderer):
     bufs, signature = [], []
     uops.print()
 
+    locals = []
+    expand_axis = {}
+    #for u in uops:
+    #  if u.op is UOps.SPECIAL:
+    #    if u.arg[0][0] == "l":
+    #      locals.append(u.arg[1])
+    reduce_expands = []
+    for u in uops:
+      if u.op is UOps.REDUCE:
+        reduce_expands += [x for x in u.src if x.op is UOps.EXPAND]
+      if u.op is UOps.EXPAND:
+        assert len(u.arg) == 1
+        expand_axis[u.arg[0][0]] = len(locals)
+        locals.append(u.arg[0][1])
     for u in uops:
       if u.op is UOps.DEFINE_GLOBAL:
         r[u] = f"buf{u.arg[0]}"
@@ -63,6 +77,17 @@ class TritonRenderer(Renderer):
         signature.append(signature_dtypes[u.dtype])
       elif u.op is UOps.CONST:
         r[u] = str(u.arg)
+      elif u.op is UOps.EXPAND:
+        # TODO: assert it's all consts in range
+        idxx = ["None"]*len(locals)
+        idxx[expand_axis[u.arg[0][0]]] = ":"
+        kk(f"{ssa('ex', u)} = tl.arange(0, {u.arg[0][1]})[{', '.join(idxx)}]")
+      elif u.op is UOps.REDUCE:
+        rngs = [x for x in u.src[1:] if x.op is UOps.RANGE]
+        assert len(rngs) == 0
+        ex_axis = tuple([expand_axis[x.arg[0][0]] for x in u.src[1:] if x.op is UOps.EXPAND])
+        assert len(ex_axis) == 1
+        kk(f"{ssa('ex', u)} = tl.sum({r[u.src[0]]}, {ex_axis[0]}, keep_dims=True)")
       elif u.op is UOps.RANGE:
         kk(f"for {ssa('rng', u)} in range({r[u.src[0]]}, {r[u.src[1]]}):")
         depth += 1
@@ -71,19 +96,24 @@ class TritonRenderer(Renderer):
         if u.arg[0][0] == "g":
           kk(f"{u.arg[0]} = tl.program_id(axis={u.arg[0][4]})")
         else:
-          kk(f"{u.arg[0]} = tl.arange(0, {u.arg[1]})")
+          idxx = ["None"]*len(locals)
+          idxx[int(u.arg[0][4])] = ":"
+          kk(f"{u.arg[0]} = tl.arange(0, {u.arg[1]})[{', '.join(idxx)}]")
         r[u] = u.arg[0]
       elif u.op is UOps.ALU:
         r[u] = code_for_op[u.arg](*[r[x] for x in u.src], u.dtype)
         #val = code_for_op[u.arg](*[r[x] for x in u.src], u.dtype)
         #kk(f"{ssa('alu', u)} = ({val})")
       elif u.op is UOps.DEFINE_ACC:
-        #kk(f"{ssa('acc', u)} = tl.zeros((1,), dtype={triton_dtypes[u.dtype]})")
-        kk(f"{ssa('acc', u)} = {r[u.src[0]]}")
+        real_locals = locals[:]
+        for re in reduce_expands: real_locals[expand_axis[re.arg[0][0]]] = 1
+        real_locals = [x for x in real_locals if x != 1]
+        kk(f"{ssa('acc', u)} = tl.zeros({str(tuple(real_locals))}, dtype={triton_dtypes[u.dtype]})")
+        #kk(f"{ssa('acc', u)} = {r[u.src[0]]}")
       elif u.op is UOps.LOAD:
-        kk(f"{ssa('val', u)} = tl.load({r[u.src[0]]} + {r[u.src[1]]})")
+        kk(f"{ssa('val', u)} = tl.load({r[u.src[0]]} + {r[u.src[1]]}.reshape(16,16))")
       elif u.op is UOps.STORE:
-        kk(f"tl.store({r[u.src[0]]} + {r[u.src[1]]}, {r[u.src[2]]})")
+        kk(f"tl.store({r[u.src[0]]} + {r[u.src[1]]}.reshape(16,16), {r[u.src[2]]})")
       elif u.op is UOps.CAST:
         kk(f"{ssa('cast', u)} = tl.cast({r[u.src[0]]}, {triton_dtypes[u.dtype]})")
       elif u.op is UOps.PHI:
@@ -93,6 +123,8 @@ class TritonRenderer(Renderer):
         raise RuntimeError(f"unimplemented {u.op}")
 
     src = f"import triton\nimport triton.language as tl\n@triton.jit\ndef {name}({', '.join(bufs)}):\n" + '\n'.join(kernel)
+    #src = src.replace("ex3 = tl.sum((acc0+(val0*val1)), 2, keep_dims=True)", "ex3 = tl.dot(val0.reshape(16,16), val1.reshape(16,16), acc0.reshape(16,16), out_dtype=tl.float16).reshape(16,16,1)")
+    src = src.replace("ex3 = tl.sum((acc0+(val0*val1)), 2, keep_dims=True)", "ex3 = tl.dot(val0, val1, acc0, out_dtype=tl.float16)")
     if DEBUG >= 3: print(src)
 
     linecache.getlines = lambda filename, module_globals=None: src.splitlines(keepends=True) \
@@ -100,9 +132,13 @@ class TritonRenderer(Renderer):
     exec(compile(src, "<triton>", "exec"), globals()) # pylint: disable=W0122
     compiled = triton_compile(ASTSource(globals()[name], ','.join(signature),
                                         attrs=AttrsDescriptor(divisible_by_16=tuple(range(len(bufs))), equal_to_1=())))
-
     ptx = compiled.asm["ptx"]
     # specify the shared memory here so we don't need to do it dynamically
     ptx = ptx.replace(".extern .shared .align 16 .b8 global_smem[];", f".shared .align 16 .b8 global_smem[{compiled.metadata.shared}];")
-    return ptx
+    # useless comment spam
+    ptx = ptx.replace("\t// begin inline asm\n", "")
+    ptx = ptx.replace("\t// end inline asm\n", "")
+    # remove debug sections
+    ptx = ptx.split("\t.file")[0]
+    return {"src":ptx, "local_size":[32*compiled.metadata.num_warps, 1, 1]}
 

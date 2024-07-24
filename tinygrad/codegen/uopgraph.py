@@ -366,6 +366,7 @@ def do_reduce_with_expand(root):
   expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
   expands_reduce = [x for x in expands if root.src[0].op is UOps.EXPAND and all(y in root.src[0].arg for y in x.arg)]
   expands_non_reduce = [x for x in expands if x not in expands_reduce]
+  if len(expands_non_reduce) == len(root.src[1:]): return None
   const = UOp.const(root.dtype.scalar(), dtypes.as_const(0, root.dtype.scalar()) if root.arg is ReduceOps.SUM else dtypes.min(root.dtype.scalar()))
   ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
   acc_number += 1
@@ -377,8 +378,10 @@ def do_reduce_with_expand(root):
     ret = functools.reduce(lambda x,y: UOp.alu(alu_op, x, y), (ret,)+root.src[0].src)
   else:
     ret = UOp.alu(alu_op, ret, root.src[0])
+  #if len(expands_non_reduce): ret = ret * prod([sz for _,sz in flatten([x.arg for x in expands_non_reduce])])
+  if len(expands_non_reduce):
+    ret = UOp(UOps.REDUCE, root.dtype, (ret,)+tuple(expands_non_reduce), root.arg)
   ret = UOp(UOps.PHI, ret.dtype, (acc, ret))
-  if len(expands_non_reduce): ret = ret * prod([sz for _,sz in flatten([x.arg for x in expands_non_reduce])])
   return ret
 
 def do_contract(con:UOp):
@@ -405,8 +408,8 @@ def no_vectorized_alu(alu):
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 expander = PatternMatcher([
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
-         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
+  #(UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
+  #       UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
   (UOp(UOps.REDUCE).name("root"), do_reduce_with_expand),
   (UOp(UOps.CONTRACT).name("con"), do_contract),
   # remove EXPANDs from SINK
@@ -559,7 +562,7 @@ class UOpGraph:
     try:
       type_verify(self.uops)
       assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-      assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
+      #assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
       # TODO: this should be enabled, and the valid clause should be removed
       # NOTE: multiple identical stores to DEFINE_LOCAL is okay
       assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \

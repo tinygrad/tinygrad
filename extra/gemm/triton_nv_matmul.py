@@ -42,7 +42,8 @@ def matmul_kernel(c_ptr, a_ptr, b_ptr, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N:
 
 # CUDA=1 PTX=1 python3 extra/gemm/triton_nv_matmul.py
 if __name__ == "__main__":
-  BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K = 64, 128, 64
+  #BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K = 64, 128, 64
+  BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K = 16, 16, 16
   M, N, K = 4096, 4096, 4096
 
   # **** torch test ****

@@ -5,10 +5,13 @@ from tinygrad.engine.realize import CompiledRunner, ExecItem
 N = 4096
 if __name__ == "__main__":
   A, B = Tensor.empty(N, N, dtype=dtypes.float16), Tensor.empty(N, N, dtype=dtypes.float16)
-  C = A.matmul(B, acc_dtype=dtypes.float32)
+  C = A.matmul(B, acc_dtype=dtypes.float16)
   si = C.schedule()[-1]
   ast = si.ast
   k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
+  opts = [Opt(op=OptOps.UPCAST, axis=0, amt=16),
+          Opt(op=OptOps.UPCAST, axis=1, amt=16),
+          Opt(op=OptOps.UNROLL, axis=0, amt=16)]
   """
   opts = [Opt(op=OptOps.TC, axis=0, amt=0),
           Opt(op=OptOps.UPCAST, axis=1, amt=16),
@@ -17,8 +20,8 @@ if __name__ == "__main__":
           Opt(op=OptOps.UNROLL, axis=0, amt=4),
           Opt(op=OptOps.LOCAL, axis=1, amt=2),
   ]
-  for opt in opts: k.apply_opt(opt)
   """
+  for opt in opts: k.apply_opt(opt)
   prg = k.to_program()
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
   tflops = []

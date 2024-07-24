@@ -753,6 +753,7 @@ class Kernel:
   def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
+    if isinstance(src, dict): src, self.local_size = src['src'], src['local_size']
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
