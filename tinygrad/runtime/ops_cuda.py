@@ -8,6 +8,7 @@ from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, in
 from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.assembly import PTXRenderer
+from tinygrad.renderer.triton import TritonRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 def pretty_ptx(s):
@@ -20,7 +21,7 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
 
-PTX = getenv("PTX")
+PTX, TRITON = getenv("PTX"), getenv("TRITON")
 
 def check(status):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()}")  # noqa: E501
@@ -159,8 +160,11 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
-                     PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch), functools.partial(CUDAProgram, self), graph=CUDAGraph)
+    if TRITON: renderer, compiler = TritonRenderer(), PTXCompiler(self.arch)
+    elif PTX: renderer, compiler = PTXRenderer(self.arch), PTXCompiler(self.arch)
+    else: renderer, compiler = CUDARenderer(self.arch), CUDACompiler(self.arch)
+
+    super().__init__(device, CUDAAllocator(self), renderer, compiler, functools.partial(CUDAProgram, self), graph=CUDAGraph)
 
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))
