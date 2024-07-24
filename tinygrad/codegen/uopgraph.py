@@ -264,6 +264,8 @@ constant_folder = PatternMatcher([
   (UOp.var("x") % UOp.const(None, 1), lambda x: x.const(0)),
   # (x*c0)+(x*c1) -> x*(c0+c1)
   (UOp.var("x") * UOp.cvar("c0") + UOp.var("x") * UOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
+  # (x+c0)*c1 -> x*c1+(c0*c1)
+  ((UOp.var("x") + UOp.cvar("c0")) * UOp.cvar("c1"), lambda x,c0,c1: x*c1+exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg])),
   # (x*c0)+(y*c0) -> (x+y)*c0
   #((UOp.var("x") * UOp.cvar("c0")) + (UOp.var("y") * UOp.cvar("c0")), lambda x,y,c0: c0*(x+y)),
   # mul div
