@@ -99,21 +99,19 @@ class UOp:
       if self.arg is BinaryOps.MUL: return any(x.divides(v) for x in self.src)
     return False # generic false if we aren't sure
   @functools.cached_property
-  def vmin(self) -> UOp: return self._min_max[0]
+  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None else self.const(dtypes.min(cast(DType, self.dtype)))
   @functools.cached_property
-  def vmax(self) -> UOp: return self._min_max[1]
+  def vmax(self) -> UOp: return x if (x:=self._min_max[1]) is not None else self.const(dtypes.max(cast(DType, self.dtype)))
   @functools.cached_property
-  def _min_max(self) -> Tuple[UOp, UOp]:
+  def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
+    # NOTE: returned UOp is assumed to be CONST
+    if self.op in (UOps.DEFINE_VAR, UOps.RANGE): return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else None
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
-    if self.op in (UOps.DEFINE_VAR, UOps.RANGE):
-      return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else self.const(dtypes.max(cast(DType, self.dtype)))
-    if self.op is UOps.SPECIAL:
-      return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else self.const(dtypes.max(cast(DType, self.dtype)))
+    if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
     if self.op is UOps.CONST: return self, self
-    if self.op is UOps.ALU and self.arg is UnaryOps.NEG and self.dtype != dtypes.bool:
-      nmin, nmax = self.src[0]._min_max
-      return self.const(-nmax.arg), self.const(-nmin.arg)
-    return self.const(dtypes.min(cast(DType, self.dtype))), self.const(dtypes.max(cast(DType, self.dtype)))
+    if self.op is UOps.ALU:
+      if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool: return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
+    return None, None
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
