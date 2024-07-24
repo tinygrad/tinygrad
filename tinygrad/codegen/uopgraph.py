@@ -23,7 +23,7 @@ def image_contract_load(buf, idx, idy, id4, ls_allow_any_len):
                           ls_allow_any_len.const(float('nan')))
 
 def image_contract_store(buf, ex, idx, idy, ls_allow_any_len, var):
-  new_var = UOp(UOps.CONTRACT, var.dtype.vec(4), (var,), (ex.arg[0][0],))
+  new_var = UOp(UOps.CONTRACT, var.dtype.vec(4), (var,), ((ex.arg[0][0],4),))
   return UOp(UOps.STORE, None, (buf, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx, idy)), new_var) + ls_allow_any_len.src[3:])
 
 # ***** float4 handling *****
@@ -47,7 +47,7 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
   if idx3 is not None: idx = idx + idx3
   if not idx.divides(len(ex.src)): return None
 
-  new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), (ex.arg[0][0],))
+  new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), ((ex.arg[0][0],len(ex.src)),))
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
 
 float4_folding = PatternMatcher([
@@ -387,8 +387,9 @@ def do_contract(con:UOp):
   if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg[0][0] in con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
   # complex CONTRACT may only remove one axis from EXPAND
   assert len(con.arg) == 1, "contract arg one is all that's supported"
+  assert con.arg[0][1] == con.dtype.count, "dtype size mismatch"
   try:
-    split_index = [x[0] for x in ex.arg].index(con.arg[0])
+    split_index = ex.arg.index(con.arg[0])
   except ValueError:
     # CONTRACT without EXPAND (still) repeats the element VECTORIZED
     return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
@@ -398,7 +399,7 @@ def do_contract(con:UOp):
   srcs = []
   for i in range(0, len(to_join), con.dtype.count):
     srcs += [UOp(UOps.VECTORIZE, con.dtype, tuple(src)) for src in zip(*to_join[i:i+con.dtype.count])]
-  return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x[0] != con.arg[0]))
+  return UOp(UOps.EXPAND, con.dtype, tuple(srcs), tuple(x for x in ex.arg if x != con.arg[0]))
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
