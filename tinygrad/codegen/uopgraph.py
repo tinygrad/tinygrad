@@ -385,6 +385,7 @@ def do_contract(con:UOp):
   # simple CONTRACT and EXPAND cancel out
   if len(ex.arg) == 1 and len(con.arg) == 1 and ex.arg == con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
   # complex CONTRACT may remove several axes from EXPAND
+  assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   srcs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
     lsrcs = [ex.src[_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})] for lrpk in _choices_from_args(con.arg)]
