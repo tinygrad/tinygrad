@@ -433,7 +433,7 @@ class HCQProgram:
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
 
   def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
-               vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:
+               vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
     """
     Enqueues the program for execution with the given arguments and dimensions.
 
