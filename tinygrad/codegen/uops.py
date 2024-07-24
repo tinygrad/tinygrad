@@ -110,7 +110,8 @@ class UOp:
     if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
     if self.op is UOps.CONST: return self, self
     if self.op is UOps.ALU:
-      if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool: return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
+      if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(cast(DType, self.dtype)):
+        return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
     return None, None
 
 class UPat:
