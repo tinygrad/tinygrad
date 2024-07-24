@@ -193,14 +193,13 @@ constant_folder = PatternMatcher([
     arg=ReduceOps.SUM).name("reduce_allow_any_len"), index_collapse),
   # other arange folders
   (UOp.cvar("c1") - (UOp.var("x") + UOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
+  # max folding
+  (UOp.max(UOp.var('x'), UOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # max on special can go away (TODO: special should be variable, same thing applies)
-  (UOp.max(UOp.cvar('c'), UOp(UOps.SPECIAL).name('s')), lambda c,s: c if (s.arg[1]-1) <= c.arg else None),
   (UOp.max(UOp.cvar('c'), UOp(UOps.SPECIAL).name('s')+UOp.cvar('c2')), lambda c,s,c2: (s+c2) if 0 >= c.arg else None),  # TODO: generic
   (UOp.max(UOp.cvar('c'), -(UOp(UOps.SPECIAL).name('s')+UOp.cvar('c2'))), lambda c,s,c2: -(s+c2) if -(s.arg[1]-1+c2.arg) >= c.arg else None),
   # max on range can go away (ugh: copy of SPECIAL, and with/without const)
-  (UOp.max(UOp.cvar('c'), UOp(UOps.RANGE).name('s')), lambda c,s: s if s.src[0].arg >= c.arg else None),  # TODO: generic
   (UOp.max(UOp.cvar('c'), UOp(UOps.RANGE).name('s')+UOp.cvar('c2')), lambda c,s,c2: (s+c2) if s.src[0].arg >= c.arg else None),  # TODO: generic
-  (UOp.max(UOp.cvar('c'), -(UOp(UOps.RANGE).name('s'))), lambda c,s: -s if -(s.src[1].arg-1) >= c.arg else None),
   (UOp.max(UOp.cvar('c'), -(UOp(UOps.RANGE).name('s')+UOp.cvar('c2'))), lambda c,s,c2: -(s+c2) if -(s.src[1].arg-1+c2.arg) >= c.arg else None),
   # const rules
   (UOp(UOps.GEP, src=(UOp.cvar("c"),)).name("root"), lambda root, c: root.const(c.arg)),
@@ -213,8 +212,6 @@ constant_folder = PatternMatcher([
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
   (UOp(UOps.DEFINE_ACC, src=(UOp.cvar(),)).name("root"), lambda root: UOp.cast(root.src[0], root.dtype)),
   (UOp(UOps.GEP, src=(UOp.cvar("x"),)).name("root"), lambda root,x: root.const(x.arg)),
-  # max -2147483648
-  (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UOp.var().where(UOp.var("val"), UOp.var("val")), lambda val: val),
   (UOp.cvar('gate').where(UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
@@ -240,6 +237,9 @@ constant_folder = PatternMatcher([
   # lt folding
   (UOp.var('x').lt(UOp.var('y')),
    lambda x,y: UOp.const(dtypes.bool, True) if x.vmax.arg < y.vmin.arg else UOp.const(dtypes.bool, False) if x.vmin.arg >= y.vmax.arg else None),
+  # c0*x<c1 for positive int c0,c1
+  ((UOp.cvar('c0',dtypes.int)*UOp.var('x')).lt(UOp.cvar('c1',dtypes.int)),
+   lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if c0.arg > 0 and c1.arg > 0 else None),
   # ** load/store folding **
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.load(UOp.var("buf"), UOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
