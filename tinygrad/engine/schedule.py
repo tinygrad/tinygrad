@@ -204,11 +204,10 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
     realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None]) -> Dict[LazyBuffer, None]:
   rc_parents, cache = deque(group), set()
   while rc_parents:
-    # max one reduceop per kernel
     if (p:=rc_parents.pop()) in cache: continue
     cache.add(p)
+    # max one reduceop per kernel
     if p.op in ReduceOps: return {}
-    if p in realizes: continue
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[LazyBuffer, None] = {}
