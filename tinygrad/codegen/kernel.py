@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
 from tinygrad.engine.graph import print_tree
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, \
-                         verify_lazyop, KernelInfo, get_lazyop_info
+                         verify_lazyop, KernelInfo, get_lazyop_info, reduce_st
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import dtypes, ImageDType
@@ -22,7 +22,7 @@ from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto() # noqa: E702
+  SPLIT = auto(); GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
@@ -136,6 +136,19 @@ class Kernel:
     ret.applied_opts_cache = None
 
     return ret
+
+  @staticmethod
+  def split(ast:LazyOp, opts:Optional[Renderer]=None) -> Tuple[Kernel, ...]:
+    op = ast.src[0] or None
+    parent = ast
+    asts = [ast]
+    while(op.src):
+      if op.op is MetaOps.KERNEL:
+        parent.src = ()
+        asts.append(op)
+      parent = op
+      op = op.src[0]
+    return tuple(Kernel(a, opts=opts) for a in asts)
 
   @property
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
@@ -437,7 +450,6 @@ class Kernel:
       local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
       smem_sz = amt*acc_sz*upcast_sz*local_sz
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
-
     if opt.op is OptOps.LOCAL:    # cyan
       check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")

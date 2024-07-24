@@ -11,24 +11,13 @@ from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import ScheduleItem
 
 # **************** Program Creation ****************
-def ast_split(ast:LazyOp) -> Tuple[LazyOp, ...]:
-  op = ast.src[0]
-  parent = ast
-  while(op.src):
-    if op.op is MetaOps.KERNEL:
-      parent.src = ()
-      return ast, op
-    parent = op
-    op = op.src[0]
-  return (ast,)
-
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_kernels(renderer:Renderer, ast:LazyOp) -> Tuple[Kernel, ...]:
   if DEBUG >= 5:
     from tinygrad.engine.graph import print_tree
     print_tree(ast)
 
-  kernels = tuple(Kernel(ast, opts=renderer) for ast in ast_split(ast))
+  kernels = Kernel.split(ast, opts=renderer) 
   for k in kernels:
     k.required_optimizations()
     if not NOOPT:
