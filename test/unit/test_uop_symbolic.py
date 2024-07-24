@@ -56,8 +56,8 @@ class TestSymbolic(unittest.TestCase):
       self.assertIn(render(v), s)
     else:
       self.assertEqual(render(v), s)
-    #self.assertEqual(v.min, n)
-    #self.assertEqual(v.max, m)
+    # self.assertEqual(v.vmin.arg, n)
+    # self.assertEqual(v.vmax.arg, m)
 
   def test_cmp_simple(self):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 4), 0, 1, "(a<4)")
@@ -97,11 +97,12 @@ class TestSymbolic(unittest.TestCase):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
     self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
 
-  #def test_div_becomes_num(self):
-  #  assert isinstance(Variable("a", 2, 3)//2, NumNode)
+  @unittest.expectedFailure
+  def test_div_becomes_num(self):
+    self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
-  #def test_var_becomes_num(self):
-  #  assert isinstance(Variable("a", 2, 2), NumNode)
+  def test_var_becomes_num(self):
+    self.helper_test_variable(Variable("a", 2, 2), 2, 2, "2")
 
   @unittest.expectedFailure
   def test_equality(self):

@@ -218,6 +218,7 @@ constant_folder = PatternMatcher([
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
+  (UOp(UOps.DEFINE_VAR).name('x'), lambda x: x.vmin if x.vmin.arg == x.vmax.arg else None),
   (-(-UOp.var('x')), lambda x: x),    # -(-x) -> x
   (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
