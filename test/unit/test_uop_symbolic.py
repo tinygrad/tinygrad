@@ -333,7 +333,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "(idx//4)")
     self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, -1, 24, "(((3+idx)//4)+-1)")
 
-@unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
     # TODO: why are the negative tests broken? (even if we did support negative variables)
@@ -343,16 +342,16 @@ class TestSymbolicNumeric(unittest.TestCase):
     for i in range(MIN, MAX):
       v = f(NumNode(i))
       #print(i, f(i), v.min, v.max)
-      self.assertEqual(v.min, v.max)
-      self.assertEqual(v.min, f(i))
+      self.assertEqual(v.vmin, v.vmax)
+      self.assertEqual(v.vmin.arg, f(i))
     for kmin in range(MIN, MAX):
       for kmax in range(MIN, MAX):
         if kmin > kmax: continue
         v = f(Variable("tmp", kmin, kmax))
         values = [f(rv) for rv in range(kmin, kmax+1)]
         # the min and max may not be exact
-        self.assertLessEqual(v.min, min(values))
-        self.assertGreaterEqual(v.max, max(values))
+        self.assertLessEqual(v.vmin.arg, min(values))
+        self.assertGreaterEqual(v.vmax.arg, max(values))
 
   def test_mod_4(self): self.helper_test_numeric(lambda x: (x%4))
   def test_div_4(self): self.helper_test_numeric(lambda x: (x//4))

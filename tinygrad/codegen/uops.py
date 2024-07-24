@@ -34,6 +34,11 @@ class UOp:
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  def __post_init__(self):
+    # resolve const folding, might want to do more here
+    if self.op is UOps.ALU and all(s.op is UOps.CONST for s in self.src):
+      folded = self.const(exec_alu(self.arg, cast(DType, self.dtype), [x.arg for x in self.src]))
+      self.__dict__.update(folded.__dict__)
   def commutative(self) -> bool:
     return (self.op is UOps.ALU and \
       self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
