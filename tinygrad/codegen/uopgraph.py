@@ -327,7 +327,7 @@ def do_expand(root:UOp):
     if len(expands) == 0: return None
     expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
     if root.op is UOps.WMMA:
-      dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1] or x[0] in root.arg[-2])
+      dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1] or x[0] in [y[0] for y in flatten(root.arg[-2])])
       expand_args = tuple(x for x in expand_args if x not in dont_expand_args)
     else:
       dont_expand_args = ()
