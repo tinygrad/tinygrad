@@ -28,11 +28,12 @@ def image_contract_store(buf, ex, idx, idy, ls_allow_any_len, var):
 
 # ***** float4 handling *****
 
-def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None):
-  if len(ex.src) != 4: return None
+def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None, idx3=None):
+  if len(ex.src) not in [2, 4]: return None
   if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
   if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   if idx2 is not None: idx = idx + idx2
+  if idx3 is not None: idx = idx + idx3
   if not idx.divides(len(ex.src)): return None
 
   if load.dtype.scalar() != load.dtype: return None  # how does this happen?
@@ -56,6 +57,7 @@ float4_folding = PatternMatcher([
     (UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex")+UOp.var("idx2")), UOp.var("var"))).name("store"),
     lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float(2,4) load
+  (UOp(UOps.LOAD, src=(UOp.var("buf"), UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("idx2")+UOp.var("idx3"))).name("load"), float4_expand_load),
   (UOp(UOps.LOAD, src=(UOp.var("buf"), UOp(UOps.EXPAND).name("ex")+UOp.var("idx")+UOp.var("idx2"))).name("load"), float4_expand_load),
   (UOp(UOps.LOAD, src=(UOp.var("buf"), UOp(UOps.EXPAND).name("ex")+UOp.var("idx"))).name("load"), float4_expand_load),
   (UOp(UOps.LOAD, src=(UOp.var("buf"), UOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
