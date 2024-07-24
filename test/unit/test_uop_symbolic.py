@@ -226,7 +226,6 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_mod_large(self):
     self.helper_test_variable((Variable("a", 0, 20)*10)%9, 0, 8, "(a%9)")
 
-  @unittest.expectedFailure
   def test_mul_mod_small(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
 
@@ -258,7 +257,6 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_0(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)]), 0, 7, "a")
 
-  @unittest.expectedFailure
   def test_mod_remove(self):
     self.helper_test_variable(Variable("a", 0, 6)%100, 0, 6, "a")
 
