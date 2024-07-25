@@ -159,7 +159,7 @@ class PTXRenderer(Renderer):
         elif uop is UOps.DEFINE_ACC:
           if dtype.count > 1:
             r[u] = [ssa('acc', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-            for uu in r[u]: kk(f"mov.b{self.types[dtype.scalar()][1:]} {uu}, {const(src[0].src[0].arg, dtype.scalar())};")
+            for uu in r[u]: kk(f"mov.b{self.types[dtype.scalar()][1:]} {uu}, {const(src[0].arg, dtype.scalar())};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {ssa('acc', u)}, {const(src[0].arg, dtype)};")
         elif uop is UOps.SPECIAL:
           assert args[0][0] != "i", "idx not supported"
@@ -171,9 +171,8 @@ class PTXRenderer(Renderer):
           r[u] = f"%{args.expr}"
           kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.CONST:
-          assert dtype.count == 1
-          n = next((x.dtype.count for x in uops.uops if x.op == UOps.VECTORIZE and all(s is u for s in x.src)), None) # type: ignore
-          r[u] = [const(args, dtype, mov=True) for _ in range(n)] if n else const(args, dtype, mov=True)
+          if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
+          else: r[u] = const(args, dtype, mov=True)
         elif uop is UOps.GEP: r[u] = r[src[0]][u.arg]
         elif uop is UOps.LOAD:
           assert src[0].dtype == dtypes.int64, "load isn't int64"
@@ -195,7 +194,7 @@ class PTXRenderer(Renderer):
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {r[src[0]]}, {r[src[1]]};")
           r[u] = r[src[0]]
         # NOTE: casting to str is fine because you can't vectorize a vectorize
-        elif uop in {UOps.VECTORIZE}: r[u] = r[src[0]] if all(c.op == UOps.CONST for c in src) else [cast(str,r[x]) for x in src]
+        elif uop is UOps.VECTORIZE: r[u] = [cast(str,r[x]) for x in src]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           assert src[0].dtype is not None and dtype.count == 1
           _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
