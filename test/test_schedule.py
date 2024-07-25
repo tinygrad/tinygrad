@@ -1028,7 +1028,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(4, 4)
     r = a.sum(2) + b
     d = r.T * 4
-    e = r + d
+    e = r * d
     schedule = check_schedule([d, e], 3)
     assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
 

@@ -1,4 +1,4 @@
-import sys, pickle, atexit, functools
+import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
@@ -193,8 +193,7 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
   if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
-    group[tr] = st.contiguous and st.size == r.st.size and tr not in reduce_for_op
-    return
+    return group.__setitem__(tr, st.contiguous and st.size == r.st.size and tr not in reduce_for_op)
   for tr_next in children[tr]:
     # max one reduceop per kernel
     if tr_next.op in ReduceOps: return group.__setitem__(tr_next, False)
@@ -202,22 +201,24 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.__setitem__(tr_next, False)
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
+def _get_inputs(buf:LazyBuffer, r:LazyBuffer, realizes:Dict[LazyBuffer, None], cache, first=True) -> Set[LazyBuffer]:
+  if buf.realized is not None or buf.op is MetaOps.CONST or buf in cache: return set()
+  cache.add(buf)
+  if not first and (buf in realizes or buf is r): return set((buf,))
+  return set.union(set(), *iter(_get_inputs(x.base, r, realizes, cache, False) for x in buf.srcs))
+
 def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],\
     realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None], forced_realize:bool) -> Dict[LazyBuffer, None]:
-  rc_parents, cache, is_complete = deque(group), set(), not forced_realize
+  rc_parents, cache, is_complete = deque(group), set(), not forced_realize and len(group) > 1
   while rc_parents and is_complete:
     if (p:=rc_parents.pop()) in cache: continue
     cache.add(p)
     # max one reduceop per kernel
     if p.op in ReduceOps: is_complete = False
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
-  @functools.lru_cache(None)
-  def _get_recursive_parents(buf:LazyBuffer, first=True) -> Set[LazyBuffer]:
-    if buf.realized is not None or buf.op is MetaOps.CONST: return set()
-    if not first and (buf in realizes or buf is r): return set((buf,))
-    return set.union(set(), *iter(_get_recursive_parents(x.base, False) for x in buf.srcs))
   if not is_complete:
-    new_group = {tr:None for tr in group if tr is not r and len(_get_recursive_parents(tr)) == 1}
+    new_group = {tr:None for tr in group if tr is not r and len(_get_inputs(tr, r, realizes, set())) == 1}
+    # if it can only group some children, we have to realize the reduceop
     if new_group: realizes[r] = None
     return new_group
   # search descendants of the reduceop that can cleanly group
