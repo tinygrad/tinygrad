@@ -148,7 +148,7 @@ class IndependentLowerer:
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
         dtype = x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype
-        return UOp.alu(TernaryOps.WHERE, valid, UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
+        return valid.alu(TernaryOps.WHERE, UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
       if x.arg.idx == -1:
         buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype), (), ("temp", x.arg.st.size))
       else:
@@ -179,6 +179,6 @@ class IndependentLowerer:
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axis[2])
       # NOTE: always using ridxs is fine here
       return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
-    return UOp.alu(x.op, *in_uops)
+    return in_uops[0].alu(x.op, *in_uops[1:])
 
 def lazyop_to_uop(ast:LazyOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)
