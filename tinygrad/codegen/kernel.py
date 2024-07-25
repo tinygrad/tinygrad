@@ -655,14 +655,9 @@ class Kernel:
         idx = self.bufs.index(op.arg)
         arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
       elif op.op in ReduceOps:
-        print("reduce with initial arg=",op.arg)
-        print("self.first_reduce,self.group_for_reduces",self.first_reduce,self.group_for_reduces)
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
-        print("self.sts[reduce_idx]=",self.sts[reduce_idx].shape)
-        print("self.sts[reduce_idx+1]=",self.sts[reduce_idx+1].shape)
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
-        print("  new arg=",arg)
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
           if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
@@ -712,31 +707,17 @@ class Kernel:
           new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
           return LazyOp(op.op, (ret,), new_reduce_axes) if new_reduce_axes else ret
         if self.group_for_reduces:
-          print("fixing up reduceop=",op is not self.reduceops[-1]) # check if it's the last
           start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
-          mask = tuple(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] for i in range(self.global_dims, self.global_dims+self.local_dims+self.group_for_reduces))
-          sts = ShapeTracker.from_shape(tuple([1] * self.global_dims + [x if mask[i] or i < self.first_reduce else 1 for i,x in enumerate(list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]))] + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])) # noqa: E501
-          # local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces] + \
-          #   (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
-          print("fixing up store to: ", sts.shape)
-          print("  [1] * self.global_dims=",[1] * self.global_dims)
-          print("  masked=",[x if mask[i] else 1 for i,x in enumerate(list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]))])
-          print("  upcasted=",[1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce))
-          print("  [x[0] for x in self.upcasted_axis(0)])=",[x[0] for x in self.upcasted_axis(0)])
-          local_buffer = MemBuffer(-1, start.dtype, sts)
-          # local_buffer = MemBuffer(-1, start.dtype, ShapeTracker.from_shape(local_shape))
+          # mask = tuple(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] for i in range(self.global_dims, self.global_dims+self.local_dims+self.group_for_reduces))
+          # sts = ShapeTracker.from_shape(tuple([1] * self.global_dims + [x if mask[i] or i < self.first_reduce else 1 for i,x in enumerate(list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]))] + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])) # noqa: E501
+          local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
+            tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
+            (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
+          # local_buffer = MemBuffer(-1, start.dtype, sts)
+          local_buffer = MemBuffer(-1, start.dtype, ShapeTracker.from_shape(local_shape))
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
-          print("grouped_reduce arg=")
-          # print("  ", tuple(mask[j+(self.global_dims-self.first_reduce)] for j,i in enumerate(range(self.first_reduce, self.first_reduce+self.group_for_reduces))))
-          print("  ", tuple(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
-          print("  ", tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
           grouped_reduce =  LazyOp(op.op, (local_load,), tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
-          print("grouped_reduce: ", grouped_reduce.arg)
-          print("masked: ", tuple((i,mask[j]) for j,i in enumerate(range(self.first_reduce, self.first_reduce+self.group_for_reduces))))
-          print("self.global_dims=",self.global_dims)
-          print("self.first_reduce=",self.first_reduce)
-          print("masked2: ",tuple((i,mask[j+(self.global_dims-self.first_reduce)]) for j,i in enumerate(range(self.first_reduce, self.first_reduce+self.group_for_reduces))) )
           if op is self.reduceops[-1]: return grouped_reduce
           store_back = LazyOp(BufferOps.STORE, (grouped_reduce,), local_buffer)
           return LazyOp(BufferOps.LOAD, (store_back,), local_buffer)

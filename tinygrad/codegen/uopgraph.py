@@ -481,18 +481,26 @@ class UOpGraph:
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
+    print(self.sink)
+
     # replace UOps.STORE gate with an IF block
     @functools.lru_cache(None)
     def _replace_gates(u:UOp, gate:Optional[UOp]=None) -> UOp:
-      if gate is None and u.op is UOps.STORE and len(u.src) == 4:
+      if u.op is UOps.STORE: print("store, len(u.src)=",len(u.src))
+      if u.op is UOps.STORE and len(u.src) >= 4:
+        print("setting gate")
         gate = u.src[3]
       addif = u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER
+      if u.op is UOps.LOAD: 
+        print("addif=",addif)
+        print("u.op is UOps.LOAD!")
+        if u.src[-1].op is UOps.BARRIER: print("  u.src[-1].op is UOps.BARRIER")
       if (replace_source:=tuple(_replace_gates(x, None if addif else gate) for x in u.src)) != u.src:
-        if u.op is UOps.STORE and len(u.src) == 4 and u.src[3] is gate: replace_source = replace_source[:3]
         u = UOp(u.op, u.dtype, replace_source, u.arg)
+      if addif and gate is None: print("addif but gate is None!")
       if addif and gate is not None:
-        if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
-        return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
+        print("addif!")
+        return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
       return u
     sink_srcs = list(self.sink.src)
     for i, s in enumerate(sink_srcs):
@@ -502,8 +510,6 @@ class UOpGraph:
 
     # do graph rewrite
     sink = graph_rewrite(sink, self.folder)
-
-    print(sink)
 
     # expand
     UOpGraph.cnt += 1
@@ -530,15 +536,24 @@ class UOpGraph:
 
     # scope children impact the toposort and END* insertion
     scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
-
-    # phi_order = {r:[x for x in get_recursive_children(r, UOps.SINK) if x.op is UOps.PHI] for r in in_degree if r.op is UOps.PHI}
-    # for r in scope_children:
-      # if r.op is UOps.RANGE: 
-        # if not len([p for p in scope_children[r] if p.op is UOps.PHI]) == 0:
-          # print("  range has multiple phis: ", r.op, r.arg)
-          # for p in [p for p in scope_children[r] if p.op is UOps.PHI]: print("    ", p.op, [(s.op, s.arg) for s in r.src], p.arg)
-        # assert len([p for p in scope_children[r] if p.op is UOps.PHI]) == 0, f"scope has multiple phis!"
     range_phi = {r:tuple(sorted([p for p in scope_children[r] if p.op is UOps.PHI])) for r in scope_children if r.op is UOps.RANGE}
+
+    # print("scopes:")
+    # for s in scope_children:
+    #   print("  ", s.op, s.arg)
+    #   for ss in scope_children[s]: print("    ", ss.op, [(sss.op, sss.arg) for sss in ss.src], ss.arg)
+
+    def print_children(u, end, tab):
+      if len([s for s in get_recursive_children(u, end, False) if s.op is UOps.PHI]) > 1:
+        print(tab, u.op, [(s.op, s.arg) for s in u.src], u.arg)
+        for s in get_recursive_children(u, end, False): print(tab + "-> ", s.op, s.arg)
+        if u.op is end: return
+        for s in children[u]: print_children(s, end, tab + "  ")
+
+    print("scope_children")
+    for s in scope_children:
+      if len([p for p in scope_children[s] if p.op is UOps.PHI]) > 1: print_children(s, END_FOR_UOP[s.op][0], "")
+        
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
@@ -548,17 +563,11 @@ class UOpGraph:
         if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
-    # print("scopes:")
-    # for s in scope_children:
-    #   print("  ", s.op, s.arg)
-    #   for ss in scope_children[s]: print("    ", ss.op, ss.arg)
-
     for u in children:
       if in_degree[u] == 0: push(u)
 
     scope_end: Dict[UOp, UOp] = {}
     self._uops = []
-    print("starting queue")
     scopes: Dict[UOps, List[UOp]] = {}
     while queue:
       p,x = heapq.heappop(queue)
@@ -589,38 +598,9 @@ class UOpGraph:
       for u in reversed(children[x]):
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
-    print("ending queue")
-
-    # scope_end: Dict[UOp, UOp] = {}
-    # self._uops = []
-    # while queue:
-    #   p,x = heapq.heappop(queue)
-    #   if DEBUG >= 7: print(p,x)
-    #   if x in scope_children: scope_end[x] = x
-    #   if x.op is UOps.DEFINE_ACC:
-    #     idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
-    #     self._uops.insert(idx, x)
-    #   else: self._uops.append(x)
-    #   for u, ss in scope_children.items():
-    #     if x in ss:
-    #       ss.remove(x)
-    #       if len(ss) == 0: scope_end[u] = x
-    #   for u in children[x]:
-    #     in_degree[u] -= 1
-    #     if in_degree[u] == 0: push(u)
-
-    # print("uops:")
-    # for i,u in enumerate(self._uops):
-    #   print(f"{i}  :{u.op} {[self._uops.index(s) for s in u.src]} , {u.arg}")
 
     # end scopes in toposort order
-    for u, x in scope_end.items():
-    #   print(f"scope_end[{u}] = ", x)
-      self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
-
-    # print("uops:")
-    # for i,u in enumerate(self._uops):
-    #   print(f"{i}  :{u}")
+    for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
@@ -639,6 +619,9 @@ class UOpGraph:
 
     # strip the SINK
     self._uops = self._uops[:-1]
+
+    for i,u in enumerate(self._uops):
+      print(f"{i}  : {u.op} {[self._uops.index(s) for s in u.src]} {u.arg}")
 
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import fuzz_uops
