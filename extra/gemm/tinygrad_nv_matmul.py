@@ -9,14 +9,22 @@ if __name__ == "__main__":
   si = C.schedule()[-1]
   ast = si.ast
   k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-  opts = [
-    Opt(op=OptOps.TC, axis=0, amt=0),
-    Opt(op=OptOps.UPCAST, axis=0, amt=4),
-    Opt(op=OptOps.UPCAST, axis=1, amt=8),
-    Opt(op=OptOps.LOCAL, axis=0, amt=2),
-    Opt(op=OptOps.LOCAL, axis=1, amt=2),
-    Opt(op=OptOps.LOCAL, axis=0, amt=2)
-  ]
+  if Device.DEFAULT in {"AMD", "HIP"}:
+    opts = [
+      Opt(op=OptOps.TC, axis=0, amt=0),
+      Opt(op=OptOps.UPCAST, axis=0, amt=4),
+      Opt(op=OptOps.UPCAST, axis=1, amt=4),
+      Opt(op=OptOps.LOCAL, axis=1, amt=4),
+    ]
+  else:
+    opts = [
+      Opt(op=OptOps.TC, axis=0, amt=0),
+      Opt(op=OptOps.UPCAST, axis=0, amt=4),
+      Opt(op=OptOps.UPCAST, axis=1, amt=8),
+      Opt(op=OptOps.LOCAL, axis=0, amt=2),
+      Opt(op=OptOps.LOCAL, axis=1, amt=2),
+      Opt(op=OptOps.LOCAL, axis=0, amt=2)
+    ]
   for opt in opts: k.apply_opt(opt)
   prg = k.to_program()
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
