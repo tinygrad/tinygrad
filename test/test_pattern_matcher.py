@@ -190,6 +190,8 @@ class TestPatternMatcher(TestUOps):
     dtypes._float2 = dtypes.float.vec(2)
     upat = UPat(UOps.CONST, name="x", dtype=dtypes.float)
     assert str(upat) == str(eval(str(upat)))
+    evpat:UPat = eval(repr(UPat(src = [UPat(name='a'), UPat(name='b')])))
+    assert len(evpat.src) == 2
     for i in range(20): upat = UPat(UOps.ALU, name="x", src=[upat, upat], arg=BinaryOps.ADD)
     assert len(str(upat)) < 10_000
     assert str(eval(str(upat))) == str(upat)
