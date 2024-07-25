@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, colored, prod, dedup,\
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup,\
     all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -106,7 +106,6 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
                               v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
       input_st = tmp + ShapeTracker(tuple(nv))
     elif reduce_info:
-      # TODO: is this generic enough?
       top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
       _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
       new_axis = tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
@@ -161,7 +160,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       # this was causing "test_lil_model" to fail
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         simple_pads[buf.base] = None # don't realize image to image casts. this is part of a larger problem
-      else: realizes[buf.base] = None
+      elif not FUSE_AS_ONE_KERNEL: realizes[buf.base] = None
     # check all other pads for safe fusion
     elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
@@ -203,20 +202,6 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r)
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
-def _buildup_st(xt:LazyBuffer, st:ShapeTracker, realizes, sts:Dict[LazyBuffer, ShapeTracker], first=True):
-  """buildup the ShapeTracker from the base LazyBuffer"""
-  if xt.base.realized is not None or xt in sts: return
-  if xt is not xt.base: st, xt = xt.st+st, xt.base
-  sts.setdefault(xt, st:=ShapeTracker.from_shape(xt.srcs[0].shape) if xt.op in ReduceOps else st)
-  if first or xt not in realizes:
-    for x in xt.srcs: _buildup_st(x, st, realizes, sts, False)
-
-# TODO cache this
-def _recurse_children(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], children:Dict[LazyBuffer, Dict[LazyBuffer, None]], first=True):
-  """recursively find realized descendants"""
-  if buf in realizes and not first: return set((buf,))
-  return set.union(set(), *iter(_recurse_children(x, realizes, children, False) for x in children[buf]))
-
 def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],\
     realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None]) -> Dict[LazyBuffer, None]:
   rc_parents, cache = deque(group), set()
@@ -249,7 +234,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
-  const_reduces: List[LazyBuffer] = []
   for r in allbufs:
     if r.op not in ReduceOps or r in realizes: continue
 
@@ -286,25 +270,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
-      realizes[tr] = None
+      if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
-    if FUSE_ARANGE and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: const_reduces.append(r)
-
-  def _fold_arange(r:LazyBuffer, group:Set[LazyBuffer]) -> bool:
-    if DEBUG_ARANGE:=(getenv("DEBUG_ARANGE")): print(f"checking {r}")
-    for tr in group:
-      if not (descendants:=_recurse_children(tr, realizes, children)): return False
-      # check if tr can cleanly fuse with its children
-      for d in descendants:
-        sts: Dict[LazyBuffer, ShapeTracker] = {}
-        _buildup_st(d, ShapeTracker.from_shape(reduce_for_op[d].shape if d in reduce_for_op else d.shape), realizes, sts)
-        return len(sts[tr].views) == 1
-    if DEBUG_ARANGE: print(colored(f"fused {r}", "green"))
-    return True
-  # TODO: what if only some children can fuse? can save an extra global_load
-  for r in const_reduces:
-    if _fold_arange(r, group:={op for op,reduceop in reduce_for_op.items() if r is reduceop}):
-      for x in group: del realizes[x]
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
