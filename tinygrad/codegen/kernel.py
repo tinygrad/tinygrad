@@ -112,9 +112,6 @@ class Kernel:
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
-    # cache
-    self.applied_opts_cache: Optional[List[Opt]] = None
-
   def copy(self):
     ret = type(self).__new__(type(self))
 
@@ -130,9 +127,6 @@ class Kernel:
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, self.bufs_for_tensor_core
-
-    # uncached since linearize didn't run
-    ret.applied_opts_cache = None
 
     return ret
 
@@ -327,7 +321,7 @@ class Kernel:
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
-        if self.opts.device == "AMD":
+        if self.opts.device in {"AMD", "HIP"}:
           # NOTE: AMD requires locals first
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
           for (tc_dim, tc_amt) in tc.threads:
@@ -671,7 +665,7 @@ class Kernel:
             permaxis += list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
-          if self.opts.device == "AMD":
+          if self.opts.device in {"AMD", "HIP"}:
             reduce_axes = [self.shape_len-self.upcasted]
             upcast_axis: Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]] = \
               (((self.shape_len-self.upcasted, 16),), ((self.shape_len-self.upcasted, 16),), ((self.shape_len-self.upcasted+1, 8),))
@@ -727,25 +721,8 @@ class Kernel:
       print(self.applied_opts)
     verify_lazyop(modified_ast)
 
-    uop_sink = lazyop_to_uop(modified_ast, self.opts)
-
-    # extract global/local sizes
-    if self.opts.has_local:
-      self.global_size: Optional[List[int]] = [1,1,1]
-      self.local_size: Optional[List[int]] = [1,1,1]
-      for u in uop_sink.parents:
-        if u.op is UOps.SPECIAL:
-          if u.arg[0][0] == 'i': self.local_size = None
-          if u.arg[0][0] == 'l':
-            assert self.local_size is not None
-            self.local_size[int(u.arg[0][-1])] = u.arg[1]
-          else:
-            self.global_size[int(u.arg[0][-1])] = u.arg[1]
-    else:
-      self.global_size, self.local_size = None, None
-
     # generate the UOpGraph
-    self.uops:UOpGraph = UOpGraph(uop_sink, self.opts)
+    self.uops:UOpGraph = UOpGraph(lazyop_to_uop(modified_ast, self.opts), self.opts)
     if DEBUG >= 5: self.uops.print()
     if getenv("GRAPHUOPS"): self.uops.graph()
     return self
@@ -753,15 +730,33 @@ class Kernel:
   def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
+
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+
+    # extract global/local sizes
+    if self.opts.has_local:
+      global_size: Optional[List[int]] = [1,1,1]
+      local_size: Optional[List[int]] = [1,1,1]
+      for u in self.uops.uops:
+        if u.op is UOps.SPECIAL:
+          if u.arg[0][0] == 'i': local_size = None
+          if u.arg[0][0] == 'l':
+            assert local_size is not None
+            local_size[int(u.arg[0][-1])] = u.arg[1]
+          else:
+            assert global_size is not None
+            global_size[int(u.arg[0][-1])] = u.arg[1]
+    else:
+      global_size, local_size = None, None
+
     ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
-    run_count = prod((self.global_size or []) + (self.local_size or []))
+    run_count = prod((global_size or []) + (local_size or []))
     # group non-local MemBuffers by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
-    return Program(ansiname, src, self.opts.device, self.global_size, self.local_size, self.uops,
+    return Program(ansiname, src, self.opts.device, global_size, local_size, self.uops,
                    ops * run_count, min(mem * run_count, mem_bytes), mem * run_count)

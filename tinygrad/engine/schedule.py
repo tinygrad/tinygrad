@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_AS_ONE_KERNEL, FUSE_CONV_BW, GlobalCounters, colored, prod, dedup,\
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup,\
     all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -37,7 +37,7 @@ class ScheduleItem:
 
 # *** DAG transformation: List[LazyBuffer] -> ScheduleItem ***
 
-def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
+def _recursive_lazyop(buf:LazyBuffer, inputs:Dict[LazyBuffer, int], outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer],
                       reduce_info:Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> LazyOp:
   """recursively create a lazyop"""
@@ -49,29 +49,24 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   if buf.op is MetaOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
-    if isinstance(buf.arg, Variable):
-      val, var_val = buf.arg.unbind()
-      var_vals.__setitem__(val, var_val)
-    else:
-      assert isinstance(buf.arg, get_args(ConstType)), f"cannot create ConstBuffer with value {buf.arg}"
-      val = buf.arg
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(val, buf.dtype, unbound_st))
+    if isinstance(arg, Variable):
+      arg, var_val = arg.unbind()
+      var_vals[arg] = var_val
+    else: assert isinstance(arg, get_args(ConstType)), f"cannot create ConstBuffer with value {arg}"
+    return LazyOp(BufferOps.CONST, (), ConstBuffer(arg, buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized is not None or (buf in realizes and buf not in outputs):
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if buf in assign_targets:
-      # can only assign to contiguous read+write buffer
-      if not unbound_st.contiguous:
-        # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
-        if not (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and
-            ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask)):
-          raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                             +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-      return LazyOp(BufferOps.LOAD, (), MemBuffer(outputs.index(assign_targets[buf]), buf.dtype, unbound_st))
-    if buf not in inputs: inputs.append(buf)
-    return LazyOp(BufferOps.LOAD, (), MemBuffer(len(outputs)+inputs.index(buf), buf.dtype, unbound_st))
+      # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
+      if unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and\
+          ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask)):
+        return LazyOp(BufferOps.LOAD, (), MemBuffer(outputs.index(assign_targets[buf]), buf.dtype, unbound_st))
+      raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
+                         +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+    return LazyOp(BufferOps.LOAD, (), MemBuffer(len(outputs)+inputs.setdefault(buf, len(inputs)), buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
   if buf.op in {MetaOps.CONTIGUOUS, MetaOps.ASSIGN}:
@@ -110,14 +105,17 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
         nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                               v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
       input_st = tmp + ShapeTracker(tuple(nv))
-    else:
-      if reduce_info:
+    elif reduce_info:
+      top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
+      _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
+      new_axis = tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
+      if buf.op is buf.srcs[0].base.op:
         # merge this reduce with its parent
-        top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
-        _, rshape = _permute_reduce(top_reduce_input_st, top_reduce_axes)
-        new_axis = axis + tuple(range(len(top_reduce_input_st.shape)-len(rshape), len(top_reduce_input_st.shape)))
-        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
+        reduce_info[top_reduce] = (top_reduce_input_st, axis+new_axis)
         return
+      reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
+      # reshape this reduce per its top axis
+      input_st = input_st.reshape(tuple(1 if i in new_axis else s for i,s in enumerate(top_reduce_input_st.shape)))
     reduce_info[buf] = (input_st, axis)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
@@ -130,7 +128,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
   cache: Dict[Tuple[LazyBuffer, ShapeTracker], LazyOp] = {}
   ast: List[LazyOp] = []
-  inputs: List[LazyBuffer] = []
+  inputs: Dict[LazyBuffer, int] = {}
   reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
   seen_ops: Dict[Tuple[LazyBuffer, ShapeTracker], None] = {}
   for i, out in enumerate(outs):
@@ -141,7 +139,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
     output_view, vv = output_view.simplify().unbind()
     if vv: var_vals.update(vv)
     ast.append(LazyOp(BufferOps.STORE, (lop, ), MemBuffer(i, out.dtype, output_view)))
-  return LazyOp(MetaOps.KERNEL, tuple(ast)), inputs, var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])
+  return LazyOp(MetaOps.KERNEL, tuple(ast)), list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -188,21 +186,47 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
-                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer], cache:Set):
+                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, bool], cache:Set):
   """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
   if (tr, st) in cache: return
   cache.add((tr, st))
-  if tr in realizes:
+  if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
-    if not st.contiguous or st.size != r.st.size or tr in reduce_for_op: group.add(r)
-    return group.add(tr)
+    group[tr] = st.contiguous and st.size == r.st.size and tr not in reduce_for_op
+    return
   for tr_next in children[tr]:
     # max one reduceop per kernel
-    if tr_next.op in ReduceOps: return group.add(r)
     # can only fuse contiguous
-    if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
+    if tr_next.op in ReduceOps or len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1:
+      group[tr_next] = False
+      return
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
+
+def _get_inputs(buf:LazyBuffer, r:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict, first=True) -> Set[LazyBuffer]:
+  if buf.realized is not None or buf.op is MetaOps.CONST or buf in cache: return cache.get(buf, set())
+  if not first and (buf in realizes or buf is r): cache.setdefault(buf, set((buf,)))
+  return cache.setdefault(buf, set.union(set(), *iter(_get_inputs(x.base, r, realizes, cache, False) for x in buf.srcs)))
+
+def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],\
+    realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None], realize_reduceop:bool) -> Dict[LazyBuffer, None]:
+  rc_parents, cache, is_complete = deque(group), set(), not realize_reduceop and len(group) > 1
+  while rc_parents and is_complete:
+    if (p:=rc_parents.pop()) in cache: continue
+    cache.add(p)
+    # max one reduceop per kernel
+    if p.op in ReduceOps: is_complete = False
+    rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+  if not is_complete:
+    group = {tr:None for tr in group if tr is not r and len(_get_inputs(tr, r, realizes, {})) == 1}
+    # if only some children can group, we have to realize the reduceop
+    if group: realizes[r] = None
+    return group
+  # search descendants of the reduceop that can cleanly group
+  descendants: Dict[LazyBuffer, bool] = {}
+  for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
+  descendants_to_group = {tr:None for tr,can_group in descendants.items() if can_group}
+  return merge_dicts([group, descendants_to_group if len(descendants_to_group) == len(descendants) else {}])
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
@@ -225,45 +249,23 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   for r in allbufs:
     if r.op not in ReduceOps or r in realizes: continue
 
-    group: Set[LazyBuffer] = set()
-    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache=set())
+    reduceop_children: Dict[LazyBuffer, bool] = {}
+    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, reduceop_children, cache=set())
     # max one reduceop per kernel
-    can_chase = all(tr not in reduce_for_op for tr in group)
-    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
-    forced_realize = r in group
-    if not forced_realize and len(group) > 1:
-      # create a multi output kernel if the LazyBuffers can cleanly group
-      cache: Set[LazyBuffer] = set()
-      rc_parents, rc_children = deque(group), deque(group)
-      while rc_parents:
-        if (p:=rc_parents.pop()) in cache: continue
-        cache.add(p)
-        # max one reduceop per kernel
-        if p.op in ReduceOps:
-          forced_realize = True
-          break
-        rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
-      # search descendants of the reduceop that can cleanly group
-      cache.clear()
-      realized_descendants: Set[LazyBuffer] = set()
-      while rc_children and not forced_realize:
-        if (c:=rc_children.pop()) in cache: continue
-        cache.add(c)
-        if c.op in ReduceOps or not c.st.contiguous or c.st.size != r.st.size or c in reduce_for_op:
-          realized_descendants.clear()
-          break
-        if c in realizes and c not in group: realized_descendants.add(c)
-        rc_children.extend(x for x in children[c] if x.realized is None and x.device == r.device)
-      group.update(realized_descendants)
+    can_chase = all(tr not in reduce_for_op for tr in reduceop_children)
+    realize_reduceop = any(not can_group for can_group in reduceop_children.values())
+    group = {tr:None for tr,can_group in reduceop_children.items() if can_group}
+    if len(group) > 1 or realize_reduceop:
+      group = _get_isolated_children(r, reduce_for_op, children, realizes, group, realize_reduceop)
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is MetaOps.ASSIGN for x in group):
+    if any(x.op is MetaOps.ASSIGN for x in group):
       parents = deque((r, *group))
-      while parents and not forced_realize:
+      while parents and group:
         if (p:=parents.pop().base).realized or p in realizes:
-          if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
+          if p in assign_targets and assign_targets[p] not in group: group, can_chase = {}, False
           continue
         parents.extend(p.srcs)
-    if forced_realize:
+    if not group:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
@@ -276,12 +278,14 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           st = st + st_childs[0].st
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
-        # don't cast to higher size before store (tr cannot be realized if forced_realize)
+        # don't cast to higher size before store
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
-    else: reduce_for_op.update((tr, r) for tr in group)
+    else:
+      if realize_reduceop: realizes[r] = None
+      reduce_for_op.update((tr, r) for tr in group)
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
