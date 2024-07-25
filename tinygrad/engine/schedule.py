@@ -203,15 +203,25 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
       return
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
+def _get_inputs(buf:LazyBuffer, r:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict, first=True) -> Set[LazyBuffer]:
+  if buf.realized is not None or buf.op is MetaOps.CONST or buf in cache: return cache.get(buf, set())
+  if not first and (buf in realizes or buf is r): cache.setdefault(buf, set((buf,)))
+  return cache.setdefault(buf, set.union(set(), *iter(_get_inputs(x.base, r, realizes, cache, False) for x in buf.srcs)))
+
 def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],\
-    realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None]) -> Dict[LazyBuffer, None]:
-  rc_parents, cache = deque(group), set()
-  while rc_parents:
+    realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None], forced_realize:bool) -> Dict[LazyBuffer, None]:
+  rc_parents, cache, is_complete = deque(group), set(), not forced_realize and len(group) > 1
+  while rc_parents and is_complete:
     if (p:=rc_parents.pop()) in cache: continue
     cache.add(p)
     # max one reduceop per kernel
-    if p.op in ReduceOps: return {}
+    if p.op in ReduceOps: is_complete = False
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+  if not is_complete:
+    group = {tr:None for tr in group if tr is not r and len(_get_inputs(tr, r, realizes, {})) == 1}
+    # if it can only group some children, we have to realize the reduceop
+    if group: realizes[r] = None
+    return group
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[LazyBuffer, bool] = {}
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
@@ -243,19 +253,19 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     _recursive_group(r, r.st, r, children, realizes, reduce_for_op, reduceop_children, cache=set())
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in reduceop_children)
-    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
+    # TODO: forced_realize is poorly named now
     forced_realize = any(not can_group for can_group in reduceop_children.values())
-    if len(group:={tr:None for tr,can_group in reduceop_children.items() if can_group}) > 1 and not forced_realize:
-      group = _get_isolated_children(r, reduce_for_op, children, realizes, group)
+    if len(group:={tr:None for tr,can_group in reduceop_children.items() if can_group}) > 1 or forced_realize:
+      group = _get_isolated_children(r, reduce_for_op, children, realizes, group, forced_realize)
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is MetaOps.ASSIGN for x in group):
+    if any(x.op is MetaOps.ASSIGN for x in group):
       parents = deque((r, *group))
-      while parents and not forced_realize:
+      while parents and group:
         if (p:=parents.pop().base).realized or p in realizes:
-          if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
+          if p in assign_targets and assign_targets[p] not in group: group, can_chase = {}, False
           continue
         parents.extend(p.srcs)
-    if forced_realize or not group:
+    if not group:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
@@ -273,7 +283,9 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
-    else: reduce_for_op.update((tr, r) for tr in group)
+    else:
+      if forced_realize: realizes[r] = None
+      reduce_for_op.update((tr, r) for tr in group)
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
