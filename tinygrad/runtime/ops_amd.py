@@ -159,12 +159,13 @@ class AMDComputeQueue(HWComputeQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
   def _update_exec(self, cmd_idx, global_size, local_size):
-    self._patch(cmd_idx, offset=50 + self.cmd_idx_to_exec_info[cmd_idx], data=local_size)
-    self._patch(cmd_idx, offset=59 + self.cmd_idx_to_exec_info[cmd_idx], data=global_size)
+    if local_size is not None: self._patch(cmd_idx, offset=50 + self.cmd_idx_to_exec_info[cmd_idx], data=local_size)
+    if global_size is not None: self._patch(cmd_idx, offset=59 + self.cmd_idx_to_exec_info[cmd_idx], data=global_size)
 
     if (dp:=self.cmd_idx_to_dispatch_packet.get(cmd_idx)) is not None:
-      dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
-      dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
+      if local_size is not None: dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
+      if global_size is not None:
+        dp.grid_size_x,dp.grid_size_y,dp.grid_size_z = [g*l for g,l in zip(global_size,[dp.workgroup_size_x,dp.workgroup_size_y,dp.workgroup_size_z])]
 
   def _wait(self, signal, value=0):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
