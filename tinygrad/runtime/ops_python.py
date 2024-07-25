@@ -175,7 +175,7 @@ class PythonProgram:
             ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
           elif arg[5] == "CLANG":
             def elem(x, i, j, _): return x[i+j][0]
-            def c_map(_, elem): return (elem%16, elem//16)
+            def c_map(_, elem): return (elem%arg[4][0], elem//arg[4][0])
             ul[i] = wmma_helper(1, 1, arg[4][0], arg[4][1], arg[4][2], elem, elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
