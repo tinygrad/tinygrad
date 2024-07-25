@@ -112,6 +112,8 @@ class UOp:
     if self.op is UOps.ALU:
       if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(cast(DType, self.dtype)):
         return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
+      if self.arg is BinaryOps.ADD:
+        return self.const(self.src[0].vmin.arg+self.src[1].vmin.arg), self.const(self.src[0].vmax.arg+self.src[1].vmax.arg)
     return None, None
 
 class UPat:
