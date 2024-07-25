@@ -122,7 +122,8 @@ class QcomComputeQueue(HWComputeQueue):
     self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_INVALIDATE])
 
   def _wait(self, signal, value=0):
-    self.cmd(adreno.CP_WAIT_FOR_IDLE)
+    self.cmd(adreno.CP_WAIT_REG_MEM, adreno.WRITE_GE | (adreno.POLL_MEMORY << adreno.CP_WAIT_REG_MEM_0_POLL__SHIFT),
+             *data64_le(mv_address(signal._signal)), value & 0xffffffff, 0xffffffff, 32) # busy wait for 32 cycles
 
   def _submit(self, device: QcomDevice):
     # TODO(vpachkov): split objs based on cmd stream size
