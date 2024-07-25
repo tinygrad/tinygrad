@@ -343,7 +343,7 @@ class TestLinearizerFailures(unittest.TestCase):
 
   @unittest.skipIf(CI, "for real AMD GPU")
   def test_failure_41(self):
-    # One more resnet crash with a page fault on AMD.
+    # One more resnet crash with a page fault on AMD. Checked on rocm6.1.3, -O1 works, -O2 fails
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(256, 1, 128, 28, 28, 1, 1, 1), strides=(100352, 0, 784, 28, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))), src=(LazyOp(UnaryOps.CAST, arg=dtypes.half, src=(
        LazyOp(ReduceOps.SUM, arg=(5, 6, 7), src=(
          LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
