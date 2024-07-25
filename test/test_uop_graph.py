@@ -202,6 +202,62 @@ class TestUOpGraph(TestUOps):
     self.assert_equiv_uops(g.uops[6], c6)
     self.assert_equiv_uops(g.uops[7], c7)
 
+  def test_wmma_vectorize_fold(self):
+    for i in [2, 4, 8]:
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
+      var = UOp.var(dtype=dtypes.half.vec(i))
+      acc = UOp.var('acc', dtype=dtypes.half.vec(i))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[0], acc)
+      self.assertEqual(len(g.uops), 1)
+
+    for i in [2, 4, 8]:
+      var = UOp.var(dtype=dtypes.half.vec(i))
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
+      acc = UOp.var('acc', dtype=dtypes.half.vec(i))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[0], acc)
+      self.assertEqual(len(g.uops), 1)
+
+  def test_wmma_vectorize_no_fold(self):
+    for i in [4, 8]:
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
+                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) + tuple(UOp.var(f"tmp{j}", dtype=dtypes.half) for j in range(i//2)))
+      var = UOp.var(f"tmp{i}", dtype=dtypes.half.vec(i))
+      acc = UOp.var('acc', dtype=dtypes.half.vec(i))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[-1], wmma)
+
+    for i in [4, 8]:
+      var = UOp.var(f"tmp{i}", dtype=dtypes.half.vec(i))
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
+                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) + tuple(UOp.var(f"tmp{j}", dtype=dtypes.half) for j in range(i//2)))
+      acc = UOp.var('acc', dtype=dtypes.half.vec(i))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[-1], wmma)
+
+    for i in [2, 4, 8]:
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
+                tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
+      var = UOp.var(f"tmp{i}", dtype=dtypes.half.vec(i))
+      acc = UOp.var('acc', dtype=dtypes.half.vec(i))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[-1], wmma)
+
+    for i in [2, 4, 8]:
+      var = UOp.var(f"tmp{i}", dtype=dtypes.half.vec(i))
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
+                tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
+      acc = UOp.var('acc', dtype=dtypes.half.vec(i))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[-1], wmma)
+
   def test_phi_vec_const_fold(self):
     c0 = UOp.const(dtypes.float, 0.0)
     c1 = UOp.const(dtypes.float, 1.0)
