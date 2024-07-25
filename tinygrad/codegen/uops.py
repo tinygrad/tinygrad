@@ -49,26 +49,26 @@ class UOp:
   def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return UOp(UOps.BITCAST, dtype, (self,))
   def name(self, name:Optional[str]): return UOp(UOps.VAR, src=(self,), arg=name)
-  def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
-  def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, self.ufix(x))
-  def __radd__(self, x): return UOp.alu(BinaryOps.ADD, self, self.ufix(x))
-  def __sub__(self, x): return UOp.alu(BinaryOps.ADD, self, self.ufix(-x))
-  def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, self.ufix(x))
-  def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, self.ufix(x), self)
-  def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, self.ufix(x))
-  def __truediv__(self, x): return UOp.alu(BinaryOps.MUL, self, UOp.alu(UnaryOps.RECIP, self.ufix(x)))
-  def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, self.ufix(x))
-  def __xor__(self, x): return UOp.alu(BinaryOps.XOR, self, self.ufix(x))
-  def __and__(self, x): return UOp.alu(BinaryOps.AND, self, self.ufix(x))
-  def __or__(self, x): return UOp.alu(BinaryOps.OR, self, self.ufix(x))
-  def ne(self, x): return UOp.alu(BinaryOps.CMPNE, self, self.ufix(x))
+  def __neg__(self): return self.alu(UnaryOps.NEG)
+  def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
+  def __radd__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
+  def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
+  def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
+  def __rmul__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self)
+  def __floordiv__(self, x): return self.alu(BinaryOps.IDIV, self.ufix(x))
+  def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
+  def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
+  def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
+  def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
+  def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
+  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
   def eq(self, x): return -self.ne(x)
-  def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, self.ufix(x))
+  def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def ge(self, x): return -self.lt(x)
-  def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
-  def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
-  def where(self, x, y): return UOp.alu(TernaryOps.WHERE, self, x, y)
-  def recip(self): return UOp.alu(UnaryOps.RECIP, self)
+  def max(self, x): return self.alu(BinaryOps.MAX, x)
+  def min(self, x): return -(-self).max(-x)
+  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
+  def recip(self): return self.alu(UnaryOps.RECIP)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return UOp._const(self.dtype if isinstance(self, UOp) else self, b)
   @staticmethod
   @functools.lru_cache(maxsize=None)
@@ -79,8 +79,8 @@ class UOp:
       return UOp(UOps.VECTORIZE, dtype, src=tuple(
         UOp(UOps.CONST, dtype.scalar(), arg=dtypes.as_const(b, dtype.scalar())) for _ in range(dtype.count)))
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
-  @staticmethod
-  def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
+  def alu(self, arg, *src:UOp):
+    return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod
@@ -116,7 +116,9 @@ class UOp:
       return min(self.src, key=lambda x: x.arg), max(self.src, key=lambda x: x.arg)
     if self.op is UOps.ALU:
       if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(cast(DType, self.dtype)):
-        return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
+        return self.const(-self.src[0].vmax.arg).vmin, self.const(-self.src[0].vmin.arg).vmax
+      if self.arg is BinaryOps.ADD:
+        return self.const(self.src[0].vmin.arg+self.src[1].vmin.arg).vmin, self.const(self.src[0].vmax.arg+self.src[1].vmax.arg).vmin
     return None, None
 
 class UPat:
@@ -145,9 +147,9 @@ class UPat:
                 name, u.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
   def __repr__(self):
     def rep(x):
-      form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=(%s))"
-      return form % (('{%s}'%', '.join(map(str,x.op))) if isinstance(x.op, tuple) else x.op, x.arg,
-                     repr(x.name), set(x.dtype) if x.dtype else None, x.allowed_len == 0, "%s")
+      form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
+      return form % (None if x.op is None else ('(%s)'%', '.join(map(str, x.op))), x.arg, repr(x.name),
+        set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and len(x.src)>1 else "(%s)")
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:

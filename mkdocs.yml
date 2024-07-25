@@ -14,12 +14,12 @@ nav:
       - Creation: tensor/creation.md
       - Movement: tensor/movement.md
       - Ops: tensor/ops.md
-    - Function: function.md
     - dtypes: dtypes.md
     - nn (Neural Networks): nn.md
     - Environment Variables: env_vars.md
   - Developer:
     - developer.md
+    - Function (autodiff): function.md
     - Runtime:
       - runtime/overview.md
       - HCQ: runtime/hcq.md
