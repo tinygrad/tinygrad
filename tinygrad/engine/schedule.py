@@ -203,7 +203,7 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
       return
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
-def _get_inputs(buf:LazyBuffer, r:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, Set[LazyBuffer]], first=True) -> Set[LazyBuffer]:
+def _get_inputs(buf:LazyBuffer, r:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict, first=True) -> Set[LazyBuffer]:
   if buf.realized is not None or buf.op is MetaOps.CONST or buf in cache: return cache.get(buf, set())
   if not first and (buf in realizes or buf is r): cache.setdefault(buf, set((buf,)))
   return cache.setdefault(buf, set.union(set(), *iter(_get_inputs(x.base, r, realizes, cache, False) for x in buf.srcs)))
@@ -218,10 +218,10 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
     if p.op in ReduceOps: is_complete = False
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
   if not is_complete:
-    new_group = {tr:None for tr in group if tr is not r and len(_get_inputs(tr, r, realizes, {})) == 1}
+    group = {tr:None for tr in group if tr is not r and len(_get_inputs(tr, r, realizes, {})) == 1}
     # if it can only group some children, we have to realize the reduceop
-    if new_group: realizes[r] = None
-    return new_group
+    if group: realizes[r] = None
+    return group
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[LazyBuffer, bool] = {}
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
