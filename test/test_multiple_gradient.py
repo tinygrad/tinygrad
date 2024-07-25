@@ -9,7 +9,7 @@ class TestMultipleGradient(unittest.TestCase):
     Set up an idealized system where the weights are initialized to the correct value
     of an all-ones tensor. Check that the gradient is zero.
     '''
-    def total_loss(true_energy, model_energy, true_force, model_force):
+    def total_loss(self, true_energy, model_energy, true_force, model_force):
         # Set up the energy-matching and force-matching objectives
         fm_loss = ((true_force - model_force)**2).mean() 
         em_loss = ((true_energy - model_energy)**2).mean()
