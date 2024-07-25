@@ -250,6 +250,8 @@ constant_folder = PatternMatcher([
   (UOp.var('x') // UOp.cvar('c'), lambda x,c: x.const(0) if 0 <= x.vmin.arg <= x.vmax.arg < c.arg else None),
   # mod folding
   (UOp.var('x') % UOp.cvar('c'), lambda x,c: x if 0 <= x.vmin.arg <= x.vmax.arg < c.arg else None),
+  # mod reduction
+  (UOp.var('x') % UOp.cvar('c'), lambda x,c: (x-(x.vmin.arg//c.arg)*c.arg)%c if 0 < c.arg <= x.vmin.arg else None),
   # mul -> (sum) -> mod
   ((UOp.cvar('c0')*UOp.var('x')) % UOp.cvar('c1'), lambda x,c0,c1: x*(c0.arg%c1.arg)%c1 if c0.arg >= c1.arg > 0 else None),
   (((UOp.cvar('c')*UOp.var('x'))+UOp.var('x2')) % UOp.cvar('c'), lambda x,c,x2: x2%c),
