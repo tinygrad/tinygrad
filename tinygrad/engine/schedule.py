@@ -244,17 +244,17 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
-    if not forced_realize and len(group) > 1:
+    if forced_realize or len(group) > 1:
       group = _get_isolated_children(r, reduce_for_op, children, realizes, group)
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is MetaOps.ASSIGN for x in group):
+    if any(x.op is MetaOps.ASSIGN for x in group):
       parents = deque((r, *group))
-      while parents and not forced_realize:
+      while parents and group:
         if (p:=parents.pop().base).realized or p in realizes:
-          if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
+          if p in assign_targets and assign_targets[p] not in group: group, can_chase = {}, False
           continue
         parents.extend(p.srcs)
-    if forced_realize or not group:
+    if not group:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
