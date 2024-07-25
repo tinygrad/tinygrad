@@ -11,17 +11,16 @@ import tinygrad.runtime.autogen.opencl as cl
 import tinygrad.runtime.autogen.libc as libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice, check, checked, OpenCLRenderer
 from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, data64_le, to_char_p_p, DEBUG, prod, PROFILE
-import tinygrad.runtime.autogen.libc as libc
 
 # if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl # noqa: F401
 
-def parity(val: int): return (~0x6996 >> ((val ^ (val >> 16) ^ (val >> 8) ^ (val >> 4)) & 0xf)) & 1
+def prt(val: int):
+  for i in range(4,1,-1): val ^= val >> (1 << i)
+  return (~0x6996 >> (val & 0xf)) & 1
 
-def pkt7_hdr(opcode: int, cnt: int):
-  return adreno.CP_TYPE7_PKT | cnt & 0x3FFF | parity(cnt) << 15 | (opcode & 0x7F) << 16 | parity(opcode) << 23
+def pkt7_hdr(opcode: int, cnt: int): return adreno.CP_TYPE7_PKT | cnt & 0x3FFF | prt(cnt) << 15 | (opcode & 0x7F) << 16 | prt(opcode) << 23
 
-def pkt4_hdr(reg: int, cnt: int):
-  return adreno.CP_TYPE4_PKT | cnt & 0x3FFF | parity(cnt) << 7 | (reg & 0x3FFFF) << 8 | parity(reg) << 27
+def pkt4_hdr(reg: int, cnt: int): return adreno.CP_TYPE4_PKT | cnt & 0x7F | prt(cnt) << 7 | (reg & 0x3FFFF) << 8 | prt(reg) << 27
 
 class QcomCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
@@ -54,7 +53,7 @@ class QcomDevice(HCQCompiled):
                      QcomSignal, QcomComputeQueue, QcomCopyQueue, timeline_signals=(QcomSignal(), QcomSignal()))
 
   def _ctx(self):
-    cr = kgsl.struct_kgsl_drawctxt_create(flags=(2<<20) | 0x10 | 0x2)
+    cr = kgsl.struct_kgsl_drawctxt_create(flags=(kgsl.KGSL_CONTEXT_TYPE_CL<<kgsl.KGSL_CONTEXT_TYPE_SHIFT) | 0x10 | 0x2)
     self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
     self.context_id = cr.drawctxt_id
     return self.context_id
@@ -65,8 +64,8 @@ class QcomDevice(HCQCompiled):
     return ret
 
   def _gpu_alloc(self, size:int, flags:int=0, map_to_cpu=False, uncached=False):
-    size = round_up(size, align:=(4 << 10))
-    flags |= ((align << kgsl.KGSL_MEMALIGN_SHIFT) & kgsl.KGSL_MEMALIGN_MASK)
+    size = round_up(size, 2 << (alignment_hint:=11))
+    flags |= ((alignment_hint << kgsl.KGSL_MEMALIGN_SHIFT) & kgsl.KGSL_MEMALIGN_MASK)
     if uncached: flags |= ((kgsl.KGSL_CACHEMODE_UNCACHED << kgsl.KGSL_CACHEMODE_SHIFT) & kgsl.KGSL_CACHEMODE_MASK)
 
     alloc = kgsl.struct_kgsl_gpuobj_alloc(size=size, flags=flags)
@@ -86,16 +85,15 @@ class QcomAllocator(HCQAllocator):
   def __init__(self, device:QcomDevice): super().__init__(device)
 
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
-    # TODO(vpachkov): host?
     return self.device._gpu_alloc(size, map_to_cpu=True)
   
   def copyin(self, dest:HCQBuffer, src:memoryview): 
     ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
   def copyout(self, dest:memoryview, src:HCQBuffer):
+    self.device.synchronize()
     ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
   
   def _free(self, opaque, options:BufferOptions):
-    # TODO(vpachkov): host?
     return self.device._gpu_free(opaque)
 
 class QcomComputeQueue(HWComputeQueue):
@@ -103,23 +101,20 @@ class QcomComputeQueue(HWComputeQueue):
     self.q = []
     super().__init__()
 
-  def push(self, opcode=None, reg=None, vals = []):
-    if opcode: self.q += [pkt7_hdr(opcode, len(vals)), *vals]
-    if reg: self.q += [pkt4_hdr(reg, len(vals)), *vals]
-
   def cmd(self, opcode: int, *vals: int): self.q += [pkt7_hdr(opcode, len(vals)), *vals]
 
   def reg(self, reg: int, *vals: int): self.q += [pkt4_hdr(reg, len(vals)), *vals]
 
   def _signal(self, signal, value=0):
-    self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_FLUSH_TS | (adreno.EV_WRITE_USER_64B << adreno.CP_EVENT_WRITE7_0_WRITE_SRC__SHIFT), *data64_le(mv_address(signal._signal)), *data64_le(value)])
-    self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_INVALIDATE])
+    self.cmd(adreno.CP_EVENT_WRITE7, adreno.CACHE_FLUSH_TS | (adreno.EV_WRITE_USER_64B << adreno.CP_EVENT_WRITE7_0_WRITE_SRC__SHIFT),
+             *data64_le(mv_address(signal._signal)), *data64_le(value))
+    self.cmd(adreno.CP_EVENT_WRITE7, adreno.CACHE_INVALIDATE)
 
   def _timestamp(self, signal):
     # doesnt really work right now
     pass
-    self.push(opcode=adreno.CP_REG_TO_MEM, vals=[0x40000980,  *data64_le(mv_address(signal._signal))])
-    self.push(opcode=adreno.CP_EVENT_WRITE7, vals=[adreno.CACHE_INVALIDATE])
+    self.cmd(adreno.CP_REG_TO_MEM, 0x40000980,  *data64_le(mv_address(signal._signal)))
+    self.cmd(adreno.CP_EVENT_WRITE7, adreno.CACHE_INVALIDATE)
 
   def _wait(self, signal, value=0):
     self.cmd(adreno.CP_WAIT_REG_MEM, adreno.WRITE_GE | (adreno.POLL_MEMORY << adreno.CP_WAIT_REG_MEM_0_POLL__SHIFT),
@@ -141,29 +136,15 @@ class QcomComputeQueue(HWComputeQueue):
     submit_req.cmdlist = ctypes.addressof(obj)
     submit_req.cmdsize = ctypes.sizeof(kgsl.struct_kgsl_command_object)
     submit_req.numcmds = 1
-    #TODO: not recreating context sometimes results to EDEADLK
     submit_req.context_id = device._ctx()
 
     device._ioctl(0x4A, submit_req)
     self.q = []
-
-  def _memory_barrier(self): pass
   
   def _exec(self, prg, kernargs, global_size, local_size):
     if local_size is not None: global_size = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
 
-    self.reg(
-      adreno.REG_A6XX_SP_CS_CTRL_REG0,
-      # set max regs 16 for now, todo: optimize this
-      (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT) | (16 << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT) | (16 << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT),
-      0x41, 0, 0, # offsets
-      *data64_le(prg.lib_gpu.va_addr), 0, *data64_le(prg.private_gpu.va_addr), prg.private_gpu.size,
-    )
-
-    self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.lib_gpu.size // 4)
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0xf60000, *data64_le(prg.lib_gpu.va_addr))
-
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0x40364000, *data64_le(kernargs))
+    self.cmd(adreno.CP_WAIT_FOR_IDLE)
     self.cmd(adreno.CP_SET_MARKER, adreno.RM6_COMPUTE)
     self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc)
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x60)
@@ -175,18 +156,31 @@ class QcomComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, adreno.ISAMMODE_CL | (1 << 3)) # ISAMMODE|UNK3
     self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
     self.reg(adreno.REG_A6XX_UCHE_UNKNOWN_0E12, 0x10000000)
-    self.reg(adreno.REG_A6XX_HLSQ_CS_CNTL, 0x140)
-    self.reg(adreno.REG_A6XX_SP_CS_CONFIG, 0x100)
-    self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, 0)
-
+    self.reg(adreno.REG_A6XX_HLSQ_CS_CNTL, 0x140) # TODO: adjust const count
     self.reg(
       adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
         # kernel dimenstion = 3
-        3 | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT) | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT) | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT),
+        3 | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT)
+        | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT)
+        | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT),
         global_size[0], 0, global_size[1], 0, global_size[2], 0, # global size x,y,z followed by offsets
         0xccc0cf, 0x2fc,
         1,1,1, # HLSQ_CS_KERNEL_GROUP_[X,Y,Z] seems always ones
     )
+    self.reg(adreno.REG_A6XX_SP_CHICKEN_BITS, 0x20)
+    self.reg(
+      adreno.REG_A6XX_SP_CS_CTRL_REG0,
+      (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT)
+      # set max regs 16 for now, todo: optimize this
+      | (16 << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT) | (16 << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT),
+      0x41, 0, 0, # offsets
+      *data64_le(prg.lib_gpu.va_addr), 0, *data64_le(prg.private_gpu.va_addr), prg.private_gpu.size,
+    )
+    self.reg(adreno.REG_A6XX_SP_CS_CONFIG, 0x100)
+    self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, 0)
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0x40364000, *data64_le(kernargs))
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0xf60000, *data64_le(prg.lib_gpu.va_addr))
+    self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.lib_gpu.size // 4)
 
     self.cmd(adreno.CP_RUN_OPENCL, 0)
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
@@ -211,23 +205,6 @@ class QcomProgram(HCQProgram):
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     if len(bufs): to_mv(kernargs_ptr + self.kernargs_args_offset, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
-    
-  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    kernargs_ptr = self.fill_kernargs(args, vals)
-
-    q = QcomComputeQueue()
-
-    q.reg(
-      adreno.REG_A6XX_SP_CS_CTRL_REG0,
-      # set max regs 16 for now, todo: optimize this
-      (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT) | (16 << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT) | (16 << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT),
-      0x41, 0, 0, # offsets
-      data64_le(self.lib_gpu.va_addr), data64_le(self.private_gpu.va_addr),
-    )
-
-    q.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, self.lib_gpu.size // 4)
-    q.cmd(adreno.CP_LOAD_STATE6_FRAG, 0xf60000, data64_le(self.lib_gpu.va_addr))
-    q.exec(self, kernargs_ptr, global_size, local_size)
 
 
 if __name__ == '__main__':
