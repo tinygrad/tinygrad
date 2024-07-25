@@ -198,8 +198,8 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
   for tr_next in children[tr]:
     # max one reduceop per kernel
     # can only fuse contiguous
-    if tr_next.op in ReduceOps or len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1:
-      group[tr_next] = False
+    if tr_next.op in ReduceOps or len(st_childs:=dedup(s for s in tr_next.srcs if s.base is tr)) > 1:
+      group[r] = False
       return
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
