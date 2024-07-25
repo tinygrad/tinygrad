@@ -35,6 +35,8 @@ def fully_flatten(l): return [item for sublist in l for item in (fully_flatten(s
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def round_up(num, amt:int): return (num+amt-1)//amt * amt
+def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
+def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"  # noqa: E501
   return {k:v for d in ds for k,v in d.items()}
@@ -105,9 +107,9 @@ class ContextVar:
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
 WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
-MULTIOUTPUT, PROFILE, TRANSCENDENTAL = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("TRANSCENDENTAL", 1)
-USE_TC, TC_OPT = ContextVar("TC", 1), ContextVar("TC_OPT", 0)
-FUSE_AS_ONE_KERNEL = ContextVar("FUSE_AS_ONE_KERNEL", 0)
+MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
+USE_TC, TC_OPT, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("TRANSCENDENTAL", 1)
+FUSE_AS_ONE_KERNEL, FUSE_CONV_BW = ContextVar("FUSE_AS_ONE_KERNEL", 0), ContextVar("FUSE_CONV_BW", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -163,7 +165,6 @@ class ProfileLogger:
   mjson: List[Dict] = []
   actors: Dict[str, int] = {}
   subactors: Dict[Tuple[str, str], int] = {}
-  path = getenv("PROFILE_OUTPUT_FILE", temp("tinygrad_profile.json"))
 
   def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
 
@@ -183,8 +184,8 @@ class ProfileLogger:
 
     ProfileLogger.writers -= 1
     if ProfileLogger.writers == 0 and len(self.mjson) > 0:
-      with open(self.path, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
-      print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/ to open it.")
+      with open(PROFILEPATH.value, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
+      print(f"Saved profile to {PROFILEPATH.value}. Use https://ui.perfetto.dev/ to open it.")
 
 # *** universal database cache ***
 
@@ -198,7 +199,7 @@ def db_connection():
   global _db_connection
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
-    _db_connection = sqlite3.connect(CACHEDB, timeout=30)
+    _db_connection = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
     _db_connection.execute("PRAGMA journal_mode=WAL")
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
@@ -322,3 +323,13 @@ class tqdm:
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+
+def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
+  def dfs(x:Any, cache:dict):
+    for s in srcfn(x) or []:
+      cache.setdefault(s, [len(cache), 0, False])[1] += 1
+      if cache[s][1] == 1: dfs(s, cache)
+  if cache is None: dfs(x, cache:={})
+  if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
+  cx[2], srcs = True, ('None' if srcfn(x) is None else''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
+  return f"{' '*d} {f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs

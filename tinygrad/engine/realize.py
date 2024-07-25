@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast, Generator, Tuple
 import time, pprint
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context
+from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA
 from tinygrad.ops import MetaOps, LazyOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
@@ -15,24 +15,23 @@ from tinygrad.engine.schedule import ScheduleItem
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
   if DEBUG >= 5:
-    from tinygrad.engine.graph import print_tree
-    print_tree(ast)
-  k = Kernel(ast, opts=renderer)
-  k.required_optimizations()
+    print(ast)
+  k = Kernel(ast, opts=renderer).required_optimizations()
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
-      kb, k_opt = Kernel(ast, opts=renderer), k
-      kb.required_optimizations()
+      kb, k_opt = Kernel(ast, opts=renderer).required_optimizations(), k
       rawbufs = bufs_from_lin(kb, allocate=False)
-      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+      if BEAM.value >= 100:
+        from extra.mcts_search import mcts_search
+        k = mcts_search(kb, rawbufs, BEAM.value)
+      else:
+        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
       if beam_compare:=getenv("BEAM_COMPARE", 1):
         # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
         lins: List[Tuple[str, Kernel]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
-        if used_tensor_cores:
-          lins.append(("hc", Kernel(ast, opts=renderer)))
-          lins[-1][1].hand_coded_optimizations()
+        if used_tensor_cores: lins.append(("hc", Kernel(ast, opts=renderer).hand_coded_optimizations()))
         timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
@@ -66,8 +65,9 @@ def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
 # **************** Runners ****************
 
 class Runner:
-  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
-    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
+  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0, lds_estimate:sint=0):
+    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate, self.lds_estimate = \
+      True, display_name, dname, op_estimate, mem_estimate, lds_estimate
   @property
   def device(self): return Device[self.dname]
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
@@ -81,7 +81,7 @@ class CompiledRunner(Runner):
     self.p:Program = p
     self.lib:bytes = precompiled if precompiled is not None else Device[p.dname].compiler.compile_cached(p.src)
     self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
-    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate)
+    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate, p.lds_estimate)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
@@ -176,20 +176,21 @@ class ExecItem:
     et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += (op_estimate:=sym_infer(self.prg.op_estimate, var_vals))
-      GlobalCounters.global_mem += (mem_estimate:=sym_infer(self.prg.mem_estimate, var_vals))
+      GlobalCounters.global_ops += (op_est:=sym_infer(self.prg.op_estimate, var_vals))
+      GlobalCounters.global_mem += (mem_est:=sym_infer(self.prg.mem_estimate, var_vals))
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
+        lds_est = sym_infer(self.prg.lds_estimate, var_vals)
         ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
-        print(f"{colored(f'*** {self.prg.dname[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(38-ansilen(self.prg.display_name))} arg {len(self.bufs):3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
-              (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)" +  # noqa: E501
-               f" {[repr(m) if DEBUG >= 3 else str(m) for m in self.metadata] if self.metadata else ''}"))
+        print(f"{colored(f'*** {self.prg.dname[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(38-ansilen(self.prg.display_name))} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
+              (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_est/((et or 1e-20)*1e9):9.2f} GFLOPS {mem_est/((et or 1e-20)*1e9):6.1f}|{lds_est/((et or 1e-20)*1e9):<7.1f} GB/s)" +  # noqa: E501
+               f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}"))
       self.prg.first_run = False
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is MetaOps.COPY or getenv("USE_COPY_KERNEL")
-  if si.ast.op is MetaOps.SINK:
+  if si.ast.op is MetaOps.KERNEL:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals], si.metadata)
   out = si.outputs[0]

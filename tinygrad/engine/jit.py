@@ -75,15 +75,18 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     self.jc_idx_with_updatable_var_vals = []
     op_estimate: sint = 0
     mem_estimate: sint = 0
+    lds_estimate: sint = 0
     for j,ji in enumerate(jit_cache):
       op_estimate += ji.prg.op_estimate
       mem_estimate += ji.prg.mem_estimate
+      lds_estimate += ji.prg.lds_estimate
       if isinstance(ji.prg, CompiledRunner):
         if ji.prg.p.vars: self.jc_idx_with_updatable_var_vals.append(j)
         if (ji.prg.p.global_size and not all_int(ji.prg.p.global_size)) or (ji.prg.p.local_size and not all_int(ji.prg.p.local_size)):
           self.jc_idx_with_updatable_launch_dims.append(j)
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
-    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
+    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
+                     op_estimate, mem_estimate, lds_estimate)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
