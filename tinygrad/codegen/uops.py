@@ -102,9 +102,9 @@ class UOp:
       if self.arg is BinaryOps.MUL: return any(x.divides(v) for x in self.src)
     return False # generic false if we aren't sure
   @functools.cached_property
-  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None else self.const(dtypes.min(cast(DType, self.dtype)))
+  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None else self.const(dtypes.min(cast(DType, self.dtype))).vmin
   @functools.cached_property
-  def vmax(self) -> UOp: return x if (x:=self._min_max[1]) is not None else self.const(dtypes.max(cast(DType, self.dtype)))
+  def vmax(self) -> UOp: return x if (x:=self._min_max[1]) is not None else self.const(dtypes.max(cast(DType, self.dtype))).vmax
   @functools.cached_property
   def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
     # NOTE: returned UOp is assumed to be CONST
@@ -112,6 +112,8 @@ class UOp:
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
     if self.op is UOps.CONST: return self, self
+    if self.op is UOps.VECTORIZE and all(x.op == UOps.CONST for x in self.src):
+      return min(self.src, key=lambda x: x.arg), max(self.src, key=lambda x: x.arg)
     if self.op is UOps.ALU:
       if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(cast(DType, self.dtype)):
         return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
