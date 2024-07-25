@@ -253,7 +253,6 @@ class TestSymbolic(unittest.TestCase):
   def test_distribute_mul(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, {"((a*3)+(b*3))", "((a+b)*3)"})
 
-  @unittest.expectedFailure
   def test_mod_mul_sum(self):
     self.helper_test_variable(Node.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, "(a+b)")
 
