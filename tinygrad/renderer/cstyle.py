@@ -163,7 +163,8 @@ class CStyleLanguage(Renderer):
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
           else:
             notfin = all(x.op == UOps.CONST and not math.isfinite(x.arg) for x in src)
-            val = self.render_vectorize([strip_parens(r[x]) if notfin else r[x] for x in src], dtype)
+            h4z = dtype == dtypes.half.vec(4) and all(x.op == UOps.CONST and x.arg == 0.0 for x in src)
+            val = self.render_vectorize([strip_parens(r[x]) if notfin else f"{x.arg}" if h4z else r[x] for x in src], dtype)
           if uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src):
             r[u] = f"({val})" if all(math.isnan(x.arg) or (math.isinf(x.arg) and x.arg < 0) for x in src) else val
           elif child_count[u] <= 1: r[u] = val
