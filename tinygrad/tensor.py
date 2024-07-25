@@ -238,10 +238,10 @@ class Tensor:
     """
     return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
-  def _data(self) -> memoryview:
+  def _data(self, to_clang=True) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
     # NOTE: this realizes on the object from as_buffer being a Python object
-    cpu = self.cast(self.dtype.scalar()).contiguous().to("CLANG").realize()
+    cpu = self.cast(self.dtype.scalar()).contiguous().to("CLANG").realize() if to_clang else self.cast(self.dtype.scalar()).contiguous().realize()
     buf = cast(Buffer, cast(LazyBuffer, cpu.lazydata).base.realized)
     if self.device != "CLANG": buf.options = BufferOptions(nolru=True)
     return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
@@ -285,7 +285,7 @@ class Tensor:
     """
     return self.data().tolist()
 
-  def numpy(self) -> np.ndarray:
+  def numpy(self, to_clang=True) -> np.ndarray:
     """
     Returns the value of this tensor as a `numpy.ndarray`.
 
@@ -297,7 +297,7 @@ class Tensor:
     if self.dtype == dtypes.bfloat16: return self.float().numpy()
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
+    return np.frombuffer(self._data(to_clang), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
 
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     """

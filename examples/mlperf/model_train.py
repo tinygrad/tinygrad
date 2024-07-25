@@ -599,7 +599,7 @@ def train_retinanet():
         except StopIteration: next_proc = None
         nt = time.perf_counter()
 
-        out = out.numpy()
+        out = out.numpy(False)
         npt = time.perf_counter()
         
         predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
