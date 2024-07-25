@@ -218,8 +218,9 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
     if not first and (buf in realizes or buf is r): return set((buf,))
     return set.union(set(), *iter(_get_recursive_parents(x.base, False) for x in buf.srcs))
   if not is_complete:
-    return {}
-    #return {tr:None for tr in group if tr is not r and len(_get_recursive_parents(tr)) == 1}
+    new_group = {tr:None for tr in group if tr is not r and len(_get_recursive_parents(tr)) == 1}
+    if new_group: realizes[r] = None
+    return new_group
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[LazyBuffer, None] = {}
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
