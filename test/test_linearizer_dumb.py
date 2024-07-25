@@ -4,6 +4,7 @@
 
 import unittest
 from tinygrad import Device, dtypes
+from tinygrad.codegen.uops import UOps
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps # noqa: F401 # pylint: disable=unused-import
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
@@ -26,6 +27,34 @@ class TestLinearizerDumb(unittest.TestCase):
           LazyOp(BufferOps.CONST, arg=ConstBuffer(val=0.0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),))
     opts = [Opt(op=OptOps.TC, axis=2, amt=2), Opt(op=OptOps.UPCAST, axis=2, amt=0), Opt(op=OptOps.UNROLL, axis=1, amt=0)]
     k = Kernel(ast, opts=Device["METAL"].renderer)
+    k.required_optimizations()
+    for opt in opts: k.apply_opt(opt)
+    prg = k.to_program()
+    k.uops.print()
+    print(prg.src)
+    Device[Device.DEFAULT].compiler.compile_cached(prg.src)
+    with self.assertRaises(AssertionError):
+      gate_count = len([x for x in prg.src.splitlines() if "if" in x])
+      assert gate_count == 1, f"must have only one gate {gate_count} != 1"
+      assert len([u for u in k.uops if u.op is UOps.IF]) == 1, "must have a single IF"
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
+  def test_max_simplify_and_cancel(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(BinaryOps.MUL, arg=None, src=(
+          LazyOp(UnaryOps.CAST, arg=dtypes.int, src=(
+            LazyOp(BinaryOps.CMPNE, arg=None, src=(
+              LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=()),
+                LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+              LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(1000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
+          LazyOp(BinaryOps.ADD, arg=None, src=(
+            LazyOp(ReduceOps.SUM, arg=(1,), src=(
+              LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1001, 1999), strides=(0, 0), offset=0, mask=((0, 1001), (999, 1999)), contiguous=False), View(shape=(1000, 1000), strides=(1, 2000), offset=0, mask=None, contiguous=False)))), src=()),)),
+            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1000, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),))
+    opts = [Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8)]
+    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
