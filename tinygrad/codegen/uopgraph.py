@@ -19,7 +19,7 @@ def image_contract_load(buf, idx, idy, id4, ls_allow_any_len):
     extra = (ls_allow_any_len.src[2], UOp(UOps.VECTORIZE, ls_allow_any_len.dtype.vec(4), (ls_allow_any_len.src[3],)*4))
   else: extra = ls_allow_any_len.src[2:]  # NOTE: image load shouldn't have barrier and this shouldn't matter
   vec_load = UOp(UOps.LOAD, ls_allow_any_len.dtype.vec(4), (buf, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx, idy))) + extra)
-  return functools.reduce(lambda ret, i: UOp.alu(TernaryOps.WHERE, id4.ne(i), ret, UOp(UOps.GEP, ls_allow_any_len.dtype, (vec_load,), i)), range(4),
+  return functools.reduce(lambda ret, i: id4.ne(i).alu(TernaryOps.WHERE, ret, UOp(UOps.GEP, ls_allow_any_len.dtype, (vec_load,), i)), range(4),
                           ls_allow_any_len.const(float('nan')))
 
 def image_contract_store(buf, ex, idx, idy, ls_allow_any_len, var):
@@ -131,7 +131,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
     return None
   if idx2 is not None: idx = idx + idx2
   if idx3 is not None: idx = idx + idx3
-  comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
+  comprange = UOp.min(loop_end, UOp.max((idx-compval-mval).alu(BinaryOps.IDIV, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.REDUCE, reduce_allow_any_len.dtype, (comprange.cast(multconst.dtype) * multconst,) +
              tuple(x for x in reduce_allow_any_len.src[1:] if x is not rng), reduce_allow_any_len.arg)
 
@@ -336,6 +336,7 @@ def do_expand(root:UOp):
     if len(expands) == 0: return None
     expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
     if root.op is UOps.WMMA:
+      # both the reduce and upcast args are not expanded here
       dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1] or x[0] in [y[0] for y in flatten(root.arg[-2])])
       expand_args = tuple(x for x in expand_args if x not in dont_expand_args)
     else:
@@ -346,17 +347,14 @@ def do_expand(root:UOp):
     new_src: List[UOp] = []
     for src in root.src:
       if src.op is UOps.EXPAND:
-        lnew_src = [src.src[_expand_arg_to_idx(src.arg, {**rpk, **lrpk})] for lrpk in lrpks]
-        if len(dont_expand_args):
-          # TODO: is this right for UOps.WMMA? all lnew_src should be the same
-          new_src.append(lnew_src[0] if root.op is UOps.WMMA else UOp(UOps.EXPAND, root.dtype, tuple(lnew_src), dont_expand_args))
-        else:
-          assert len(lnew_src) == 1
-          new_src.append(lnew_src[0])
+        lnew_src = tuple(src.src[_expand_arg_to_idx(src.arg, {**rpk, **lrpk})] for lrpk in lrpks)
+        # TODO: is this right for UOps.WMMA? when there's more than one, all lnew_src should be the same
+        new_src.append(lnew_src[0] if len(lnew_src) == 1 or root.op is UOps.WMMA else UOp(UOps.EXPAND, root.dtype, lnew_src, dont_expand_args))
       else:
         new_src.append(src)
     new_srcs.append(UOp(root.op, root.dtype, tuple(new_src), root.arg))
   if root.op is UOps.EXPAND:
+    # merge two expands
     expand_args, old_args = tuple(sorted(root.arg+expand_args)), expand_args
     assert len(expand_args) == (len(old_args) + len(root.arg))
     new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _choices_from_args(expand_args)]
@@ -377,9 +375,9 @@ def do_reduce_with_expand(root):
     assert root.src[0].op is UOps.EXPAND
     expand_reduce_args = dedup(flatten([x.arg for x in expands_reduce]))
     assert prod([y[1] for y in expand_reduce_args]) == len(root.src[0].src)
-    ret = functools.reduce(lambda x,y: UOp.alu(alu_op, x, y), (ret,)+root.src[0].src)
+    ret = functools.reduce(lambda x,y: x.alu(alu_op, y), (ret,)+root.src[0].src)
   else:
-    ret = UOp.alu(alu_op, ret, root.src[0])
+    ret = ret.alu(alu_op, root.src[0])
   ret = UOp(UOps.PHI, ret.dtype, (acc, ret))
   if len(expands_non_reduce): ret = ret * prod([sz for _,sz in flatten([x.arg for x in expands_non_reduce])])
   return ret
@@ -391,15 +389,13 @@ def do_contract(con:UOp):
   if ex.op is not UOps.EXPAND or not all(x in ex.arg for x in con.arg):
     assert ex.op is not UOps.EXPAND or not any(x in ex.arg for x in con.arg), "partial contract not supported"
     return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
-  # simple CONTRACT and EXPAND cancel out
-  if ex.arg == con.arg: return UOp(UOps.VECTORIZE, con.dtype, ex.src)
-  # complex CONTRACT may remove several axes from EXPAND
+  # CONTRACT may remove several axes from EXPAND
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   srcs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
     lsrcs = [ex.src[_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})] for lrpk in _choices_from_args(con.arg)]
     srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(lsrcs)))
-  return UOp(UOps.EXPAND, con.dtype, tuple(srcs), new_ex_args)
+  return srcs[0] if len(srcs) == 1 else UOp(UOps.EXPAND, con.dtype, tuple(srcs), new_ex_args)
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
@@ -421,7 +417,7 @@ expander = PatternMatcher([
   # empty EXPAND is NOOP
   (UOp(UOps.EXPAND, src=(UOp.var('x'),), arg=()), lambda x: x),
   # no ALU on vectorized dtypes
-  (UPat({UOps.ALU, UOps.CAST}, name="alu"), no_vectorized_alu),
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
 ])
 
 # *** uop graph ***
