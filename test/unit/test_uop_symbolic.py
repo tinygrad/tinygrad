@@ -97,8 +97,8 @@ class TestSymbolic(unittest.TestCase):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
     self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
 
-  #def test_div_becomes_num(self):
-  #  assert isinstance(Variable("a", 2, 3)//2, NumNode)
+  def test_div_reduction(self):
+   self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
   #def test_var_becomes_num(self):
   #  assert isinstance(Variable("a", 2, 2), NumNode)
