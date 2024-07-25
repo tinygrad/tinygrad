@@ -431,14 +431,11 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=self.first_reduce)
       self.local_dims += 1
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
-      # print(f"applying group: axis={axis}, amt={amt}, insert_before={self.first_reduce + self.group_for_reduces}")
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       # check(len(self.reduceops) == 1, "can't group with multiple reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
-      print("sts after shift_to:")
-      for st in self.sts: print("  ", st)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.shape_len-self.upcasted, "can't upcasted already upcasted")

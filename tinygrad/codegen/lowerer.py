@@ -166,17 +166,8 @@ class IndependentLowerer:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         load_back = len(x.src) == 1 and x.src[0].op is BufferOps.STORE and x.src[0].src[0].op in ReduceOps and all(i-self.first_reduce < self.group_for_reduces for i in x.src[0].src[0].arg) and x is not self.reduceops[-1].src[0]
         zero = UOp(op=UOps.CONST, dtype=dtypes.bigint, src=(), arg=0)
-        print("load_back=",load_back)
         if load_back:
-          # print("  with len(arg)=",len((buf, zero) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)),) + barrier))
-          # print("  ", (buf, zero))
-          # print("  ", (valid, UOp.const(x.arg.dtype.scalar(), 0)))
-          # print("  ", barrier)
-          print("loading (load_back): ", zero)
-          print("  st=",x.arg.st)
           return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, zero) + (valid, UOp.const(x.arg.dtype.scalar(), 0)) + barrier)
-        print("loading: ", idx)
-        print("  st=",x.arg.st)
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread
       store_back = x.src[0].op in ReduceOps and len(x.src[0].arg) > 0 and all(i-self.first_reduce < self.group_for_reduces for i in x.src[0].arg) and x.src[0] is not self.reduceops[-1]
@@ -200,8 +191,6 @@ class IndependentLowerer:
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axis[2])
       # NOTE: always using ridxs is fine here
-      print("rendering reduce with x.arg=",x.arg)
-      print("  -> ", tuple(self.ridxs[i] for i in x.arg))
       return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
     return UOp.alu(x.op, *in_uops)
 

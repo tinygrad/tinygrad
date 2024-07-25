@@ -361,7 +361,6 @@ def do_expand(root:UOp):
 acc_number = 0
 def do_reduce_with_expand(root):
   global acc_number
-  print("do_reduce_with_expand")
   expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
   expands_reduce = [x for x in expands if root.src[0].op is UOps.EXPAND and all(y in root.src[0].arg for y in x.arg)]
   expands_non_reduce = [x for x in expands if x not in expands_reduce]
@@ -481,25 +480,14 @@ class UOpGraph:
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
-    print(self.sink)
-
     # replace UOps.STORE gate with an IF block
     @functools.lru_cache(None)
     def _replace_gates(u:UOp, gate:Optional[UOp]=None) -> UOp:
-      if u.op is UOps.STORE: print("store, len(u.src)=",len(u.src))
-      if u.op is UOps.STORE and len(u.src) >= 4:
-        print("setting gate")
-        gate = u.src[3]
+      if u.op is UOps.STORE and len(u.src) >= 4: gate = u.src[3]
       addif = u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER
-      if u.op is UOps.LOAD: 
-        print("addif=",addif)
-        print("u.op is UOps.LOAD!")
-        if u.src[-1].op is UOps.BARRIER: print("  u.src[-1].op is UOps.BARRIER")
       if (replace_source:=tuple(_replace_gates(x, None if addif else gate) for x in u.src)) != u.src:
         u = UOp(u.op, u.dtype, replace_source, u.arg)
-      if addif and gate is None: print("addif but gate is None!")
       if addif and gate is not None:
-        print("addif!")
         return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
       return u
     sink_srcs = list(self.sink.src)
@@ -514,10 +502,7 @@ class UOpGraph:
     # expand
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
-      print('rewriting expander')
       sink = graph_rewrite(sink, expander+self.folder)
-
-    print(sink)
 
     # for PTX only
     
@@ -537,23 +522,6 @@ class UOpGraph:
     # scope children impact the toposort and END* insertion
     scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
     range_phi = {r:tuple(sorted([p for p in scope_children[r] if p.op is UOps.PHI])) for r in scope_children if r.op is UOps.RANGE}
-
-    # print("scopes:")
-    # for s in scope_children:
-    #   print("  ", s.op, s.arg)
-    #   for ss in scope_children[s]: print("    ", ss.op, [(sss.op, sss.arg) for sss in ss.src], ss.arg)
-
-    def print_children(u, end, tab):
-      if len([s for s in get_recursive_children(u, end, False) if s.op is UOps.PHI]) > 1:
-        print(tab, u.op, [(s.op, s.arg) for s in u.src], u.arg)
-        for s in get_recursive_children(u, end, False): print(tab + "-> ", s.op, s.arg)
-        if u.op is end: return
-        for s in children[u]: print_children(s, end, tab + "  ")
-
-    print("scope_children")
-    for s in scope_children:
-      if len([p for p in scope_children[s] if p.op is UOps.PHI]) > 1: print_children(s, END_FOR_UOP[s.op][0], "")
-        
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
@@ -619,9 +587,6 @@ class UOpGraph:
 
     # strip the SINK
     self._uops = self._uops[:-1]
-
-    for i,u in enumerate(self._uops):
-      print(f"{i}  : {u.op} {[self._uops.index(s) for s in u.src]} {u.arg}")
 
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import fuzz_uops
