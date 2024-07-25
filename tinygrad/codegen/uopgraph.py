@@ -404,9 +404,40 @@ def no_vectorized_alu(alu):
                    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
+def late_fixup_expand(ex, buf):
+  root_src = None
+  offsets = []
+  new_srcs = list(ex.src)
+  for s in ex.src:
+    if len(s.src) > 2: return None
+    idx = s.src[1]
+    if idx.arg is BinaryOps.ADD and idx.src[0].op is UOps.CONST:
+      if root_src is None: root_src = idx.src[1]
+      elif root_src != idx.src[1]: return None
+      offsets.append(idx.src[0].arg)
+    elif idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST:
+      if root_src is None: root_src = idx.src[0]
+      elif root_src != idx.src[0]: return None
+      offsets.append(idx.src[1].arg)
+    else:
+      if root_src is None: root_src = idx
+      elif root_src != idx: return None
+      offsets.append(0)
+  for o in offsets:
+    if o+1 in offsets:
+      load_1 = new_srcs[load_1_idx:=offsets.index(o)]
+      load_2_idx = offsets.index(o+1)
+      if load_1.dtype.count != 1: return None
+      new_load = UOp(load_1.op, load_1.dtype.vec(2), load_1.src, load_1.arg)
+      new_srcs[load_1_idx] = UOp(UOps.GEP, load_1.dtype, (new_load,), 0)
+      new_srcs[load_2_idx] = UOp(UOps.GEP, load_1.dtype, (new_load,), 1)
+  if ex.src == tuple(new_srcs): return None
+  return UOp(ex.op, ex.dtype, tuple(new_srcs), ex.arg)
+
 expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
+  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat())), name="ex"), late_fixup_expand),
   (UOp(UOps.REDUCE).name("root"), do_reduce_with_expand),
   (UOp(UOps.CONTRACT).name("con"), do_contract),
   # remove EXPANDs from SINK
