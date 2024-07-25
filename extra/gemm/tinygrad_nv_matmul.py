@@ -5,7 +5,7 @@ from tinygrad.engine.realize import CompiledRunner, ExecItem
 N = 4096
 if __name__ == "__main__":
   A, B = Tensor.empty(N, N, dtype=dtypes.float16), Tensor.empty(N, N, dtype=dtypes.float16)
-  C = A.matmul(B, acc_dtype=dtypes.float32)
+  C = A.matmul(B)
   si = C.schedule()[-1]
   ast = si.ast
   k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
