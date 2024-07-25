@@ -223,7 +223,8 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[LazyBuffer, bool] = {}
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
-  return merge_dicts([group, {tr:None for tr,can_group in descendants.items() if can_group}])
+  descendants_to_group = {tr:None for tr,can_group in descendants.items() if can_group}
+  return merge_dicts([group, descendants_to_group if len(descendants_to_group) == len(descendants) else {}])
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
@@ -250,7 +251,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     _recursive_group(r, r.st, r, children, realizes, reduce_for_op, reduceop_children, cache=set())
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in reduceop_children)
-    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
+    # TODO: forced_realize is poorly named now
     forced_realize = any(not can_group for can_group in reduceop_children.values())
     if len(group:={tr:None for tr,can_group in reduceop_children.items() if can_group}) > 1 or forced_realize:
       group = _get_isolated_children(r, reduce_for_op, children, realizes, group, forced_realize)

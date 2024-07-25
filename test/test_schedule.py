@@ -1140,7 +1140,7 @@ class TestSchedule(unittest.TestCase):
     e = c * d
     f = (b - d).sum() - e
     # run_schedule(check_schedule([c, d, e, f], 1))
-    run_schedule(check_schedule([c, d, e, f], 2))
+    run_schedule(check_schedule([c, d, e, f], 3))
     np.testing.assert_allclose(c.numpy(), c_np:=a.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(d.numpy(), d_np:=a.numpy().sum()*2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), e_np:=c_np*d_np, atol=1e-4, rtol=1e-4)
