@@ -204,13 +204,14 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
 
 def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],\
     realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None]) -> Dict[LazyBuffer, None]:
-  rc_parents, cache = deque(group), set()
-  while rc_parents:
+  rc_parents, cache, is_complete = deque(group), set(), True
+  while rc_parents and is_complete:
     if (p:=rc_parents.pop()) in cache: continue
     cache.add(p)
     # max one reduceop per kernel
-    if p.op in ReduceOps: return {}
+    if p.op in ReduceOps: is_complete = False
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+  if not is_complete: return {}
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[LazyBuffer, None] = {}
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
