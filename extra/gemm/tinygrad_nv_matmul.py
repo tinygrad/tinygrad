@@ -23,7 +23,7 @@ if __name__ == "__main__":
       Opt(op=OptOps.UPCAST, axis=1, amt=8),
       Opt(op=OptOps.LOCAL, axis=0, amt=2),
       Opt(op=OptOps.LOCAL, axis=1, amt=2),
-      Opt(op=OptOps.LOCAL, axis=0, amt=2)
+      Opt(op=OptOps.LOCAL, axis=0, amt=2),
     ]
   for opt in opts: k.apply_opt(opt)
   prg = k.to_program()
