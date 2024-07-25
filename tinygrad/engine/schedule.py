@@ -219,7 +219,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
   if not is_complete:
     group = {tr:None for tr in group if tr is not r and len(_get_inputs(tr, r, realizes, {})) == 1}
-    # if it can only group some children, we have to realize the reduceop
+    # if only some children can group, we have to realize the reduceop
     if group: realizes[r] = None
     return group
   # search descendants of the reduceop that can cleanly group
