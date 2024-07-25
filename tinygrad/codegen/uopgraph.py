@@ -157,8 +157,10 @@ constant_folder = PatternMatcher([
   *[(UOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(UOp(UOps.GEP, dtypes.float,
                          src=(UOp.var('x', dtype=dtypes.float.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8]],
   # tensor core with a 0 input is acc
-  (UOp(UOps.WMMA, src=(UOp.const(None, 0.0), UOp.var(), UOp.var('acc'))), lambda acc: acc),
-  (UOp(UOps.WMMA, src=(UOp.var(), UOp.const(None, 0.0), UOp.var('acc'))), lambda acc: acc),
+  *[(UOp(UOps.WMMA, src=(UOp(UOps.VECTORIZE, src=tuple(UOp.const(None, 0.0) for _ in range(i))), UOp.var(), UOp.var('acc'))),
+     lambda acc: acc) for i in [2, 4, 8]],
+  *[(UOp(UOps.WMMA, src=(UOp.var(), UOp(UOps.VECTORIZE, src=tuple(UOp.const(None, 0.0) for _ in range(i))), UOp.var('acc'))),
+     lambda acc: acc) for i in [2, 4, 8]],
   # tensor core cleanups
   *[(UOp(UOps.REDUCE, src=(UOp(UOps.EXPAND, src=tuple(UOp(UOps.GEP, dtypes.float, src=(UOp.var('x'),), arg=i) for i in range(j))).name("expand"),))
     .name("reduce_allow_any_len"), reduce_before_expand) for j in [2,4,8]],
