@@ -4,7 +4,7 @@ import difflib, pickle, multiprocessing, os, logging, sqlite3, requests, io, zip
 from typing import List
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Device
-from tinygrad.helpers import CI, Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
+from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
 from tinygrad.ops import LazyOp
 
 PAGE_SIZE = 100
@@ -14,6 +14,7 @@ TABLE_NAME = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
 REF_TABLE_NAME = f"process_replay_master_{VERSION}"
 ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
 if REF == "master": ASSERT_DIFF = False
+COMPARE_SCHEDULE = getenv("COMPARE_SCHEDULE", int((k:="[compare_schedule]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -41,7 +42,7 @@ def process_replay(offset:int, ref_schedule:List[LazyOp]):
       if ASSERT_DIFF: raise e
       continue
     # try compare
-    if getenv("COMPARE_SCHEDULE") and ast not in ref_schedule:
+    if COMPARE_SCHEDULE and ast not in ref_schedule:
       with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
         print(opts.render(name, Kernel(ast, opts=opts).linearize().uops))
       continue
@@ -76,7 +77,7 @@ if __name__ == "__main__":
     exit(0)
   ref_schedule = multiprocessing.Manager().list()
   # *** download the reference schedule
-  if getenv("COMPARE_SCHEDULE"):
+  if COMPARE_SCHEDULE:
     logging.info("fetching process replay reference")
     # TODO: make this run_id dynamic
     run_id = "10093148840"
