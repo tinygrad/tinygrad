@@ -204,10 +204,9 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
 def _get_inputs(buf:LazyBuffer, r:LazyBuffer, realizes:Dict[LazyBuffer, None], cache, first=True) -> Set[LazyBuffer]:
-  if buf.realized is not None or buf.op is MetaOps.CONST or buf in cache: return set()
-  cache.add(buf)
+  if buf.realized is not None or buf.op is MetaOps.CONST or buf in cache: return cache.get(buf, set())
   if not first and (buf in realizes or buf is r): return set((buf,))
-  return set.union(set(), *iter(_get_inputs(x.base, r, realizes, cache, False) for x in buf.srcs))
+  return cache.setdefault(buf, set.union(set(), *iter(_get_inputs(x.base, r, realizes, cache, False) for x in buf.srcs)))
 
 def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],\
     realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None], forced_realize:bool) -> Dict[LazyBuffer, None]:
