@@ -97,13 +97,13 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
                      op_estimate, mem_estimate, lds_estimate)
 
   def replaced_vars(self, var_vals):
-    res_v = [var_vals[v] for v in self.vars]
+    vals = [var_vals[v] for v in self.vars]
     for j, vidxs in self.var_vals_replace.items():
-      for i, v in enumerate(vidxs): yield j, i, res_v[v]
+      for i, v in enumerate(vidxs): yield j, i, vals[v]
 
   def replaced_launch_dims(self, var_vals):
-    res_v = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
-    for j, (gd, ld) in self.launch_dims_replace.items(): yield j, (res_v[gd] if gd is not None else None), (res_v[ld] if ld is not None else None)
+    dims = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
+    for j, (gl, lc) in self.launch_dims_replace.items(): yield j, (dims[gl] if gl is not None else None), (dims[lc] if lc is not None else None)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
