@@ -300,6 +300,11 @@ return c;}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
+  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+    maxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
+    # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
+    return f"__launch_bounds__({maxThreadsPerBlock}) "
+
 code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
                     UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
                     UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",

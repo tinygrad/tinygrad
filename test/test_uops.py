@@ -364,7 +364,7 @@ class TestUOpStr(TestEqUOps):
     self.assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
-    a = NOp(UOps.CONST, dtypes.float, (), 2.0, varname="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, varname="c1")
+    a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
     assert str(eval(str(a))) == str(a)
 
 if __name__ == '__main__':
