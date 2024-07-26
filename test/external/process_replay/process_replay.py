@@ -19,7 +19,7 @@ SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 
-def process_replay(offset:int, ref_schedule:List[LazyOp]):
+def diff_kernel(offset:int, ref_schedule:List[LazyOp]):
   if early_stop.is_set(): return
   conn = db_connection()
   cur = conn.cursor()
@@ -71,10 +71,7 @@ def get_ref_schedule(offset:int, ref_schedule):
   conn.commit()
   cur.close()
 
-if __name__ == "__main__":
-  if SKIP_PROCESS_REPLAY:
-    logging.info("skipping process replay.")
-    exit(0)
+def process_replay():
   ref_schedule = multiprocessing.Manager().list()
   # *** download the reference schedule
   if COMPARE_SCHEDULE:
@@ -113,6 +110,14 @@ if __name__ == "__main__":
   cur.close()
   processes = []
   for i in tqdm(range(0, row_count, PAGE_SIZE)):
-    processes.append(p:=multiprocessing.Process(target=process_replay, args=(i, ref_schedule)))
+    processes.append(p:=multiprocessing.Process(target=diff_kernel, args=(i, ref_schedule)))
     p.start()
   for p in processes: p.join()
+
+if __name__ == "__main__":
+  if SKIP_PROCESS_REPLAY:
+    logging.info("skipping process replay.")
+    exit(0)
+  try: process_replay()
+  except Exception as e:
+    if ASSERT_DIFF: raise e
