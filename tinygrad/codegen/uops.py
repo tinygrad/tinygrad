@@ -43,7 +43,7 @@ class UOp:
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
-  def __repr__(self): return pretty_print(self, lambda x: f"UOp({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
+  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
   # *** uop syntactic sugar
   def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
@@ -111,11 +111,10 @@ class UOp:
         return self.const(self.src[0].vmin.arg+self.src[1].vmin.arg), self.const(self.src[0].vmax.arg+self.src[1].vmax.arg)
     return None, None
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
   varname:Optional[str] = None
   src:Tuple[NOp, ...] = tuple()
-  def __repr__(self): return pretty_print(self, lambda x: f"NOp({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
   def name(self, name:Optional[str]=None): return NOp(self.op, self.dtype, self.src, self.arg, varname=name)
   @staticmethod
   def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, varname=name)

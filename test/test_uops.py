@@ -9,7 +9,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu # 
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
-from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uops import UOps, NOp, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
 from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
@@ -362,6 +362,10 @@ class TestUOpStr(TestEqUOps):
     # nice big complicated uop
     sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
     self.assert_equiv_uops(sink, eval(str(sink)))
+
+  def test_nop_str(self):
+    a = NOp(UOps.CONST, dtypes.float, (), 2.0, varname="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, varname="c1")
+    assert str(eval(str(a))) == str(a)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
