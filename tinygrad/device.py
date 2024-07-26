@@ -321,14 +321,14 @@ class HWComputeQueue(HWCommandQueue):
     self._exec(prg, kernargs, global_size, local_size)
   def _exec(self, prg, kernargs, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
-  def update_exec(self, cmd_idx:int, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+  def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
     """
     Updates a previously queued execution command.
 
     Args:
       cmd_idx: Index of the execution command to update
-      global_size: New global work size
-      local_size: New local work size
+      global_size: New global work size (if None, keeps the original)
+      local_size: New local work size (if None, keeps the original)
     """
     if self.cmds_meta[cmd_idx] != "exec": raise RuntimeError("called update_exec not on an exec command")
     self._update_exec(cmd_idx, global_size, local_size)

@@ -1,5 +1,6 @@
-import ctypes
+import ctypes, subprocess
 import tinygrad.runtime.autogen.comgr as comgr
+from tinygrad.device import Compiler, CompileError
 
 def check(status):
   if status != 0:
@@ -54,3 +55,16 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
   for x in [data_set_src, data_set_bc, data_set_reloc, data_set_exec]: check(comgr.amd_comgr_destroy_data_set(x))
   check(comgr.amd_comgr_destroy_action_info(action_info))
   return ret
+
+# this should probably be a method on the Compiler
+def disasm(lib):
+  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
+  return '\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x])
+
+class AMDCompiler(Compiler):
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_hip_{self.arch}")
+  def compile(self, src:str) -> bytes:
+    try: return compile_hip(src, self.arch)
+    except RuntimeError as e: raise CompileError(e) from e
