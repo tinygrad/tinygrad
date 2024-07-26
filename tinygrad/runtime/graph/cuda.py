@@ -62,8 +62,9 @@ class CUDAGraph(MultiGraphRunner):
 
     # Update launch dims in the kern_params struct.
     for j, global_dims, local_dims in self.replaced_launch_dims(var_vals):
-      prg = self.jit_cache[j].prg
-      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], global_dims or prg.p.global_size, local_dims or prg.p.local_size)
+      prg = cast(CompiledRunner, self.jit_cache[j].prg)
+      node, local_size, global_size, = self.updatable_nodes[j][1], global_dims or prg.p.global_size, local_dims or prg.p.local_size
+      node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size # type: ignore[misc]
 
     # Update graph nodes with the updated structs.
     for node, c_node_params, c_args, is_copy in self.updatable_nodes.values():
@@ -75,6 +76,3 @@ class CUDAGraph(MultiGraphRunner):
   def __del__(self):
     if hasattr(self, 'graph'): check(cuda.cuGraphDestroy(self.graph))
     if hasattr(self, 'instance'): check(cuda.cuGraphExecDestroy(self.instance))
-
-  def set_kernel_node_launch_dims(self, node, global_size: Tuple[int, int, int], local_size: Tuple[int, int, int]):
-    node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size

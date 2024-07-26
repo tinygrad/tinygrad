@@ -57,7 +57,8 @@ class MetalGraph(GraphRunner):
                                                                                  input_rawbuffers[input_idx]._buf.offset, i)
 
     for j, global_dims, local_dims in self.replaced_launch_dims(var_vals):
-      global_size, local_size = global_dims or self.jit_cache[j].prg.p.global_size, local_dims or self.jit_cache[j].prg.p.local_size
+      prg = cast(CompiledRunner, self.jit_cache[j].prg)
+      global_size, local_size = global_dims or prg.p.global_size, local_dims or prg.p.local_size
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size),
                                                                                                        Metal.MTLSize(*local_size))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]
