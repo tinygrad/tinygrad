@@ -69,6 +69,8 @@ class UOp:
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
   def recip(self): return self.alu(UnaryOps.RECIP)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return UOp._const(self.dtype if isinstance(self, UOp) else self, b)
+  def sconst(self:Union[UOp, DType, None], b:ConstType|Variable):
+    return UOp._const(cast(DType, self.dtype).scalar() if isinstance(self, UOp) else self, b)
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def _const(dtype:Optional[DType], b:ConstType|Variable):
@@ -98,11 +100,10 @@ class UOp:
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
   @functools.cached_property
-  def vmin(self) -> UOp:
-    return x if (x:=self._min_max[0]) is not None else UOp.const(cast(DType, self.dtype).scalar(), dtypes.min(cast(DType, self.dtype))).vmin
+  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None else self.sconst(dtypes.min(cast(DType, self.dtype))).vmin
   @functools.cached_property
   def vmax(self) -> UOp:
-    return x if (x:=self._min_max[1]) is not None else UOp.const(cast(DType, self.dtype).scalar(), dtypes.max(cast(DType, self.dtype))).vmax
+    return x if (x:=self._min_max[1]) is not None else self.const(dtypes.max(cast(DType, self.dtype))).vmax
   @functools.cached_property
   def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
     # NOTE: returned UOp is assumed to be CONST
@@ -113,9 +114,9 @@ class UOp:
     if self.op is UOps.VECTORIZE and all(x.op == UOps.CONST and x.arg == self.src[0].arg for x in self.src): return self.src[0], self.src[0]
     if self.op is UOps.ALU:
       if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(cast(DType, self.dtype)):
-        return self.const(-self.src[0].vmax.arg).vmin, self.const(-self.src[0].vmin.arg).vmax
+        return self.sconst(-self.src[0].vmax.arg), self.sconst(-self.src[0].vmin.arg)
       if self.arg is BinaryOps.ADD:
-        return self.const(self.src[0].vmin.arg+self.src[1].vmin.arg).vmin, self.const(self.src[0].vmax.arg+self.src[1].vmax.arg).vmin
+        return self.sconst(self.src[0].vmin.arg+self.src[1].vmin.arg), self.sconst(self.src[0].vmax.arg+self.src[1].vmax.arg)
     return None, None
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
