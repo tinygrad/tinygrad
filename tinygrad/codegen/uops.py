@@ -127,9 +127,8 @@ class NOp(UOp):
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
   def compile(self: NOp, name:Optional[str]=None) -> UPat:
-    if self.op is UOps.NOOP: return UPat(name=self.name, dtype=self.dtype)
-    return UPat(self.op, self.arg, (list if self.commutative() else tuple)([src.compile() for src in self.src]) if self.src != () else None,
-                self.name or name, self.dtype, self.allow_any_len)
+    return UPat(name=self.name, dtype=self.dtype) if self.op is UOps.NOOP else UPat(self.op, self.arg, (list if self.commutative()
+      else tuple)(src.compile() for src in self.src) or None, self.name or name, self.dtype, self.allow_any_len)
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
