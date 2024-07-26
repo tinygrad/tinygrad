@@ -138,15 +138,13 @@ class HCQGraph(MultiGraphRunner):
 
     # Update var_vals
     vals = self._resolve_symbolic_vars(var_vals)
-    for j, vidxs in self.var_vals_replace:
-      for i,v in enumerate(vidxs): self.ji_args_vars[j][i] = vals[v]
-    # for j in self.jc_idx_with_updatable_var_vals:
-    #   for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars): self.ji_args_vars[j][i] = var_vals[v]
+    for j, vidxs in self.var_vals_replace.items():
+      for i, v in enumerate(vidxs): self.ji_args_vars[j][i] = vals[v]
 
     launch_dims = self._resolve_symbolic_launch_dims(var_vals)
-    for j,gd,ld in self.launch_dims_replace:
+    for j, (gd, ld) in self.launch_dims_replace.items():
       queue, cmd_ptr = self.op_cmd_idx[j]
-      queue.update_exec(cmd_ptr, launch_dims[gd] if gd is not None else None, launch_dims[ld] if ld is not None else None)
+      queue.update_exec(cmd_ptr, launch_dims.get(gd), launch_dims.get(ld))
 
     for dev in self.devices:
       comp_queue, copy_queue, need_sig_upd = self.comp_queues[dev], self.copy_queues[dev], dev.timeline_signal != self.last_timeline[dev][0]

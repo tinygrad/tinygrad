@@ -26,6 +26,7 @@ class MetalGraph(GraphRunner):
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
     all_resources = [self.int_buf.buf] if len(self.vars) else []
 
+    launch_dims = self._resolve_symbolic_launch_dims(var_vals)
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
       descriptor = Metal.MTLComputePipelineDescriptor.new()
@@ -39,8 +40,8 @@ class MetalGraph(GraphRunner):
           icb_command.setKernelBuffer_offset_atIndex_(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
       for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex_(self.int_buf.buf, self.vars.index(v)*4, len(ji.bufs)+i)
-      if j not in self.jc_idx_with_updatable_launch_dims:
-        global_size, local_size = prg.p.launch_dims(var_vals)
+      if (ld_idxs:=self.launch_dims_replace.get(j)) is not None:
+        global_size, local_size = launch_dims.get(ld_idxs[0], prg.p.global_size), launch_dims.get(ld_idxs[1], prg.p.local_size)
         icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
       icb_command.setBarrier()
 

@@ -71,8 +71,8 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
-    self.var_vals_replace = []
-    self.launch_dims_replace = []
+    self.var_vals_replace = {}
+    self.launch_dims_replace = {}
 
     op_estimate: sint = 0
     mem_estimate: sint = 0
@@ -87,17 +87,17 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
       mem_estimate += ji.prg.mem_estimate
       lds_estimate += ji.prg.lds_estimate
       if isinstance(ji.prg, CompiledRunner):
-        if ji.prg.p.vars: self.var_vals_replace.append((j, [self.vars.index(v) for v in ji.prg.p.vars]))
+        if ji.prg.p.vars: self.var_vals_replace[j] = [self.vars.index(v) for v in ji.prg.p.vars]
 
         g_resolve_idx = self.symbolic_dims.index(dim) if (dim:=tuple(ji.prg.p.global_size)) in self.symbolic_dims else None
         l_resolve_idx = self.symbolic_dims.index(dim) if (dim:=tuple(ji.prg.p.local_size)) in self.symbolic_dims else None
-        if g_resolve_idx is not None or l_resolve_idx is not None: self.launch_dims_replace.append((j, g_resolve_idx, l_resolve_idx))
+        if g_resolve_idx is not None or l_resolve_idx is not None: self.launch_dims_replace[j] = (g_resolve_idx, l_resolve_idx)
 
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
                      op_estimate, mem_estimate, lds_estimate)
 
   def _resolve_symbolic_vars(self, var_vals) -> List: return [var_vals[v] for v in self.vars]
-  def _resolve_symbolic_launch_dims(self, var_vals) -> List: return [tuple(sym_infer(s, var_vals) for s in ld) for ld in self.symbolic_dims]
+  def _resolve_symbolic_launch_dims(self, var_vals) -> List: return {i:tuple(sym_infer(s, var_vals) for s in ld) for i, ld in enumerate(self.symbolic_dims)}
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
