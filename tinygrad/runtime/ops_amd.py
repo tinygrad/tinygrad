@@ -6,10 +6,7 @@ from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue
                             HCQSignal, HCQProgram, BufferOptions
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
-import tinygrad.runtime.autogen.kfd as kfd
-import tinygrad.runtime.autogen.hsa as hsa
-import tinygrad.runtime.autogen.amd_gpu as amd_gpu
-import tinygrad.runtime.autogen.libc as libc
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
 from tinygrad.runtime.support.compiler_hip import AMDCompiler, disasm
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
