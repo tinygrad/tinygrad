@@ -81,7 +81,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
     self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and not all_int(d)] +
                                [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and not all_int(d)])
-    def sym_dim_idx(dim): return self.symbolic_dims.index(tuple(dim)) if tuple(dim) in self.symbolic_dims and dim is not None else None
+    def sym_dim_idx(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
     for j,ji in enumerate(jit_cache):
       op_estimate += ji.prg.op_estimate
