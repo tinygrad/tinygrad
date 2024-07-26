@@ -193,8 +193,8 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
 
   def _update_exec(self, cmd_idx, global_size, local_size):
     # Patch the exec cmd with new launch dims
-    self.cmd_idx_to_global_dims[cmd_idx][:] = array.array('I', global_size)
-    self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
+    if global_size is not None: self.cmd_idx_to_global_dims[cmd_idx][:] = array.array('I', global_size)
+    if local_size is not None: self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
 
   def _signal(self, signal, value=0):
     if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 2)) is None or prev_qmd.release0_enable == 1: return super()._signal(signal, value)

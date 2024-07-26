@@ -79,7 +79,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 3), 0, 0, "0")
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 2), 0, 0, "0")
 
-  @unittest.expectedFailure
   def test_ge_divides(self):
     expr = create_lt_node(Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)
     self.helper_test_variable(expr, 0, 1, "(idx<128)")
@@ -97,8 +96,8 @@ class TestSymbolic(unittest.TestCase):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
     self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
 
-  #def test_div_becomes_num(self):
-  #  assert isinstance(Variable("a", 2, 3)//2, NumNode)
+  def test_div_reduction(self):
+   self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
   #def test_var_becomes_num(self):
   #  assert isinstance(Variable("a", 2, 2), NumNode)
@@ -213,11 +212,9 @@ class TestSymbolic(unittest.TestCase):
     # This is mod reduction
     self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, {"(-1+a)", "(a+(-1))"})
 
-  @unittest.expectedFailure
   def test_sum_div_const(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
 
-  @unittest.expectedFailure
   def test_sum_div_const_big(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 16, 0, 1, "(a//4)")
 
@@ -312,7 +309,6 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_div_factor_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//8, 0, 5, "(a//2)")
 
-  @unittest.expectedFailure
   def test_sum_div_partial_remove(self):
     self.helper_test_variable(Node.sum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
 
