@@ -112,13 +112,15 @@ if __name__ == "__main__":
       print(fp.split('/')[-1].split('.')[0])
       ref = parse_benchmark(fp)
       compare = parse_benchmark(fp.replace("timing_ref", "timing_compare"))
-      diff: Dict[str, List[str]] = {}
+      diff: Dict[str, List[float]] = {}
       avg_diff: Dict[str, float] = {}
       for key, ref_vals in ref.items():
-        vals = [(comp - ref) / ref * 100 for ref,comp in zip(ref_vals, compare[key]) if ref != 0]
+        vals = [round((comp-ref)/ref*100, 2) for ref,comp in zip(ref_vals, compare[key]) if ref != 0]
         if not vals or key == "epochs": continue
         avg_diff[key] = sum(vals) / len(vals)
-        diff[key] = [colored(f"{x:7.2f}%", 'yellow' if x == 0 else 'red' if x < 0.75 else 'green' if x > 1.15 else 'yellow') for x in vals[:5]]
+        diff[key] = sorted(vals[:5], key=abs, reverse=True)
+      for k,v in sorted(avg_diff.items(), key=lambda x:abs(x[1]), reverse=True):
+        print(colored(f"{k:20} {v:7.2f}%", 'yellow' if v == 0 else 'red' if v < 0.75 else 'green' if v > 1.15 else 'yellow'))
       print(tabulate(diff, headers='keys'))
 
   # *** schedule diff
