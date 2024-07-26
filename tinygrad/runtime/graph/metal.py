@@ -26,7 +26,6 @@ class MetalGraph(GraphRunner):
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
     all_resources = [self.int_buf.buf] if len(self.vars) else []
 
-    launch_dims = self._resolve_symbolic_launch_dims(var_vals)
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
       descriptor = Metal.MTLComputePipelineDescriptor.new()
