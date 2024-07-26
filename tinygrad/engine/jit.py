@@ -81,7 +81,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
     self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and not all_int(d)] +
                                [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and not all_int(d)])
-    def sym_dim_idx(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
+    def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
     for j,ji in enumerate(jit_cache):
       op_estimate += ji.prg.op_estimate
@@ -90,8 +90,8 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
       if isinstance(ji.prg, CompiledRunner):
         if ji.prg.p.vars: self.var_vals_replace[j] = [self.vars.index(v) for v in ji.prg.p.vars]
 
-        gl_idx, lc_idx = sym_dim_idx(ji.prg.p.global_size), sym_dim_idx(ji.prg.p.local_size)
-        if gl_idx is not None or lc_idx is not None: self.launch_dims_replace[j] = (gl_idx, lc_idx)
+        global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
+        if global_dim_idx is not None or local_dim_idx is not None: self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
 
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
                      op_estimate, mem_estimate, lds_estimate)
