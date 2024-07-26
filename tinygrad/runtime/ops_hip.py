@@ -1,9 +1,9 @@
 from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
-import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator, BufferOptions
+from tinygrad.runtime.autogen import hip
 from tinygrad.runtime.support.compiler_hip import AMDCompiler, disasm
 from tinygrad.renderer.cstyle import HIPRenderer
 

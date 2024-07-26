@@ -3,8 +3,7 @@ import os, sys, mmap, _posixshmem, io, ctypes, ctypes.util, platform, contextlib
 from typing import Optional, Generator, Tuple, Callable, List
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
-import tinygrad.runtime.autogen.io_uring as io_uring
-import tinygrad.runtime.autogen.libc as libc
+from tinygrad.runtime.autogen import io_uring, libc
 
 class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
