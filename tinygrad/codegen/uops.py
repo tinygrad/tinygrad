@@ -114,19 +114,19 @@ class UOp:
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
-  varname:Optional[str] = None
+  vnm:Optional[str] = None
   src:Tuple[NOp, ...] = tuple()
-  def name(self, name:Optional[str]=None): return NOp(self.op, self.dtype, self.src, self.arg, varname=name)
+  # def name(self, name:Optional[str]=None): return NOp(self.op, self.dtype, self.src, self.arg, vnm=name)
   @staticmethod
-  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, varname=name)
+  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, vnm=name)
   @staticmethod
-  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype).name(name)
+  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, vnm=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
   def compile(self: NOp, name:Optional[str]=None) -> UPat:
-    if self.op is UOps.NOOP: return UPat(name=self.varname, dtype=self.dtype)
+    if self.op is UOps.NOOP: return UPat(name=self.vnm, dtype=self.dtype)
     return UPat(self.op, self.arg, (list if self.commutative() else tuple)([src.compile() for src in self.src]) if self.src != () else None,
-                (name := self.varname or name), self.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
+                (name := self.vnm or name), self.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
