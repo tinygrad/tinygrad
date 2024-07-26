@@ -3,12 +3,11 @@ import os, ctypes, contextlib, pathlib, re, fcntl, functools, mmap, struct, temp
 from typing import Tuple, List, Any, cast, Union, Dict
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
-                            HCQProgram, HCQSignal, Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, to_char_p_p, DEBUG, prod
+                            HCQProgram, HCQSignal, BufferOptions
+from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
 from tinygrad.renderer.cstyle import NVRenderer
-from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler, PTXCompiler, PTX
+from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
-import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.renderer.assembly import PTXRenderer
 import tinygrad.runtime.autogen.libc as libc
 from tinygrad.runtime.support.elf import elf_loader
@@ -64,32 +63,6 @@ assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
 
-class NVCompiler(Compiler):
-  def __init__(self, arch:str):
-    self.arch, self.compile_options = arch, [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
-    cuda_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
-    if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
-    super().__init__(f"compile_nv_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    cuda_check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
-    status = nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
-
-    if status != 0:
-      raise CompileError(f"compile failed: {_get_bytes(prog, nvrtc.nvrtcGetProgramLog, nvrtc.nvrtcGetProgramLogSize, cuda_check).decode()}")
-    return _get_bytes(prog, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize, cuda_check)
-
-def jitlink_check(status, ctx=None):
-  if status != 0:
-    err_log = _get_bytes(ctx, nvrtc.nvJitLinkGetErrorLog, nvrtc.nvJitLinkGetErrorLogSize, cuda_check).decode() if ctx else ""
-    raise CompileError(f"NvJitLink Error {status}, {nvrtc.nvJitLinkResult__enumvalues.get(status, 'Unknown')}\n{err_log}")
-
-class NVPTXCompiler(NVCompiler):
-  def compile(self, src:str) -> bytes:
-    ptxsrc = src.replace("TARGET", self.arch).replace("VERSION", "7.8" if self.arch >= "sm_89" else "7.5")
-    jitlink_check(nvrtc.nvJitLinkCreate(handle := nvrtc.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
-    jitlink_check(nvrtc.nvJitLinkAddData(handle, nvrtc.NVJITLINK_INPUT_PTX, ptxsrc.encode(), len(ptxsrc), "<null>".encode()), handle)
-    jitlink_check(nvrtc.nvJitLinkComplete(handle), handle)
-    return _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, jitlink_check)
 
 class NVSignal(HCQSignal):
   def __init__(self, value=0, **kwargs):

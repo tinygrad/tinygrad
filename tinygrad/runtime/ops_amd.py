@@ -1,16 +1,16 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, subprocess, time, array
+import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, time, array
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, \
-                            HCQSignal, HCQProgram, Compiler, CompileError, BufferOptions
+                            HCQSignal, HCQProgram, BufferOptions
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.runtime.support.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 import tinygrad.runtime.autogen.libc as libc
+from tinygrad.runtime.support.compiler_hip import AMDCompiler, disasm
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
@@ -54,18 +54,6 @@ COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
 def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
-
-def disasm(lib):
-  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-  return '\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x])
-
-class AMDCompiler(Compiler):
-  def __init__(self, arch:str):
-    self.arch = arch
-    super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    try: return compile_hip(src, self.arch)
-    except RuntimeError as e: raise CompileError(e) from e
 
 class AMDSignal(HCQSignal):
   def __init__(self, value=0, alloc_event=False):
