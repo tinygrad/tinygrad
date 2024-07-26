@@ -3,11 +3,11 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT, dedup
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.shape.symbolic import Variable, sint, sym_infer
 from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner
 from tinygrad.engine.schedule import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
@@ -70,23 +70,40 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
 class GraphRunner(Runner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
-    self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
-    self.jc_idx_with_updatable_launch_dims = []
-    self.jc_idx_with_updatable_var_vals = []
+    self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
+    self.var_vals_replace:Dict[int, List[int]] = {}
+    self.launch_dims_replace:Dict[int, Tuple[Optional[int], Optional[int]]] = {}
+
     op_estimate: sint = 0
     mem_estimate: sint = 0
     lds_estimate: sint = 0
+
+    self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
+    self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and not all_int(d)] +
+                               [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and not all_int(d)])
+    def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
+
     for j,ji in enumerate(jit_cache):
       op_estimate += ji.prg.op_estimate
       mem_estimate += ji.prg.mem_estimate
       lds_estimate += ji.prg.lds_estimate
       if isinstance(ji.prg, CompiledRunner):
-        if ji.prg.p.vars: self.jc_idx_with_updatable_var_vals.append(j)
-        if (ji.prg.p.global_size and not all_int(ji.prg.p.global_size)) or (ji.prg.p.local_size and not all_int(ji.prg.p.local_size)):
-          self.jc_idx_with_updatable_launch_dims.append(j)
-    self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
+        if ji.prg.p.vars: self.var_vals_replace[j] = [self.vars.index(v) for v in ji.prg.p.vars]
+
+        global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
+        if global_dim_idx is not None or local_dim_idx is not None: self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
+
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
                      op_estimate, mem_estimate, lds_estimate)
+
+  def updated_vars(self, var_vals):
+    vals = [var_vals[v] for v in self.vars]
+    for j, vidxs in self.var_vals_replace.items():
+      for i, v in enumerate(vidxs): yield j, i, vals[v]
+
+  def updated_launch_dims(self, var_vals):
+    dims = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
+    for j, (gl, lc) in self.launch_dims_replace.items(): yield j, (dims[gl] if gl is not None else None), (dims[lc] if lc is not None else None)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
