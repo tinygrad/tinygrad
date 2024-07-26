@@ -161,13 +161,8 @@ class CStyleLanguage(Renderer):
             kk(f"{self.render_dtype(cast(DType, src[0].dtype))} {precast} = {r[src[0]]};")
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
-          else:
-            notfin = all(x.op == UOps.CONST and not math.isfinite(x.arg) for x in src)
-            h4z = dtype == dtypes.half.vec(4) and all(x.op == UOps.CONST and x.arg == 0.0 for x in src)
-            val = self.render_vectorize([strip_parens(r[x]) if notfin else f"{x.arg}" if h4z else r[x] for x in src], dtype)
-          if uop is UOps.VECTORIZE and all(x.op == UOps.CONST for x in src):
-            r[u] = f"({val})" if all(math.isnan(x.arg) or (math.isinf(x.arg) and x.arg < 0) for x in src) else val
-          elif child_count[u] <= 1: r[u] = val
+          else: val = self.render_vectorize([r[x] for x in src], dtype)
+          if child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
           kk(self.render_local(args[0], dtype, args[1]))
@@ -175,11 +170,8 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
-        elif uop is UOps.WMMA:
-          val = self.render_const(src[2].src[0].arg, dtype) if src[2].op == UOps.VECTORIZE else r[src[2]]
-          kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {val});")
-        elif uop is UOps.DEFINE_ACC:
-          kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].src[0].arg if dtype.count > 1 else src[0].arg, dtype)};")
+        elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
+        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {r[src[0]]};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
