@@ -6,7 +6,7 @@ from tabulate import tabulate
 from typing import DefaultDict, List, Dict
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Device
-from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
+from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, temp, tqdm
 from tinygrad.ops import LazyOp
 
 # *** process replay settings
@@ -20,6 +20,7 @@ ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in
 if REF == "master": ASSERT_DIFF = False
 COMPARE_SCHEDULE = getenv("COMPARE_SCHEDULE", int((k:="[compare_schedule]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")))
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+TEMP_DIR = temp("process_replay")
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 # *** github settings
@@ -106,9 +107,9 @@ if __name__ == "__main__":
     res = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master&status=success", headers=GH_HEADERS)
     ref_run_id = res.json()["workflow_runs"][0]["id"]
     print(f"comparing speed for {RUN_ID} against {ref_run_id}")
-    download_artifact(ref_run_id, f"Speed ({name})", "/tmp/timing_ref")
-    download_artifact(RUN_ID, f"Speed ({name})", "/tmp/timing_compare")
-    for fp in glob.glob("/tmp/timing_ref/*.txt"):
+    download_artifact(ref_run_id, f"Speed ({name})", f"{TEMP_DIR}/timing_ref")
+    download_artifact(RUN_ID, f"Speed ({name})", f"{TEMP_DIR}/timing_compare")
+    for fp in glob.glob(f"{TEMP_DIR}/timing_ref/*.txt"):
       print(fp.split('/')[-1].split('.')[0])
       ref = parse_benchmark(fp)
       compare = parse_benchmark(fp.replace("timing_ref", "timing_compare"))
@@ -128,8 +129,8 @@ if __name__ == "__main__":
   if COMPARE_SCHEDULE:
     logging.info("fetching process replay reference")
     # TODO: make this run_id dynamic
-    download_artifact("10093148840", f"process_replay_{Device.DEFAULT.lower()}.db", "/tmp/process_replay")
-    ref_conn = sqlite3.connect("/tmp/process_replay/process_replay.db")
+    download_artifact("10093148840", f"process_replay_{Device.DEFAULT.lower()}.db", f"{TEMP_DIR}/schedule")
+    ref_conn = sqlite3.connect(f"{TEMP_DIR}/schedule/process_replay.db")
     row_count = ref_conn.execute(f"select count(*) from '{REF_TABLE_NAME}'").fetchone()[0]
     processes = []
     for i in tqdm(range(0, row_count, PAGE_SIZE)):
