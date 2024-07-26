@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import difflib, pickle, multiprocessing, os, logging, sqlite3, requests, io, zipfile
-from typing import List
+from collections import defaultdict
+import difflib, pickle, multiprocessing, os, logging, sqlite3, requests, io, zipfile, glob, re
+from tabulate import tabulate
+from typing import DefaultDict, List, Dict
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Device
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
@@ -85,6 +87,13 @@ def download_artifact(run_id:str, name:str, dest:str):
   with io.BytesIO(res.content) as zip_content:
     with zipfile.ZipFile(zip_content, "r") as zip_ref: zip_ref.extractall(dest)
 
+def parse_benchmark(fp:str):
+  ret: DefaultDict[str, List] = defaultdict(list)
+  with open(fp) as f:
+    for line in f.read().splitlines():
+      for v,k in dict(re.findall(r'(\d+\.\d+|\d+)\s*([a-zA-Z\s]+?)(?:,|$)', line)).items(): ret[k.strip()].append(float(v))
+  return ret
+
 if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
     logging.info("skipping process replay.")
@@ -99,6 +108,18 @@ if __name__ == "__main__":
     print(f"comparing speed for {RUN_ID} against {ref_run_id}")
     download_artifact(ref_run_id, f"Speed ({name})", "/tmp/timing_ref")
     download_artifact(RUN_ID, f"Speed ({name})", "/tmp/timing_compare")
+    for fp in glob.glob("/tmp/timing_ref/*.txt"):
+      print(fp.split('/')[-1].split('.')[0])
+      ref = parse_benchmark(fp)
+      compare = parse_benchmark(fp.replace("timing_ref", "timing_compare"))
+      diff: Dict[str, List[str]] = {}
+      avg_diff: Dict[str, float] = {}
+      for key, ref_vals in ref.items():
+        vals = [(comp - ref) / ref * 100 for ref,comp in zip(ref_vals, compare[key]) if ref != 0]
+        if not vals or key == "epochs": continue
+        avg_diff[key] = sum(vals) / len(vals)
+        diff[key] = [colored(f"{x:7.2f}%", 'yellow' if x == 0 else 'red' if x < 0.75 else 'green' if x > 1.15 else 'yellow') for x in vals[:5]]
+      print(tabulate(diff, headers='keys'))
 
   # *** schedule diff
   ref_schedule = multiprocessing.Manager().list()
