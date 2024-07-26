@@ -224,8 +224,8 @@ class TestUOpGraph(TestUOps):
   def test_wmma_vectorize_no_fold(self):
     for i in [4, 8]:
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
-                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) + tuple(UOp(UOps.DEFINE_VAR,
-                                                                            dtypes.half, arg=Variable(f'tmp{j}', 0.0, 1.0)) for j in range(i//2)))
+                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
+                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=Variable(f'tmp{j}', 0.0, 1.0)) for j in range(i//2)))
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
@@ -235,8 +235,8 @@ class TestUOpGraph(TestUOps):
     for i in [4, 8]:
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
-                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) + tuple(UOp(UOps.DEFINE_VAR,
-                                                                            dtypes.half, arg=Variable(f'tmp{j}', 0.0, 1.0)) for j in range(i//2)))
+                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
+                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=Variable(f'tmp{j}', 0.0, 1.0)) for j in range(i//2)))
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       g = UOpGraph([wmma])
