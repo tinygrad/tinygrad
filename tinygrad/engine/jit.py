@@ -71,8 +71,8 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
-    self.var_vals_replace:Dict[int, int] = {}
-    self.launch_dims_replace:Dict[int, int] = {}
+    self.var_vals_replace:Dict[int, List[int]] = {}
+    self.launch_dims_replace:Dict[int, Tuple[Optional[int], Optional[int]]] = {}
 
     op_estimate: sint = 0
     mem_estimate: sint = 0
@@ -81,7 +81,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
     self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and not all_int(d)] +
                                [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and not all_int(d)])
-    def sym_dim_idx(dim): return self.symbolic_dims.index(dim) if dim in self.symbolic_dims and dim is not None else None
+    def sym_dim_idx(dim): return self.symbolic_dims.index(tuple(dim)) if tuple(dim) in self.symbolic_dims and dim is not None else None
 
     for j,ji in enumerate(jit_cache):
       op_estimate += ji.prg.op_estimate
@@ -89,7 +89,9 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
       lds_estimate += ji.prg.lds_estimate
       if isinstance(ji.prg, CompiledRunner):
         if ji.prg.p.vars: self.var_vals_replace[j] = [self.vars.index(v) for v in ji.prg.p.vars]
-        if (gl_idx:=sym_dim_idx(ji.prg.p.global_size)) or (lc_idx:=sym_dim_idx(ji.prg.p.local_size)): self.launch_dims_replace[j] = (gl_idx, lc_idx)
+
+        gl_idx, lc_idx = sym_dim_idx(ji.prg.p.global_size), sym_dim_idx(ji.prg.p.local_size)
+        if gl_idx is not None or lc_idx is not None: self.launch_dims_replace[j] = (gl_idx, lc_idx)
 
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
                      op_estimate, mem_estimate, lds_estimate)
@@ -100,7 +102,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
       for i, v in enumerate(vidxs): yield j, i, res_v[v]
 
   def replaced_launch_dims(self, var_vals):
-    res_v = [tuple(sym_infer(s, var_vals) for s in ld) for ld in self.symbolic_dims]
+    res_v = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
     for j, (gd, ld) in self.launch_dims_replace.items(): yield j, (res_v[gd] if gd is not None else None), (res_v[ld] if ld is not None else None)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
