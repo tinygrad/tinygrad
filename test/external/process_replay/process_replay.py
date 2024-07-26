@@ -89,8 +89,19 @@ if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
     logging.info("skipping process replay.")
     exit(0)
+
+  # *** speed diff (for benchmarks)
+  if REF == "update_benchmark":
+    name = {"testmacbenchmark": "Mac", "testnvidiabenchmark": "NVIDIA", "testmorenvidiabenchmark": "NVIDIA Training",
+            "testamdbenchmark": "AMD", "testmoreamdbenchmark": "AMD Training"}[os.environ["GITHUB_JOB"]]
+    res = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master", headers=GH_HEADERS)
+    ref_run_id = res.json()["workflow_runs"][0]["id"]
+    print(f"comparing speed for {RUN_ID} against {ref_run_id}")
+    download_artifact(ref_run_id, f"Speed ({name})", "/tmp/timing_ref")
+    download_artifact(RUN_ID, f"Speed ({name})", "/tmp/timing_compare")
+
+  # *** schedule diff
   ref_schedule = multiprocessing.Manager().list()
-  # *** download the reference schedule
   if COMPARE_SCHEDULE:
     logging.info("fetching process replay reference")
     # TODO: make this run_id dynamic
@@ -105,7 +116,8 @@ if __name__ == "__main__":
     ref_conn.close()
   conn = db_connection()
   cur = conn.cursor()
-  # *** run the comparison
+
+  # *** kernel diff
   try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
   except sqlite3.OperationalError:
     logging.warning(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
