@@ -70,9 +70,9 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
 class GraphRunner(Runner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
-    self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
-    self.var_vals_replace = {}
-    self.launch_dims_replace = {}
+    self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
+    self.var_vals_replace:Dict[int, int] = {}
+    self.launch_dims_replace:Dict[int, int] = {}
 
     op_estimate: sint = 0
     mem_estimate: sint = 0
@@ -96,8 +96,17 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
                      op_estimate, mem_estimate, lds_estimate)
 
-  def _resolve_symbolic_vars(self, var_vals) -> List: return [var_vals[v] for v in self.vars]
-  def _resolve_symbolic_launch_dims(self, var_vals) -> List: return {i:tuple(sym_infer(s, var_vals) for s in ld) for i, ld in enumerate(self.symbolic_dims)}
+  # def _resolve_symbolic_vars(self, var_vals) -> List: return [var_vals[v] for v in self.vars]
+  # def _resolve_symbolic_launch_dims(self, var_vals) -> List: return {i:tuple(sym_infer(s, var_vals) for s in ld) for i, ld in enumerate(self.symbolic_dims)}
+
+  def replaced_vars(self, var_vals):
+    res_v = [var_vals[v] for v in self.vars]
+    for j, vidxs in self.var_vals_replace.items():
+      for i, v in enumerate(vidxs): yield j, i, res_v[v]
+
+  def replaced_launch_dims(self, var_vals):
+    res_v = [tuple(sym_infer(s, var_vals) for s in ld) for ld in self.symbolic_dims]
+    for j, (gd, ld) in self.launch_dims_replace.items(): yield j, (res_v[gd] if gd is not None else None), (res_v[ld] if ld is not None else None)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):

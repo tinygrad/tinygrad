@@ -120,6 +120,8 @@ class HCQGraph(MultiGraphRunner):
       if hasattr(self.copy_queues[dev], 'bind') and self.last_ji[self.copy_queues[dev]] is not None: self.copy_queues[dev].bind(dev)
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
+    # resolved_launch_dims, resolved_vals = self._resolve_symbolic_replace()
+
     # Wait and restore signals
     self.kickoff_value += 1
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
@@ -137,14 +139,27 @@ class HCQGraph(MultiGraphRunner):
       else: self.op_cmd_idx[j][0].update_copy(self.op_cmd_idx[j][1], **{('dest' if i == 0 else 'src'): input_rawbuffers[input_idx]._buf.va_addr})
 
     # Update var_vals
-    vals = self._resolve_symbolic_vars(var_vals)
-    for j, vidxs in self.var_vals_replace.items():
-      for i, v in enumerate(vidxs): self.ji_args_vars[j][i] = vals[v]
+    for j, i, v in self.replaced_vars(var_vals): self.ji_args_vars[j][i] = v
 
-    launch_dims = self._resolve_symbolic_launch_dims(var_vals)
-    for j, (gd, ld) in self.launch_dims_replace.items():
+    # Update launch dims
+    for j, global_dims, local_dims in self.replaced_launch_dims(var_vals):
       queue, cmd_ptr = self.op_cmd_idx[j]
-      queue.update_exec(cmd_ptr, launch_dims.get(gd), launch_dims.get(ld))
+      queue.update_exec(cmd_ptr, global_dims, local_dims)
+
+    # Update launch dims
+    # for j, (global_replace_idx, local_replace_idx) in self.launch_dims_replace.items():
+    #   queue, cmd_ptr = self.op_cmd_idx[j]
+    #   queue.update_exec(cmd_ptr, resolved_launch_dims.get(global_replace_idx), resolved_launch_dims.get(local_replace_idx))
+
+    # Update var_vals
+    # vals = self._resolve_symbolic_vars(var_vals)
+    # for j, vidxs in self.var_vals_replace.items():
+    #   for i, v in enumerate(vidxs): self.ji_args_vars[j][i] = vals[v]
+
+    # launch_dims = self._resolve_symbolic_launch_dims(var_vals)
+    # for j, (gd, ld) in self.launch_dims_replace.items():
+    #   queue, cmd_ptr = self.op_cmd_idx[j]
+    #   queue.update_exec(cmd_ptr, launch_dims.get(gd), launch_dims.get(ld))
 
     for dev in self.devices:
       comp_queue, copy_queue, need_sig_upd = self.comp_queues[dev], self.copy_queues[dev], dev.timeline_signal != self.last_timeline[dev][0]
