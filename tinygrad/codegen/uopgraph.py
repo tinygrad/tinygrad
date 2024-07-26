@@ -7,9 +7,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI
 from tinygrad.codegen.uops import UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
-
-if TYPE_CHECKING:
-  from tinygrad.renderer import Renderer
+if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # ***** image handling *****
 
@@ -118,9 +116,7 @@ def reduce_before_expand(reduce_allow_any_len, expand, x):
 def sum_collapse(phi_input, loop, val1, val2):
   for v1,v2 in [(val1, val2), (val2, val1)]:
     if loop not in v1.parents:
-      loop_range = loop.src[1]-loop.src[0]
-      ret = v1*loop_range.cast(v1.dtype)
-      return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+ret
+      return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+v1*(loop.src[1]-loop.src[0]).cast(v1.dtype)
   return None
 
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce_allow_any_len, idx2=None, idx3=None):
