@@ -149,8 +149,9 @@ class IndependentLowerer:
       if x.op is BufferOps.CONST:
         dtype = x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype
         return valid.alu(TernaryOps.WHERE, UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
-      if x.arg.idx == -1:
-        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype), (), ("temp", x.arg.st.size))
+      if x.arg.idx < 0:
+        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype),
+                  arg=(f"temp{-x.arg.idx}", x.arg.st.real_size()))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
                   (x.arg.idx, x.arg.idx < self.output_count))
@@ -159,9 +160,9 @@ class IndependentLowerer:
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread
       if x.arg.idx != -1:
-        has_valid = True
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
+        has_valid = valid.op is not UOps.CONST or valid.arg is not True
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
