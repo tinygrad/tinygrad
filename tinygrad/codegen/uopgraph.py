@@ -34,7 +34,7 @@ def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None, i
   if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   if idx2 is not None: idx = idx + idx2
   if idx3 is not None: idx = idx + idx3
-  if not idx.divides(len(ex.src)): return None
+  if idx.divides(len(ex.src)) is None: return None
 
   if load.dtype.scalar() != load.dtype: return None  # how does this happen?
   vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
@@ -46,7 +46,7 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
   if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   if idx2 is not None: idx = idx + idx2
   if idx3 is not None: idx = idx + idx3
-  if not idx.divides(len(ex.src)): return None
+  if idx.divides(len(ex.src)) is None: return None
 
   new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), ((ex.arg[0][0],len(ex.src)),))
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
@@ -251,6 +251,7 @@ constant_folder = PatternMatcher([
   # *** rules from symbolic ***
   # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c: x.const(x.vmin.arg//c.arg) if c.arg > 0 and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
+  (NOp.var('x') // NOp.cvar('c'), lambda x,c: d if c.arg > 0 and (d:=x.divides(c.arg)) is not None else None),
   # mod folding
   (NOp.var('x') % NOp.cvar('c'), lambda x,c: x if 0 <= x.vmin.arg <= x.vmax.arg < c.arg else None),
   # mod reduction

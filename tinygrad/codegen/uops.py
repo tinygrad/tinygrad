@@ -86,13 +86,14 @@ class UOp:
   @property  # parents with self
   def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
-  def divides(self, v):
-    if self.op is UOps.CONST:
-      return self.arg%v == 0
+  def divides(self, v) -> Optional[UOp]:
+    if self.op is UOps.CONST: return self.const(self.arg//v) if self.arg%v == 0 else None
     if self.op is UOps.ALU:
-      if self.arg is BinaryOps.ADD: return all(x.divides(v) for x in self.src)
-      if self.arg is BinaryOps.MUL: return any(x.divides(v) for x in self.src)
-    return False # generic false if we aren't sure
+      if self.arg is BinaryOps.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
+      if self.arg is BinaryOps.MUL:
+        if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
+        if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
+    return None # generic None if we aren't sure
   @functools.cached_property
   def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None else self.const(dtypes.min(cast(DType, self.dtype)))
   @functools.cached_property
