@@ -12,7 +12,7 @@ from tinygrad.helpers import prod, pretty_print
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
+  SINK = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); GEP = auto() # noqa: E702
@@ -118,13 +118,13 @@ class NOp(UOp):
   def __repr__(self): return pretty_print(self, lambda x: f"NOp({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
   def name(self, name:Optional[str]=None): return NOp(self.op, self.dtype, self.src, self.arg, varname=name)
   @staticmethod
-  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.VAR, dtype=dtype, varname=name)
+  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, varname=name)
   @staticmethod
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype).name(name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
   def compile(self: NOp, name:Optional[str]=None) -> UPat:
-    if self.op is UOps.VAR: return UPat(name=self.varname, dtype=self.dtype)
+    if self.op is UOps.NOOP: return UPat(name=self.varname, dtype=self.dtype)
     return UPat(self.op, self.arg, (list if self.commutative() else tuple)([src.compile() for src in self.src]) if self.src != () else None,
                 (name := self.varname or name), self.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
