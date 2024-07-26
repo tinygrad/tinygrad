@@ -107,9 +107,7 @@ class QcomComputeQueue(HWComputeQueue):
   def reg(self, reg: int, *vals: int): self.q += [pkt4_hdr(reg, len(vals)), *vals]
 
   def _signal(self, signal, value=0):
-    self.cmd(adreno.CP_EVENT_WRITE7, adreno.CACHE_FLUSH_TS | (adreno.EV_WRITE_USER_64B << adreno.CP_EVENT_WRITE7_0_WRITE_SRC__SHIFT),
-             *data64_le(mv_address(signal._signal)), *data64_le(value))
-    self.cmd(adreno.CP_EVENT_WRITE7, adreno.CACHE_INVALIDATE)
+    self.cmd(adreno.CP_MEM_WRITE, *data64_le(mv_address(signal._signal)), *data64_le(value))
 
   def _timestamp(self, signal):
     # doesnt really work right now
