@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT, dedup
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -71,45 +71,33 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
-    self.launch_dims_replace = []
     self.var_vals_replace = []
+    self.launch_dims_replace = []
 
-    self.symbolic_launch_dims = []
-    self.jc_idx_with_updatable_launch_dims = []
-    self.jc_idx_with_updatable_var_vals = []
     op_estimate: sint = 0
     mem_estimate: sint = 0
     lds_estimate: sint = 0
+
+    self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
+    self.symbolic_dims = dedup([tuple(dim) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (dim:=ji.prg.p.local_size) and not all_int(dim)] +
+                               [tuple(dim) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (dim:=ji.prg.p.global_size) and not all_int(dim)])
+
     for j,ji in enumerate(jit_cache):
       op_estimate += ji.prg.op_estimate
       mem_estimate += ji.prg.mem_estimate
       lds_estimate += ji.prg.lds_estimate
       if isinstance(ji.prg, CompiledRunner):
-        if ji.prg.p.vars: self.jc_idx_with_updatable_var_vals.append(j)
+        if ji.prg.p.vars: self.var_vals_replace.append((j, [self.vars.index(v) for v in ji.prg.p.vars]))
 
-        gs, ls = tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size)
-        if gs and not all_int(gs): self.symbolic_launch_dims.append(gs)
-        if ls and not all_int(ls): self.symbolic_launch_dims.append(ls)
+        g_resolve_idx = self.symbolic_dims.index(dim) if (dim:=tuple(ji.prg.p.global_size)) in self.symbolic_dims else None
+        l_resolve_idx = self.symbolic_dims.index(dim) if (dim:=tuple(ji.prg.p.local_size)) in self.symbolic_dims else None
+        if g_resolve_idx is not None or l_resolve_idx is not None: self.launch_dims_replace.append((j, g_resolve_idx, l_resolve_idx))
 
-    self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
-    self.symbolic_launch_dims = list(set(self.symbolic_launch_dims)) # TODO: dedup
-
-    for j,ji in enumerate(jit_cache):
-      if not isinstance(ji.prg, CompiledRunner): continue
-      if ji.prg.p.vars: self.var_vals_replace.append((j, [self.vars.index(v) for v in ji.prg.p.vars]))
-
-      gs, ls = tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size)
-      g_resolve_idx = self.symbolic_launch_dims.index(gs) if gs in self.symbolic_launch_dims else None
-      l_resolve_idx = self.symbolic_launch_dims.index(ls) if ls in self.symbolic_launch_dims else None
-      if g_resolve_idx is not None or l_resolve_idx is not None: self.launch_dims_replace.append((j, g_resolve_idx, l_resolve_idx))
-
-
-    # self.symblic_launch_dims = []
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
                      op_estimate, mem_estimate, lds_estimate)
 
   def _resolve_symbolic_vars(self, var_vals) -> List: return [var_vals[v] for v in self.vars]
-  def _resolve_symbolic_launch_dims(self, var_vals) -> List: return [tuple(sym_infer(s, var_vals) for s in ld) for ld in self.symbolic_launch_dims]
+  def _resolve_symbolic_launch_dims(self, var_vals) -> List: return [tuple(sym_infer(s, var_vals) for s in ld) for ld in self.symbolic_dims]
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
