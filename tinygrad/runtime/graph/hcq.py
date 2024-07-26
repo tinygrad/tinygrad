@@ -137,10 +137,10 @@ class HCQGraph(MultiGraphRunner):
       else: self.op_cmd_idx[j][0].update_copy(self.op_cmd_idx[j][1], **{('dest' if i == 0 else 'src'): input_rawbuffers[input_idx]._buf.va_addr})
 
     # Update var_vals
-    for j, i, v in self.replaced_vars(var_vals): self.ji_args_vars[j][i] = v
+    for j, i, v in self.updated_vars(var_vals): self.ji_args_vars[j][i] = v
 
     # Update launch dims
-    for j, global_dims, local_dims in self.replaced_launch_dims(var_vals):
+    for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       queue, cmd_ptr = self.op_cmd_idx[j]
       queue.update_exec(cmd_ptr, global_dims, local_dims)
 

@@ -58,10 +58,10 @@ class CUDAGraph(MultiGraphRunner):
         elif i == 1: self.updatable_nodes[j][1].srcDevice = input_rawbuffers[input_idx]._buf
 
     # Update var_vals in the c_args struct.
-    for j, i, v in self.replaced_vars(var_vals): setattr(self.updatable_nodes[j][2], f'v{i}', v)
+    for j, i, v in self.updated_vars(var_vals): setattr(self.updatable_nodes[j][2], f'v{i}', v)
 
     # Update launch dims in the kern_params struct.
-    for j, global_dims, local_dims in self.replaced_launch_dims(var_vals):
+    for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       prg = cast(CompiledRunner, self.jit_cache[j].prg)
       node, local_size, global_size, = self.updatable_nodes[j][1], global_dims or prg.p.global_size, local_dims or prg.p.local_size
       node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size # type: ignore[misc]
