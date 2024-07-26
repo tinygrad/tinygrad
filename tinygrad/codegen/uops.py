@@ -100,10 +100,9 @@ class UOp:
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
   @functools.cached_property
-  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None else self.sconst(dtypes.min(cast(DType, self.dtype))).vmin
+  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None else self.sconst(dtypes.min(cast(DType, self.dtype)))
   @functools.cached_property
-  def vmax(self) -> UOp:
-    return x if (x:=self._min_max[1]) is not None else self.const(dtypes.max(cast(DType, self.dtype))).vmax
+  def vmax(self) -> UOp: return x if (x:=self._min_max[1]) is not None else self.sconst(dtypes.max(cast(DType, self.dtype)))
   @functools.cached_property
   def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
     # NOTE: returned UOp is assumed to be CONST
