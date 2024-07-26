@@ -63,7 +63,7 @@ class CUDAGraph(MultiGraphRunner):
     # Update launch dims in the kern_params struct.
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       prg = cast(CompiledRunner, self.jit_cache[j].prg)
-      node, local_size, global_size, = self.updatable_nodes[j][1], global_dims or prg.p.global_size, local_dims or prg.p.local_size
+      node, global_size, local_size = self.updatable_nodes[j][1], global_dims or prg.p.global_size, local_dims or prg.p.local_size
       node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size # type: ignore[misc]
 
     # Update graph nodes with the updated structs.
