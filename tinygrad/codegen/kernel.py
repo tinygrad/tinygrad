@@ -688,7 +688,7 @@ class Kernel:
             raise RuntimeError("unsupported device for tensor cores")
 
           assert apply_to_st is None, "double tensor core? not supported"
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out,
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device,
                       tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axis),
                       tuple(self.first_upcast+ax for ax in reduce_axes))
           ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
