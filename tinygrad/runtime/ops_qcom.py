@@ -1,4 +1,5 @@
 import os
+import math
 import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast
@@ -165,7 +166,7 @@ class QcomComputeQueue(HWComputeQueue):
         | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT),
         global_size[0], 0, global_size[1], 0, global_size[2], 0, # global size x,y,z followed by offsets
         0xccc0cf, 0x2fc,
-        1,1,1, # HLSQ_CS_KERNEL_GROUP_[X,Y,Z] seems always ones
+        global_size[0], global_size[1], global_size[2], # global sizes one again?
     )
     self.reg(adreno.REG_A6XX_SP_CHICKEN_BITS, 0x20)
     self.reg(
@@ -178,8 +179,18 @@ class QcomComputeQueue(HWComputeQueue):
     )
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG, 0x100)
     self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, 0)
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0x40364000, *data64_le(kernargs))
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG, 0xf60000, *data64_le(prg.lib_gpu.va_addr))
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG,
+             (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT)
+             | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
+             | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
+             | (256 << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT),
+             *data64_le(kernargs))
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG,
+            (adreno.ST_SHADER << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT)
+            | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
+            | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
+            | (math.ceil(prg.image_size / 128) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT),
+            *data64_le(prg.lib_gpu.va_addr))
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.lib_gpu.size // 4)
 
     self.cmd(adreno.CP_RUN_OPENCL, 0)
@@ -195,10 +206,10 @@ class QcomProgram(HCQProgram):
 
     self.private_gpu = self.device._gpu_alloc(0x101, 0xC0F00)
 
-    image_offset, image_size = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0]
-    image = bytearray(lib[image_offset:image_offset+image_size])
+    image_offset, self.image_size = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0]
+    image = bytearray(lib[image_offset:image_offset+self.image_size])
     self.lib_gpu = self.device._gpu_alloc(len(image), 0x10C0A00, map_to_cpu=True)
-    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image_size)
+    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), self.image_size)
 
     # set constbuffer to be 1 page for now
     super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=0x140)
