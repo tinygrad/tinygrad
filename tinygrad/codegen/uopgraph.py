@@ -54,30 +54,30 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
 float4_folding = PatternMatcher([
   # reorder index to bring const closer to store
   (NOp(UOps.STORE, src=(NOp.var("buf"), NOp.var("idx")+
-    (NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4))).name("ex")+NOp.var("idx2")), NOp.var("var"))).name("store"),
+    (NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex")+NOp.var("idx2")), NOp.var("var")), name="store"),
     lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float(2,4) load
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND).name("ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3"))).name("load"), float4_expand_load),
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND).name("ex")+NOp.var("idx")+NOp.var("idx2"))).name("load"), float4_expand_load),
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND).name("ex")+NOp.var("idx"))).name("load"), float4_expand_load),
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND).name("ex"))).name("load"), float4_expand_load),
+  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3")), name="load"), float4_expand_load),
+  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")), name="load"), float4_expand_load),
+  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")), name="load"), float4_expand_load),
+  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")), name="load"), float4_expand_load),
   # float(2,4) store
   # TODO: fold ADDs into one UOp and remove add chains
   (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND).name("ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3"), NOp.var("var"))).name("store_allow_any_len"),
+    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3"), NOp.var("var")), name="store_allow_any_len"),
     float4_contract_store),
   (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND).name("ex")+NOp.var("idx")+NOp.var("idx2"), NOp.var("var"))).name("store_allow_any_len"),
+    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2"), NOp.var("var")), name="store_allow_any_len"),
     float4_contract_store),
   (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND).name("ex")+NOp.var("idx"), NOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
+    NOp(UOps.EXPAND, name="ex")+NOp.var("idx"), NOp.var("var")), name="store_allow_any_len"), float4_contract_store),
   (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND).name("ex"), NOp.var("var"))).name("store_allow_any_len"), float4_contract_store),
+    NOp(UOps.EXPAND, name="ex"), NOp.var("var")), name="store_allow_any_len"), float4_contract_store),
   # image handling
   (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
-     NOp.var('id4'))))).name("ls_allow_any_len"), image_contract_load),
+     NOp.var('id4')))), name="ls_allow_any_len"), image_contract_load),
   (NOp(UOps.STORE, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
-     NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4))).name("ex"))), NOp.var("var"))).name("ls_allow_any_len"),
+     NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex"))), NOp.var("var")), name="ls_allow_any_len"),
      image_contract_store),
 ])
 
@@ -153,8 +153,7 @@ constant_folder = PatternMatcher([
   (UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.bigint, name="x"),
    lambda x: UOp(x.op, dtypes.int32, x.src, x.arg)),
   # VECTORIZE/GEP
-  (NOp(UOps.GEP, src=(NOp(UOps.VECTORIZE).name("cast"),)).name("gep"), lambda gep, cast: cast.src[gep.arg]),
-  # NOTE: this has to be two rules since the dtypes must be the same
+  (NOp(UOps.GEP, src=(NOp(UOps.VECTORIZE, name="cast"),), name="gep"), lambda gep, cast: cast.src[gep.arg]),
   *[(NOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(NOp(UOps.GEP, dtypes.float,
                          src=(NOp.var('x', dtype=dtypes.float.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
   *[(NOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(NOp(UOps.GEP, dtypes.half,
@@ -163,9 +162,9 @@ constant_folder = PatternMatcher([
   (NOp(UOps.WMMA, src=(NOp.const(None, 0.0), NOp.var(), NOp.var('acc'))), lambda acc: acc),
   (NOp(UOps.WMMA, src=(NOp.var(), NOp.const(None, 0.0), NOp.var('acc'))), lambda acc: acc),
   # tensor core cleanups
-  *[(NOp(UOps.REDUCE, src=(NOp(UOps.EXPAND, src=tuple(NOp(UOps.GEP, dtypes.float, src=(NOp.var('x'),), arg=i) for i in range(j))).name("expand"),))
-    .name("reduce_allow_any_len"), reduce_before_expand) for j in [2,4,8]],
-  (NOp.var("add") + NOp(UOps.WMMA).name("wmma"),
+  *[(NOp(UOps.REDUCE, src=(NOp(UOps.EXPAND, src=tuple(NOp(UOps.GEP, dtypes.float, src=(NOp.var('x'),), arg=i) for i in range(j)), name="expand"),)
+    ,name="reduce_allow_any_len"), reduce_before_expand) for j in [2,4,8]],
+  (NOp.var("add") + NOp(UOps.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
   (NOp(UOps.ALU, dtype=dtypes.uint64, src=(NOp.var("x"), NOp.var("seed")), arg=BinaryOps.THREEFRY), threefry2x32),
@@ -175,46 +174,46 @@ constant_folder = PatternMatcher([
   (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),)),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # extra arange loop folding because we don't fold adds. TODO: fold adds
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end"))).name("rng") +
+  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2") + NOp.var("idx3"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM).name("reduce_allow_any_len"), loop_collapse),
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end"))).name("rng") +
+    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"), loop_collapse),
+  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM).name("reduce_allow_any_len"), loop_collapse),
+    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"), loop_collapse),
   # arange loop folding (reduce)
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end"))).name("rng"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM).name("reduce_allow_any_len"), loop_collapse),
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") - NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end"))).name("rng"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM).name("reduce_allow_any_len"),
+  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
+    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"), loop_collapse),
+  (NOp(UOps.REDUCE, src=((NOp.var("idx") - NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
+    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"),
     lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # indexing (with a multiply offset)!
-  (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE).name("rng")).cast()*
-    NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE).name("rng"))).name("ld"),),
-    arg=ReduceOps.SUM).name("reduce_allow_any_len"), index_collapse),
-  (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE).name("rng")).where(
-    NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE).name("rng"))).name("ld"), NOp.const(None, 0.0)),),
-    arg=ReduceOps.SUM).name("reduce_allow_any_len"), index_collapse),
+  (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).cast()*
+    NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"),),
+    arg=ReduceOps.SUM, name="reduce_allow_any_len"), index_collapse),
+  (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).where(
+    NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"), NOp.const(None, 0.0)),),
+    arg=ReduceOps.SUM, name="reduce_allow_any_len"), index_collapse),
   # other arange folders
   (NOp.cvar("c1") - (NOp.var("x") + NOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
   # max folding
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # max on special can go away (TODO: special should be variable, same thing applies)
-  (NOp.max(NOp.cvar('c'), NOp(UOps.SPECIAL).name('s')+NOp.cvar('c2')), lambda c,s,c2: (s+c2) if 0 >= c.arg else None),  # TODO: generic
-  (NOp.max(NOp.cvar('c'), -(NOp(UOps.SPECIAL).name('s')+NOp.cvar('c2'))), lambda c,s,c2: -(s+c2) if -(s.arg[1]-1+c2.arg) >= c.arg else None),
+  (NOp.max(NOp.cvar('c'), NOp(UOps.SPECIAL, name="s")+NOp.cvar('c2')), lambda c,s,c2: (s+c2) if 0 >= c.arg else None),  # TODO: generic
+  (NOp.max(NOp.cvar('c'), -(NOp(UOps.SPECIAL, name="s")+NOp.cvar('c2'))), lambda c,s,c2: -(s+c2) if -(s.arg[1]-1+c2.arg) >= c.arg else None),
   # max on range can go away (ugh: copy of SPECIAL, and with/without const)
-  (NOp.max(NOp.cvar('c'), NOp(UOps.RANGE).name('s')+NOp.cvar('c2')), lambda c,s,c2: (s+c2) if s.src[0].arg >= c.arg else None),  # TODO: generic
-  (NOp.max(NOp.cvar('c'), -(NOp(UOps.RANGE).name('s')+NOp.cvar('c2'))), lambda c,s,c2: -(s+c2) if -(s.src[1].arg-1+c2.arg) >= c.arg else None),
+  (NOp.max(NOp.cvar('c'), NOp(UOps.RANGE, name="s")+NOp.cvar('c2')), lambda c,s,c2: (s+c2) if s.src[0].arg >= c.arg else None),  # TODO: generic
+  (NOp.max(NOp.cvar('c'), -(NOp(UOps.RANGE, name="s")+NOp.cvar('c2'))), lambda c,s,c2: -(s+c2) if -(s.src[1].arg-1+c2.arg) >= c.arg else None),
   # const rules
-  (NOp(UOps.GEP, src=(NOp.cvar("c"),)).name("root"), lambda root, c: root.const(c.arg)),
+  (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const(c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
   (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
-  (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC).name("acc"), NOp.var("acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
+  (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, name="acc"), NOp.var("acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
   (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),)), NOp.var("x"))), lambda x: x),
   (NOp(UOps.PHI, src=(NOp.cvar(), NOp.var("x"))), lambda x: x),
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
-  (NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),)).name("root"), lambda root: UOp.cast(root.src[0], root.dtype)),
-  (NOp(UOps.GEP, src=(NOp.cvar("x"),)).name("root"), lambda root,x: root.const(x.arg)),
+  (NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),), name="root"), lambda root: UOp.cast(root.src[0], root.dtype)),
+  (NOp(UOps.GEP, src=(NOp.cvar("x"),), name="root"), lambda root,x: root.const(x.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
   (NOp.cvar('gate').where(NOp.var('c0'), NOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
@@ -301,15 +300,15 @@ constant_folder = PatternMatcher([
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("gate").where(NOp.var("alt"), NOp.load(NOp.var("buf"), NOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # VECTORIZE-PHI-GEP -> PHI-VECTORIZE
-  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(NOp.var("val"),), arg=i), NOp.var(f"v{i}"))) for i in range(4))).name("root"),
+  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(NOp.var("val"),), arg=i), NOp.var(f"v{i}"))) for i in range(4)), name="root"),
    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1, v2, v3))))),
-  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(NOp.var("val"),), arg=i), NOp.var(f"v{i}"))) for i in range(2))).name("root"),
+  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(NOp.var("val"),), arg=i), NOp.var(f"v{i}"))) for i in range(2)), name="root"),
    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
   (NOp.lt(-NOp.var('x'), NOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(c.const(-c.arg), x)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
-  (NOp(UOps.CAST).name("root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
-  (NOp(UOps.VECTORIZE).name("root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
+  (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
+  (NOp(UOps.VECTORIZE, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.const(dtypes.bool, True), NOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.const(dtypes.bool, True), NOp.cvar("var"), NOp.var("barrier")),
@@ -319,7 +318,7 @@ constant_folder = PatternMatcher([
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("val"), NOp.const(dtypes.bool, True)), NOp.store),
   (NOp.store(NOp.var(), NOp.var(), NOp.var(), NOp.const(dtypes.bool, False)), lambda: UOp(UOps.NOOP)),
   # remove NOOPs from SINK
-  (NOp(UOps.SINK).name("root"),
+  (NOp(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
 ])
 
@@ -417,14 +416,14 @@ def no_vectorized_alu(alu):
 expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
-  (NOp(UOps.REDUCE).name("root"), do_reduce_with_expand),
-  (NOp(UOps.CONTRACT).name("con"), do_contract),
+  (NOp(UOps.REDUCE, name="root"), do_reduce_with_expand),
+  (NOp(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
-  (NOp(UOps.SINK).name("root"),
+  (NOp(UOps.SINK, name="root"),
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg)
     if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
   # BARRIERs aren't actually expanded
-  (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND).name("ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
+  (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
   # empty EXPAND is NOOP
   (NOp(UOps.EXPAND, src=(NOp.var('x'),), arg=()), lambda x: x),
   # no ALU on vectorized dtypes
