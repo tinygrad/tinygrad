@@ -40,9 +40,9 @@ class MetalGraph(GraphRunner):
           icb_command.setKernelBuffer_offset_atIndex_(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
       for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex_(self.int_buf.buf, self.vars.index(v)*4, len(ji.bufs)+i)
-      if (ld_idxs:=self.launch_dims_replace.get(j)) is not None:
-        global_size, local_size = launch_dims.get(ld_idxs[0], prg.p.global_size), launch_dims.get(ld_idxs[1], prg.p.local_size)
-        icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
+
+      global_size, local_size = prg.p.launch_dims(var_vals)
+      icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
       icb_command.setBarrier()
 
     self.all_resources = dedup(all_resources)
@@ -56,8 +56,9 @@ class MetalGraph(GraphRunner):
     for (j,i),input_idx in self.input_replace.items():
       self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf.buf,
                                                                                  input_rawbuffers[input_idx]._buf.offset, i)
-    for j in self.jc_idx_with_updatable_launch_dims:
-      global_size, local_size = cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals)
+
+    for j, global_dims, local_dims in self.replaced_launch_dims(var_vals):
+      global_size, local_size = global_dims or self.jit_cache[j].prg.p.global_size, local_dims or self.jit_cache[j].prg.p.local_size
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size),
                                                                                                        Metal.MTLSize(*local_size))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]

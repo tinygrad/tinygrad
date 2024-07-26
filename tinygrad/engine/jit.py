@@ -79,8 +79,9 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     lds_estimate: sint = 0
 
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
-    self.symbolic_dims = dedup([tuple(dim) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (dim:=ji.prg.p.local_size) and not all_int(dim)] +
-                               [tuple(dim) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (dim:=ji.prg.p.global_size) and not all_int(dim)])
+    self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and not all_int(d)] +
+                               [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and not all_int(d)])
+    def sym_dim_idx(dim): return self.symbolic_dims.index(dim) if dim in self.symbolic_dims and dim is not None else None
 
     for j,ji in enumerate(jit_cache):
       op_estimate += ji.prg.op_estimate
@@ -88,16 +89,10 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
       lds_estimate += ji.prg.lds_estimate
       if isinstance(ji.prg, CompiledRunner):
         if ji.prg.p.vars: self.var_vals_replace[j] = [self.vars.index(v) for v in ji.prg.p.vars]
-
-        g_resolve_idx = self.symbolic_dims.index(dim) if (dim:=tuple(ji.prg.p.global_size)) in self.symbolic_dims else None
-        l_resolve_idx = self.symbolic_dims.index(dim) if (dim:=tuple(ji.prg.p.local_size)) in self.symbolic_dims else None
-        if g_resolve_idx is not None or l_resolve_idx is not None: self.launch_dims_replace[j] = (g_resolve_idx, l_resolve_idx)
+        if (gl_idx:=sym_dim_idx(ji.prg.p.global_size)) or (lc_idx:=sym_dim_idx(ji.prg.p.local_size)): self.launch_dims_replace[j] = (gl_idx, lc_idx)
 
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
                      op_estimate, mem_estimate, lds_estimate)
-
-  # def _resolve_symbolic_vars(self, var_vals) -> List: return [var_vals[v] for v in self.vars]
-  # def _resolve_symbolic_launch_dims(self, var_vals) -> List: return {i:tuple(sym_infer(s, var_vals) for s in ld) for i, ld in enumerate(self.symbolic_dims)}
 
   def replaced_vars(self, var_vals):
     res_v = [var_vals[v] for v in self.vars]
