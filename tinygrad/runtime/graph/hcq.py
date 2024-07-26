@@ -137,13 +137,16 @@ class HCQGraph(MultiGraphRunner):
       else: self.op_cmd_idx[j][0].update_copy(self.op_cmd_idx[j][1], **{('dest' if i == 0 else 'src'): input_rawbuffers[input_idx]._buf.va_addr})
 
     # Update var_vals
-    for j in self.jc_idx_with_updatable_var_vals:
-      for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars): self.ji_args_vars[j][i] = var_vals[v]
+    vals = self._resolve_symbolic_vars(var_vals)
+    for j, vidxs in self.var_vals_replace:
+      for i,v in enumerate(vidxs): self.ji_args_vars[j][i] = vals[v]
+    # for j in self.jc_idx_with_updatable_var_vals:
+    #   for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars): self.ji_args_vars[j][i] = var_vals[v]
 
     launch_dims = self._resolve_symbolic_launch_dims(var_vals)
-    for j,gd,ld in self.jc_idx_with_updatable_launch_dims_2:
+    for j,gd,ld in self.launch_dims_replace:
       queue, cmd_ptr = self.op_cmd_idx[j]
-      queue.update_exec(cmd_ptr, launch_dims[gd] if gd >= 0 else None, launch_dims[ld] if ld >= 0 else None)
+      queue.update_exec(cmd_ptr, launch_dims[gd] if gd is not None else None, launch_dims[ld] if ld is not None else None)
 
     for dev in self.devices:
       comp_queue, copy_queue, need_sig_upd = self.comp_queues[dev], self.copy_queues[dev], dev.timeline_signal != self.last_timeline[dev][0]
