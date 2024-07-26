@@ -135,18 +135,15 @@ class UPat:
                name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False):
     self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
     self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
-    self.arg = arg
+    self.arg, self.name = arg, name
     self.src: Any = None
-    if isinstance(src, list):
-      # try all permutations if it's a list
-      self.src = list(itertools.permutations(src))
-    elif isinstance(src, tuple):
-      # only one if it's a tuple
-      self.src = [src]
-    elif isinstance(src, UPat):
-      # repeat if it's a UPat
-      self.src = [itertools.repeat(src)]
-    self.name: Optional[str] = name
+    # try all permutations if it's a list
+    if isinstance(src, list): self.src = list(itertools.permutations(src))
+    # only one if it's a tuple
+    elif isinstance(src, tuple): self.src = [src]
+    # repeat if it's a UPat
+    elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
+
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
 
   def __repr__(self):
