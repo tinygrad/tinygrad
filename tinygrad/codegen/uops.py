@@ -110,7 +110,6 @@ class UOp:
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
     if self.op is UOps.CONST: return self, self
-    if self.op is UOps.VECTORIZE and all(x.op == UOps.CONST and x.arg == self.src[0].arg for x in self.src): return self.src[0], self.src[0]
     if self.op is UOps.ALU:
       if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(cast(DType, self.dtype)):
         return self.sconst(-self.src[0].vmax.arg), self.sconst(-self.src[0].vmin.arg)
