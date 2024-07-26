@@ -110,6 +110,9 @@ class UOp:
         return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
       if self.arg is BinaryOps.ADD:
         return self.const(self.src[0].vmin.arg+self.src[1].vmin.arg), self.const(self.src[0].vmax.arg+self.src[1].vmax.arg)
+      if self.arg is BinaryOps.MUL and self.src[0].vmin.arg >= 0 and self.src[1].vmin.arg >= 0:
+        return self.const(self.src[0].vmin.arg*self.src[1].vmin.arg), self.const(self.src[0].vmax.arg*self.src[1].vmax.arg)
+      if self.arg is BinaryOps.MOD and self.src[1].op is UOps.CONST: return self.const(0), self.const(self.src[1].arg-1)
     return None, None
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
