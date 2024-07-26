@@ -7,7 +7,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, 
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.shape.symbolic import Variable, sint, sym_infer
 from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner
 from tinygrad.engine.schedule import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
@@ -71,7 +71,9 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
+    self.symbolic_launch_dims = []
     self.jc_idx_with_updatable_launch_dims = []
+    self.jc_idx_with_updatable_launch_dims_2 = []
     self.jc_idx_with_updatable_var_vals = []
     op_estimate: sint = 0
     mem_estimate: sint = 0
@@ -82,11 +84,21 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
       lds_estimate += ji.prg.lds_estimate
       if isinstance(ji.prg, CompiledRunner):
         if ji.prg.p.vars: self.jc_idx_with_updatable_var_vals.append(j)
-        if (ji.prg.p.global_size and not all_int(ji.prg.p.global_size)) or (ji.prg.p.local_size and not all_int(ji.prg.p.local_size)):
-          self.jc_idx_with_updatable_launch_dims.append(j)
+        if ji.prg.p.global_size and not all_int(ji.prg.p.global_size): self.symblic_launch_dims.append(ji.prg.p.global_size)
+        if ji.prg.p.local_size and not all_int(ji.prg.p.local_size): self.symblic_launch_dims.append(ji.prg.p.local_size)
+
+    self.symbolic_launch_dims = list(set(self.symblic_launch_dims)) # TODO: dedup
+    for j,ji in enumerate(jit_cache):
+      if not isinstance(ji.prg, CompiledRunner): continue
+      g_resolve_idx, l_resolve_idx = self.symblic_launch_dims.index(ji.prg.p.global_size), self.symblic_launch_dims.index(ji.prg.p.local_size)
+      if g_resolve_idx > 0 or l_resolve_idx > 0: self.jc_idx_with_updatable_launch_dims_2.append((j, g_resolve_idx, l_resolve_idx))
+
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
+    # self.symblic_launch_dims = []
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
                      op_estimate, mem_estimate, lds_estimate)
+
+  def _resolve_symbolic_launch_dims(self, var_vals) -> List: return [tuple(sym_infer(d, var_vals) for s in ld) for ld in self.symblic_launch_dims]
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
