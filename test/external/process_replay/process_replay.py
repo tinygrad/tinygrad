@@ -103,7 +103,7 @@ if __name__ == "__main__":
   if REF == "update_benchmark":
     name = {"testmacbenchmark": "Mac", "testnvidiabenchmark": "NVIDIA", "testmorenvidiabenchmark": "NVIDIA Training",
             "testamdbenchmark": "AMD", "testmoreamdbenchmark": "AMD Training"}[os.environ["GITHUB_JOB"]]
-    res = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master", headers=GH_HEADERS)
+    res = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master&status=success", headers=GH_HEADERS)
     ref_run_id = res.json()["workflow_runs"][0]["id"]
     print(f"comparing speed for {RUN_ID} against {ref_run_id}")
     download_artifact(ref_run_id, f"Speed ({name})", "/tmp/timing_ref")
