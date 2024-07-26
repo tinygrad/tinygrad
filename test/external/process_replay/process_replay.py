@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 BASE_URL = f"https://api.github.com/repos/{os.getenv('GITHUB_REPOSITORY', 'tinygrad/tinygrad')}"
 GH_HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN', '')}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 
-def process_replay(offset:int, ref_schedule:List[LazyOp]):
+def diff_kernel(offset:int, ref_schedule:List[LazyOp], kernel_changed):
   if early_stop.is_set(): return
   conn = db_connection()
   cur = conn.cursor()
@@ -47,6 +47,7 @@ def process_replay(offset:int, ref_schedule:List[LazyOp]):
       logging.info(ast)
       logging.info(applied_opts)
       logging.info(e)
+      kernel_changed.value = True
       if ASSERT_DIFF: raise e
       continue
     # try compare
@@ -63,6 +64,7 @@ def process_replay(offset:int, ref_schedule:List[LazyOp]):
       diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
       for line in diff:
         logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+      kernel_changed.value = True
       if ASSERT_DIFF: raise e
       if changed > MAX_DIFF_PCT:
         logging.warning(f"detected changes in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
@@ -125,6 +127,7 @@ if __name__ == "__main__":
       print(tabulate(diff, headers='keys'))
 
   # *** schedule diff
+def process_replay():
   ref_schedule = multiprocessing.Manager().list()
   if COMPARE_SCHEDULE:
     logging.info("fetching process replay reference")
@@ -149,7 +152,17 @@ if __name__ == "__main__":
   conn.commit()
   cur.close()
   processes = []
+  changed = multiprocessing.Manager().Value('b', False)
   for i in tqdm(range(0, row_count, PAGE_SIZE)):
-    processes.append(p:=multiprocessing.Process(target=process_replay, args=(i, ref_schedule)))
+    processes.append(p:=multiprocessing.Process(target=diff_kernel, args=(i, ref_schedule, changed)))
     p.start()
   for p in processes: p.join()
+  if changed.value and ASSERT_DIFF: raise Exception("process replay detected changes")
+
+if __name__ == "__main__":
+  if SKIP_PROCESS_REPLAY:
+    logging.info("skipping process replay.")
+    exit(0)
+  try: process_replay()
+  except Exception as e:
+    if ASSERT_DIFF: raise e
