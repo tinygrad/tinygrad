@@ -83,14 +83,14 @@ class TestSymbolic(unittest.TestCase):
     expr = create_lt_node(Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)
     self.helper_test_variable(expr, 0, 1, "(idx<128)")
 
-  @unittest.expectedFailure
   def test_ge_divides_and(self):
     expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
                       create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)])
-    self.helper_test_variable(expr, 0, 1, "((idx1<128) and (idx2<128))")
-    expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
-                      create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7), 512)])
-    self.helper_test_variable(expr//4, 0, 0, "0")
+    self.helper_test_variable(expr, 0, 1, {"((idx1<128) and (idx2<128))", "((idx1<128)*(idx2<128))"})
+    # # bool divided by int is not allowed
+    # expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
+    #                   create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7), 512)])
+    # self.helper_test_variable(expr//4, 0, 0, "0")
 
   def test_lt_factors(self):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
@@ -218,11 +218,12 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_const_big(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 16, 0, 1, "(a//4)")
 
-  @unittest.expectedFailure
   def test_sum_lt_fold(self):
     self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]), 16), 0, 1, "(a<4)")
     self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]), 16), 0, 1, "(((a*4)+b)<16)")
-    self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
+    # TODO: fix
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
 
   def test_mul_mod_large(self):
     self.helper_test_variable((Variable("a", 0, 20)*10)%9, 0, 8, "(a%9)")
@@ -371,14 +372,15 @@ class TestSymbolicVars(unittest.TestCase):
     s = SumNode([a, b, c])
     assert s.vars() == {a, b, c}
 
-  @unittest.skip("TODO: fix me")
   def test_compound(self):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
     assert (a + b * c).vars() == {a, b, c}
     assert (a % 3 + b // 5).vars() == {a, b}
-    assert (a + b + c - a).vars() == {b, c}
+    # TODO: fix me
+    with self.assertRaises(AssertionError):
+      assert (a + b + c - a).vars() == {b, c}
 
   def test_dedup(self):
     a = Variable("a", 0, 10)
