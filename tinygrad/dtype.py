@@ -54,10 +54,12 @@ class dtypes:
   def as_const(val: ConstType, dtype:DType): return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   def min(dtype:DType):
+    assert dtype is not None
     if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
     return -float("inf") if dtypes.is_float(dtype) else False
   @staticmethod
   def max(dtype:DType):
+    assert dtype is not None
     if dtypes.is_int(dtype): return (2**(dtype.itemsize*8-(0 if dtypes.is_unsigned(dtype) else 1)))-1
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
