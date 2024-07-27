@@ -129,7 +129,7 @@ class NOp(UOp):
   def compile(self: NOp, name:Optional[str]=None) -> UPat:
     if self.op is UOps.NOOP: return UPat(**{k:tuple(s.compile() for s in v) if k == 'src' else v for k,v in self.arg.items()})
     return UPat(self.op, self.arg, (list if self.commutative() else tuple)([src.compile() for src in self.src]) if self.src != () else None,
-                (name := self.name or name), self.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
+                self.name or name, self.dtype, self.allow_any_len)
 
 def _nop(*args, **kwargs): return NOp(UOps.NOOP, arg=dict([*zip(['op', 'dtype', 'src', 'arg', 'name'], args), *kwargs.items()]))
 
