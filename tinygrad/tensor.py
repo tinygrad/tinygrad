@@ -331,7 +331,7 @@ class Tensor:
 
     """
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
-    canonical_devices = tuple(Device.canonicalize(x) for x in devices)
+    canonical_devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
     if axis is not None:
       if axis < 0: axis += len(self.shape)
       if splits is None:
@@ -340,9 +340,6 @@ class Tensor:
       assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
       boundaries = tuple(itertools.accumulate(splits))
       bounds = tuple(zip((0,) + boundaries, boundaries))
-    else:
-      assert splits is None, "splits only allowed for Tensor sharded on axis!"
-      bounds = None
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, bounds),
                   device=canonical_devices, requires_grad=self.requires_grad)
 
