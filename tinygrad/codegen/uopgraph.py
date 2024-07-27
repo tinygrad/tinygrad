@@ -208,7 +208,7 @@ constant_folder = PatternMatcher([
   # const rules
   (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const(c.arg)),
   *[(UPat(UOps.GEP, name="root", src=(UPat(UOps.VECTORIZE, name="v", src=[UPat(UOps.CONST) for _ in range(i)]))),
-     lambda root, v: root.const(v.src[root.arg].arg)) for i in [2, 4, 8]],
+     lambda root, v: v.src[root.arg]) for i in [2, 4, 8]],
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
   # a phi on a DEFINE_ACC without loops, CONST, or a vectorized CONST is a noop. this is for correctness, not just speed
   (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, name="acc"), NOp.var("acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
@@ -218,7 +218,7 @@ constant_folder = PatternMatcher([
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
   (NOp(UOps.DEFINE_ACC, src=(NOp.var(),), name="root"), lambda root: UOp.cast(root.src[0], root.dtype)),
   *[(UPat(UOps.GEP, name="root", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, name="v", src=[UPat(UOps.CONST) for _ in range(i)]))))),
-     lambda root, v: root.const(v.src[root.arg].arg)) for i in [2, 4, 8]],
+     lambda root, v: v.src[root.arg]) for i in [2, 4, 8]],
   (NOp(UOps.GEP, src=(NOp.cvar("x"),), name="root"), lambda root,x: root.const(x.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
