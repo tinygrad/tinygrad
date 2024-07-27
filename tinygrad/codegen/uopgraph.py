@@ -11,18 +11,18 @@ if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # ***** image handling *****
 
-def image_contract_load(buf, idx, idy, id4, ls_allow_any_len):
-  if len(ls_allow_any_len.src) > 3:
+def image_contract_load(buf, idx, idy, id4, ls):
+  if len(ls.src) > 3:
     # TODO: there's no contract on the gate, is this okay?
-    extra = (ls_allow_any_len.src[2], UOp(UOps.VECTORIZE, ls_allow_any_len.dtype.vec(4), (ls_allow_any_len.src[3],)*4))
-  else: extra = ls_allow_any_len.src[2:]  # NOTE: image load shouldn't have barrier and this shouldn't matter
-  vec_load = UOp(UOps.LOAD, ls_allow_any_len.dtype.vec(4), (buf, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx, idy))) + extra)
-  return functools.reduce(lambda ret, i: id4.ne(i).alu(TernaryOps.WHERE, ret, UOp(UOps.GEP, ls_allow_any_len.dtype, (vec_load,), i)), range(4),
-                          ls_allow_any_len.const(float('nan')))
+    extra = (ls.src[2], UOp(UOps.VECTORIZE, ls.dtype.vec(4), (ls.src[3],)*4))
+  else: extra = ls.src[2:]  # NOTE: image load shouldn't have barrier and this shouldn't matter
+  vec_load = UOp(UOps.LOAD, ls.dtype.vec(4), (buf, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx, idy))) + extra)
+  return functools.reduce(lambda ret, i: id4.ne(i).alu(TernaryOps.WHERE, ret, UOp(UOps.GEP, ls.dtype, (vec_load,), i)), range(4),
+                          ls.const(float('nan')))
 
-def image_contract_store(buf, ex, idx, idy, ls_allow_any_len, var):
+def image_contract_store(buf, ex, idx, idy, ls, var):
   new_var = UOp(UOps.CONTRACT, var.dtype.vec(4), (var,), ((ex.arg[0][0],4),))
-  return UOp(UOps.STORE, None, (buf, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx, idy)), new_var) + ls_allow_any_len.src[3:])
+  return UOp(UOps.STORE, None, (buf, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx, idy)), new_var) + ls.src[3:])
 
 # ***** float4 handling *****
 
@@ -38,7 +38,7 @@ def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None, i
   vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
   return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
 
-def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtypes.int, 0), idx2=None, idx3=None):
+def float4_contract_store(buf, ex, var, store, idx=UOp.const(dtypes.int, 0), idx2=None, idx3=None):
   if len(ex.src) not in [2, 4]: return None
   if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
   if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
@@ -47,7 +47,7 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
   if idx.divides(len(ex.src)) is None: return None
 
   new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), ((ex.arg[0][0],len(ex.src)),))
-  return UOp(UOps.STORE, None, (buf, idx, new_var) + store_allow_any_len.src[3:])
+  return UOp(UOps.STORE, None, (buf, idx, new_var) + store.src[3:])
 
 float4_folding = PatternMatcher([
   # reorder index to bring const closer to store
@@ -62,20 +62,20 @@ float4_folding = PatternMatcher([
   # float(2,4) store
   # TODO: fold ADDs into one UOp and remove add chains
   (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3"), NOp.var("var")), name="store_allow_any_len"),
+    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3"), NOp.var("var")), name="store", allow_any_len=True),
     float4_contract_store),
   (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2"), NOp.var("var")), name="store_allow_any_len"),
+    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2"), NOp.var("var")), name="store", allow_any_len=True),
     float4_contract_store),
   (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex")+NOp.var("idx"), NOp.var("var")), name="store_allow_any_len"), float4_contract_store),
+    NOp(UOps.EXPAND, name="ex")+NOp.var("idx"), NOp.var("var")), name="store", allow_any_len=True), float4_contract_store),
   (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex"), NOp.var("var")), name="store_allow_any_len"), float4_contract_store),
+    NOp(UOps.EXPAND, name="ex"), NOp.var("var")), name="store", allow_any_len=True), float4_contract_store),
   # image handling
   (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
-     NOp.var('id4')))), name="ls_allow_any_len"), image_contract_load),
+     NOp.var('id4')))), name="ls", allow_any_len=True), image_contract_load),
   (NOp(UOps.STORE, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
-     NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex"))), NOp.var("var")), name="ls_allow_any_len"),
+     NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex"))), NOp.var("var")), name="ls", allow_any_len=True),
      image_contract_store),
 ])
 
@@ -104,13 +104,13 @@ def threefry2x32(x: UOp, seed: UOp):
 
 # ***** main rewriter *****
 
-def reduce_before_expand(reduce_allow_any_len, expand, x):
+def reduce_before_expand(reduce, expand, x):
   # if the expand is being reduced, you can't push it through
   # NOTE: could do a partial push here in some cases
-  expands = flatten([x.arg for x in reduce_allow_any_len.src[1:] if x.op is UOps.EXPAND])
+  expands = flatten([x.arg for x in reduce.src[1:] if x.op is UOps.EXPAND])
   if any(x in expands for x in expand.arg): return None
-  red = UOp(UOps.REDUCE, x.dtype, (x,)+reduce_allow_any_len.src[1:], reduce_allow_any_len.arg)
-  gep = tuple(UOp(UOps.GEP, reduce_allow_any_len.dtype, (red,), i) for i in range(x.dtype.count))
+  red = UOp(UOps.REDUCE, x.dtype, (x,)+reduce.src[1:], reduce.arg)
+  gep = tuple(UOp(UOps.GEP, reduce.dtype, (red,), i) for i in range(x.dtype.count))
   return UOp(expand.op, expand.dtype, gep, expand.arg)
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -119,8 +119,8 @@ def sum_collapse(phi_input, loop, val1, val2):
       return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+v1*(loop.src[1]-loop.src[0]).cast(v1.dtype)
   return None
 
-def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce_allow_any_len, idx2=None, idx3=None):
-  if getenv("DISABLE_LOOP_COLLAPSE") or rng not in reduce_allow_any_len.src: return None  # must be the right REDUCE
+def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce, idx2=None, idx3=None):
+  if getenv("DISABLE_LOOP_COLLAPSE") or rng not in reduce.src: return None  # must be the right REDUCE
   if mval.arg >= 0 or loop_start.arg != 0:
     # TODO: support and test this with other mvals and loop_starts
     if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
@@ -128,13 +128,13 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
   if idx2 is not None: idx = idx + idx2
   if idx3 is not None: idx = idx + idx3
   comprange = UOp.min(loop_end, UOp.max((idx-compval-mval).alu(BinaryOps.IDIV, mval) + (loop_end-loop_start), loop_start))
-  return UOp(UOps.REDUCE, reduce_allow_any_len.dtype, (comprange.cast(multconst.dtype) * multconst,) +
-             tuple(x for x in reduce_allow_any_len.src[1:] if x is not rng), reduce_allow_any_len.arg)
+  return UOp(UOps.REDUCE, reduce.dtype, (comprange.cast(multconst.dtype) * multconst,) +
+             tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
-def index_collapse(idx,rng,buf,add,mul,ld,reduce_allow_any_len):
-  if rng not in reduce_allow_any_len.src: return None
-  return UOp(reduce_allow_any_len.op, reduce_allow_any_len.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx)),)+
-             tuple(x for x in reduce_allow_any_len.src[1:] if x is not rng), reduce_allow_any_len.arg)
+def index_collapse(idx,rng,buf,add,mul,ld,reduce):
+  if rng not in reduce.src: return None
+  return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx)),)+
+             tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
@@ -159,7 +159,7 @@ constant_folder = PatternMatcher([
   (NOp(UOps.WMMA, src=(NOp.var(), NOp.const(None, 0.0), NOp.var('acc'))), lambda acc: acc),
   # tensor core cleanups
   *[(NOp(UOps.REDUCE, src=(NOp(UOps.EXPAND, src=tuple(NOp(UOps.GEP, dtypes.float, src=(NOp.var('x'),), arg=i) for i in range(j)), name="expand"),)
-    ,name="reduce_allow_any_len"), reduce_before_expand) for j in [2,4,8]],
+    ,name="reduce", allow_any_len=True), reduce_before_expand) for j in [2,4,8]],
   (NOp.var("add") + NOp(UOps.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
@@ -172,23 +172,23 @@ constant_folder = PatternMatcher([
   # extra arange loop folding because we don't fold adds. TODO: fold adds
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2") + NOp.var("idx3"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"), loop_collapse),
+   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"), loop_collapse),
+   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   # arange loop folding (reduce)
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"), loop_collapse),
+   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   (NOp(UOps.REDUCE, src=((NOp.var("idx") - NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"),
+    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True),
     lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # indexing (with a multiply offset)!
   (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).cast()*
     NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"),),
-    arg=ReduceOps.SUM, name="reduce_allow_any_len"), index_collapse),
+    arg=ReduceOps.SUM, name="reduce", allow_any_len=True), index_collapse),
   (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).where(
     NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"), NOp.const(None, 0.0)),),
-    arg=ReduceOps.SUM, name="reduce_allow_any_len"), index_collapse),
+    arg=ReduceOps.SUM, name="reduce", allow_any_len=True), index_collapse),
   # other arange folders
   (NOp.cvar("c1") - (NOp.var("x") + NOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
   # max folding
