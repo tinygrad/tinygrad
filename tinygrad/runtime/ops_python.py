@@ -45,7 +45,7 @@ class PythonProgram:
         if uop is UOps.DEFINE_ACC: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
-        if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
+        if getenv("TRACE") or True: print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
           if len(inp) == 3: inp.append([True] * len(inp[0]))  # set the gate to True
           if isinstance(dtp[0], ImageDType):
@@ -103,7 +103,21 @@ class PythonProgram:
         elif uop in {UOps.CAST, UOps.BITCAST}:
           assert dtp[0].fmt and dtype.fmt
           pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-          if uop is UOps.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
+          if uop is UOps.BITCAST:
+            x = inp
+            sz = 0
+            while True:
+              if isinstance(x, list):
+                x = x[-1]
+              else:
+                sz = x.__sizeof__() // 8 + 1
+                break
+            if dtype.itemsize > sz and False:
+              raise RuntimeError("target bigger than source not implemented")
+            elif dtype.itemsize < sz and False:
+              raise RuntimeError("bigger 2 thinersource not implemented")
+            else:
+              ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
           else:
             casted = [dtypes.as_const(x, dtype) for x in inp[0]]
             if dtypes.is_int(dtype):

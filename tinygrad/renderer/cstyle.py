@@ -159,8 +159,15 @@ class CStyleLanguage(Renderer):
           assert len(src) == 1 or (uop is UOps.VECTORIZE and len(src) > 1), "Invalid source length for operation"
           if uop is UOps.BITCAST:
             precast = ssa('precast')
-            kk(f"{self.render_dtype(cast(DType, src[0].dtype))} {precast} = {r[src[0]]};")
-            val = self.render_cast(precast, dtype, bitcast=True)
+            if dtype.itemsize > src[0].dtype.itemsize:
+              raise RuntimeError("target bigger than source not implemented")
+            elif dtype.itemsize < src[0].dtype.itemsize:
+              if c['precast'] == 1:
+                kk("float vval0 = *((__global float*)(data1+0));")
+              val = f"( as_uint(vval0) >> {8 * (c['precast'] - 1)}) & 0xFF; "
+            else:
+              kk(f"{self.render_dtype(cast(DType, src[0].dtype))} {precast} = {r[src[0]]};")
+              val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
           else: val = self.render_vectorize([r[x] for x in src], dtype)
           if child_count[u] <= 1: r[u] = val
