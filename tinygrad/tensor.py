@@ -336,7 +336,8 @@ class Tensor:
       if axis < 0: axis += len(self.shape)
       if splits is None:
         sz = round_up(self.shape[axis], len(devices)) // len(devices)
-        splits = tuple([min(self.shape[axis], sz*(i+1)) for i in range(len(devices))])
+        splits = tuple([max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))])
+      assert sum(splits) == self.shape[axis]
     else:
       assert splits is None, "splits only allowed for Tensor sharded on axis!"
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, splits),

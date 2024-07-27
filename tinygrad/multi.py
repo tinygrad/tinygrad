@@ -42,9 +42,13 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   pads = [((s,dim-e),) for s,e in chunks]
   return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
+def splits_to_bounds(splits: Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
+  boundaries = tuple(itertools.accumulate(splits))
+  return tuple(zip((0,) + boundaries, boundaries))
+
 def to_sharded(lbs:List[LazyBuffer], axis:int, splits: Tuple[int, ...]) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, splits={splits}")
-  bounds = zip((0,) + splits, splits)
+  bounds = splits_to_bounds(splits)
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
 class MultiLazyBuffer:
@@ -52,7 +56,7 @@ class MultiLazyBuffer:
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs), "all lbs must be LazyBuffers, and we need at least one of them"
     assert all_same([x.dtype for x in lbs]), f"all multilazybuffer needs same dtype, getting {[x.dtype for x in lbs]}"
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
-    self.splits = tuple(itertools.accumulate([lb.shape[axis] for lb in lbs])) if axis is not None else None
+    self.splits = tuple([lb.shape[axis] for lb in lbs]) if axis is not None else None
 
   @property
   def shape(self):
@@ -65,7 +69,7 @@ class MultiLazyBuffer:
   def real_lbs(self): return [lb for lb,r in zip(self.lbs, self.real) if r]
 
   @property
-  def bounds(self): return list(zip((0,) + self.splits, self.splits)) if self.splits is not None else None
+  def bounds(self): return splits_to_bounds(self.splits) if self.splits is not None else None
 
   def __repr__(self):
     return f"<MLB {self.axis=} {self.real=} {chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
