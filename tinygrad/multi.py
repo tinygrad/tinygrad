@@ -42,7 +42,7 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   pads = [((s,dim-e),) for s,e in chunks]
   return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
-def splits_to_bounds(splits: Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
+def splits_to_bounds(splits: Tuple[int, ...]) -> Tuple[Tuple[int, sint], ...]:
   boundaries = tuple(itertools.accumulate(splits))
   return tuple(zip((0,) + boundaries, boundaries))
 
@@ -56,7 +56,7 @@ class MultiLazyBuffer:
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs), "all lbs must be LazyBuffers, and we need at least one of them"
     assert all_same([x.dtype for x in lbs]), f"all multilazybuffer needs same dtype, getting {[x.dtype for x in lbs]}"
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
-    self.splits = tuple([lb.shape[axis] for lb in lbs]) if axis is not None else None
+    self.splits = tuple([int(lb.shape[axis]) for lb in lbs]) if axis is not None else None
 
   @property
   def shape(self):
