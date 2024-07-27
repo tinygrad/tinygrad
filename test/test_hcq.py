@@ -489,7 +489,7 @@ class TestProfiler(unittest.TestCase):
     expected_diff = 100000 # sleep in us
 
     devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(6)]
-    bufs =[Buffer(f"{Device.DEFAULT}:{i}", 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated() for i in range(6)]
+    bufs = [Buffer(f"{Device.DEFAULT}:{i}", 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated() for i in range(6)]
 
     # enqueue ops on different queues to check the timer sync
     cpu_time = []
