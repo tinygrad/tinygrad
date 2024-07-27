@@ -52,8 +52,8 @@ class MultiLazyBuffer:
     assert all_same([x.dtype for x in lbs]), f"all multilazybuffer needs same dtype, getting {[x.dtype for x in lbs]}"
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
     if axis is not None:
-      boundaries = tuple(itertools.accumulate([lb.shape[axis] for lb in lbs]))
-      self.bounds = tuple(zip((0,) + boundaries, boundaries))
+      splits = list(itertools.accumulate([lb.shape[axis] for lb in lbs], initial=0))
+      self.bounds = list(zip(splits, splits[1:]))
 
   @property
   def shape(self):
