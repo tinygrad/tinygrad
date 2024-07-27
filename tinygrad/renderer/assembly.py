@@ -21,7 +21,7 @@ class PTXRenderer(Renderer):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float)])] # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float)])] # noqa: E501
   def __init__(self, arch:str, device="CUDA"): self.device, self.tensor_cores = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
@@ -154,11 +154,8 @@ class PTXRenderer(Renderer):
         if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
         elif uop is UOps.ALU:
           assert src[0].dtype is not None
-          if args is BinaryOps.CMPLT or args is BinaryOps.CMPNE:
-            # pass in the other dtype here
-            kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in src], src[0].dtype, self.types[src[0].dtype]))
-          else:
-            kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in src], dtype, self.types[dtype]))
+          src_dtype = src[0].dtype if args in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype
+          kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in src], src_dtype, self.types[src_dtype]))
         elif uop is UOps.DEFINE_ACC:
           if dtype.count > 1:
             r[u] = [ssa('acc', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
@@ -173,9 +170,7 @@ class PTXRenderer(Renderer):
           bufs.append((args.expr, dtype))
           r[u] = f"%{args.expr}"
           kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
-        elif uop is UOps.CONST:
-          if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
-          else: r[u] = const(args, dtype, mov=True)
+        elif uop is UOps.CONST: r[u] = ([const(args, dtype.scalar(), mov=True)] * dtype.count) if dtype.count > 1 else const(args, dtype, mov=True)
         elif uop is UOps.GEP: r[u] = r[src[0]][u.arg]
         elif uop is UOps.LOAD:
           assert src[0].dtype == dtypes.int64, "load isn't int64"
@@ -196,9 +191,8 @@ class PTXRenderer(Renderer):
             for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {r[src[0]]}, {r[src[1]]};")
           r[u] = r[src[0]]
-        elif uop in {UOps.VECTORIZE}:
-          assert src[0].dtype is not None and dtype.count > 1
-          r[u] = [r[x] for x in src] # type: ignore
+        # NOTE: casting to str is fine because you can't vectorize a vectorize
+        elif uop is UOps.VECTORIZE: r[u] = [cast(str,r[x]) for x in src]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           assert src[0].dtype is not None and dtype.count == 1
           _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)

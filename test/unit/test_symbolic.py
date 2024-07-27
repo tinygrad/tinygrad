@@ -45,8 +45,8 @@ class TestSymbolic(unittest.TestCase):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
     self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
 
-  def test_div_becomes_num(self):
-    assert isinstance(Variable("a", 2, 3)//2, NumNode)
+  def test_div_reduction(self):
+   self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
   def test_var_becomes_num(self):
     assert isinstance(Variable("a", 2, 2), NumNode)
@@ -153,7 +153,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mod_to_sub(self):
     # This is mod reduction
-    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, (Variable("a",1,2)-1).render())
+    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, "(-1+a)")
 
   def test_sum_div_const(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")

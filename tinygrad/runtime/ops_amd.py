@@ -1,16 +1,13 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, subprocess, time, array
+import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, time, array
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, \
-                            HCQSignal, HCQProgram, Compiler, CompileError, BufferOptions
+                            HCQSignal, HCQProgram, BufferOptions
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.runtime.support.hip_comgr import compile_hip
-import tinygrad.runtime.autogen.kfd as kfd
-import tinygrad.runtime.autogen.hsa as hsa
-import tinygrad.runtime.autogen.amd_gpu as amd_gpu
-import tinygrad.runtime.autogen.libc as libc
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
+from tinygrad.runtime.support.compiler_hip import AMDCompiler, disasm
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
@@ -54,18 +51,6 @@ COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
 def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
-
-def disasm(lib):
-  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-  return '\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x])
-
-class AMDCompiler(Compiler):
-  def __init__(self, arch:str):
-    self.arch = arch
-    super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    try: return compile_hip(src, self.arch)
-    except RuntimeError as e: raise CompileError(e) from e
 
 class AMDSignal(HCQSignal):
   def __init__(self, value=0, alloc_event=False):
@@ -159,12 +144,13 @@ class AMDComputeQueue(HWComputeQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
   def _update_exec(self, cmd_idx, global_size, local_size):
-    self._patch(cmd_idx, offset=50 + self.cmd_idx_to_exec_info[cmd_idx], data=local_size)
-    self._patch(cmd_idx, offset=59 + self.cmd_idx_to_exec_info[cmd_idx], data=global_size)
+    if local_size is not None: self._patch(cmd_idx, offset=50 + self.cmd_idx_to_exec_info[cmd_idx], data=local_size)
+    if global_size is not None: self._patch(cmd_idx, offset=59 + self.cmd_idx_to_exec_info[cmd_idx], data=global_size)
 
     if (dp:=self.cmd_idx_to_dispatch_packet.get(cmd_idx)) is not None:
-      dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
-      dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
+      if local_size is not None: dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
+      if global_size is not None:
+        dp.grid_size_x,dp.grid_size_y,dp.grid_size_z = [g*l for g,l in zip(global_size,[dp.workgroup_size_x,dp.workgroup_size_y,dp.workgroup_size_z])]
 
   def _wait(self, signal, value=0):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
