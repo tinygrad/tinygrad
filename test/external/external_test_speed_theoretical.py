@@ -13,10 +13,10 @@ def _test(tcount, fxn, szmax):
       ts = [(x+1).realize() for x in ts]
       Device.default.synchronize()
       st = time.perf_counter()
-      out = jfxn(*ts)
+      out_nbytes = jfxn(*ts).nbytes()
       Device.default.synchronize()
       tms.append(time.perf_counter() - st)
-    gbs = (out.nbytes()+sum(x.nbytes() for x in ts))*1e-9/min(tms)
+    gbs = (out_nbytes+sum(x.nbytes() for x in ts))*1e-9/min(tms)
     print(f"{ts[0].nbytes()/(1024*1024):10.0f} MB, {min(tms)*1e3:6.2f} ms GB/s {gbs:<10.2f} {str(ts[0].shape):20s}")
     allgbs.append(gbs)
   return max(allgbs)
