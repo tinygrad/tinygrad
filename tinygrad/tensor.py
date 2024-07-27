@@ -339,7 +339,7 @@ class Tensor:
         splits = tuple([max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))])
       assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
       boundaries = tuple(itertools.accumulate(splits))
-      bounds = zip((0,) + boundaries, boundaries)
+      bounds = tuple(zip((0,) + boundaries, boundaries))
     else:
       assert splits is None, "splits only allowed for Tensor sharded on axis!"
       bounds = None

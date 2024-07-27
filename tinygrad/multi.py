@@ -51,8 +51,9 @@ class MultiLazyBuffer:
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs), "all lbs must be LazyBuffers, and we need at least one of them"
     assert all_same([x.dtype for x in lbs]), f"all multilazybuffer needs same dtype, getting {[x.dtype for x in lbs]}"
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
-    boundaries = tuple(itertools.accumulate([lb.shape[axis] for lb in lbs])) if axis is not None else None
-    self.bounds = tuple(zip((0,) + boundaries, boundaries)) if axis is not None else None
+    if axis is not None:
+      boundaries = tuple(itertools.accumulate([lb.shape[axis] for lb in lbs]))
+      self.bounds = tuple(zip((0,) + boundaries, boundaries))
 
   @property
   def shape(self):
