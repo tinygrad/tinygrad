@@ -212,7 +212,7 @@ constant_folder = PatternMatcher([
   (NOp(UOps.PHI, src=(NOp.cvar(), NOp.var("x"))), lambda x: x),
   *[(UPat(UOps.PHI, src=(UPat(UOps.VECTORIZE, src=[UPat(UOps.CONST) for _ in range(i)]), UPat(name="x"))), lambda x: x) for i in [2, 4, 8]],
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
-  (NOp(UOps.DEFINE_ACC, src=(NOp.var(),), name="root"), lambda root: UOp.cast(root.src[0], root.dtype)),
+  (NOp(UOps.DEFINE_ACC, src=(NOp.var(),), name="root"), lambda root: root.src[0]),
   *[(UPat(UOps.GEP, name="root", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.VECTORIZE, name="v", src=[UPat(UOps.CONST) for _ in range(i)]))))),
      lambda root, v: v.src[root.arg]) for i in [2, 4, 8]],
   (NOp(UOps.GEP, src=(NOp.cvar("x"),), name="root"), lambda root,x: root.const(x.arg)),
