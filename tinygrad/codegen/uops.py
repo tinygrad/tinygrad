@@ -112,13 +112,16 @@ class UOp:
         return self.const(self.src[0].vmin.arg+self.src[1].vmin.arg), self.const(self.src[0].vmax.arg+self.src[1].vmax.arg)
       if self.arg is BinaryOps.MUL and self.src[0].vmin.arg >= 0 and self.src[1].vmin.arg >= 0:
         return self.const(self.src[0].vmin.arg*self.src[1].vmin.arg), self.const(self.src[0].vmax.arg*self.src[1].vmax.arg)
-      if self.arg is BinaryOps.MOD and self.src[1].op is UOps.CONST: return self.const(0), self.const(self.src[1].arg-1)
+      if self.arg is BinaryOps.MOD and self.src[1].op is UOps.CONST and self.src[1].arg > 0: return self.const(0), self.const(self.src[1].arg-1)
+      if self.arg is BinaryOps.IDIV and self.src[1].op is UOps.CONST and self.src[1].arg > 0:
+        return self.const(self.src[0].vmin.arg//self.src[1].arg), self.const(self.src[0].vmax.arg//self.src[1].arg)
     return None, None
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
   name:Optional[str] = None
   src:Tuple[NOp, ...] = tuple()
+  allow_any_len:bool = False
   @staticmethod
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return _nop(op=UOps.CONST, dtype=dtype, name=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
@@ -136,18 +139,15 @@ class UPat:
                name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False):
     self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
     self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
-    self.arg = arg
+    self.arg, self.name = arg, name
     self.src: Any = None
-    if isinstance(src, list):
-      # try all permutations if it's a list
-      self.src = list(itertools.permutations(src))
-    elif isinstance(src, tuple):
-      # only one if it's a tuple
-      self.src = [src]
-    elif isinstance(src, UPat):
-      # repeat if it's a UPat
-      self.src = [itertools.repeat(src)]
-    self.name: Optional[str] = name
+    # try all permutations if it's a list
+    if isinstance(src, list): self.src = list(itertools.permutations(src))
+    # only one if it's a tuple
+    elif isinstance(src, tuple): self.src = [src]
+    # repeat if it's a UPat
+    elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
+
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
 
   def __repr__(self):
@@ -207,7 +207,6 @@ def type_verify(uops):
       assert dtype is None, f"{uop} dtype must be None, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
     if uop is UOps.ALU:
-      assert dtype.count == 1, f"wide ALU is not supported on {dtype}"
       if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
       elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
         assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
@@ -258,7 +257,8 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       assert u.src[2].dtype is not None
       mem += u.src[2].dtype.itemsize * mults
     elif u.op is UOps.ALU and u not in dont_count:
-      flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
+      assert u.dtype is not None
+      flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
       assert u.arg[1] is not None
       flops += 2 * prod(u.arg[1]) // 32 * mults
