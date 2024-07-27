@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import difflib, pickle, multiprocessing, os, logging, sqlite3, requests, io, zipfile
-from typing import List
+from collections import defaultdict
+import difflib, pickle, multiprocessing, os, logging, sqlite3, requests, io, zipfile, glob, re
+from tabulate import tabulate
+from typing import DefaultDict, List, Dict
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Device
-from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, tqdm
+from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, temp, tqdm
 from tinygrad.ops import LazyOp
 
+# *** process replay settings
 PAGE_SIZE = 100
 REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
-TABLE_NAME = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{VERSION}"
+RUN_ID = os.getenv("GITHUB_RUN_ID", "HEAD")
+TABLE_NAME = f"process_replay_{RUN_ID}_{VERSION}"
 REF_TABLE_NAME = f"process_replay_master_{VERSION}"
 ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
 if REF == "master": ASSERT_DIFF = False
 COMPARE_SCHEDULE = getenv("COMPARE_SCHEDULE", int((k:="[compare_schedule]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")))
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+TEMP_DIR = temp("process_replay")
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format='%(message)s')
+# *** github settings
+BASE_URL = f"https://api.github.com/repos/{os.getenv('GITHUB_REPOSITORY', 'tinygrad/tinygrad')}"
+GH_HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN', '')}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 
 def diff_kernel(offset:int, ref_schedule:List[LazyOp], kernel_changed):
   if early_stop.is_set(): return
@@ -73,27 +81,59 @@ def get_ref_schedule(offset:int, ref_schedule):
   conn.commit()
   cur.close()
 
+def download_artifact(run_id:str, name:str, dest:str):
+  res = requests.get(f"{BASE_URL}/actions/runs/{run_id}/artifacts?name={name}", headers=GH_HEADERS)
+  assert res.status_code == 200, f"download failed {res.status_code} {res.json()}"
+  download_url = res.json()["artifacts"][0]["archive_download_url"]
+  res = requests.get(download_url, headers=GH_HEADERS)
+  assert res.status_code == 200, f"download failed {res.status_code}"
+  with io.BytesIO(res.content) as zip_content:
+    with zipfile.ZipFile(zip_content, "r") as zip_ref: zip_ref.extractall(dest)
+
+def parse_benchmark(fp:str):
+  ret: DefaultDict[str, List] = defaultdict(list)
+  with open(fp) as f:
+    for line in f.read().splitlines():
+      for v,k in dict(re.findall(r'(\d+\.\d+|\d+)\s*([a-zA-Z\s]+?)(?:,|$)', line)).items(): ret[k.strip()].append(float(v))
+  return ret
+
+if __name__ == "__main__":
+  if SKIP_PROCESS_REPLAY:
+    logging.info("skipping process replay.")
+    exit(0)
+
+  # *** speed diff (for benchmarks)
+  if REF == "update_benchmark":
+    name = {"testmacbenchmark": "Mac", "testnvidiabenchmark": "NVIDIA", "testmorenvidiabenchmark": "NVIDIA Training",
+            "testamdbenchmark": "AMD", "testmoreamdbenchmark": "AMD Training"}[os.environ["GITHUB_JOB"]]
+    res = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master&status=success", headers=GH_HEADERS)
+    ref_run_id = res.json()["workflow_runs"][0]["id"]
+    print(f"comparing speed for {RUN_ID} against {ref_run_id}")
+    download_artifact(ref_run_id, f"Speed ({name})", f"{TEMP_DIR}/timing_ref")
+    download_artifact(RUN_ID, f"Speed ({name})", f"{TEMP_DIR}/timing_compare")
+    for fp in glob.glob(f"{TEMP_DIR}/timing_ref/*.txt"):
+      print(fp.split('/')[-1].split('.')[0])
+      ref = parse_benchmark(fp)
+      compare = parse_benchmark(fp.replace("timing_ref", "timing_compare"))
+      diff: Dict[str, List[float]] = {}
+      avg_diff: Dict[str, float] = {}
+      for key, ref_vals in ref.items():
+        vals = [round((comp-ref)/ref*100, 2) for ref,comp in zip(ref_vals, compare[key]) if ref != 0]
+        if not vals or key == "epochs": continue
+        avg_diff[key] = sum(vals) / len(vals)
+        diff[key] = sorted(vals[:5], key=abs, reverse=True)
+      for k,v in sorted(avg_diff.items(), key=lambda x:abs(x[1]), reverse=True):
+        print(colored(f"{k:20} {v:7.2f}%", 'yellow' if v == 0 else 'red' if v < 0.75 else 'green' if v > 1.15 else 'yellow'))
+      print(tabulate(diff, headers='keys'))
+
+  # *** schedule diff
 def process_replay():
   ref_schedule = multiprocessing.Manager().list()
-  # *** download the reference schedule
   if COMPARE_SCHEDULE:
     logging.info("fetching process replay reference")
     # TODO: make this run_id dynamic
-    run_id = "10093148840"
-    name = f"process_replay_{Device.DEFAULT.lower()}.db" # TODO: onnx and openpilot is matrix.task
-    url = f"https://api.github.com/repos/{os.getenv('GITHUB_REPOSITORY', 'tinygrad/tinygrad')}/actions/runs/{run_id}/artifacts?name={name}"
-    headers = {
-      "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}",
-      "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"
-    }
-    res = requests.get(url, headers=headers)
-    assert res.status_code == 200, f"download failed {res.status_code} {res.json()}"
-    download_url = res.json()["artifacts"][0]["archive_download_url"]
-    res = requests.get(download_url, headers=headers)
-    assert res.status_code == 200, f"download failed {res.status_code}"
-    with io.BytesIO(res.content) as zip_content:
-      with zipfile.ZipFile(zip_content, "r") as zip_ref: zip_ref.extractall("/tmp/process_replay/")
-    ref_conn = sqlite3.connect("/tmp/process_replay/process_replay.db")
+    download_artifact("10093148840", f"process_replay_{Device.DEFAULT.lower()}.db", f"{TEMP_DIR}/schedule")
+    ref_conn = sqlite3.connect(f"{TEMP_DIR}/schedule/process_replay.db")
     row_count = ref_conn.execute(f"select count(*) from '{REF_TABLE_NAME}'").fetchone()[0]
     processes = []
     for i in tqdm(range(0, row_count, PAGE_SIZE)):
@@ -103,7 +143,8 @@ def process_replay():
     ref_conn.close()
   conn = db_connection()
   cur = conn.cursor()
-  # *** run the comparison
+
+  # *** kernel diff
   try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
   except sqlite3.OperationalError:
     logging.warning(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
