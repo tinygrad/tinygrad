@@ -205,7 +205,6 @@ def type_verify(uops):
       assert dtype is None, f"{uop} dtype must be None, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
     if uop is UOps.ALU:
-      assert dtype.count == 1, f"wide ALU is not supported on {dtype}"
       if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
       elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
         assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
@@ -256,7 +255,8 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       assert u.src[2].dtype is not None
       mem += u.src[2].dtype.itemsize * mults
     elif u.op is UOps.ALU and u not in dont_count:
-      flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
+      assert u.dtype is not None
+      flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
       assert u.arg[1] is not None
       flops += 2 * prod(u.arg[1]) // 32 * mults
