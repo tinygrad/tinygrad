@@ -69,7 +69,7 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
 
-  helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
+  helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(f2), (tiny_a, tiny_b))
 
 def helper_test_matvec(name, N, M):
   torch.manual_seed(0)
@@ -79,7 +79,7 @@ def helper_test_matvec(name, N, M):
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy())
 
-  helper_test_generic(f"{name:30s} {N:5d}x{M:5d}", lambda a,b: a@b, (torch_a, torch_b), TinyJit(lambda a,b:(a@b).realize()), (tiny_a, tiny_b))
+  helper_test_generic(f"{name:30s} {N:5d}x{M:5d}", lambda a,b: a@b, (torch_a, torch_b), TinyJit(lambda a,b:a@b), (tiny_a, tiny_b))
 
 prefix = None
 def helper_test_generic(name, f1, f1_args, f2, f2_args):
