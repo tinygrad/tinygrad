@@ -338,9 +338,12 @@ class Tensor:
         sz = round_up(self.shape[axis], len(devices)) // len(devices)
         splits = tuple([max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))])
       assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
+      boundaries = tuple(itertools.accumulate(splits))
+      bounds = zip((0,) + boundaries, boundaries)
     else:
       assert splits is None, "splits only allowed for Tensor sharded on axis!"
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, splits),
+      bounds = None
+    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, bounds),
                   device=canonical_devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):
