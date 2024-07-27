@@ -25,6 +25,8 @@ class _Device:
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     return ret
+  @property
+  def default(self) -> Compiled: return self[self.DEFAULT]
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
