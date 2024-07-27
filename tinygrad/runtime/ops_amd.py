@@ -21,7 +21,7 @@ def kfd_ioctl(idir, nr, user_struct, fd, **kwargs):
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
   return made
 
-kio = type("KIO", (object,), {name[11:].lower(): functools.partial(kfd_ioctl, {"IOW": 1, "IOR": 2, "IOWR": 3}[p[0]], p[1], p[2])
+kio:Any = type("KIO", (object,), {name[11:].lower(): functools.partial(kfd_ioctl, {"IOW": 1, "IOR": 2, "IOWR": 3}[p[0]], p[1], p[2])
                               for name,p in kfd.__dict__.items() if name.startswith("AMDKFD_IOC_")})
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0106, 0x0107
