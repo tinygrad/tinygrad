@@ -470,7 +470,14 @@ def train_retinanet():
   def val_step(X):
     Tensor.training = False
     out = model(normalize(X), False)
-    return out.cast(dtypes.float32).to(GPUS[0]).realize()
+    out = out.cast(dtypes.float32)
+    splits = out.split([90000, 22500, 5625, 1521, 441],1)
+    offsets = []
+    scores = []
+    for s in splits:
+      offsets.append(s[:,:,:4].to(GPUS[0]).realize())
+      scores.append(s[:,:,4:].reshape(BS_EVAL, -1).to(GPUS[0]).realize())
+    return *offsets, *scores
 
   feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
   ANCHORS = anchor_generator((BS,3,800,800), feature_shapes)
@@ -599,10 +606,11 @@ def train_retinanet():
         except StopIteration: next_proc = None
         nt = time.perf_counter()
 
-        out = out.numpy(False)
+        offsets = [o.numpy(False) for o in out[:5]]
+        scores = [o.numpy(False) for o in out[5:]]
         npt = time.perf_counter()
         
-        predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
+        predictions = model.postprocess_detections(offsets, scores, orig_image_sizes=orig_shapes)
         coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(),
                           "score": score} for i, prediction in enumerate(predictions)
                           for box, score, label in zip(*prediction.values())]

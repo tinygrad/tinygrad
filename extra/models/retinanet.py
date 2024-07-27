@@ -103,22 +103,18 @@ class RetinaNet:
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
   @line_profiler.profile
-  def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
+  def postprocess_detections(self, offsets, scores, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
     anchors = self.anchor_gen(input_size)
-    grid_sizes = self.backbone.compute_grid_sizes(input_size)
-    split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
     detections = []
-    for i, predictions_per_image in enumerate(predictions):
+    for i in range(offsets[0].shape[0]):
       h, w = input_size if image_sizes is None else image_sizes[i]
 
-      predictions_per_image = np.split(predictions_per_image, split_idx)
-      offsets_per_image = [br[:, :4] for br in predictions_per_image]
-      scores_per_image = [cl[:, 4:] for cl in predictions_per_image]
+      offsets_per_image = [br[i] for br in offsets]
+      scores_per_image = [cl[i] for cl in scores]
 
       image_boxes, image_scores, image_labels = [], [], []
       for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
         # remove low scoring boxes
-        scores_per_level = scores_per_level.flatten()
         topk_idxs = np.where(scores_per_level > score_thresh)[0]
         scores_per_level = scores_per_level[topk_idxs]
 
