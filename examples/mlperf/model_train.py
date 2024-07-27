@@ -592,6 +592,7 @@ def train_retinanet():
       cnt, proc = 0, data_get_val(it)
 
       while proc is not None:
+        coco_eval = COCOeval(coco_val, iouType="bbox")
         cnt+=1
         GlobalCounters.reset()
         st = time.perf_counter()
