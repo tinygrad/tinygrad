@@ -2,8 +2,8 @@ import time, unittest
 from tinygrad import Tensor, TinyJit, Device, dtypes
 from tinygrad.helpers import getenv, GlobalCounters
 
-SZMIN = getenv("SZMIN", 10)
 SZMAX = getenv("SZMAX", 10)
+SZMIN = min(SZMAX, getenv("SZMIN", 10))
 def _test(tcount, fxn, dtype=dtypes.float):
   print(f"**** testing {fxn.__name__} {dtype}")
   allgbs = []
