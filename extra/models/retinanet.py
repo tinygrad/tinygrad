@@ -114,11 +114,10 @@ class RetinaNet:
       for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
         # remove low scoring boxes
         scores_per_level = scores_per_level.flatten()
-        keep_idxs = scores_per_level > score_thresh
-        scores_per_level = scores_per_level[keep_idxs]
+        topk_idxs = np.where(scores_per_level > score_thresh)[0]
+        scores_per_level = scores_per_level[topk_idxs]
 
         # keep topk
-        topk_idxs = np.where(keep_idxs)[0]
         num_topk = min(len(topk_idxs), topk_candidates)
         sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
         topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
