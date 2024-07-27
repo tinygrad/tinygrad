@@ -291,11 +291,7 @@ class SumNode(RedNode):
 class AndNode(RedNode):
   def get_bounds(self) -> Tuple[int, sint]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
-    subed = []
-    for node in self.nodes:
-      if not (sub:=node.substitute(var_vals)): return NumNode(0)
-      subed.append(sub)
-    return Node.ands(subed)
+    return Node.ands([node.substitute(var_vals) for node in self.nodes])
 
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 def sym_infer(a: Union[Node, int], var_vals: Optional[Dict[Variable, int]]) -> int:
