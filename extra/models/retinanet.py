@@ -7,7 +7,7 @@ from extra.models.resnet import ResNet
 from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
 from examples.mlperf.helpers import encode_boxes
 import numpy as np
-
+import line_profiler
 Conv2dNormal = Conv2d
 Conv2dNormal_priorprob = Conv2d
 Conv2dKaiming = Conv2d
@@ -97,6 +97,7 @@ class RetinaNet:
     load_state_dict(self, d)
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
+  @line_profiler.profile
   def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
     anchors = self.anchor_gen(input_size)
     grid_sizes = self.backbone.compute_grid_sizes(input_size)
