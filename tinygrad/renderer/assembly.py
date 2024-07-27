@@ -120,11 +120,11 @@ class PTXRenderer(Renderer):
         return out
       return self.render_const(x, dtype)
 
-    def _cast(a, dtype:DType, atype:DType, bitcast=False, u=None, pred=False):
+    def _cast(a, dtype:DType, atype:DType, bitcast=False, u=None, pred=False, binary_reg=False):
       if atype == dtype or isinstance(atype, PtrDType):
         if u: r[u] = a
         return a
-      kk(*self.render_cast((ret:=ssa('cast', u, self.types[dtype])), a, dtype, atype, bitcast))
+      kk(*self.render_cast((ret:=ssa('cast', u, f"b{self.types[dtype][1:]}" if binary_reg else self.types[dtype])), a, dtype, atype, bitcast))
       return ret
 
     for u in uops:
@@ -195,7 +195,8 @@ class PTXRenderer(Renderer):
         elif uop is UOps.VECTORIZE: r[u] = [cast(str,r[x]) for x in src]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           assert src[0].dtype is not None and dtype.count == 1
-          _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
+          _cast(r[src[0]] if src[0].dtype.count == 1 else f"{{{','.join(r[src[0]])}}}",
+                dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u, binary_reg=src[0].dtype.count>1)
         elif uop is UOps.DEFINE_LOCAL:
           # TODO: we should sum these, and fetch 0xC000 from somewhere
           assert args[1]*dtype.itemsize <= 0xC000, "too large local"
@@ -206,20 +207,23 @@ class PTXRenderer(Renderer):
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
           kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
         elif uop is UOps.WMMA:
-          wmma = []
-          for vv in src[:2]:
-            for i in range(0, len(r[vv]), 2):
-              wmma.append(ssa("wmma", dtype="b32"))
-              kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[vv][i:i+2])}}};')
           r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
           kk(f'mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32\
-            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:4])}}}, {{{", ".join(wmma[4:])}}}, {{{", ".join(r[src[2]])}}};')
+            {{{", ".join(r[u])}}}, {{{", ".join(r[src[0]])}}}, {{{", ".join(r[src[1]])}}}, {{{", ".join(r[src[2]])}}};')
         else: raise NotImplementedError(f"no code for {uop}")
 
     return self.render_kernel(kernel, name, bufs, c.items())
 
 shiftable_consts = set([2**i for i in range(64)])
 ptx_matcher = PatternMatcher([
+  (UPat(UOps.WMMA, name="root", src=(UPat(name="x", dtype=dtypes.half.vec(8)), UPat(name="y", dtype=dtypes.half.vec(4)), UPat())),
+   lambda root, x, y: UOp(root.op, root.dtype,
+                             (UOp(UOps.VECTORIZE, dtypes.float.vec(4),
+                                  tuple([UOp(UOps.BITCAST, dtypes.float, (UOp(UOps.VECTORIZE, x.src[0].dtype.vec(2), x.src[i:i+2]),))
+                                         for i in range(0, x.dtype.count, 2)])),
+                              UOp(UOps.VECTORIZE, dtypes.float.vec(2),
+                                  tuple([UOp(UOps.BITCAST, dtypes.float, (UOp(UOps.VECTORIZE, y.src[0].dtype.vec(2), y.src[i:i+2]),))
+                                         for i in range(0, y.dtype.count, 2)]))) + root.src[2:], root.arg)),
   (UPat(UOps.ALU, BinaryOps.MUL, name="root", dtype=set([dt for dt in dtypes.fields().values() if dtypes.is_int(dt)]),
       src=[UPat(UOps.CONST,  name="const"), UPat(name="mul")]),
     lambda root, mul, const: UOp(UOps.ALU, root.dtype,
