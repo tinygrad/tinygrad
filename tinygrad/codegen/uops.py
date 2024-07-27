@@ -76,9 +76,8 @@ class UOp:
   def _const(dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (UOp.const(dtypes.int, b.min), UOp.const(dtypes.int, cast(int,b.max))), b)
-    if dtype is not None and dtype != dtype.scalar():
-      return UOp(UOps.VECTORIZE, dtype, src=tuple(
-        UOp(UOps.CONST, dtype.scalar(), arg=dtypes.as_const(b, dtype.scalar())) for _ in range(dtype.count)))
+    if dtype is not None and dtype != (sdtype := dtype.scalar()):
+      return UOp(UOps.VECTORIZE, dtype, src=tuple(UOp(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
