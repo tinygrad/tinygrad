@@ -12,9 +12,9 @@ Conv2dNormal = Conv2d
 Conv2dNormal_priorprob = Conv2d
 Conv2dKaiming = Conv2d
 
-# @line_profiler.profile
+@line_profiler.profile
 def nms(boxes, scores, thresh=0.5):
-  x1, y1, x2, y2 = np.rollaxis(boxes, 1)
+  x1, y1, x2, y2 = boxes[:,0],boxes[:,1],boxes[:,2],boxes[:,3]
   areas = (x2 - x1 + 1) * (y2 - y1 + 1)
   to_process, keep = scores.argsort()[::-1], []
   while to_process.size > 0:
@@ -34,7 +34,7 @@ def nms(boxes, scores, thresh=0.5):
   return keep
 
 def decode_bbox(offsets, anchors):
-  dx, dy, dw, dh = np.rollaxis(offsets, 1)
+  dx, dy, dw, dh = offsets[:,0],offsets[:,1],offsets[:,2],offsets[:,3]
   widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
   cx, cy = anchors[:, 0] + 0.5 * widths, anchors[:, 1] + 0.5 * heights
   pred_cx, pred_cy = dx * widths + cx, dy * heights + cy
