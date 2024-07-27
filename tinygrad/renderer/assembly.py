@@ -1,12 +1,18 @@
 from typing import DefaultDict, Dict, List, Tuple, Union, Optional, cast, Callable
 import struct, math
 from collections import defaultdict
-from extra.assembly.assembly_ptx import uops_to_ptx_asm
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph, PatternMatcher, UPat
 from tinygrad.renderer import Renderer, TensorCore
+
+# Add the parent directory of 'extra' to the Python path
+import sys
+import pathlib
+sys.path.append(str(pathlib.Path(__file__).parent.parent.parent))
+
+from extra.assembly.assembly_ptx import uops_to_ptx_asm
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):

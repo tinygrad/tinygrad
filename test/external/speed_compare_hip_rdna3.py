@@ -3,7 +3,6 @@ import time
 import os
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.engine.search import bufs_from_lin
 
@@ -12,11 +11,13 @@ import sys
 import pathlib
 sys.path.append(str(pathlib.Path(__file__).parent.parent.parent))
 
+from tinygrad.codegen.linearizer import Linearizer
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 
 if __name__ == "__main__":
   print("Starting benchmark...")
   ast_strs = load_worlds(filter_reduce=False, filter_novariable=True)
+  dev = Device["GPU"]
   print(f"Loaded {len(ast_strs)} ASTs")
 
   single = getenv("NUM", -1)
