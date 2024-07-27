@@ -1,4 +1,4 @@
-import unittest, ctypes, struct, contextlib, tempfile, pathlib, json, time, atexit
+import unittest, ctypes, struct, contextlib, tempfile, pathlib, json, time, atexit, random
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import CI, getenv, Context
 from tinygrad.device import Buffer, BufferOptions, HCQCompiled
@@ -370,8 +370,16 @@ class TestHCQ(unittest.TestCase):
       assert buf2.as_buffer()[0] == i
 
 @contextlib.contextmanager
-def helper_collect_profile(*devs):
-  for dev in devs: dev._prof_setup()
+def helper_collect_profile(*devs, random_setup_delay=False):
+  if random_setup_delay:
+    devs = list(devs)
+    for dev in devs: dev.synchronize()
+    random.shuffle(devs)
+    for dev in devs:
+      dev._prof_setup()
+      time.sleep(random.randint(1, 1000) / 1000)
+  else:
+    for dev in devs: dev._prof_setup()
 
   profile_dict = {}
   _, tmp = tempfile.mkstemp()
@@ -474,6 +482,39 @@ class TestProfiler(unittest.TestCase):
 
     copyin_node_2 = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}:1")[0]
     helper_validate_node(copyin_node_2, profile=profile, pid_name=f"{Device.DEFAULT}:1", tid_name="DMA")
+
+  @unittest.skipIf(CI, "skip CI")
+  def test_profile_sync(self):
+    devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(6)]
+    bufs =[Buffer(f"{Device.DEFAULT}:{i}", 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated() for i in range(6)]
+
+    # measure enqueue delay on the same queue, timing should be consistant here
+    mv = memoryview(bytearray(struct.pack("ff", 0, 1)))
+    expected_diff = 100000 # sleep in us
+    same_dev_sleep_diff = []
+    with helper_collect_profile(devs[0]) as profile:
+      for i in range(3):
+        x = time.perf_counter_ns()
+        time.sleep(expected_diff / 1e6)
+        same_dev_sleep_diff.append(((time.perf_counter_ns() - x) / 1000) - expected_diff)
+        bufs[0].copyin(mv)
+    same_dev_nodes = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}")
+    same_dev_diffs = [same_dev_nodes[i]['ts'] - same_dev_nodes[i-1]['ts'] - same_dev_sleep_diff[i] - expected_diff for i in range(1, 3)]
+    avg_python_delay = sum(same_dev_diffs) / len(same_dev_diffs)
+
+    # enqueue ops on different queues to check the timer sync
+    sleep_diff = []
+    with helper_collect_profile(*devs, random_setup_delay=True) as profile:
+      for i in range(6):
+        x = time.perf_counter_ns()
+        time.sleep(expected_diff / 1e6)
+        sleep_diff.append(((time.perf_counter_ns() - x) / 1000) - expected_diff)
+        bufs[i].copyin(mv)
+
+    nodes = [helper_profile_filter_node(profile, name=f"CPU -> {Device.canonicalize(f'{Device.DEFAULT}:{i}')}")[-1] for i in range(6)]
+    for i in range(1, 6):
+      diff = nodes[i]['ts'] - nodes[i-1]['ts'] - sleep_diff[i] - avg_python_delay
+      assert expected_diff * 0.998 < diff < expected_diff * 1.002, "more that 0.2% diff"
 
 if __name__ == "__main__":
   unittest.main()
