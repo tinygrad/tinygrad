@@ -63,20 +63,20 @@ float4_folding = PatternMatcher([
   # float(2,4) store
   # TODO: fold ADDs into one UOp and remove add chains
   (NOp(UOps.STORE, src=(_nop(name="buf"),
-    NOp(UOps.EXPAND, name="ex")+_nop(name="idx")+_nop(name="idx2")+_nop(name="idx3"), _nop(name="var")), name="store_allow", allow_any_len=True),
+    NOp(UOps.EXPAND, name="ex")+_nop(name="idx")+_nop(name="idx2")+_nop(name="idx3"), _nop(name="var")), name="store", allow_any_len=True),
     float4_contract_store),
   (NOp(UOps.STORE, src=(_nop(name="buf"),
-    NOp(UOps.EXPAND, name="ex")+_nop(name="idx")+_nop(name="idx2"), _nop(name="var")), name="store_allow", allow_any_len=True),
+    NOp(UOps.EXPAND, name="ex")+_nop(name="idx")+_nop(name="idx2"), _nop(name="var")), name="store", allow_any_len=True),
     float4_contract_store),
   (NOp(UOps.STORE, src=(_nop(name="buf"),
-    NOp(UOps.EXPAND, name="ex")+_nop(name="idx"), _nop(name="var")), name="store_allow", allow_any_len=True), float4_contract_store),
+    NOp(UOps.EXPAND, name="ex")+_nop(name="idx"), _nop(name="var")), name="store", allow_any_len=True), float4_contract_store),
   (NOp(UOps.STORE, src=(_nop(name="buf"),
-    NOp(UOps.EXPAND, name="ex"), _nop(name="var")), name="store_allow", allow_any_len=True), float4_contract_store),
+    NOp(UOps.EXPAND, name="ex"), _nop(name="var")), name="store", allow_any_len=True), float4_contract_store),
   # image handling
   (NOp(UOps.LOAD, src=(_nop(name="buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (_nop(name="idx"), _nop(name="idy"),
-     _nop(name="id4")))), name="ls_allow", allow_any_len=True), image_contract_load),
+     _nop(name="id4")))), name="ls", allow_any_len=True), image_contract_load),
   (NOp(UOps.STORE, src=(_nop(name="buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (_nop(name="idx"), _nop(name="idy"),
-     NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex"))), _nop(name="var")), name="ls_allow", allow_any_len=True),
+     NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex"))), _nop(name="var")), name="ls", allow_any_len=True),
      image_contract_store),
 ])
 
@@ -160,7 +160,7 @@ constant_folder = PatternMatcher([
   (NOp(UOps.WMMA, src=(_nop(), NOp.const(None, 0.0), _nop(name="acc"))), lambda acc: acc),
   # tensor core cleanups
   *[(NOp(UOps.REDUCE, src=(NOp(UOps.EXPAND, src=tuple(NOp(UOps.GEP, dtypes.float, src=(_nop(name="x"),), arg=i) for i in range(j)), name="expand"),)
-    ,name="reduce_allow", allow_any_len=True), reduce_before_expand) for j in [2,4,8]],
+    ,name="reduce", allow_any_len=True), reduce_before_expand) for j in [2,4,8]],
   (_nop(name="add") + NOp(UOps.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
@@ -173,23 +173,23 @@ constant_folder = PatternMatcher([
   # extra arange loop folding because we don't fold adds. TODO: fold adds
   (NOp(UOps.REDUCE, src=((_nop(name="idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng") +
                           _nop(name="idx2") + _nop(name="idx3"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow", allow_any_len=True), loop_collapse),
+    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   (NOp(UOps.REDUCE, src=((_nop(name="idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng") +
                           _nop(name="idx2"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow", allow_any_len=True), loop_collapse),
+    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   # arange loop folding (reduce)
   (NOp(UOps.REDUCE, src=((_nop(name="idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow", allow_any_len=True), loop_collapse),
+    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   (NOp(UOps.REDUCE, src=((_nop(name="idx") - NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow", allow_any_len=True),
+    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True),
     lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # indexing (with a multiply offset)!
   (NOp(UOps.REDUCE, src=(_nop(name="idx").eq(NOp(UOps.RANGE, name="rng")).cast()*
     NOp(UOps.LOAD, src=(_nop(name="buf"), _nop(name="add")+_nop(name="mul")*NOp(UOps.RANGE, name="rng")), name="ld"),),
-    arg=ReduceOps.SUM, name="reduce_allow", allow_any_len=True), index_collapse),
+    arg=ReduceOps.SUM, name="reduce", allow_any_len=True), index_collapse),
   (NOp(UOps.REDUCE, src=(_nop(name="idx").eq(NOp(UOps.RANGE, name="rng")).where(
     NOp(UOps.LOAD, src=(_nop(name="buf"), _nop(name="add")+_nop(name="mul")*NOp(UOps.RANGE, name="rng")), name="ld"), NOp.const(None, 0.0)),),
-    arg=ReduceOps.SUM, name="reduce_allow", allow_any_len=True), index_collapse),
+    arg=ReduceOps.SUM, name="reduce", allow_any_len=True), index_collapse),
   # other arange folders
   (NOp.cvar("c1") - (_nop(name="x") + NOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
   # max folding
