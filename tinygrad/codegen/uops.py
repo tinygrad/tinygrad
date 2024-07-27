@@ -70,7 +70,7 @@ class UOp:
   def recip(self): return self.alu(UnaryOps.RECIP)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return UOp._const(self.dtype if isinstance(self, UOp) else self, b)
   def sconst(self:Union[UOp, DType, None], b:ConstType|Variable):
-    return UOp._const(cast(DType, self.dtype).scalar() if isinstance(self, UOp) else self, b)
+    return UOp._const(cast(DType, self.dtype if isinstance(self, UOp) else self).scalar() if self is not None else self, b)
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def _const(dtype:Optional[DType], b:ConstType|Variable):
