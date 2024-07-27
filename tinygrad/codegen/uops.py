@@ -120,17 +120,18 @@ class NOp(UOp):
   name:Optional[str] = None
   src:Tuple[NOp, ...] = tuple()
   @staticmethod
-  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, name=name)
-  @staticmethod
-  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
+  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return _nop(op=UOps.CONST, dtype=dtype, name=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
   def compile(self: NOp, name:Optional[str]=None) -> UPat:
-    if self.op is UOps.NOOP: return UPat(name=self.name, dtype=self.dtype)
+    if self.op is UOps.NOOP: return UPat(**{k:tuple(s.compile() for s in v) if k == 'src' else v for k,v in self.arg.items()})
     return UPat(self.op, self.arg, (list if self.commutative() else tuple)([src.compile() for src in self.src]) if self.src != () else None,
                 (name := self.name or name), self.dtype, allow_any_len=(isinstance(name, str) and 'allow_any_len' in name))
 
+def _nop(*args, **kwargs): return NOp(UOps.NOOP, arg=dict([*zip(['op', 'dtype', 'src', 'arg', 'name'], args), *kwargs.items()]))
+
 class UPat:
+  def compile(self): return self
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
                name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False):
     self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
@@ -176,7 +177,7 @@ class PatternMatcher:
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      if isinstance(p, NOp): p = p.compile()
+      p = p.compile()
       assert p.op is not None
       for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
 

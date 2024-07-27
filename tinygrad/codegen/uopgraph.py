@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI
-from tinygrad.codegen.uops import UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify
+from tinygrad.codegen.uops import UOp, NOp, _nop, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
 if TYPE_CHECKING:
@@ -53,40 +53,41 @@ def float4_contract_store(buf, ex, var, store_allow_any_len, idx=UOp.const(dtype
 
 float4_folding = PatternMatcher([
   # reorder index to bring const closer to store
-  (NOp(UOps.STORE, src=(NOp.var("buf"), NOp.var("idx")+
-    (NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex")+NOp.var("idx2")), NOp.var("var")), name="store"),
+  (NOp(UOps.STORE, src=(_nop(name="buf"), _nop(name="idx")+
+    (NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex")+_nop(name="idx2")), _nop(name="var")), name="store"),
     lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float(2,4) load
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3")), name="load"), float4_expand_load),
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")), name="load"), float4_expand_load),
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")), name="load"), float4_expand_load),
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")), name="load"), float4_expand_load),
+  (NOp(UOps.LOAD, src=(_nop(name="buf"), NOp(UOps.EXPAND, name="ex")+_nop(name="idx")+_nop(name="idx2")+_nop(name="idx3")), name="load"),
+   float4_expand_load),
+  (NOp(UOps.LOAD, src=(_nop(name="buf"), NOp(UOps.EXPAND, name="ex")+_nop(name="idx")+_nop(name="idx2")), name="load"), float4_expand_load),
+  (NOp(UOps.LOAD, src=(_nop(name="buf"), NOp(UOps.EXPAND, name="ex")+_nop(name="idx")), name="load"), float4_expand_load),
+  (NOp(UOps.LOAD, src=(_nop(name="buf"), NOp(UOps.EXPAND, name="ex")), name="load"), float4_expand_load),
   # float(2,4) store
   # TODO: fold ADDs into one UOp and remove add chains
-  (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3"), NOp.var("var")), name="store_allow_any_len"),
+  (NOp(UOps.STORE, src=(_nop(name="buf"),
+    NOp(UOps.EXPAND, name="ex")+_nop(name="idx")+_nop(name="idx2")+_nop(name="idx3"), _nop(name="var")), name="store_allow_any_len"),
     float4_contract_store),
-  (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2"), NOp.var("var")), name="store_allow_any_len"),
+  (NOp(UOps.STORE, src=(_nop(name="buf"),
+    NOp(UOps.EXPAND, name="ex")+_nop(name="idx")+_nop(name="idx2"), _nop(name="var")), name="store_allow_any_len"),
     float4_contract_store),
-  (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex")+NOp.var("idx"), NOp.var("var")), name="store_allow_any_len"), float4_contract_store),
-  (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex"), NOp.var("var")), name="store_allow_any_len"), float4_contract_store),
+  (NOp(UOps.STORE, src=(_nop(name="buf"),
+    NOp(UOps.EXPAND, name="ex")+_nop(name="idx"), _nop(name="var")), name="store_allow_any_len"), float4_contract_store),
+  (NOp(UOps.STORE, src=(_nop(name="buf"),
+    NOp(UOps.EXPAND, name="ex"), _nop(name="var")), name="store_allow_any_len"), float4_contract_store),
   # image handling
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
-     NOp.var('id4')))), name="ls_allow_any_len"), image_contract_load),
-  (NOp(UOps.STORE, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
-     NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex"))), NOp.var("var")), name="ls_allow_any_len"),
+  (NOp(UOps.LOAD, src=(_nop(name="buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (_nop(name="idx"), _nop(name="idy"),
+     _nop(name="id4")))), name="ls_allow_any_len"), image_contract_load),
+  (NOp(UOps.STORE, src=(_nop(name="buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (_nop(name="idx"), _nop(name="idy"),
+     NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex"))), _nop(name="var")), name="ls_allow_any_len"),
      image_contract_store),
 ])
 
 # ***** transcendental *****
 
 transcendental_folding = PatternMatcher([
-  (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="x"),), arg=UnaryOps.EXP2), xexp2),
-  (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=UnaryOps.LOG2), xlog2),
-  (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=UnaryOps.SIN), xsin),
+  (_nop(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(_nop(name="x"),), arg=UnaryOps.EXP2), xexp2),
+  (_nop(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(_nop(name="d"),), arg=UnaryOps.LOG2), xlog2),
+  (_nop(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(_nop(name="d"),), arg=UnaryOps.SIN), xsin),
 ])
 
 # ***** threefry *****
@@ -143,60 +144,60 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce_allow_any_len):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # CONTRACT before ALU/REDUCE/CAST
-  (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.ALU, name="alu"),)),
+  (NOp(UOps.CONTRACT, name="con", src=(NOp(UOps.ALU, name="alu"),)),
    lambda con, alu: UOp(alu.op, con.dtype, tuple(UOp(UOps.CONTRACT, x.dtype.vec(con.dtype.count), (x,), con.arg) for x in alu.src), alu.arg)),
-  (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.REDUCE, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, name="red"),)),
+  (NOp(UOps.CONTRACT, name="con", src=(_nop(UOps.REDUCE, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, name="red"),)),
    lambda con, red: UOp(UOps.REDUCE, con.dtype, (UOp(UOps.CONTRACT, con.dtype, red.src[0:1], con.arg),)+red.src[1:], red.arg)),
-  (UPat(UOps.CONTRACT, name="con", src=(UPat(UOps.CAST, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, src=(UPat(name="casted"),)),)),
+  (_nop(UOps.CONTRACT, name="con", src=(_nop(UOps.CAST, dtype={dtypes.half, dtypes.bfloat16, dtypes.float}, src=(_nop(name="casted"),)),)),
    lambda con, casted: UOp(UOps.CAST, con.dtype, (UOp(UOps.CONTRACT, casted.dtype.vec(con.dtype.count), (casted,), con.arg),))),
   # bigint is rewritten to int32
-  (UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.bigint, name="x"),
+  (_nop({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.bigint, name="x"),
    lambda x: UOp(x.op, dtypes.int32, x.src, x.arg)),
   # VECTORIZE/GEP
   (NOp(UOps.GEP, src=(NOp(UOps.VECTORIZE, name="cast"),), name="gep"), lambda gep, cast: cast.src[gep.arg]),
   *[(NOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(NOp(UOps.GEP, dtypes.float,
-                         src=(NOp.var('x', dtype=dtypes.float.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
+                         src=(_nop(name='x', dtype=dtypes.float.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
   *[(NOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(NOp(UOps.GEP, dtypes.half,
-                         src=(NOp.var('x', dtype=dtypes.half.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
+                         src=(_nop(name='x', dtype=dtypes.half.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
   # tensor core with a 0 input is acc
-  (NOp(UOps.WMMA, src=(NOp.const(None, 0.0), NOp.var(), NOp.var('acc'))), lambda acc: acc),
-  (NOp(UOps.WMMA, src=(NOp.var(), NOp.const(None, 0.0), NOp.var('acc'))), lambda acc: acc),
+  (NOp(UOps.WMMA, src=(NOp.const(None, 0.0), _nop(), _nop(name="acc"))), lambda acc: acc),
+  (NOp(UOps.WMMA, src=(_nop(), NOp.const(None, 0.0), _nop(name="acc"))), lambda acc: acc),
   # tensor core cleanups
-  *[(NOp(UOps.REDUCE, src=(NOp(UOps.EXPAND, src=tuple(NOp(UOps.GEP, dtypes.float, src=(NOp.var('x'),), arg=i) for i in range(j)), name="expand"),)
+  *[(NOp(UOps.REDUCE, src=(NOp(UOps.EXPAND, src=tuple(NOp(UOps.GEP, dtypes.float, src=(_nop(name="x"),), arg=i) for i in range(j)), name="expand"),)
     ,name="reduce_allow_any_len"), reduce_before_expand) for j in [2,4,8]],
-  (NOp.var("add") + NOp(UOps.WMMA, name="wmma"),
+  (_nop(name="add") + NOp(UOps.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
-  (NOp(UOps.ALU, dtype=dtypes.uint64, src=(NOp.var("x"), NOp.var("seed")), arg=BinaryOps.THREEFRY), threefry2x32),
+  (NOp(UOps.ALU, dtype=dtypes.uint64, src=(_nop(name="x"), _nop(name="seed")), arg=BinaryOps.THREEFRY), threefry2x32),
   # sum collapse to mul (with possible GEP)
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),)),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # extra arange loop folding because we don't fold adds. TODO: fold adds
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
-                          NOp.var("idx2") + NOp.var("idx3"))
+  (NOp(UOps.REDUCE, src=((_nop(name="idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng") +
+                          _nop(name="idx2") + _nop(name="idx3"))
     .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"), loop_collapse),
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
-                          NOp.var("idx2"))
+  (NOp(UOps.REDUCE, src=((_nop(name="idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng") +
+                          _nop(name="idx2"))
     .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"), loop_collapse),
   # arange loop folding (reduce)
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
+  (NOp(UOps.REDUCE, src=((_nop(name="idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng"))
     .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"), loop_collapse),
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") - NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
+  (NOp(UOps.REDUCE, src=((_nop(name="idx") - NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng"))
     .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce_allow_any_len"),
     lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # indexing (with a multiply offset)!
-  (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).cast()*
-    NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"),),
+  (NOp(UOps.REDUCE, src=(_nop(name="idx").eq(NOp(UOps.RANGE, name="rng")).cast()*
+    NOp(UOps.LOAD, src=(_nop(name="buf"), _nop(name="add")+_nop(name="mul")*NOp(UOps.RANGE, name="rng")), name="ld"),),
     arg=ReduceOps.SUM, name="reduce_allow_any_len"), index_collapse),
-  (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).where(
-    NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"), NOp.const(None, 0.0)),),
+  (NOp(UOps.REDUCE, src=(_nop(name="idx").eq(NOp(UOps.RANGE, name="rng")).where(
+    NOp(UOps.LOAD, src=(_nop(name="buf"), _nop(name="add")+_nop(name="mul")*NOp(UOps.RANGE, name="rng")), name="ld"), NOp.const(None, 0.0)),),
     arg=ReduceOps.SUM, name="reduce_allow_any_len"), index_collapse),
   # other arange folders
-  (NOp.cvar("c1") - (NOp.var("x") + NOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
+  (NOp.cvar("c1") - (_nop(name="x") + NOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
   # max folding
-  (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
+  (NOp.max(_nop(name="x"), _nop(name="y")), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # max on special can go away (TODO: special should be variable, same thing applies)
   (NOp.max(NOp.cvar('c'), NOp(UOps.SPECIAL, name="s")+NOp.cvar('c2')), lambda c,s,c2: (s+c2) if 0 >= c.arg else None),  # TODO: generic
   (NOp.max(NOp.cvar('c'), -(NOp(UOps.SPECIAL, name="s")+NOp.cvar('c2'))), lambda c,s,c2: -(s+c2) if -(s.arg[1]-1+c2.arg) >= c.arg else None),
@@ -208,115 +209,116 @@ constant_folder = PatternMatcher([
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
   (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
-  (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, name="acc"), NOp.var("acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
-  (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),)), NOp.var("x"))), lambda x: x),
-  (NOp(UOps.PHI, src=(NOp.cvar(), NOp.var("x"))), lambda x: x),
+  (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, name="acc"), _nop(name="acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
+  (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),)), _nop(name="x"))), lambda x: x),
+  (NOp(UOps.PHI, src=(NOp.cvar(), _nop(name="x"))), lambda x: x),
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
   (NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),), name="root"), lambda root: UOp.cast(root.src[0], root.dtype)),
   (NOp(UOps.GEP, src=(NOp.cvar("x"),), name="root"), lambda root,x: root.const(x.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
-  (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
-  (NOp.cvar('gate').where(NOp.var('c0'), NOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (_nop().where(_nop(name="val"), _nop(name="val")), lambda val: val),
+  (NOp.cvar('gate').where(_nop(name="c0"), _nop(name="c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
-  (-(-NOp.var('x')), lambda x: x),    # -(-x) -> x
-  (NOp.var('x') + 0, lambda x: x),    # x+0 -> x
-  (NOp.var('x') * 1, lambda x: x),    # x*1 -> x
-  (NOp.var('x') * -1, lambda x: -x),  # x*-1 -> -x
-  (NOp.var('x') // NOp.var('x'), lambda x: x.const(1)), # x//x -> 1
-  (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
-  (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
-  (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
-  (NOp.var('x') / NOp.cvar('c'), lambda x,c: x*exec_alu(UnaryOps.RECIP, c.dtype, [c.arg])),    # x/c -> x*(1/c)
-  (NOp.var('x', dtype=dtypes.bool).max(NOp.const(dtypes.bool, False)), lambda x: x),  # max(x, False) -> x
+  (-(-_nop(name="x")), lambda x: x),    # -(-x) -> x
+  (_nop(name="x") + 0, lambda x: x),    # x+0 -> x
+  (_nop(name="x") * 1, lambda x: x),    # x*1 -> x
+  (_nop(name="x") * -1, lambda x: -x),  # x*-1 -> -x
+  (_nop(name="x") // _nop(name="x"), lambda x: x.const(1)), # x//x -> 1
+  (_nop(name="x") // 1, lambda x: x),   # x//1 -> x
+  (_nop(name="x") // -1, lambda x: -x), # x//-1 -> -x
+  (_nop(name="x") / _nop(name="x"), lambda x: x.const(1)), # x/x -> 1
+  (_nop(name="x") / NOp.cvar('c'), lambda x,c: x*exec_alu(UnaryOps.RECIP, c.dtype, [c.arg])),    # x/c -> x*(1/c)
+  (_nop(name='x', dtype=dtypes.bool).max(NOp.const(dtypes.bool, False)), lambda x: x),  # max(x, False) -> x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
   #if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
-  (NOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
-  (NOp.var('x') - NOp.var('x'), lambda x: x.const(0)),   # x-x -> 0
+  (_nop(name="x") * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
+  (_nop(name="x") - _nop(name="x"), lambda x: x.const(0)),   # x-x -> 0
   # lt folding
-  (NOp.var('x').lt(NOp.var('y')),
+  (_nop(name="x").lt(_nop(name="y")),
    lambda x,y: NOp.const(dtypes.bool, True) if x.vmax.arg < y.vmin.arg else NOp.const(dtypes.bool, False) if x.vmin.arg >= y.vmax.arg else None),
   # c0*x<c1 for positive int c0,c1
-  ((NOp.cvar('c0',dtypes.int)*NOp.var('x')).lt(NOp.cvar('c1',dtypes.int)),
+  ((NOp.cvar('c0',dtypes.int)*_nop(name="x")).lt(NOp.cvar('c1',dtypes.int)),
    lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if c0.arg > 0 and c1.arg > 0 else None),
   # mul -> add -> lt
-  (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
+  (((NOp.cvar('c0')*_nop(name="x"))+_nop(name="x2")).lt(NOp.cvar('c1')),
    lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
   # ** load/store folding **
-  (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.load(NOp.var("buf"), NOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
+  (NOp.store(_nop(name="buf"), _nop(name="idx"), NOp.load(_nop(name="buf"), _nop(name="idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
-  ((NOp.var('x') + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x+x.const(exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
-  ((NOp.var('x') - NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x+x.const(exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
+  ((_nop(name="x") + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x+x.const(exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
+  ((_nop(name="x") - NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x+x.const(exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
   # *** rules from symbolic ***
   # div folding
-  (NOp.var('x') // NOp.cvar('c'), lambda x,c: x.const(x.vmin.arg//c.arg) if c.arg > 0 and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
-  (NOp.var('x') // NOp.cvar('c'), lambda x,c: d if c.arg > 0 and (d:=x.divides(c.arg)) is not None else None),
+  (_nop(name="x") // NOp.cvar('c'), lambda x,c: x.const(x.vmin.arg//c.arg) if c.arg > 0 and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
+  (_nop(name="x") // NOp.cvar('c'), lambda x,c: d if c.arg > 0 and (d:=x.divides(c.arg)) is not None else None),
   # mod folding
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: x if 0 <= x.vmin.arg <= x.vmax.arg < c.arg else None),
+  (_nop(name="x") % NOp.cvar('c'), lambda x,c: x if 0 <= x.vmin.arg <= x.vmax.arg < c.arg else None),
   # mod reduction
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: (x-(x.vmin.arg//c.arg)*c.arg)%c if 0 < c.arg <= x.vmin.arg else None),
+  (_nop(name="x") % NOp.cvar('c'), lambda x,c: (x-(x.vmin.arg//c.arg)*c.arg)%c if 0 < c.arg <= x.vmin.arg else None),
   # mul -> mod
-  ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: x*(c0.arg%c1.arg)%c1 if c0.arg >= c1.arg > 0 else None),
+  ((NOp.cvar('c0')*_nop(name="x")) % NOp.cvar('c1'), lambda x,c0,c1: x*(c0.arg%c1.arg)%c1 if c0.arg >= c1.arg > 0 else None),
   # mul -> add -> mod
-  (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) % NOp.cvar('c1'),
+  (((NOp.cvar('c0')*_nop(name="x"))+_nop(name="x2")) % NOp.cvar('c1'),
    lambda x,x2,c0,c1: x2%c1 if (r:=c0.arg%c1.arg) == 0 else (x*r+x2)%c1 if c0.arg >= c1.arg > 0 else None),
   # mul -> add -> div
-  (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
+  (((NOp.cvar('c0')*_nop(name="x"))+_nop(name="x2")) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
    x*(c0.arg//g)//(c1.arg//g) if c0.arg > 0 and c1.arg > 0 and (g:=math.gcd(c0.arg,c1.arg)) > 1 and g > x2.vmax.arg and x2.vmin.arg >= 0 else None),
   # mod mod
-  ((NOp.var('x') % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c0 if 0 < c0.arg < c1.arg else x % c1 if c0.arg % c1.arg == 0 else None),
-  (((NOp.var('x') * NOp.cvar('c0')) % NOp.cvar('c1')) % NOp.cvar('c0'), lambda x,c0,c1: x.const(0)),
+  ((_nop(name="x") % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c0 if 0 < c0.arg < c1.arg else x % c1 if c0.arg % c1.arg == 0 else None),
+  (((_nop(name='x') * NOp.cvar('c0')) % NOp.cvar('c1')) % NOp.cvar('c0'), lambda x,c0,c1: x.const(0)),
   # two stage mul, (x*c1)*c2 = x*(c1*c2)
-  ((NOp.var("x") * NOp.cvar("c1")) * NOp.cvar("c2"), lambda x,c1,c2: x*x.const(exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
+  ((_nop(name="x") * NOp.cvar("c1")) * NOp.cvar("c2"), lambda x,c1,c2: x*x.const(exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
   # -(x+y) -> -x + -y
-  #(-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
+  #(-(_nop(name="x") + _nop(name="y")), lambda x,y: (-x)+(-y)),
   # x%1 -> 0
-  (NOp.var("x") % NOp.const(None, 1), lambda x: x.const(0)),
+  (_nop(name="x") % NOp.const(None, 1), lambda x: x.const(0)),
   # (x*c0)+(x*c1) -> x*(c0+c1)
-  (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
+  (_nop(name="x") * NOp.cvar("c0") + _nop(name="x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
   # (x*c0)+(y*c0) -> (x+y)*c0
-  #((NOp.var("x") * NOp.cvar("c0")) + (NOp.var("y") * NOp.cvar("c0")), lambda x,y,c0: c0*(x+y)),
+  #((_nop(name="x") * NOp.cvar("c0")) + (_nop(name="y") * NOp.cvar("c0")), lambda x,y,c0: c0*(x+y)),
   # mul div
-  ((NOp.var("x") * NOp.cvar("c0")) // NOp.cvar("c1"),
+  ((_nop(name="x") * NOp.cvar("c0")) // NOp.cvar("c1"),
    lambda x,c0,c1: x*(c0.arg//gcd)//(c1.arg//gcd) if c1.arg!=0 and (gcd:=math.gcd(c0.arg,c1.arg))> 1 else None),
   # (x*x2)/x2 -> x
-  ((NOp.var("x") * NOp.var("x2")) / NOp.var("x2"), lambda x,x2: x),
+  ((_nop(name="x") * _nop(name="x2")) / _nop(name="x2"), lambda x,x2: x),
   # (x//c0)//c1 -> x//(c0*c1)
-  ((NOp.var("x") // NOp.cvar("c0")) // NOp.cvar("c1"), lambda x,c0,c1: x//x.const(exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
+  ((_nop(name="x") // NOp.cvar("c0")) // NOp.cvar("c1"), lambda x,c0,c1: x//x.const(exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
   # (x/x1)/x2 -> x/(x1*x2)
-  ((NOp.var("x") / NOp.var("x2")) / NOp.var("x3"), lambda x,x2,x3: x/(x2*x3)),
+  ((_nop(name="x") / _nop(name="x2")) / _nop(name="x3"), lambda x,x2,x3: x/(x2*x3)),
   # c0 + x < c1 -> x < c1 - c0
-  ((NOp.cvar("c0") + NOp.var("x")).lt(NOp.cvar("c1")), lambda x,c0,c1: UOp.lt(x, x.const(exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, -c0.arg])))),
+  ((NOp.cvar("c0") + _nop(name="x")).lt(NOp.cvar("c1")), lambda x,c0,c1: UOp.lt(x, x.const(exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, -c0.arg])))),
   # (x+x*c0)-> x*(c0+1)
-  (NOp.var("x") + NOp.var("x") * NOp.cvar("c0"), lambda x,c0: x*(c0.arg+1)),
+  (_nop(name="x") + _nop(name="x") * NOp.cvar("c0"), lambda x,c0: x*(c0.arg+1)),
   # x!=0 -> (bool)x
-  (NOp.var("x").ne(0), lambda x: x.cast(dtypes.bool)),
+  (_nop(name="x").ne(0), lambda x: x.cast(dtypes.bool)),
   # bool != 1 -> not bool
-  (NOp.var("x", dtype=dtypes.bool).ne(1), lambda x: -x),
+  (_nop(name="x", dtype=dtypes.bool).ne(1), lambda x: -x),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
-  (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("gate").where(NOp.var("alt"), NOp.load(NOp.var("buf"), NOp.var("idx")))),
+  (NOp.store(_nop(name="buf"), _nop(name="idx"), _nop(name="gate").where(_nop(name="alt"), NOp.load(_nop(name="buf"), _nop(name="idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # VECTORIZE-PHI-GEP -> PHI-VECTORIZE
-  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(NOp.var("val"),), arg=i), NOp.var(f"v{i}"))) for i in range(4)), name="root"),
-   lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1, v2, v3))))),
-  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(NOp.var("val"),), arg=i), NOp.var(f"v{i}"))) for i in range(2)), name="root"),
-   lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1))))),
+  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(_nop(name="val"),), arg=i), _nop(name=f"v{i}"))) for i in range(4)),
+    name="root"), lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1, v2, v3))))),
+  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(_nop(name="val"),), arg=i), _nop(name=f"v{i}"))) for i in range(2)),
+    name="root"), lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
-  (NOp.lt(-NOp.var('x'), NOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(c.const(-c.arg), x)),
+  (NOp.lt(-_nop(name='x'), NOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(c.const(-c.arg), x)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (NOp(UOps.VECTORIZE, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
-  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.const(dtypes.bool, True), NOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
-  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.const(dtypes.bool, True), NOp.cvar("var"), NOp.var("barrier")),
+  (NOp.load(_nop(name="buf"), _nop(name="idx"), NOp.const(dtypes.bool, True), NOp.cvar("var")),
+   lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
+  (NOp.load(_nop(name="buf"), _nop(name="idx"), NOp.const(dtypes.bool, True), NOp.cvar("var"), _nop(name="barrier")),
    lambda buf,idx,var,barrier: UOp.load(buf, idx, barrier, dtype=var.dtype)),
-  (NOp.load(NOp.var(), NOp.var(), NOp.const(dtypes.bool, False), NOp.cvar("var")), lambda var: var),
-  (NOp.load(NOp.var(), NOp.var(), NOp.const(dtypes.bool, False), NOp.cvar("var"), NOp.var()), lambda var: var),
-  (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("val"), NOp.const(dtypes.bool, True)), NOp.store),
-  (NOp.store(NOp.var(), NOp.var(), NOp.var(), NOp.const(dtypes.bool, False)), lambda: UOp(UOps.NOOP)),
+  (NOp.load(_nop(), _nop(), NOp.const(dtypes.bool, False), NOp.cvar("var")), lambda var: var),
+  (NOp.load(_nop(), _nop(), NOp.const(dtypes.bool, False), NOp.cvar("var"), _nop()), lambda var: var),
+  (NOp.store(_nop(name="buf"), _nop(name="idx"), _nop(name="val"), NOp.const(dtypes.bool, True)), NOp.store),
+  (NOp.store(_nop(), _nop(), _nop(), NOp.const(dtypes.bool, False)), lambda: UOp(UOps.NOOP)),
   # remove NOOPs from SINK
   (NOp(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
@@ -425,7 +427,7 @@ expander = PatternMatcher([
   # BARRIERs aren't actually expanded
   (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
   # empty EXPAND is NOOP
-  (NOp(UOps.EXPAND, src=(NOp.var('x'),), arg=()), lambda x: x),
+  (NOp(UOps.EXPAND, src=(_nop(name="x"),), arg=()), lambda x: x),
   # no ALU on vectorized dtypes
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
 ])
