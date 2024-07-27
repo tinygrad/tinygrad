@@ -12,6 +12,7 @@ Conv2dNormal = Conv2d
 Conv2dNormal_priorprob = Conv2d
 Conv2dKaiming = Conv2d
 
+# @line_profiler.profile
 def nms(boxes, scores, thresh=0.5):
   x1, y1, x2, y2 = np.rollaxis(boxes, 1)
   areas = (x2 - x1 + 1) * (y2 - y1 + 1)
@@ -19,11 +20,15 @@ def nms(boxes, scores, thresh=0.5):
   while to_process.size > 0:
     cur, to_process = to_process[0], to_process[1:]
     keep.append(cur)
-    inter_x1 = np.maximum(x1[cur], x1[to_process])
-    inter_y1 = np.maximum(y1[cur], y1[to_process])
-    inter_x2 = np.minimum(x2[cur], x2[to_process])
-    inter_y2 = np.minimum(y2[cur], y2[to_process])
-    inter_area = np.maximum(0, inter_x2 - inter_x1 + 1) * np.maximum(0, inter_y2 - inter_y1 + 1)
+    inter_x1 = np.clip(x1[to_process], x1[cur], None)
+    inter_y1 = np.clip(y1[to_process], y1[cur], None)
+    inter_x2 = np.clip(x2[to_process], x2[cur], None)
+    inter_y2 = np.clip(y2[to_process], y2[cur], None)
+    a1a = inter_x2 - inter_x1 + 1
+    a2a = inter_y2 - inter_y1 + 1
+    a1 = np.maximum(0, a1a)
+    a2 = np.maximum(0, a2a)
+    inter_area = a1 * a2
     iou = inter_area / (areas[cur] + areas[to_process] - inter_area)
     to_process = to_process[np.where(iou <= thresh)[0]]
   return keep
