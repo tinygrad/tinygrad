@@ -2,7 +2,7 @@ import time, unittest
 from tinygrad import Tensor, TinyJit, Device, dtypes
 from tinygrad.helpers import getenv, GlobalCounters
 
-SZMIN = getenv("SZMIN", 0)
+SZMIN = getenv("SZMIN", 10)
 SZMAX = getenv("SZMAX", 10)
 def _test(tcount, fxn, dtype=dtypes.float):
   print(f"**** testing {fxn.__name__} {dtype}")
@@ -35,14 +35,14 @@ class TestRamBandwidth(unittest.TestCase):
 
 # ratio between MEM and FLOPS < 1000
 # NOTE: On AMD, (x*x)+1 gets ~30 TFLOPS, (x*x)+3 gets ~60 TFLOPS
-def multfxn(x):
+def flopsmax(x):
   for _ in range(500): x = (x*x)+3
   return x
 
 class TestFlops(unittest.TestCase):
-  def test_flops_int8(self): _test(1, multfxn, dtypes.int8)
-  def test_flops_fp16(self): _test(1, multfxn, dtypes.half)
-  def test_flops_fp32(self): _test(1, multfxn)
+  def test_flops_int8(self): _test(1, flopsmax, dtypes.int8)
+  def test_flops_fp16(self): _test(1, flopsmax, dtypes.half)
+  def test_flops_fp32(self): _test(1, flopsmax)
 
 if __name__ == '__main__':
   unittest.main()
