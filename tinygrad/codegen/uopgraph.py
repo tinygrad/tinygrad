@@ -172,14 +172,15 @@ constant_folder = PatternMatcher([
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # extra arange loop folding because we don't fold adds. TODO: fold adds
   (NOp(UOps.REDUCE, src=((_nop(name="idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng") +
-                          _nop(name="idx2") + _nop(name="idx3"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
+                          _nop(name="idx2") + _nop(name="idx3")) .lt(NOp.cvar("compval"))
+    .where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   (NOp(UOps.REDUCE, src=((_nop(name="idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng") +
-                          _nop(name="idx2"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
+                          _nop(name="idx2")).lt(NOp.cvar("compval"))
+    .where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   # arange loop folding (reduce)
   (NOp(UOps.REDUCE, src=((_nop(name="idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
+    .lt(NOp.cvar("compval"))
+    .where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   (NOp(UOps.REDUCE, src=((_nop(name="idx") - NOp(UOps.RANGE, src=(_nop(name="loop_start"), _nop(name="loop_end")), name="rng"))
     .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True),
     lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
