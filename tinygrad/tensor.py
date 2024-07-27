@@ -326,7 +326,7 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.empty(2, 3)
-    print(t.shard((t.device, t.device), axis=1, splits=(2, 3)).lazydata)
+    print(t.shard((t.device, t.device), axis=1, splits=(2, 1)).lazydata)
     ```
 
     """
