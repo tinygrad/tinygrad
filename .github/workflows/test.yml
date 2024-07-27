@@ -3,6 +3,7 @@ env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '5'
   RUN_PROCESS_REPLAY: 1
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 on:
   push:
@@ -508,7 +509,7 @@ jobs:
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
         run: |
-          if [ "${{ matrix.backend }}" == "amd" ]; then
+          if [ "${{ matrix.backend }}" == "amd" ] && [ "${GITHUB_REF_NAME}" != "master" ]; then
             MAX_DIFF_PCT=1 RUN_PROCESS_REPLAY=0 test/external/process_replay/test_process_replay.sh
           fi
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
