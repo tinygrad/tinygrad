@@ -38,6 +38,13 @@ def cuda_disassemble(lib, arch):
     print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
   except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
 
+def nv_disassemble(lib):
+  try:
+    fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
+    with open(fn + ".cubin", "wb") as f: f.write(lib)
+    print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
+  except Exception as e: print("Failed to disasm cubin:", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
+
 class PTXCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
