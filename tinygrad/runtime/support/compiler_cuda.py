@@ -13,7 +13,7 @@ def _get_bytes(arg, get_str, get_sz, check) -> bytes:
 def nvrtc_check(status, ctx=None):
   if status != 0:
     err_log = _get_bytes(ctx, nvrtc.nvrtcGetProgramLog, nvrtc.nvrtcGetProgramLogSize, lambda _: None).decode() if ctx else ""
-    raise CompileError(f"Nvrtc Error {status}, {ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: nvrtc.nvrtcGetErrorString(status, ctypes.byref(x)))).decode()}\n{err_log}")  # noqa: E501
+    raise CompileError(f"Nvrtc Error {status}, {ctypes.string_at(nvrtc.nvrtcGetErrorString(status)).decode()}\n{err_log}")
 
 def jitlink_check(status, ctx=None):
   if status != 0:
