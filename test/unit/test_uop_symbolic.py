@@ -30,8 +30,7 @@ def Variable(expr, nmin, nmax):
   # TODO: fix DEFINE_VAR to not need this
   class TempVar:
     def __init__(self, x): self.expr = x
-  #return UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)), TempVar(expr))
-  return UOp(UOps.DEFINE_VAR, dtypes.int, tuple(), TempVar(expr))
+  return UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)), TempVar(expr))
 class Node:
   @staticmethod
   def sum(ops): return functools.reduce(lambda x,y: x+y, ops)
@@ -64,16 +63,14 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 4), 0, 1, "(a<4)")
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, {"((a*-1)<-7)", "(7<a)", "(!(a<8))"})
 
-  @unittest.expectedFailure
   def test_ge(self):
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 77), 0, 0, "0")
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 9), 0, 0, "0")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, "((a*-1)<-7)")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 4), 0, 1, "((a*-1)<-3)")
+    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, {"((a*-1)<-7)", "(!(a<8))"})
+    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 4), 0, 1, {"((a*-1)<-3)", "(!(a<4))"})
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 3), 1, 1, "1")
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 2), 1, 1, "1")
 
-  @unittest.expectedFailure
   def test_lt(self):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 77), 1, 1, "1")
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 9), 1, 1, "1")
@@ -82,26 +79,25 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 3), 0, 0, "0")
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 2), 0, 0, "0")
 
-  @unittest.expectedFailure
   def test_ge_divides(self):
     expr = create_lt_node(Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)
     self.helper_test_variable(expr, 0, 1, "(idx<128)")
 
-  @unittest.expectedFailure
   def test_ge_divides_and(self):
     expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
                       create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)])
-    self.helper_test_variable(expr, 0, 1, "((idx1<128) and (idx2<128))")
-    expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
-                      create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7), 512)])
-    self.helper_test_variable(expr//4, 0, 0, "0")
+    self.helper_test_variable(expr, 0, 1, {"((idx1<128) and (idx2<128))", "((idx1<128)*(idx2<128))"})
+    # # bool divided by int is not allowed
+    # expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
+    #                   create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7), 512)])
+    # self.helper_test_variable(expr//4, 0, 0, "0")
 
   def test_lt_factors(self):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
     self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
 
-  #def test_div_becomes_num(self):
-  #  assert isinstance(Variable("a", 2, 3)//2, NumNode)
+  def test_div_reduction(self):
+   self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
   #def test_var_becomes_num(self):
   #  assert isinstance(Variable("a", 2, 2), NumNode)
@@ -175,6 +171,9 @@ class TestSymbolic(unittest.TestCase):
   def test_add_min_max(self):
     self.helper_test_variable(Variable("a", 0, 8) * 2 + 12, 12, 16+12, "((a*2)+12)")
 
+  def test_div_remove(self):
+    self.helper_test_variable(Variable("a", 0, 7) // 20, 0, 0, "0")
+
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
 
@@ -183,10 +182,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 7) // -2, -4, 0, "((((a*-1)+8)//2)+-4)")
     self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "((((a*-1)+6)//2)+-3)")
 
+  def test_sum_div_remove(self):
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 20, 0, 0, "0")
+
   def test_sum_div_min_max(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
 
-  @unittest.expectedFailure
   def test_sum_div_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, Variable("b", 0, 3)*4]) // 2, 0, 20, "((a*2)+(b*2))")
 
@@ -206,30 +207,29 @@ class TestSymbolic(unittest.TestCase):
     # NOTE: even though the mod max is 50, it can't know this without knowing about the mul
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
 
-  @unittest.expectedFailure
   def test_mod_to_sub(self):
     # This is mod reduction
-    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, (Variable("a",1,2)-1).render())
+    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, {"(-1+a)", "(a+(-1))"})
 
-  @unittest.expectedFailure
   def test_sum_div_const(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
 
-  @unittest.expectedFailure
   def test_sum_div_const_big(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 16, 0, 1, "(a//4)")
 
-  @unittest.expectedFailure
   def test_sum_lt_fold(self):
     self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]), 16), 0, 1, "(a<4)")
     self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]), 16), 0, 1, "(((a*4)+b)<16)")
-    self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
+    # TODO: fix
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
 
-  @unittest.expectedFailure
-  def test_mod_mul(self):
+  def test_mul_mod_large(self):
+    self.helper_test_variable((Variable("a", 0, 20)*10)%9, 0, 8, "(a%9)")
+
+  def test_mul_mod_small(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
 
-  @unittest.expectedFailure
   def test_mod_mod(self):
     self.helper_test_variable((Variable("a", 0, 31)%12)%4, 0, 3, "(a%4)")
     self.helper_test_variable(((4*Variable("a", 0, 31)) % 12) % 4, 0, 0, "0")
@@ -238,12 +238,11 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
 
-  @unittest.expectedFailure
   def test_mul_lt(self):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*4,13), 0, 1, "(a<4)")
     self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*4,16), 0, 1, "(a<4)")
-    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,12), 0, 1, "((a*-1)<-2)")
-    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,13), 0, 1, "((a*-1)<-3)")
+    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,12), 0, 1, {"((a*-1)<-2)", "(!(a<3))"})
+    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,13), 0, 1, {"((a*-1)<-3)", "(!(a<4))"})
 
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
@@ -251,14 +250,12 @@ class TestSymbolic(unittest.TestCase):
   def test_distribute_mul(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, {"((a*3)+(b*3))", "((a+b)*3)"})
 
-  @unittest.expectedFailure
   def test_mod_mul_sum(self):
     self.helper_test_variable(Node.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, "(a+b)")
 
   def test_sum_0(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)]), 0, 7, "a")
 
-  @unittest.expectedFailure
   def test_mod_remove(self):
     self.helper_test_variable(Variable("a", 0, 6)%100, 0, 6, "a")
 
@@ -270,11 +267,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
     #self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
 
-  @unittest.expectedFailure
   def test_ge_remove(self):
     self.helper_test_variable(create_ge_node(Variable("a", 0, 6), 25), 0, 0, "0")
 
-  @unittest.expectedFailure
   def test_lt_remove(self):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6), -3), 0, 0, "0")
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6), 3), 0, 1, "(a<3)")
@@ -305,20 +300,16 @@ class TestSymbolic(unittest.TestCase):
   def test_div_factor(self):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
 
-  # TODO: this one should already work!
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
 
-  @unittest.expectedFailure
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
 
-  @unittest.expectedFailure
   def test_mul_div_factor_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//8, 0, 5, "(a//2)")
 
-  @unittest.expectedFailure
-  def test_div_remove(self):
+  def test_sum_div_partial_remove(self):
     self.helper_test_variable(Node.sum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
 
   @unittest.expectedFailure
@@ -328,6 +319,12 @@ class TestSymbolic(unittest.TestCase):
   @unittest.expectedFailure
   def test_div_into_mod(self):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
+
+  @unittest.expectedFailure
+  def test_div_neg_cancel(self):
+    self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 0, 25, "((1+idx)//4)")
+    self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "(idx//4)")
+    self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, -1, 24, "(((3+idx)//4)+-1)")
 
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
@@ -374,14 +371,15 @@ class TestSymbolicVars(unittest.TestCase):
     s = SumNode([a, b, c])
     assert s.vars() == {a, b, c}
 
-  @unittest.skip("TODO: fix me")
   def test_compound(self):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
     assert (a + b * c).vars() == {a, b, c}
     assert (a % 3 + b // 5).vars() == {a, b}
-    assert (a + b + c - a).vars() == {b, c}
+    # TODO: fix me
+    with self.assertRaises(AssertionError):
+      assert (a + b + c - a).vars() == {b, c}
 
   def test_dedup(self):
     a = Variable("a", 0, 10)

@@ -21,7 +21,7 @@ from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); MERGE = auto(); SWAP = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
@@ -112,9 +112,6 @@ class Kernel:
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
-    # cache
-    self.applied_opts_cache: Optional[List[Opt]] = None
-
   def copy(self):
     ret = type(self).__new__(type(self))
 
@@ -130,9 +127,6 @@ class Kernel:
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, self.bufs_for_tensor_core
-
-    # uncached since linearize didn't run
-    ret.applied_opts_cache = None
 
     return ret
 
@@ -151,6 +145,9 @@ class Kernel:
   @property
   def first_reduce(self) -> int:
     return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)  # noqa: E501
+
+  @property
+  def first_upcast(self) -> int: return self.shape_len-self.upcasted
 
   @property
   def reduceop(self) -> Optional[LazyOp]: return self.reduceops[0] if len(self.reduceops) > 0 else None
@@ -327,7 +324,7 @@ class Kernel:
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
-        if self.opts.device == "AMD":
+        if self.opts.device in {"AMD", "HIP"}:
           # NOTE: AMD requires locals first
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
           for (tc_dim, tc_amt) in tc.threads:
@@ -343,15 +340,14 @@ class Kernel:
         elif self.opts.device in {"CUDA", "NV"}:
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
+          # NOTE: LOCALS and UPCAST can be swapped here. it doesn't seem faster
+          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[0], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
-          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
-          # NOTE: MERGE is needed because we can't deal with two upcasted dimensions
-          self.apply_opt(Opt(OptOps.MERGE, self.shape_len-2), append_opt=False)
         # assert tensor core
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
         return True
@@ -451,7 +447,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not(self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.threads)), "can't upcast TC locals")
-      check(amt <= 8, "don't upcast more than 8")
+      check(amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCASTMID:                  # white
@@ -471,12 +467,6 @@ class Kernel:
       permute = list(range(self.shape_len))
       permute[axis], permute[amt] = permute[amt], permute[axis]
       self.reshape_and_permute(None, tuple(permute))
-    elif opt.op is OptOps.MERGE:
-      check(axis >= self.shape_len-self.upcasted, "only merge upcasted")
-      check(self.full_shape[axis:axis+2] == self.output_shape[axis:axis+2], "can't merge reduces")
-      self.reshape_and_permute(None, tuple(range(axis)) + (axis+1, axis) + tuple(range(axis+2, self.shape_len)))
-      self.reshape_and_permute(lambda x: x[0:axis] + (x[axis] * x[axis+1],) + x[axis+2:], None)
-      self.upcasted -= 1
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.shape_len - self.upcasted, "cannot pad upcasted")
@@ -678,33 +668,31 @@ class Kernel:
             permaxis += list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
-          if self.opts.device == "AMD":
-            reduce_axes = [self.shape_len-self.upcasted]
-            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted, self.shape_len-self.upcasted+1)
+          if self.opts.device in {"AMD", "HIP"}:
+            reduce_axes, upcast_axis = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
+            # https://gpuopen.com/learn/wmma_on_rdna3/
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
             fix_st2 = None
           elif self.opts.device == "METAL":
-            reduce_axes = [self.shape_len-self.upcasted]
-            upcast_axis = (self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1, self.shape_len-self.upcasted+1)
+            reduce_axes, upcast_axis = [0], [[(1, 2)], [(1, 2)], [(1, 2)]]
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device in {"CUDA", "NV"}:
-            reduce_axes = [self.shape_len-self.upcasted, self.shape_len-self.upcasted+1]
-            upcast_axis = (self.shape_len-self.upcasted, self.shape_len-self.upcasted+2, self.shape_len-self.upcasted+2)
+            reduce_axes, upcast_axis = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
-            fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
+            fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
               ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
-            fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,4), (2,2,2,2,2,2),
+            fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
               ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
           else:
             raise RuntimeError("unsupported device for tensor cores")
 
           assert apply_to_st is None, "double tensor core? not supported"
-          wmma_sz = [prod(l) for l in tc.thread_local_sizes]
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(wmma_sz), self.opts.device, upcast_axis, tuple(reduce_axes))
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device,
+                      tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axis),
+                      tuple(self.first_upcast+ax for ax in reduce_axes))
           ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
-          new_reduce_axes = tuple(i for i in arg if i not in reduce_axes)
-          return LazyOp(op.op, (ret,), new_reduce_axes) if new_reduce_axes else ret
+          return LazyOp(op.op, (ret,), new_reduce_axes) if (new_reduce_axes:=tuple(i for i in arg if i-self.first_upcast not in reduce_axes)) else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces] + \
@@ -728,41 +716,45 @@ class Kernel:
     if DEBUG >= 3:
       print(self.name)
       print(modified_ast)
+      print(self.applied_opts)
     verify_lazyop(modified_ast)
 
-    uop_sink = lazyop_to_uop(modified_ast, self.opts)
-
-    # extract global/local sizes
-    if self.opts.has_local:
-      self.global_size: Optional[List[int]] = [1,1,1]
-      self.local_size: Optional[List[int]] = [1,1,1]
-      for u in uop_sink.parents:
-        if u.op is UOps.SPECIAL:
-          if u.arg[1][0] == 'i': self.local_size = None
-          if u.arg[1][0] == 'l':
-            assert self.local_size is not None
-            self.local_size[u.arg[0]] = u.arg[2]
-          else:
-            self.global_size[u.arg[0]] = u.arg[2]
-    else:
-      self.global_size, self.local_size = None, None
-
     # generate the UOpGraph
-    self.uops:UOpGraph = UOpGraph(uop_sink, self.opts)
+    self.uops:UOpGraph = UOpGraph(lazyop_to_uop(modified_ast, self.opts), self.opts)
     if DEBUG >= 5: self.uops.print()
     if getenv("GRAPHUOPS"): self.uops.graph()
     return self
 
-  def to_program(self) -> Program:
+  def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
-    src = self.opts.render(name:=to_function_name(self.name), self.uops)
+    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
+
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+
+    # extract global/local sizes
+    if self.opts.has_local:
+      global_size: Optional[List[int]] = [1,1,1]
+      local_size: Optional[List[int]] = [1,1,1]
+      for u in self.uops.uops:
+        if u.op is UOps.SPECIAL:
+          if u.arg[0][0] == 'i': local_size = None
+          if u.arg[0][0] == 'l':
+            assert local_size is not None
+            local_size[int(u.arg[0][-1])] = u.arg[1]
+          else:
+            assert global_size is not None
+            global_size[int(u.arg[0][-1])] = u.arg[1]
+    else:
+      global_size, local_size = None, None
+
     ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
-    run_count = prod((self.global_size or []) + (self.local_size or []))
+    run_count = prod((global_size or []) + (local_size or []))
     # group non-local MemBuffers by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
+    # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
-    return Program(self.name, src, self.opts.device, self.global_size, self.local_size, self.uops, ops * run_count, min(mem * run_count, mem_bytes))
+    return Program(ansiname, src, self.opts.device, global_size, local_size, self.uops,
+                   ops * run_count, min(mem * run_count, mem_bytes), mem * run_count)
