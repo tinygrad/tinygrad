@@ -178,7 +178,8 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
-          index = (f"{'.data' if self.device == 'CLANG' and AMX else ''}[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
+          index = f"[{args}]"
+          # index = (f"{'.data' if self.device == 'CLANG' and AMX else ''}[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
           r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + index
         else: raise RuntimeError(f"failed to render {u}")
 
@@ -196,12 +197,12 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
   if AMX:
     float4 = "make_float4"
-    tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [64])]
-    tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], thread_local_sizes=[[sz],[sz],[sz,sz]], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types] # noqa:E501
+    tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [16])]
+    tensor_cores = [TensorCore(dims=(sz,sz,sz*sz), threads=[(0,sz),(1,sz)], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types] # noqa:E501
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix, macros = [_make_clang_dtype(dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)], []
-    for name, (N, M, K), dtype_in, _, _, _, _, _ in set([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+    for name, (N, M, K), dtype_in, _, _, _, _ in set([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       macros = ['#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")', '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")'] # noqa: E501
       prefix += [f"""{dtype_in.vec(K*K).name} __{name}({dtype_in.vec(N).name} data1, {dtype_in.vec(M).name} data2){{
   AMX_SET(0);\n  AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull); {dtype_in.vec(K*K).name} data = {{0}};
@@ -236,7 +237,7 @@ class OpenCLRenderer(CStyleLanguage):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
 
   # language options
@@ -286,7 +287,7 @@ class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
   def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
@@ -321,6 +322,11 @@ return c;}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
+  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+    maxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
+    # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
+    return f"__launch_bounds__({maxThreadsPerBlock}) "
+
 code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
                     UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
                     UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
@@ -346,7 +352,7 @@ def _make_hip_dtype(base_type, name, cnt):
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
-  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], thread_local_sizes=[[16],[16],[4,2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
 
   # language options
   kernel_prefix = """extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);

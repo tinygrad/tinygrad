@@ -147,7 +147,7 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
   def assert_valid(op:LazyOp, st:ShapeTracker):
     if op in sts: return
     # restore globals from the two stage reduce
-    if op.op is BufferOps.LOAD and op.arg.idx == -1:
+    if op.op is BufferOps.LOAD and op.arg.idx < 0:
       assert_valid(local_reduce:=op.src[0].src[0], op.arg.st)
       return sts.setdefault(op, sts[local_reduce])
     for x in op.src: assert_valid(x, st)

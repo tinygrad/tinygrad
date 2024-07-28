@@ -1,46 +1,28 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, errno, subprocess, time, array
+import os, fcntl, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, \
-                            HCQSignal, HCQProgram, Compiler, CompileError, BufferOptions
+                            HCQSignal, HCQProgram, BufferOptions
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.runtime.support.hip_comgr import compile_hip
-import tinygrad.runtime.autogen.kfd as kfd
-import tinygrad.runtime.autogen.hsa as hsa
-import tinygrad.runtime.autogen.amd_gpu as amd_gpu
-import tinygrad.runtime.autogen.libc as libc
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
+from tinygrad.runtime.support.compiler_hip import AMDCompiler, disasm
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
 def is_usable_gpu(gpu_id):
-  try:
-    with gpu_id.open() as f:
-      return int(f.read()) != 0
-  except OSError:
-    return False
+  with contextlib.suppress(OSError): return int(pathlib.Path(gpu_id).read_text()) != 0
+  return False
 
 def kfd_ioctl(idir, nr, user_struct, fd, **kwargs):
   ret = fcntl.ioctl(fd, (idir<<30) | (ctypes.sizeof(made := user_struct(**kwargs))<<16) | (ord('K')<<8) | nr, made)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
   return made
 
-def ioctls_from_header():
-  #hdr = pathlib.Path("/usr/include/linux/kfd_ioctl.h").read_text().replace("\\\n", "")
-  #pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_(IOW?R?)\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
-  #matches = re.findall(pattern, hdr, re.MULTILINE)
-  # get this from python instead
-  hdrpy = (pathlib.Path(__file__).parent / "autogen" / "kfd.py").read_text()
-  pattern = r'# (AMDKFD_IOC_[A-Z0-9_]+)\s=\s_(IOW?R?).*\(( 0x[0-9a-fA-F]+) ,\s+struct\s([A-Za-z0-9_]+)\s+\)'
-  matches = re.findall(pattern, hdrpy, re.MULTILINE)
-  idirs = {"IOW": 1, "IOR": 2, "IOWR": 3}
-  fxns = {name.replace("AMDKFD_IOC_", "").lower():
-          functools.partial(kfd_ioctl, idirs[idir], int(nr, 0x10), getattr(kfd, "struct_"+sname))
-          for name, idir, nr, sname in matches}
-  return type("KIO", (object, ), fxns)
-kio = ioctls_from_header()
+kio:Any = type("KIO", (object,), {name[11:].lower(): functools.partial(kfd_ioctl, {"IOW": 1, "IOR": 2, "IOWR": 3}[p[0]], p[1], p[2])
+                              for name,p in kfd.__dict__.items() if name.startswith("AMDKFD_IOC_")})
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0106, 0x0107
 
@@ -54,18 +36,6 @@ COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
 def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
-
-def disasm(lib):
-  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-  return '\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x])
-
-class AMDCompiler(Compiler):
-  def __init__(self, arch:str):
-    self.arch = arch
-    super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    try: return compile_hip(src, self.arch)
-    except RuntimeError as e: raise CompileError(e) from e
 
 class AMDSignal(HCQSignal):
   def __init__(self, value=0, alloc_event=False):
@@ -135,7 +105,7 @@ class AMDComputeQueue(HWComputeQueue):
     self._acquire_mem(gli=0, gl2=0)
 
     user_regs = [*data64_le(kernargs)]
-    if prg.kernel_code_properties & 0x2:
+    if prg.enable_dispatch_ptr:
       dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=kernargs + prg.kernargs_segment_size)
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
       dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
@@ -159,12 +129,13 @@ class AMDComputeQueue(HWComputeQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
   def _update_exec(self, cmd_idx, global_size, local_size):
-    self._patch(cmd_idx, offset=50 + self.cmd_idx_to_exec_info[cmd_idx], data=local_size)
-    self._patch(cmd_idx, offset=59 + self.cmd_idx_to_exec_info[cmd_idx], data=global_size)
+    if local_size is not None: self._patch(cmd_idx, offset=50 + self.cmd_idx_to_exec_info[cmd_idx], data=local_size)
+    if global_size is not None: self._patch(cmd_idx, offset=59 + self.cmd_idx_to_exec_info[cmd_idx], data=global_size)
 
     if (dp:=self.cmd_idx_to_dispatch_packet.get(cmd_idx)) is not None:
-      dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
-      dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
+      if local_size is not None: dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
+      if global_size is not None:
+        dp.grid_size_x,dp.grid_size_y,dp.grid_size_z = [g*l for g,l in zip(global_size,[dp.workgroup_size_x,dp.workgroup_size_y,dp.workgroup_size_z])]
 
   def _wait(self, signal, value=0):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
@@ -306,12 +277,14 @@ class AMDProgram(HCQProgram):
 
     self.rsrc1 = code.compute_pgm_rsrc1
     self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
-    self.kernel_code_properties = code.kernel_code_properties
     self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
-    # If required, allocate space for the dispatch packet in the kernargs to pass it to the GPU.
-    args_alloc_sz = self.kernargs_segment_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.kernel_code_properties & 0x2 else 0)
-    super().__init__(self.device, self.name, kernargs_alloc_size=args_alloc_sz)
+    # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
+    # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
+    self.enable_dispatch_ptr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+    additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
+
+    super().__init__(self.device, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): cast(AMDDevice, self.device)._gpu_free(self.lib_gpu)
