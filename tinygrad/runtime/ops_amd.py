@@ -279,9 +279,9 @@ class AMDProgram(HCQProgram):
     self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
     self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
-    # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution. The packet is represented as a pointer and set up in SGPRs.
-    # Space for the packet is allocated as part of the kernel arguments.
-    self.enable_dispatch_ptr = self.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+    # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
+    # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
+    self.enable_dispatch_ptr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
 
     super().__init__(self.device, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
