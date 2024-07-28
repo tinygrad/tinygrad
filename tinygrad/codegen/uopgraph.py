@@ -3,7 +3,7 @@ from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE
 import functools, itertools, heapq, math
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, exec_alu
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI
 from tinygrad.codegen.uops import UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -12,13 +12,11 @@ if TYPE_CHECKING: from tinygrad.renderer import Renderer
 # ***** image handling *****
 
 def image_contract_load(buf, idx, idy, id4, ls):
-  if len(ls.src) > 3:
-    # TODO: there's no contract on the gate, is this okay?
-    extra = (ls.src[2], UOp(UOps.VECTORIZE, ls.dtype.vec(4), (ls.src[3],)*4))
+  # TODO: there's no contract on the gate, is this okay?
+  if len(ls.src) > 3: extra = (ls.src[2], UOp(UOps.VECTORIZE, ls.dtype.vec(4), (ls.src[3],)*4))
   else: extra = ls.src[2:]  # NOTE: image load shouldn't have barrier and this shouldn't matter
   vec_load = UOp(UOps.LOAD, ls.dtype.vec(4), (buf, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx, idy))) + extra)
-  return functools.reduce(lambda ret, i: id4.ne(i).alu(TernaryOps.WHERE, ret, UOp(UOps.GEP, ls.dtype, (vec_load,), i)), range(4),
-                          ls.const(float('nan')))
+  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, ls.dtype, (vec_load,), i)), range(4), ls.const(float('nan')))
 
 def image_contract_store(buf, ex, idx, idy, ls, var):
   new_var = UOp(UOps.CONTRACT, var.dtype.vec(4), (var,), ((ex.arg[0][0],4),))
@@ -127,7 +125,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
     return None
   if idx2 is not None: idx = idx + idx2
   if idx3 is not None: idx = idx + idx3
-  comprange = UOp.min(loop_end, UOp.max((idx-compval-mval).alu(BinaryOps.IDIV, mval) + (loop_end-loop_start), loop_start))
+  comprange = UOp.min(loop_end, UOp.max((idx-compval-mval)//mval + (loop_end-loop_start), loop_start))
   return UOp(UOps.REDUCE, reduce.dtype, (comprange.cast(multconst.dtype) * multconst,) +
              tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
