@@ -121,7 +121,7 @@ class TestTinygrad(unittest.TestCase):
       out = x.matmul(W).relu()
       out = torch.nn.functional.log_softmax(out, dim=1)
       out = out.mul(m).add(m)
-      out.backward(gradient)
+      out.backward(torch.tensor(gradient))
       return out.detach().numpy(), x.grad, W.grad
 
     for x,y in zip(test_tinygrad(), test_pytorch()):
