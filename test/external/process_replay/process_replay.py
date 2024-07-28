@@ -92,7 +92,9 @@ def download_artifact(run_id:str, name:str, dest:str):
 
 def _get_times(data) -> Dict[str, float]:
   tms: Dict[str, float] = {}
-  for step in data["steps"][4:-4]:
+  for step in data["steps"][4:]:
+    # last task
+    if step["name"] == "Run actions/upload-artifact@v4": break
     fmt = "%Y-%m-%dT%H:%M:%SZ"
     tm = datetime.strptime(step["completed_at"], fmt) - datetime.strptime(step["started_at"], fmt)
     tms[step["name"]] = tm.total_seconds()
