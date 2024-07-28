@@ -20,16 +20,10 @@ def nms(boxes, scores, thresh=0.5):
   while to_process.size > 0:
     cur, to_process = to_process[0], to_process[1:]
     keep.append(cur)
-    if to_process.shape[0] != 0:
-      inter_x1 = np.clip(x1[to_process], x1[cur], None)
-      inter_y1 = np.clip(y1[to_process], y1[cur], None)
-      inter_x2 = np.clip(x2[to_process], x2[cur], None)
-      inter_y2 = np.clip(y2[to_process], y2[cur], None)
-    else:
-      inter_x1 = np.maximum(x1[cur], x1[to_process])
-      inter_y1 = np.maximum(y1[cur], y1[to_process])
-      inter_x2 = np.minimum(x2[cur], x2[to_process])
-      inter_y2 = np.minimum(y2[cur], y2[to_process])
+    inter_x1 = np.maximum(x1[cur], x1[to_process])
+    inter_y1 = np.maximum(y1[cur], y1[to_process])
+    inter_x2 = np.minimum(x2[cur], x2[to_process])
+    inter_y2 = np.minimum(y2[cur], y2[to_process])
     a1a = inter_x2 - inter_x1 + 1
     a2a = inter_y2 - inter_y1 + 1
     a1 = np.maximum(0, a1a)
