@@ -735,7 +735,7 @@ class Tensor:
     print(t.grad.numpy())
     ```
     """
-    if gradient is None: 
+    if gradient is None:
       assert self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
       # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
       # this is "implicit gradient creation"
