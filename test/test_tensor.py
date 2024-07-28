@@ -16,6 +16,7 @@ U_init = np.random.randn(3,3).astype(np.float32)
 V_init = np.random.randn(3,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
+gradient = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
   def test_zerodim_initialization(self):
@@ -55,12 +56,28 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+
   @unittest.expectedFailure
   def test_second_order_backward_pass(self):
+
+  # passing `gradient` to backward
+  def test_backward_pass_vjp(self):
+    def test_tinygrad():
+      x = Tensor(x_init, requires_grad=True)
+      W = Tensor(W_init, requires_grad=True)
+      m = Tensor(m_init)
+      out = x.dot(W).relu()
+      out = out.log_softmax()
+      out = out.mul(m).add(m)
+      out.backward(Tensor(gradient))
+      return out.numpy(), x.grad.numpy(), W.grad.numpy()
+
+
     def test_pytorch():
       x = torch.tensor(x_init, requires_grad=True)
       W = torch.tensor(W_init, requires_grad=True)
       m = torch.tensor(m_init)
+
       # forward pass
       out = x.matmul(W).relu()
       out = torch.nn.functional.log_softmax(out, dim=1)
@@ -97,6 +114,13 @@ class TestTinygrad(unittest.TestCase):
       grad_W.sum().backward()
       second_grad_W = W.grad
       return second_grad_x.numpy(), second_grad_W.numpy()
+
+      out = x.matmul(W).relu()
+      out = torch.nn.functional.log_softmax(out, dim=1)
+      out = out.mul(m).add(m)
+      out.backward(torch.tensor(gradient))
+      return out.detach().numpy(), x.grad, W.grad
+
 
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
