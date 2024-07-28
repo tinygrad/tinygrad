@@ -239,8 +239,6 @@ class TestUint8DType(TestDType):
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
-def _test_bitcasted(t: Tensor, dt: DType, expected):
-  np.testing.assert_allclose(t.bitcast(dt).numpy(), expected)
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
@@ -264,7 +262,6 @@ class TestBitCast(unittest.TestCase):
     t = Tensor(data).reshape(2, 1, 8).permute(1, 0, 2)
     tnp = np.array(data).reshape(2, 1, 8).transpose(1, 0, 2)
     np.testing.assert_allclose(t.bitcast(dt2).numpy(), tnp.view(_to_np_dtype(dt2)))
-
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
