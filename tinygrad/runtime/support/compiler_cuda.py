@@ -1,5 +1,4 @@
-import subprocess, hashlib, tempfile, ctypes, ctypes.util, re
-from pathlib import Path
+import subprocess, hashlib, tempfile, ctypes, ctypes.util, re, pathlib
 from typing import Callable
 from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
 import tinygrad.runtime.autogen.nvrtc as nvrtc
@@ -33,7 +32,7 @@ def pretty_ptx(s):
 
 def cuda_disassemble(lib, arch):
   try:
-    fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
+    fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
     with open(fn + ".ptx", "wb") as f: f.write(lib)
     subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn+".ptx"], check=True)
     print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
@@ -41,7 +40,7 @@ def cuda_disassemble(lib, arch):
 
 def nv_disassemble(lib):
   try:
-    fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
+    fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
     with open(fn + ".cubin", "wb") as f: f.write(lib)
     print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
   except Exception as e: print("Failed to disasm cubin:", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
@@ -76,4 +75,6 @@ class NVPTXCompiler(PTXCompiler):
     jitlink_check(nvrtc.nvJitLinkCreate(handle := nvrtc.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
     jitlink_check(nvrtc.nvJitLinkAddData(handle, nvrtc.NVJITLINK_INPUT_PTX, ptxsrc:=super().compile(src), len(ptxsrc), "<null>".encode()), handle)
     jitlink_check(nvrtc.nvJitLinkComplete(handle), handle)
-    return _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, jitlink_check)
+    data = _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, jitlink_check)
+    jitlink_check(nvrtc.nvJitLinkDestroy(handle))
+    return data
