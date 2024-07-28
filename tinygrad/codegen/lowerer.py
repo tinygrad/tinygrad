@@ -159,10 +159,10 @@ class IndependentLowerer:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)
-      #if x.arg.idx != -1:
-      #  for oidx, ridx in zip(self.idxs, self.ridxs):
-      #    if oidx != ridx: valid = valid * oidx.eq(0)
-      #  has_valid = valid.op is not UOps.CONST or valid.arg is not True
+      if x.arg.idx >= 0:
+        for oidx, ridx in zip(self.idxs, self.ridxs):
+          if oidx != ridx: valid = valid * oidx.eq(0)
+        has_valid = valid.op is not UOps.CONST or valid.arg is not True
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
