@@ -107,7 +107,7 @@ def process_replay():
     compare_job = next(j for j in compare_jobs if j["name"] == f"{name} Benchmark")
     ref_runs = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master&status=success", headers=GH_HEADERS).json()
     ref_jobs = requests.get(f"{BASE_URL}/actions/runs/{ref_runs['workflow_runs'][0]['id']}/jobs").json()["jobs"]
-    ref_job = next(j for j in ref_jobs if j["name"] == os.environ["GITHUB_JOB"])
+    ref_job = next(j for j in ref_jobs if j["name"] == f"{name} Benchmark")
     logging.info(f"comparing speed for {compare_job['id']} against {ref_job['id']}")
     compare_tms = _get_times(compare_job)
     ref_tms = _get_times(ref_job)
