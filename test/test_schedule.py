@@ -29,7 +29,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
   sched = create_schedule(flatten([r.lazydata.lbs for r in t]), seen)
   if filter_sink: sched = [s for s in sched if s.ast.op is MetaOps.KERNEL]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
-  if len(sched) != allowed or DEBUG >= 3:
+  if DEBUG >= 3:
     for i, s in enumerate(sched):
       print("kernel", i+1)
       print(s.ast)

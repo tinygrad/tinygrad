@@ -209,7 +209,7 @@ def _get_isolated_children(r:LazyBuffer, group:Dict[LazyBuffer, None]) -> Dict[L
     if (p:=rc_parents.pop()) in cache: continue
     cache.add(p)
     # max one reduceop per kernel
-    if p.op in ReduceOps or p.st.size != r.st.size: return {}
+    if p.op in ReduceOps or p.st.size > r.st.size: return {}
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
   return group
 
