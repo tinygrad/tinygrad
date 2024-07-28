@@ -645,8 +645,8 @@ class Kernel:
     def fixup_ast(op:LazyOp, apply_to_st=None) -> LazyOp:
       if op.op in BufferOps:
         if isinstance(op.arg, MemBuffer) and op.arg.idx < 0:
-          # for locals, we use the ShapeTracker that's here
-          if apply_to_st is not None: arg:Any = replace(op.arg, st=apply_to_st(op.arg.st))
+          # for locals, we use the ShapeTracker that's in the MemBuffer
+          arg:Any = replace(op.arg, st=apply_to_st(op.arg.st)) if apply_to_st is not None else op.arg
         else:
           idx = self.bufs.index(op.arg)
           arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
@@ -665,11 +665,8 @@ class Kernel:
             assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
             assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
-            permaxis = list(range(wd))
-            permaxis += [y + (wd if x == 0 else tcd) for x,y in pattern_1]
-            permaxis += list(range(wd+len(warp_dims), tcd))
-            permaxis += [y + (wd if x == 0 else tcd) for x,y in pattern_2]
-            permaxis += list(range(tcd+len(tcd_expand), len(new_shape)))
+            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in pattern_1] + list(range(wd+len(warp_dims), tcd)) + \
+                                         [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device in {"AMD", "HIP"}:
@@ -700,24 +697,17 @@ class Kernel:
               # TC=3, emulate the warp addressing with locals
               ex_shape = tuple(1 if i < self.global_dims or (i >= self.first_reduce and i < self.first_upcast) else s \
                               for i,s in enumerate(self.full_shape))
-
-              # construct the local shapetrackers, exclude strides of 0
-              st_load1 = [self.sts[self.bufs.index(op.arg)].real_strides() for op in rsrc.src[0].lazyops if op.op is BufferOps.LOAD]
-              st_load2 = [self.sts[self.bufs.index(op.arg)].real_strides() for op in rsrc.src[1].lazyops if op.op is BufferOps.LOAD]
-              assert len(st_load1) == 1 and len(st_load2) == 1
-              st1 = ShapeTracker.from_shape(tuple(s if st_load1[0][i] != 0 else 1 for i,s in enumerate(ex_shape))).expand(ex_shape)
-              st2 = ShapeTracker.from_shape(tuple(s if st_load2[0][i] != 0 else 1 for i,s in enumerate(ex_shape))).expand(ex_shape)
-
-              store1 = LazyOp(BufferOps.STORE, (rsrc.src[0],), MemBuffer(-1, tc.dtype_in, st1))
-              store2 = LazyOp(BufferOps.STORE, (rsrc.src[1],), MemBuffer(-2, tc.dtype_in, st2))
-              src1 = LazyOp(BufferOps.LOAD, (fixup_ast(store1, fix_st1),), MemBuffer(-1, tc.dtype_in, st1))
-              src2 = LazyOp(BufferOps.LOAD, (fixup_ast(store2, fix_st2),), MemBuffer(-2, tc.dtype_in, st2))
+              srcs = []
+              for i,(src,fix_st_fxn) in enumerate(zip(rsrc.src, [fix_st1, fix_st2])):
+                st_load = [self.sts[self.bufs.index(op.arg)].real_strides() for op in src.lazyops if op.op is BufferOps.LOAD]
+                local_shape = tuple(s if max(cast(int, x[i]) for x in st_load) != 0 else 1 for i,s in enumerate(ex_shape))
+                membuf = MemBuffer(-1-i, tc.dtype_in, ShapeTracker.from_shape(local_shape).expand(ex_shape))
+                srcs.append(LazyOp(BufferOps.LOAD, (fixup_ast(LazyOp(BufferOps.STORE, (src,), membuf), fix_st_fxn),), membuf))
             else:
               # for TC=2, we can't do the shapetracker fixup
-              src1, src2 = fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])
-            # MUL/SUM
-            ret = LazyOp(BinaryOps.MUL, (src1, src2))
-            ret = LazyOp(ReduceOps.SUM, (ret,), wmma_arg[-1])
+              srcs = [fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])]
+            # MUL/SUM instead of WMMA
+            ret = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.MUL, tuple(srcs)),), wmma_arg[-1])
           else:
             ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
           return LazyOp(op.op, (ret,), new_reduce_axes) if (new_reduce_axes:=tuple(i for i in arg if i-self.first_upcast not in reduce_axes)) else ret
