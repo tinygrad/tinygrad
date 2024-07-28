@@ -117,7 +117,8 @@ python_alu: Dict[Op, Callable]  = {
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
   BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
-  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
+  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0],
+  BinaryOps.IDIV: lambda x,y: (x // y) + (1 if (x < 0) != (y < 0) and x % y != 0 else 0) if y != 0 else x*math.inf,
   TernaryOps.MULACC: lambda x,y,z: (x*y)+z,
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
