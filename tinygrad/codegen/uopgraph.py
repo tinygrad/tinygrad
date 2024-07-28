@@ -268,8 +268,6 @@ constant_folder = PatternMatcher([
   (NOp.var("x") % NOp.const(None, 1), lambda x: x.const(0)),
   # (x*c0)+(x*c1) -> x*(c0+c1)
   (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  # (x+c0)*c1 -> x*c1+c0*c1
-  ((NOp.var("x")+NOp.cvar("c0"))*NOp.cvar("c1"), lambda x,c0,c1: c1*x+x.const(exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
   # (x*c0)+(y*c0) -> (x+y)*c0
   #((NOp.var("x") * NOp.cvar("c0")) + (NOp.var("y") * NOp.cvar("c0")), lambda x,y,c0: c0*(x+y)),
   # mul div
