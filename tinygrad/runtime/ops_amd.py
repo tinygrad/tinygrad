@@ -105,7 +105,7 @@ class AMDComputeQueue(HWComputeQueue):
     self._acquire_mem(gli=0, gl2=0)
 
     user_regs = [*data64_le(kernargs)]
-    if prg.kernel_code_properties & 0x2:
+    if prg.enable_dispatch_ptr:
       dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=kernargs + prg.kernargs_segment_size)
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
       dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
@@ -277,12 +277,14 @@ class AMDProgram(HCQProgram):
 
     self.rsrc1 = code.compute_pgm_rsrc1
     self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
-    self.kernel_code_properties = code.kernel_code_properties
     self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
-    # If required, allocate space for the dispatch packet in the kernargs to pass it to the GPU.
-    args_alloc_sz = self.kernargs_segment_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.kernel_code_properties & 0x2 else 0)
-    super().__init__(self.device, self.name, kernargs_alloc_size=args_alloc_sz)
+    # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
+    # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
+    self.enable_dispatch_ptr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+    additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
+
+    super().__init__(self.device, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): cast(AMDDevice, self.device)._gpu_free(self.lib_gpu)
