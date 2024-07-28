@@ -194,6 +194,12 @@ class ClangRenderer(CStyleLanguage):
   supports_float4 = bool(AMX)
   has_local = False
   global_max = None
+
+  # language options
+  buffer_suffix = " restrict"
+  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+
   if AMX:
     float4 = "make_float4"
     tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [64])]
@@ -207,11 +213,6 @@ class ClangRenderer(CStyleLanguage):
   AMX_SET(0);\n  AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull); {dtype_in.vec(K*K).name} data = {{0}};
   for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(5, (int *)(&data), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}\n  AMX_SET(1);\n  return data;\n}}"""] # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, macros + prefix)
-
-  # language options
-  buffer_suffix = " restrict"
-  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"

@@ -380,7 +380,7 @@ class Kernel:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
-          if (self.opts.device == "CLANG" and AMX): return True # breaks when upcasting both M and N
+          if (self.opts.device == "CLANG" and AMX): return True # skip hand-coded TC opts if CLANG, upcasting will make kernel slower
           # hand-coded TC opts
           def late_upcast_tc(tc_dim: int):
             if tc_opts.axes_exist[tc_dim]:
