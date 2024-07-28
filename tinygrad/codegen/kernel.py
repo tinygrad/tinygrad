@@ -348,8 +348,8 @@ class Kernel:
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
-        # assert tensor core
-        if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
+        self.tensor_core = tc
+        self.no_wmma = use_tensor_cores == 2  # TC=2 will do the shape ops without the WMMA
         return True
     return False
 
@@ -691,7 +691,12 @@ class Kernel:
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device,
                       tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axis),
                       tuple(self.first_upcast+ax for ax in reduce_axes))
-          ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
+          if self.no_wmma:
+            # NOTE: without wmma, we don't change the load ShapeTrackers
+            ret = LazyOp(BinaryOps.MUL, (fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])))
+            ret = LazyOp(ReduceOps.SUM, (ret,), wmma_arg[-1])
+          else:
+            ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
           return LazyOp(op.op, (ret,), new_reduce_axes) if (new_reduce_axes:=tuple(i for i in arg if i-self.first_upcast not in reduce_axes)) else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
