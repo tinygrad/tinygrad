@@ -79,7 +79,7 @@ class TestTinygrad(unittest.TestCase):
       grad_W.sum().backward()
       second_grad_W = W.grad
       return second_grad_x, second_grad_W
-      
+
     def test_tinygrad():
       x = Tensor(x_init, requires_grad=True)
       W = Tensor(W_init, requires_grad=True)
