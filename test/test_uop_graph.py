@@ -2,6 +2,7 @@ import unittest
 from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
+from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
 from tinygrad.codegen.uops import UOps, UOp, NOp, PatternMatcher
 from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite
@@ -144,10 +145,14 @@ class TestUOpGraph(TestUOps):
     d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, False))
     d2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (2, False))
     idx = UOp.const(dtypes.int, 0)
-    def _test_vec(geps):
-      vec = UOp(UOps.VECTORIZE, dtypes.float.vec(4), geps)
+    def _test_vec(geps, count=4):
+      vec = UOp(UOps.VECTORIZE, dtypes.float.vec(count), geps)
       out = UOp(UOps.STORE, None, (d0, idx, vec))
-      return UOpGraph([out]).uops[-1].src[-1]
+      g = UOpGraph([out])
+      if DEBUG >= 4:
+        from tinygrad import Device
+        print(Device[Device.DEFAULT].renderer.render("test", g))
+      return g.uops[-1].src[-1]
 
     # possible
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
@@ -163,6 +168,9 @@ class TestUOpGraph(TestUOps):
     val = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
     xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), i) for i in range(2))
     self.assertIs(_test_vec(xy+xy).op, UOps.VECTORIZE)
+    val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
+    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), i) for i in range(2))
+    self.assertIs(_test_vec(xy, count=2).op, UOps.VECTORIZE)
 
     # different vals
     val1 = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
