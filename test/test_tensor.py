@@ -56,7 +56,6 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
-
   @unittest.expectedFailure
   def test_second_order_backward_pass(self):
     def test_pytorch():
@@ -115,55 +114,15 @@ class TestTinygrad(unittest.TestCase):
       out.backward(Tensor(gradient))
       return out.numpy(), x.grad.numpy(), W.grad.numpy()
 
-
     def test_pytorch():
       x = torch.tensor(x_init, requires_grad=True)
       W = torch.tensor(W_init, requires_grad=True)
       m = torch.tensor(m_init)
-
-      # forward pass
-      out = x.matmul(W).relu()
-      out = torch.nn.functional.log_softmax(out, dim=1)
-      out = out.mul(m).add(m).sum()
-      # use retain graph so we can compute second order derivatives later
-      out.backward(retain_graph=True)
-      # save first-order gradients (dL/dx, dL/dW). they still contain graph information on how they were constructed wrt x and W
-      grad_x = x.grad
-      grad_W = W.grad
-      # zero gradients so second-order gradients are correct
-      x.grad = None
-      W.grad = None
-      # compute second-order gradients
-      grad_x.sum().backward(retain_graph=True)
-      second_grad_x = x.grad
-      grad_W.sum().backward()
-      second_grad_W = W.grad
-      return second_grad_x, second_grad_W
-
-    def test_tinygrad():
-      x = Tensor(x_init, requires_grad=True)
-      W = Tensor(W_init, requires_grad=True)
-      m = Tensor(m_init)
-      out = x.matmul(W).relu()
-      out = out.log_softmax()
-      out = out.mul(m).add(m).sum()
-      out.backward()
-      grad_x = x.grad
-      grad_W = W.grad
-      x.grad = None
-      W.grad = None
-      grad_x.sum().backward()
-      second_grad_x = x.grad
-      grad_W.sum().backward()
-      second_grad_W = W.grad
-      return second_grad_x.numpy(), second_grad_W.numpy()
-
       out = x.matmul(W).relu()
       out = torch.nn.functional.log_softmax(out, dim=1)
       out = out.mul(m).add(m)
-      out.backward(torch.tensor(gradient))
+      out.backward(gradient)
       return out.detach().numpy(), x.grad, W.grad
-
 
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
