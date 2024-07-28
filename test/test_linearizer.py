@@ -902,8 +902,7 @@ class TestLinearizer(unittest.TestCase):
         uops = uops[:uops.index(if_op)]
       assert len(set([u.op for u in uops if u.op in {UOps.RANGE, UOps.SPECIAL}])) == 1, "has either specials or ranges, not both"
       assert len([u for u in uops if u.op is UOps.PHI]) == 0, "PHI should have been simplified"
-      # TODO: once uops track min/max this will be fixed
-      #assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
+      assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
 
     helper(Tensor.arange(5.5, (3.5*300), 3.5), max_ops=2)
     helper(Tensor.arange(-1, -100, -5), max_ops=2)
@@ -911,6 +910,20 @@ class TestLinearizer(unittest.TestCase):
     #helper(Tensor.arange(-3.2, 6.7, 0.64), max_ops=2)
     #helper(Tensor.arange(256), max_ops=2)
     helper(Tensor.arange(255), max_ops=2)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_loop_collapse_many_upcasts(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(128, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(  # noqa: E501
+        LazyOp(BinaryOps.ADD, arg=None, src=(
+          LazyOp(ReduceOps.SUM, arg=(1,), src=(
+            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(129, 255), strides=(0, 0), offset=0, mask=((0, 129), (127, 255)), contiguous=False), View(shape=(128, 128), strides=(1, 256), offset=0, mask=None, contiguous=False)))), src=()),)),  # noqa: E501
+          LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(128, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),))  # noqa: E501
+    opts = [Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=0)]  # noqa: E501
+    k = Kernel(ast)
+    for opt in opts: k.apply_opt(opt)
+    uops = list(k.linearize().uops)
+    assert all(uop.op is not UOps.RANGE for uop in uops), "RANGE not collapsed"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_phis(self):

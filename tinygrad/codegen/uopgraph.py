@@ -119,7 +119,7 @@ def sum_collapse(phi_input, loop, val1, val2):
       return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+v1*(loop.src[1]-loop.src[0]).cast(v1.dtype)
   return None
 
-def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce, idx2=None, idx3=None):
+def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce, idx2=None, idx3=None, idx4=None):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in reduce.src: return None  # must be the right REDUCE
   if mval.arg >= 0 or loop_start.arg != 0:
     # TODO: support and test this with other mvals and loop_starts
@@ -127,6 +127,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
     return None
   if idx2 is not None: idx = idx + idx2
   if idx3 is not None: idx = idx + idx3
+  if idx4 is not None: idx = idx + idx4
   comprange = UOp.min(loop_end, UOp.max((idx-compval-mval).alu(BinaryOps.IDIV, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.REDUCE, reduce.dtype, (comprange.cast(multconst.dtype) * multconst,) +
              tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
@@ -170,6 +171,9 @@ constant_folder = PatternMatcher([
   (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),)),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # extra arange loop folding because we don't fold adds. TODO: fold adds
+  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
+                          NOp.var("idx2") + NOp.var("idx3") + NOp.var("idx4"))
+   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2") + NOp.var("idx3"))
    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=ReduceOps.SUM, name="reduce", allow_any_len=True), loop_collapse),
