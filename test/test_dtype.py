@@ -254,7 +254,7 @@ class TestBitCast(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       # should fail because backprop through bitcast is undefined
       Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True).bitcast(dtypes.float16)
-  
+
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_shape_change_bitcast_non_contiguous(self, dt1, dt2):
     if dt2 == dtypes.bool or not is_dtype_supported(dt1) or not is_dtype_supported(dt2) or dt2 == dtypes.bfloat16: return

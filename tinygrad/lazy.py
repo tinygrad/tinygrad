@@ -104,7 +104,7 @@ class LazyBuffer:
       # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
       new_strides = tuple(((stride * self.dtype.itemsize) // dtype.itemsize for stride in self.st.real_strides()))[:-1] + (1,)
-      ret = create_lazybuffer(self.device, ShapeTracker((View.create(new_shape, new_strides),)), dtype, MetaOps.VIEW, dtype, (self.base,))
+      ret = create_lazybuffer(self.device, ShapeTracker((View.create(new_shape, new_strides),)), dtype, MetaOps.VIEW, dtype, (self,))
       return ret._view(ShapeTracker((View.create(new_shape, new_strides),)))
     elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       # TODO: applying this makes gpt2 slower
