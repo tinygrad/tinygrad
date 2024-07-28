@@ -724,10 +724,10 @@ class Tensor:
         yield node
     return list(_walk(self, set()))
 
-  def backward(self) -> Tensor:
+  def backward(self, gradient:Optional[Tensor]=None) -> Tensor:
     """
     Propagates the gradient of a tensor backwards through the computation graph.
-    Must be used on a scalar tensor.
+    If the 'gradient' argument is not provided, the tensor must be a scalar, and the gradient is implicitly set to 1.0.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -735,11 +735,14 @@ class Tensor:
     print(t.grad.numpy())
     ```
     """
-    assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
+    if gradient is None:
+      assert self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
+      # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
+      # this is "implicit gradient creation"
+      gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
 
-    # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
-    # this is "implicit gradient creation"
-    self.grad = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
+    assert self.shape == gradient.shape, f"grad shape must match tensor shape, {gradient.shape!r} != {self.shape!r}"
+    self.grad = gradient
 
     for t0 in reversed(self._deepwalk()):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
