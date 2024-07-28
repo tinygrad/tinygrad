@@ -5,7 +5,7 @@
 from typing import Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
-from tinygrad.helpers import all_same, getenv, flatten
+from tinygrad.helpers import all_same, getenv, flatten, prod
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.uops import UOps
 from tinygrad.codegen.uopgraph import UOpGraph
@@ -173,10 +173,11 @@ class PythonProgram:
             # (i, j), C, D (4 elements on 32 threads)
             def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
             ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
-          elif arg[5] == "CLANG":
+          elif arg[4] == "CLANG":
+            wmma_sz = [prod(x[1] for x in l) for l in arg[5]]
             def elem(x, i, j, _): return x[i+j][0]
-            def c_map(_, elem): return (elem%arg[4][0], elem//arg[4][0])
-            ul[i] = wmma_helper(1, 1, arg[4][0], arg[4][1], arg[4][2], elem, elem, c_map)
+            def c_map(_, elem): return (elem%wmma_sz[0], elem//wmma_sz[0])
+            ul[i] = wmma_helper(1, 1, wmma_sz[0], wmma_sz[1], wmma_sz[2], elem, elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
