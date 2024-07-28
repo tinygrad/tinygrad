@@ -1,3 +1,4 @@
+import subprocess
 import numpy as np
 import torch
 import unittest, copy, mmap, random, math
@@ -443,6 +444,18 @@ class TestTinygrad(unittest.TestCase):
     c = (a + b).mean().backward()
     print(a)
     print(c)
+
+  def test_env_overwrite_default_device(self):
+    subprocess.run(['DISK=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"DISK\\""'],
+                    shell=True, check=True)
+    subprocess.run(['NPY=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"NPY\\""'],
+                    shell=True, check=True)
+    subprocess.run([f'{Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                    shell=True, check=True)
+    subprocess.run([f'DISK=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                    shell=True, check=True)
+    subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                    shell=True, check=True)
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
 class TestMoveTensor(unittest.TestCase):
