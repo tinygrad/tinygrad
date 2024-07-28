@@ -162,7 +162,7 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
       st = op.arg.st if op.op in BufferOps else sts[op.src[0]]
       for x in op.src:
         if sts[x].shape != st.shape:
-          if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op.op} {sts[x].shape} != {sts[x].shape}")
+          if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op.op} {sts[x].shape} != {st.shape}")
           raise AssertionError(f"found implicit expand {x.op} {sts[x].shape} != {op.op} {sts[x].shape} {prod(sts[x].shape)} != {prod(st.shape)}")
     sts[op] = st
   for i, out in enumerate(ast.src):
