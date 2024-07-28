@@ -178,8 +178,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
-          index = f"[{args}]"
-          # index = (f"{'.data' if self.device == 'CLANG' and AMX else ''}[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
+          index = (f"{'.data' if self.device == 'CLANG' and AMX else ''}[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
           r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + index
         else: raise RuntimeError(f"failed to render {u}")
 
