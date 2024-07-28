@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools, functools
 from dataclasses import replace
 from collections import defaultdict
-from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
+from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict, Any
 
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop, KernelInfo
 from tinygrad.device import Device
@@ -349,7 +349,7 @@ class Kernel:
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[1], 2), append_opt=False)
         self.tensor_core = tc
-        self.no_wmma = use_tensor_cores == 2  # TC=2 will do the shape ops without the WMMA
+        self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
     return False
 
@@ -644,8 +644,12 @@ class Kernel:
     @functools.lru_cache(None)
     def fixup_ast(op:LazyOp, apply_to_st=None) -> LazyOp:
       if op.op in BufferOps:
-        idx = self.bufs.index(op.arg)
-        arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
+        if isinstance(op.arg, MemBuffer) and op.arg.idx < 0:
+          # for locals, we use the ShapeTracker that's here
+          if apply_to_st is not None: arg:Any = replace(op.arg, st=apply_to_st(op.arg.st))
+        else:
+          idx = self.bufs.index(op.arg)
+          arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
       elif op.op in ReduceOps:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
@@ -691,9 +695,28 @@ class Kernel:
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device,
                       tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axis),
                       tuple(self.first_upcast+ax for ax in reduce_axes))
-          if self.no_wmma:
-            # NOTE: without wmma, we don't change the load ShapeTrackers
-            ret = LazyOp(BinaryOps.MUL, (fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])))
+          if self.use_tensor_cores >= 2:
+            if self.use_tensor_cores == 3:
+              # TC=3, emulate the warp addressing with locals
+              ex_shape = tuple(1 if i < self.global_dims or (i >= self.first_reduce and i < self.first_upcast) else s \
+                              for i,s in enumerate(self.full_shape))
+
+              # construct the local shapetrackers, exclude strides of 0
+              st_load1 = [self.sts[self.bufs.index(op.arg)].real_strides() for op in rsrc.src[0].lazyops if op.op is BufferOps.LOAD]
+              st_load2 = [self.sts[self.bufs.index(op.arg)].real_strides() for op in rsrc.src[1].lazyops if op.op is BufferOps.LOAD]
+              assert len(st_load1) == 1 and len(st_load2) == 1
+              st1 = ShapeTracker.from_shape(tuple(s if st_load1[0][i] != 0 else 1 for i,s in enumerate(ex_shape))).expand(ex_shape)
+              st2 = ShapeTracker.from_shape(tuple(s if st_load2[0][i] != 0 else 1 for i,s in enumerate(ex_shape))).expand(ex_shape)
+
+              store1 = LazyOp(BufferOps.STORE, (rsrc.src[0],), MemBuffer(-1, tc.dtype_in, st1))
+              store2 = LazyOp(BufferOps.STORE, (rsrc.src[1],), MemBuffer(-2, tc.dtype_in, st2))
+              src1 = LazyOp(BufferOps.LOAD, (fixup_ast(store1, fix_st1),), MemBuffer(-1, tc.dtype_in, st1))
+              src2 = LazyOp(BufferOps.LOAD, (fixup_ast(store2, fix_st2),), MemBuffer(-2, tc.dtype_in, st2))
+            else:
+              # for TC=2, we can't do the shapetracker fixup
+              src1, src2 = fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])
+            # MUL/SUM
+            ret = LazyOp(BinaryOps.MUL, (src1, src2))
             ret = LazyOp(ReduceOps.SUM, (ret,), wmma_arg[-1])
           else:
             ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
