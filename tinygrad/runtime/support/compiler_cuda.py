@@ -1,5 +1,6 @@
 import subprocess, hashlib, tempfile, ctypes, ctypes.util, re
 from pathlib import Path
+from typing import Callable
 from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
 import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.device import Compiler, CompileError
@@ -51,15 +52,17 @@ class CUDACompiler(Compiler):
     nvrtc_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_{cache_key}_{self.arch}")
-  def _compile_program(self, src:str) -> nvrtc.nvrtcProgram:
+  def _compile_program(self, src:str, nvrtc_get_content:Callable, nvrtc_get_size:Callable) -> bytes:
     nvrtc_check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
     nvrtc_check(nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options])), prog)
-    return prog
-  def compile(self, src:str) -> bytes: return _get_bytes(self._compile_program(src), nvrtc.nvrtcGetPTX, nvrtc.nvrtcGetPTXSize, nvrtc_check)
+    data = _get_bytes(prog, nvrtc_get_content, nvrtc_get_size, nvrtc_check)
+    nvrtc_check(nvrtc.nvrtcDestroyProgram(ctypes.byref(prog)))
+    return data
+  def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetPTX, nvrtc.nvrtcGetPTXSize)
 
 class NVCompiler(CUDACompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
-  def compile(self, src:str) -> bytes: return _get_bytes(self._compile_program(src), nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize, nvrtc_check)
+  def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
 
 class PTXCompiler(Compiler):
   def __init__(self, arch:str, cache_key="ptx"):
@@ -69,8 +72,7 @@ class PTXCompiler(Compiler):
 
 class NVPTXCompiler(PTXCompiler):
   def compile(self, src:str) -> bytes:
-    ptxsrc = super().compile(src)
     jitlink_check(nvrtc.nvJitLinkCreate(handle := nvrtc.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
-    jitlink_check(nvrtc.nvJitLinkAddData(handle, nvrtc.NVJITLINK_INPUT_PTX, ptxsrc, len(ptxsrc), "<null>".encode()), handle)
+    jitlink_check(nvrtc.nvJitLinkAddData(handle, nvrtc.NVJITLINK_INPUT_PTX, ptxsrc:=super().compile(src), len(ptxsrc), "<null>".encode()), handle)
     jitlink_check(nvrtc.nvJitLinkComplete(handle), handle)
     return _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, jitlink_check)
