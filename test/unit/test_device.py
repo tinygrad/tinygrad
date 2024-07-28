@@ -40,7 +40,7 @@ class TestCompiler(unittest.TestCase):
 
   def test_device_compile(self):
     getenv.cache_clear()
-    with patch.dict(os.environ, {"DISABLE_COMPILER_CACHE": "1"}, clear=True):
+    with patch.dict(os.environ, {"DISABLE_COMPILER_CACHE": "1"}):
       a = Tensor([0.,1.], device=Device.DEFAULT).realize()
       (a + 1).realize()
 
