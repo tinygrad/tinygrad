@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata
 from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, reduce_st
 from tinygrad.shape.symbolic import sint, Variable
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
@@ -83,6 +83,9 @@ class LazyBuffer:
 
   def can_view(self): return self.st.consecutive and not self.is_unrealized_const() and self.device.split(":")[0] in view_supported_devices
 
+  def can_view_bitcast(self):
+    return not self.is_unrealized_const() and self.device.split(":")[0] in view_supported_devices
+
   def contiguous(self, allow_buffer_view=True):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
       ret = self.e(MetaOps.VIEW) if allow_buffer_view and self.can_view() else self.e(MetaOps.CONTIGUOUS)
@@ -98,15 +101,16 @@ class LazyBuffer:
       return create_lazybuffer(self.device, self.st, dtype, MetaOps.CONST, dtypes.as_const(self.base.arg, dtype))
     new_shape = self.shape
     if bitcast and self.dtype.itemsize != dtype.itemsize:
-      if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
-      if not all_int(new_shape): raise RuntimeError("shape changing bitcast with symbolic shape isn't supported yet")
+      #if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
       # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
-      if not (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
+      new_strides = tuple(((stride * self.dtype.itemsize) // dtype.itemsize for stride in self.st.real_strides()))[:-1] + (1,)
+      ret = create_lazybuffer(self.device, ShapeTracker((View.create(new_shape, new_strides),)), dtype, MetaOps.VIEW, dtype, (self.base,))
+      return ret._view(ShapeTracker((View.create(new_shape, new_strides),)))
     elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       # TODO: applying this makes gpt2 slower
       return self.base.cast(dtype, bitcast)._view(self.st)
-    cast_op: Union[MetaOps, UnaryOps] = (MetaOps.VIEW if self.can_view() and allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
+    cast_op: Union[MetaOps, UnaryOps] = (MetaOps.VIEW if self.can_view() and allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST   
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is MetaOps.CONST and not isinstance(self.base.arg, Variable)

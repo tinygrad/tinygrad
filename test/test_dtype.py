@@ -63,7 +63,7 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not cls.DTYPE or not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
-    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 8)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
@@ -99,7 +99,7 @@ class TestDType(unittest.TestCase):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
     list(map(
       lambda dtype:
-        _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype.itemsize == self.DTYPE.itemsize and dtype != dtypes.bool else None,
+        _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
 
@@ -239,11 +239,32 @@ class TestUint8DType(TestDType):
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
+def _test_bitcasted(t: Tensor, dt: DType, expected):
+  np.testing.assert_allclose(t.bitcast(dt).numpy(), expected)
+
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self):
     with self.assertRaises(RuntimeError):
-      _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
+      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16)
+
+    with self.assertRaises(RuntimeError):
+      # should fail because full gives tensor with final stride 0
+      Tensor.full((4,), 1, dtype=dtypes.int16).bitcast(dtypes.int8)
+
+    with self.assertRaises(RuntimeError):
+      # should fail because backprop through bitcast is undefined
+      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True).bitcast(dtypes.float16)
+  
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_shape_change_bitcast_non_contiguous(self, dt1, dt2):
+    if dt2 == dtypes.bool or not is_dtype_supported(dt1) or not is_dtype_supported(dt2) or dt2 == dtypes.bfloat16: return
+    data = rand_for_dtype(dt1, 16)
+    t = Tensor(data).reshape(2, 1, 8).permute(1, 0, 2)
+    tnp = np.array(data).reshape(2, 1, 8).transpose(1, 0, 2)
+    np.testing.assert_allclose(t.bitcast(dt2).numpy(), tnp.view(_to_np_dtype(dt2)))
+
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
