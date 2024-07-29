@@ -26,6 +26,7 @@ Each runtime should implement the required functions that are defined in the `HW
             "timestamp",
             "update_signal",
             "update_wait",
+            "bind",
             "submit",
         ]
         show_source: false
