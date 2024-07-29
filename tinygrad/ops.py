@@ -107,19 +107,14 @@ def hook_overflow(dv, fxn):
   return wfxn
 
 python_alu: Dict[Op, Callable]  = {
-  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
-  UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan,
-  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
-  UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
-  UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
-  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
-  BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
+  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
+  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
+  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
+  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift, BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
   BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
-  TernaryOps.MULACC: lambda x,y,z: (x*y)+z,
-  TernaryOps.WHERE: lambda x,y,z: y if x else z}
+  TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
 def truncate_fp16(x):
   try:
@@ -134,7 +129,7 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
-      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value, dtypes.bigint: lambda x: x }
+      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
 
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
