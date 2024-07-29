@@ -52,15 +52,12 @@ def _get_offsets(new_srcs):
   offsets = {}
   for i,s in enumerate(new_srcs):
     idx = s.src[1]
-    if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST:
-      this_root_src, arg = idx.src[0], idx.src[1].arg
-    elif idx.op is UOps.CONST:
-      this_root_src, arg = "CONST", idx.arg
-    else:
-      this_root_src, arg = idx, 0
+    if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: this_root_src, arg = idx.src[0], idx.src[1].arg
+    elif idx.op is UOps.CONST: this_root_src, arg = "CONST", idx.arg
+    else: this_root_src, arg = idx, 0
     if root_src is not None and root_src != this_root_src: return None
+    if arg in offsets: return None  # different gates maybe?
     root_src = this_root_src
-    if arg in offsets: return None  # different gates
     offsets[arg] = i
   return offsets
 
@@ -79,7 +76,7 @@ def fold_expanded_load(ex, buf):
         if not load_1.src[1].divides(fold_length): continue
         folded = [new_srcs[offsets[o+i]] for i in range(fold_length)]
         if len(load_1.src) >= 4:
-          if not all_same([x.src[2] for x in folded]): continue  # gate must be the same
+          if not all_same([x.src[2:3] for x in folded]): continue  # gate must be the same
           new_src = list(load_1.src)
           new_src[3] = UOp(UOps.VECTORIZE, load_1.dtype.vec(fold_length), tuple([x.src[3] for x in folded]))
           new_load = UOp(load_1.op, load_1.dtype.vec(fold_length), tuple(new_src), load_1.arg)
