@@ -302,7 +302,6 @@ class HWCommandQueue:
     Note:
       Implementing this method is optional but recommended for performance gains.
     """
-    pass
 
   def submit(self, device:HCQCompiled):
     """
