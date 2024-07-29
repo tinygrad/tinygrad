@@ -25,21 +25,33 @@ def pkt4_hdr(reg: int, cnt: int): return adreno.CP_TYPE4_PKT | cnt & 0x7F | prt(
 
 def parse_cl_lib(lib: bytes, name:str):
   """
-  Extract information from OpenCL binary used to run a shader: image offset, image size, offsets to argument buffers
+  Extract information from OpenCL binary used to run a shader:
+  image offset, image size, offsets to argument buffers, constants offsets and values
   """
   image_offset, image_size = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0]
 
+  # parse argument buffers layout
+  buffs_info = []
   ptr = struct.unpack("I", lib[0x110:0x114])[0] # read img desc offset
   ptr += (344 + len(name) + 1) # skip to bufs descr
-
-  buffs_info = []
   while (ptr + 16 < len(lib)):
     length, num, type, offset_words = struct.unpack("I" * 4, lib[ptr:ptr+16])
     if length == 0: break
     ptr += length
     buffs_info.append(offset_words * 4)
 
-  return image_offset, image_size, buffs_info
+  # parse constants layout
+  consts_info = []
+  ptr = struct.unpack("I", lib[0xb0:0xb4])[0] # read kernel desc offset
+  ptr += 200
+  if ptr != 0:
+    # constant vals are placed just before a shader
+    while (ptr + 40 < image_offset):
+      cnst, offset_words = struct.unpack("I", lib[ptr:ptr+4])[0], struct.unpack("I", lib[ptr+16:ptr+20])[0]
+      ptr += 40
+      consts_info.append((cnst, offset_words * 4))
+
+  return image_offset, image_size, buffs_info, consts_info
 
 class QcomCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
@@ -222,7 +234,7 @@ class QcomProgram(HCQProgram):
 
     self.private_gpu = self.device._gpu_alloc(0x101, 0xC0F00)
 
-    image_offset, self.image_size, self.buffs_info = parse_cl_lib(self.lib, self.name)
+    image_offset, self.image_size, self.buffs_info, self.consts_info = parse_cl_lib(self.lib, self.name)
     image = bytearray(lib[image_offset:image_offset+self.image_size])
     self.lib_gpu = self.device._gpu_alloc(len(image), 0x10C0A00, map_to_cpu=True)
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), self.image_size)
@@ -234,41 +246,12 @@ class QcomProgram(HCQProgram):
     if len(bufs) < len(self.buffs_info): RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
     for i, b in enumerate(bufs):
       ctypes.cast(kernargs_ptr + self.buffs_info[i], ctypes.POINTER(ctypes.c_int64))[0] = b.va_addr
+    for cnst_val, cnst_off in self.consts_info:
+      ctypes.cast(kernargs_ptr + cnst_off, ctypes.POINTER(ctypes.c_int32))[0] = cnst_val
 
 
 if __name__ == '__main__':
-  device = QcomDevice()
-  alloc = device._gpu_alloc(0x1000, map_to_cpu=True)
-  ptr = to_mv(alloc.va_addr, alloc.size).cast("I")
-  ptr[0] = 1
-  print(ptr[0])
-  device._gpu_free(alloc)
-
-  sig = QcomSignal()
-  queue = QcomComputeQueue()
-
-  lib = QcomCompiler('').compile('''
-__kernel void E_72_9_8_16_4(__global float* data0) {
-  int gidx1 = get_group_id(0); /* 9 */
-  int lidx2 = get_local_id(0); /* 8 */
-  int gidx0 = get_group_id(1); /* 72 */
-  int lidx3 = get_local_id(1); /* 16 */
-  int alu0 = (gidx1*64);
-  int alu1 = (lidx2*576);
-  int alu2 = (lidx3*4);
-  int alu3 = (((gidx0*569)%577)+alu0+(alu1%577)+alu2);
-  float alu4 = (((alu3%577)<1)?1.0f:0.0f);
-  float alu5 = ((((alu3+1)%577)<1)?1.0f:0.0f);
-  float alu6 = ((((alu3+2)%577)<1)?1.0f:0.0f);
-  float alu7 = ((((alu3+3)%577)<1)?1.0f:0.0f);
-  *((__global float4*)(data0+(gidx0*4608)+alu0+alu1+alu2)) = (float4)((alu4+alu4),(alu5+alu5),(alu6+alu6),(alu7+alu7));
-}
-''')
-  
-  print(lib)
-
-  for i in range(1, 10):
-    queue.signal(sig, i)
-    queue.submit(device)
-    sig.wait(i)
-    print(sig.value)
+  import tinygrad as tg
+  x = tg.Tensor([1.0, 2.0, 3.0, 4.0, 5.0])
+  y = x.sin()
+  print(y.numpy())
