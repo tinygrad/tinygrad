@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING
+from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any
 import functools, itertools, heapq, math
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.shape.symbolic import Variable
@@ -47,31 +47,89 @@ def float4_contract_store(buf, ex, var, store, idx=UOp.const(dtypes.int, 0), idx
   new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), ((ex.arg[0][0],len(ex.src)),))
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store.src[3:])
 
+def _get_offsets(new_srcs):
+  root_src: Any = None
+  offsets = {}
+  for i,s in enumerate(new_srcs):
+    idx = s.src[1]
+    if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST:
+      if root_src is None: root_src = idx.src[0]
+      elif root_src != idx.src[0]: return None
+      assert idx.src[1].arg not in offsets
+      offsets[idx.src[1].arg] = i
+    else:
+      if root_src is None: root_src = idx
+      elif root_src != idx: return None
+      assert 0 not in offsets
+      offsets[0] = i
+  return offsets
+
+def fold_expanded_load(ex, buf):
+  offsets = _get_offsets(ex.src)
+  if offsets is None: return None
+  new_srcs = list(ex.src)
+  used = set()
+  for o in offsets:
+    if o in used: continue
+    for fold_length in [4]:
+      if all(o+i in offsets for i in range(1,fold_length)):
+        load_1 = new_srcs[offsets[o]]
+        assert load_1.dtype.count == 1
+        if not load_1.src[1].divides(fold_length): continue
+        new_load = UOp(load_1.op, load_1.dtype.vec(fold_length), load_1.src, load_1.arg)
+        for i in range(fold_length):
+          new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
+          used.add(o+i)
+  return UOp(ex.op, ex.dtype, tuple(new_srcs), ex.arg) if ex.src != tuple(new_srcs) else None
+
+def fold_expanded_store(ex, buf):
+  offsets = _get_offsets(ex.src)
+  if offsets is None: return None
+  new_srcs = []
+  used = set()
+  for o in offsets:
+    if o in used: continue
+    for fold_length in [4]:
+      if all(o+i in offsets for i in range(1, fold_length)):
+        load_1 = ex.src[offsets[o]]
+        if not load_1.src[1].divides(fold_length): continue
+        stores = UOp(UOps.VECTORIZE, load_1.src[2].dtype.vec(fold_length), tuple(ex.src[offsets[o+i]].src[2] for i in range(fold_length)))
+        new_srcs.append(UOp(load_1.op, None, (load_1.src[0], load_1.src[1], stores), load_1.arg))
+        for i in range(0, fold_length): used.add(o+i)
+  for o in offsets:
+    if o in used: continue
+    new_srcs.append(ex.src[offsets[o]])
+  return UOp(ex.op, ex.dtype, tuple(new_srcs), ex.arg) if ex.src != tuple(new_srcs) else None
+
 float4_folding = PatternMatcher([
-  # float(2,4) load
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3")), name="load"), float4_expand_load),
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")), name="load"), float4_expand_load),
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")), name="load"), float4_expand_load),
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")), name="load"), float4_expand_load),
-  # float(2,4) store
-  # TODO: fold ADDs into one UOp and remove add chains
-  (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3"), NOp.var("var")), name="store", allow_any_len=True),
-    float4_contract_store),
-  (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2"), NOp.var("var")), name="store", allow_any_len=True),
-    float4_contract_store),
-  (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex")+NOp.var("idx"), NOp.var("var")), name="store", allow_any_len=True), float4_contract_store),
-  (NOp(UOps.STORE, src=(NOp.var("buf"),
-    NOp(UOps.EXPAND, name="ex"), NOp.var("var")), name="store", allow_any_len=True), float4_contract_store),
-  # image handling
-  (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
-     NOp.var('id4')))), name="ls", allow_any_len=True), image_contract_load),
-  (NOp(UOps.STORE, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
-     NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex"))), NOp.var("var")), name="ls", allow_any_len=True),
-     image_contract_store),
+  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat())), name="ex"), fold_expanded_load),
+  (UPat(UOps.SINK, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat())), name="ex"), fold_expanded_store),
 ])
+"""
+# float(2,4) load
+(NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3")), name="load"), float4_expand_load),
+(NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")), name="load"), float4_expand_load),
+(NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")), name="load"), float4_expand_load),
+(NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")), name="load"), float4_expand_load),
+# float(2,4) store
+# TODO: fold ADDs into one UOp and remove add chains
+(NOp(UOps.STORE, src=(NOp.var("buf"),
+  NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3"), NOp.var("var")), name="store", allow_any_len=True),
+  float4_contract_store),
+(NOp(UOps.STORE, src=(NOp.var("buf"),
+  NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2"), NOp.var("var")), name="store", allow_any_len=True),
+  float4_contract_store),
+(NOp(UOps.STORE, src=(NOp.var("buf"),
+  NOp(UOps.EXPAND, name="ex")+NOp.var("idx"), NOp.var("var")), name="store", allow_any_len=True), float4_contract_store),
+(NOp(UOps.STORE, src=(NOp.var("buf"),
+  NOp(UOps.EXPAND, name="ex"), NOp.var("var")), name="store", allow_any_len=True), float4_contract_store),
+# image handling
+(NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
+    NOp.var('id4')))), name="ls", allow_any_len=True), image_contract_load),
+(NOp(UOps.STORE, src=(NOp.var("buf"), NOp(UOps.VECTORIZE, dtypes.int.vec(3), (NOp.var('idx'), NOp.var('idy'),
+    NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex"))), NOp.var("var")), name="ls", allow_any_len=True),
+    image_contract_store),
+"""
 
 # ***** transcendental *****
 
