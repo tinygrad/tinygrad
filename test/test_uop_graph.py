@@ -5,7 +5,7 @@ from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
 from tinygrad.codegen.uops import UOps, UOp, NOp, PatternMatcher
-from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite, expander, constant_folder
+from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite, expander, reducer, constant_folder
 
 simple_pm = PatternMatcher([
   (NOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -289,12 +289,7 @@ class TestUOpGraph(TestUOps):
     # ranges are closed in the right order
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
-def expander_rewrite(sink):
-  together = PatternMatcher(expander.patterns + constant_folder.patterns)
-  return graph_rewrite(sink, together)
-  #out = UOpGraph(UOp(UOps.SINK, None, (sink,)))
-  #out.linearize()
-  #return out.uops[-1]
+def expander_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + reducer)
 
 class TestExpander(unittest.TestCase):
   def test_expand_add_broadcast(self):

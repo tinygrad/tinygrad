@@ -53,19 +53,15 @@ def _get_offsets(new_srcs):
   for i,s in enumerate(new_srcs):
     idx = s.src[1]
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST:
-      if root_src is None: root_src = idx.src[0]
-      elif root_src != idx.src[0]: return None
-      assert idx.src[1].arg not in offsets
-      offsets[idx.src[1].arg] = i
+      this_root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST:
-      if root_src is None: root_src = "CONST"
-      elif root_src != "CONST": return None
-      offsets[idx.arg] = i
+      this_root_src, arg = "CONST", idx.arg
     else:
-      if root_src is None: root_src = idx
-      elif root_src != idx: return None
-      assert 0 not in offsets
-      offsets[0] = i
+      this_root_src, arg = idx, 0
+    if root_src is not None and root_src != this_root_src: return None
+    root_src = this_root_src
+    assert arg not in offsets
+    offsets[arg] = i
   return offsets
 
 def fold_expanded_load(ex, buf):
