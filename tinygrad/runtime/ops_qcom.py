@@ -23,6 +23,24 @@ def pkt7_hdr(opcode: int, cnt: int): return adreno.CP_TYPE7_PKT | cnt & 0x3FFF |
 
 def pkt4_hdr(reg: int, cnt: int): return adreno.CP_TYPE4_PKT | cnt & 0x7F | prt(cnt) << 7 | (reg & 0x3FFFF) << 8 | prt(reg) << 27
 
+def parse_cl_lib(lib: bytes, name:str):
+  """
+  Extract information from OpenCL binary used to run a shader: image offset, image size, offsets to argument buffers
+  """
+  image_offset, image_size = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0]
+
+  ptr = struct.unpack("I", lib[0x110:0x114])[0] # read img desc offset
+  ptr += (344 + len(name) + 1) # skip to bufs descr
+
+  buffs_info = []
+  while (ptr + 16 < len(lib)):
+    length, num, type, offset_words = struct.unpack("I" * 4, lib[ptr:ptr+16])
+    if length == 0: break
+    ptr += length
+    buffs_info.append(offset_words * 4)
+
+  return image_offset, image_size, buffs_info
+
 class QcomCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
   
@@ -204,7 +222,7 @@ class QcomProgram(HCQProgram):
 
     self.private_gpu = self.device._gpu_alloc(0x101, 0xC0F00)
 
-    image_offset, self.image_size = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0]
+    image_offset, self.image_size, self.buffs_info = parse_cl_lib(self.lib, self.name)
     image = bytearray(lib[image_offset:image_offset+self.image_size])
     self.lib_gpu = self.device._gpu_alloc(len(image), 0x10C0A00, map_to_cpu=True)
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), self.image_size)
@@ -213,7 +231,9 @@ class QcomProgram(HCQProgram):
     super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=0x140)
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
-    if len(bufs): to_mv(kernargs_ptr + self.kernargs_args_offset, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
+    if len(bufs) < len(self.buffs_info): RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
+    for i, b in enumerate(bufs):
+      ctypes.cast(kernargs_ptr + self.buffs_info[i], ctypes.POINTER(ctypes.c_int64))[0] = b.va_addr
 
 
 if __name__ == '__main__':
