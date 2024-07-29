@@ -40,7 +40,6 @@ def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 class AMDSignal(HCQSignal):
   def __init__(self, value=0, alloc_event=False):
     self._signal = AMDDevice.signals_pool.pop()
-    self._signal[0] = value
     self._value_addr, self._timestamp_addr = mv_address(self._signal), mv_address(self._signal) + 8
     if alloc_event:
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
@@ -48,6 +47,7 @@ class AMDSignal(HCQSignal):
       self._event_id = sync_event.event_id
       self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._event_id)
     else: self._event_mailbox_ptr = self._event_id = 0
+    super().__init__(value)
   def __del__(self): AMDDevice.signals_pool.append(self._signal)
   def _get_value(self) -> int: return self._signal[0]
   def _get_timestamp(self) -> float: return self._signal[1] / 1e2
@@ -163,9 +163,9 @@ class AMDComputeQueue(HWComputeQueue):
     if signal is not None and self.cmds_len[cmd_idx] > 8:
       self._patch(cmd_idx, offset=11, data=[*data64_le(signal._event_mailbox_ptr), *data64_le(signal._event_id), signal._event_id])
 
-  def bind(self, device: AMDDevice):
+  def bind(self, device):
     self.binded_device = device
-    self.hw_page = device._gpu_alloc(len(self.q) * 4, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    self.hw_page = cast(AMDDevice, device)._gpu_alloc(len(self.q) * 4, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
     for i, value in enumerate(self.q): hw_view[i] = value
 
