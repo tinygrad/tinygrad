@@ -51,7 +51,7 @@ class HIPAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferOptions):
     check(hip.hipSetDevice(self.device.device_id))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
-  def _free(self, opaque): check(hip.hipFree(opaque))
+  def _free(self, opaque, options:BufferOptions): check(hip.hipFree(opaque))
   def copyin(self, dest, src: memoryview):
     check(hip.hipSetDevice(self.device.device_id))
     check(hip.hipMemcpy(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice))
