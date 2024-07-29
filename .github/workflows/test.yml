@@ -101,7 +101,7 @@ jobs:
         python docs/abstractions2.py
         python docs/abstractions3.py
     - name: Test Docs Build
-      run: mkdocs build --strict
+      run: python -m mkdocs build --strict
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test README
