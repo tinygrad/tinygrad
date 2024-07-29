@@ -78,14 +78,17 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.src[1].arg, 3.0)
 
   def test_consts_go_last(self):
-    a = UOp(UOps.DEFINE_VAR, dtypes.int)
-    b = UOp(UOps.DEFINE_VAR, dtypes.int)
-    c = UOp(UOps.DEFINE_VAR, dtypes.int)
-    out = a+3+b+c+4
-    sink = graph_rewrite(out, constant_folder)
-    self.assertEqual(sink.op, UOps.ALU)
-    self.assertEqual(sink.src[1].op, UOps.CONST)
-    self.assertEqual(sink.src[1].arg, 7)
+    a = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('a', 0, 1))
+    b = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('b', 0, 1))
+    c = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('c', 0, 1))
+    d = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('d', 0, 1))
+    outs = [2+a, 2+a+d+3+b+c+4] #, UOp(UOps.ALU, a.dtype, src=(a.const(2),a), arg=BinaryOps.ADD)]
+    for out in outs:
+      sink = graph_rewrite(out, constant_folder)
+      print(sink)
+      self.assertEqual(sink.op, UOps.ALU)
+      self.assertEqual(sink.src[1].op, UOps.CONST)
+      self.assertEqual(len([x for x in sink.sparents if x.op is UOps.CONST]), 1)
 
 class TestUOpGraph(TestUOps):
   def test_add_constant_fold(self):

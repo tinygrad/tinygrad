@@ -239,6 +239,7 @@ constant_folder = PatternMatcher([
   ((NOp.var('x') + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x+x.const(exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   ((NOp.var("x") * NOp.cvar("c1")) * NOp.cvar("c2"), lambda x,c1,c2: x*x.const(exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
   # ** move add consts to end **
+  #(UPat(UOps.ALU, BinaryOps.ADD, (UPat(UOps.CONST, name="c1"), UPat(name="x"))), lambda c1,x: x+c1),
   ((NOp.var('x') + NOp.cvar('c1')) + NOp.var('y'), lambda x,c1,y: (x+y)+c1),
   # *** rules from symbolic ***
   # div folding
