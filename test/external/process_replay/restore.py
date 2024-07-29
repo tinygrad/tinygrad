@@ -14,7 +14,7 @@ for offset in tqdm(range(0, row_cnt, PAGE_SIZE)):
   for row in rows:
     ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
     try: Device[opts.device].compiler.compile(compare_src)
-    except Exception as e:
+    except Exception:
       print("FAILED TO COMPILE")
       print(ast)
       print(applied_opts)
