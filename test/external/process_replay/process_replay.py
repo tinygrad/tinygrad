@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-from collections import defaultdict
-import difflib, pickle, multiprocessing, os, logging, sqlite3, requests, io, zipfile, glob, re
+import difflib, pickle, multiprocessing, os, logging, sqlite3, requests, io, zipfile
 from tabulate import tabulate
-from typing import DefaultDict, List, Dict
+from datetime import datetime
+from typing import Dict, List
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Device
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, temp, tqdm
@@ -90,44 +90,33 @@ def download_artifact(run_id:str, name:str, dest:str):
   with io.BytesIO(res.content) as zip_content:
     with zipfile.ZipFile(zip_content, "r") as zip_ref: zip_ref.extractall(dest)
 
-def parse_benchmark(fp:str):
-  ret: DefaultDict[str, List] = defaultdict(list)
-  with open(fp) as f:
-    for line in f.read().splitlines():
-      for v,k in dict(re.findall(r'(\d+\.\d+|\d+)\s*([a-zA-Z\s]+?)(?:,|$)', line)).items(): ret[k.strip()].append(float(v))
-  return ret
+def _get_times(data) -> Dict[str, float]:
+  tms: Dict[str, float] = {}
+  for step in data["steps"][4:]:
+    # last task
+    if step["name"] == "Run actions/upload-artifact@v4": break
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    tm = datetime.strptime(step["completed_at"], fmt) - datetime.strptime(step["started_at"], fmt)
+    tms[step["name"]] = tm.total_seconds()
+  return tms
 
-if __name__ == "__main__":
-  if SKIP_PROCESS_REPLAY:
-    logging.info("skipping process replay.")
-    exit(0)
-
+def process_replay():
   # *** speed diff (for benchmarks)
   if REF == "update_benchmark":
-    name = {"testmacbenchmark": "Mac", "testnvidiabenchmark": "NVIDIA", "testmorenvidiabenchmark": "NVIDIA Training",
-            "testamdbenchmark": "AMD", "testmoreamdbenchmark": "AMD Training"}[os.environ["GITHUB_JOB"]]
-    res = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master&status=success", headers=GH_HEADERS)
-    ref_run_id = res.json()["workflow_runs"][0]["id"]
-    print(f"comparing speed for {RUN_ID} against {ref_run_id}")
-    download_artifact(ref_run_id, f"Speed ({name})", f"{TEMP_DIR}/timing_ref")
-    download_artifact(RUN_ID, f"Speed ({name})", f"{TEMP_DIR}/timing_compare")
-    for fp in glob.glob(f"{TEMP_DIR}/timing_ref/*.txt"):
-      print(fp.split('/')[-1].split('.')[0])
-      ref = parse_benchmark(fp)
-      compare = parse_benchmark(fp.replace("timing_ref", "timing_compare"))
-      diff: Dict[str, List[float]] = {}
-      avg_diff: Dict[str, float] = {}
-      for key, ref_vals in ref.items():
-        vals = [round((comp-ref)/ref*100, 2) for ref,comp in zip(ref_vals, compare[key]) if ref != 0]
-        if not vals or key == "epochs": continue
-        avg_diff[key] = sum(vals) / len(vals)
-        diff[key] = sorted(vals[:5], key=abs, reverse=True)
-      for k,v in sorted(avg_diff.items(), key=lambda x:abs(x[1]), reverse=True):
-        print(colored(f"{k:20} {v:7.2f}%", 'yellow' if v == 0 else 'red' if v < 0.75 else 'green' if v > 1.15 else 'yellow'))
-      print(tabulate(diff, headers='keys'))
+    name = {"testmacbenchmark": "Mac", "testnvidiabenchmark": "tinybox green", "testmorenvidiabenchmark": "tinybox green Training",
+            "testamdbenchmark": "tinybox red", "testmoreamdbenchmark": "tinybox red Training"}[os.environ["GITHUB_JOB"]]
+    compare_jobs = requests.get(f"{BASE_URL}/actions/runs/{RUN_ID}/jobs", headers=GH_HEADERS).json()["jobs"]
+    compare_job = next(j for j in compare_jobs if j["name"] == f"{name} Benchmark")
+    ref_runs = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master&status=success", headers=GH_HEADERS).json()
+    ref_jobs = requests.get(f"{BASE_URL}/actions/runs/{ref_runs['workflow_runs'][0]['id']}/jobs").json()["jobs"]
+    ref_job = next(j for j in ref_jobs if j["name"] == f"{name} Benchmark")
+    logging.info(f"comparing speed for {compare_job['id']} against {ref_job['id']}")
+    compare_tms = _get_times(compare_job)
+    ref_tms = _get_times(ref_job)
+    diff = [[k, f"{v}s", f"{compare_tms[k]}s", f"{(((v-compare_tms[k])/v)*100):7.2f}%"] for k,v in ref_tms.items() if v>0]
+    logging.info(tabulate(diff, headers=["job", "master", "compare", "diff"]))
 
   # *** schedule diff
-def process_replay():
   ref_schedule = multiprocessing.Manager().list()
   if COMPARE_SCHEDULE:
     logging.info("fetching process replay reference")

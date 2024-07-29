@@ -4,7 +4,7 @@ import functools
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer
+from tinygrad.ops import BufferOps, LazyOp, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import getenv, all_int, get_contraction, prod
@@ -148,7 +148,7 @@ class IndependentLowerer:
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
         dtype = x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype
-        return valid.alu(TernaryOps.WHERE, UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
+        return valid.where(UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
       if x.arg.idx < 0:
         buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype),
                   arg=(f"temp{-x.arg.idx}", x.arg.st.real_size()))
@@ -158,8 +158,8 @@ class IndependentLowerer:
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
-      # NOTE: only store the local reduceop in the first thread
-      if x.arg.idx != -1:
+      # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)
+      if x.arg.idx >= 0:
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
         has_valid = valid.op is not UOps.CONST or valid.arg is not True
