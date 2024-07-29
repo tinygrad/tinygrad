@@ -11,10 +11,10 @@ for offset in tqdm(range(0, row_cnt, PAGE_SIZE)):
   rows = cur.execute(f"SELECT val FROM '{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset)).fetchall()
   for row in rows:
     ast, opts, applied_opts, name, compare_src, ctx = pickle.loads(row[0])
-    try: Device[Device.DEFAULT].compiler.compile(compare_src)
+    try: Device[opts.device].compiler.compile(compare_src)
     except Exception as e:
       print("FAILED TO COMPILE")
       print(ast)
       print(applied_opts)
       print(compare_src)
-      raise e
+      continue
