@@ -235,10 +235,11 @@ class TestUOpGraph(TestUOps):
     ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.bool, True), UOp.const(dtypes.int, 3)))
     uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, ld0+ld1))])
     ld0, ld1 = uops[-1].src[2].src
+    uops.print()
     # ld0 becomes the invalid value
-    self.assert_equiv_uops(ld0, UOp.const(dtypes.int, 2))
+    self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
     # the gate and invalid value are deleted from ld1
-    self.assert_equiv_uops(ld1, UOp.load(glbl2, idx, dtype=dtypes.int))
+    self.assert_equiv_uops(ld0, UOp.load(glbl2, idx, dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
@@ -251,9 +252,9 @@ class TestUOpGraph(TestUOps):
     uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, lidx, ld0+ld1))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
-    self.assert_equiv_uops(ld0, UOp.const(dtypes.int, 2))
+    self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
     # the gate and invalid value are deleted from ld1
-    self.assert_equiv_uops(ld1, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
+    self.assert_equiv_uops(ld0, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
 
   def test_fold_gated_store(self):
     glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
