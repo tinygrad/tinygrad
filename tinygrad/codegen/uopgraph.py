@@ -238,9 +238,6 @@ constant_folder = PatternMatcher([
   # ** two stage add/mul folding **
   ((NOp.var('x') + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x+x.const(exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   ((NOp.var("x") * NOp.cvar("c1")) * NOp.cvar("c2"), lambda x,c1,c2: x*x.const(exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
-  # ** move add consts to end **
-  #(UPat(UOps.ALU, BinaryOps.ADD, (UPat(UOps.CONST, name="c1"), UPat(name="x"))), lambda c1,x: x+c1),
-  ((NOp.var('x') + NOp.cvar('c1')) + NOp.var('y'), lambda x,c1,y: (x+y)+c1),
   # *** rules from symbolic ***
   # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c: x.const(x.vmin.arg//c.arg) if c.arg > 0 and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
@@ -310,6 +307,10 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (NOp(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
+  # ** move add consts to end **
+  #(UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(UOps.CONST, name='c1'), UPat(name='x'))), lambda c1,x: x+c1),
+  (UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name='x'), UPat(UOps.CONST, name='c1'))), UPat(name='y'))),
+    lambda x,c1,y: (x+y)+c1),
 ])
 
 # *** uop expander ***
