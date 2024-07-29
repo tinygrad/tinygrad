@@ -48,10 +48,6 @@ def float4_contract_store(buf, ex, var, store, idx=UOp.const(dtypes.int, 0), idx
   return UOp(UOps.STORE, None, (buf, idx, new_var) + store.src[3:])
 
 float4_folding = PatternMatcher([
-  # reorder index to bring const closer to store
-  (NOp(UOps.STORE, src=(NOp.var("buf"), NOp.var("idx")+
-    (NOp(UOps.EXPAND, src=tuple(NOp.const(dtypes.int, i) for i in range(4)), name="ex")+NOp.var("idx2")), NOp.var("var")), name="store"),
-    lambda buf, store, idx, idx2, ex, var: UOp(UOps.STORE, store.dtype, (buf, idx+idx2+ex, var), store.arg)),
   # float(2,4) load
   (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")+NOp.var("idx3")), name="load"), float4_expand_load),
   (NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.EXPAND, name="ex")+NOp.var("idx")+NOp.var("idx2")), name="load"), float4_expand_load),
@@ -307,8 +303,8 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (NOp(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
-  # ** move add consts to end **
-  #(UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(UOps.CONST, name='c1'), UPat(name='x'))), lambda c1,x: x+c1),
+  # ** move add consts to end (NOTE: this is still happening before constant folding) **
+  (UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(UOps.CONST, name='c1'), UPat(name='x'))), lambda c1,x: x+c1 if x.op is not UOps.CONST else None),
   (UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name='x'), UPat(UOps.CONST, name='c1'))), UPat(name='y'))),
     lambda x,c1,y: (x+y)+c1),
 ])
