@@ -1,7 +1,7 @@
 import pathlib, re, ctypes, mmap, collections, struct, functools, os, copy
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 from typing import Optional, Any
-from tinygrad.helpers import from_mv
+from tinygrad.helpers import to_mv
 from extra.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from extra.mockgpu.nv.nvgpu import NVGPU
 
@@ -138,13 +138,21 @@ class NVDriver(VirtDriver):
     if struct.cmd == nv_gpu.NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2:
       params:Any = nv_gpu.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS.from_address(params_ptr)
       params.deviceInstance = params.gpuId # emulate them to be the same
-    elif struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2:
-      params = nv_gpu.NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS.from_address(params_ptr)
+    elif struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2 or struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST:
+      if struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST:
+        params = nv_gpu.NV0080_CTRL_GPU_GET_CLASSLIST_PARAMS.from_address(params_ptr)
+      else:
+        params = nv_gpu.NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS.from_address(params_ptr)
+
       classes = [50021, 51607, 51648, 50543, 51125, 51125, 51125, 51125, 50529, 36967, 36909, 37105, 33868, 36978, 37095, 37094, 36980, 37014, 49270,
                  41068, 41088, 41280, 50025, 96, 112, 115, 125, 20608, 20640, 20539, 20540, 41089, 41092, 50034, 50810, 50811, 50814, 51056, 51057,
                  51059, 51069, 51071, 51632, 51639, 51639, 51706, 52019, 222, 50287, 50273, 50031, 50017] # from ada102
       params.numClasses = len(classes)
-      for i,c in enumerate(classes): params.classList[i] = c
+      if struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST:
+        clslist = to_mv(params.classList, params.numClasses * 4).cast('I')
+        for i,c in enumerate(classes): clslist[i] = c
+      else:
+        for i,c in enumerate(classes): params.classList[i] = c
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO:
       info = {nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION: nv_gpu.NV2080_CTRL_GR_INFO_SM_VERSION_3_5}
 
