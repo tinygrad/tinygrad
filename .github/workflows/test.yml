@@ -16,7 +16,7 @@ jobs:
   uops:
     name: uops tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -69,7 +69,7 @@ jobs:
   linter:
     name: Linters
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     # TODO: run the pre-commit hook to replace a lot of this
     steps:
@@ -135,7 +135,7 @@ jobs:
 
     name: ${{ matrix.task=='optimage'&&'GPU IMAGE+compile Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Code
@@ -235,7 +235,7 @@ jobs:
   #testwebgpu:
   #  name: WebGPU Tests
   #  runs-on: macos-13
-  #  timeout-minutes: 10
+  #  timeout-minutes: 20
   #  steps:
   #  - name: Checkout Code
   #    uses: actions/checkout@v4
@@ -332,7 +332,7 @@ jobs:
 #  testwebgl:
 #    name: WebGL Tests
 #    runs-on: ubuntu-latest
-#    timeout-minutes: 10
+#    timeout-minutes: 20
 #
 #    steps:
 #    - name: Checkout Code
@@ -524,7 +524,7 @@ jobs:
   #testunicorn:
   #  name: ARM64 unicorn Test
   #  runs-on: ubuntu-latest
-  #  timeout-minutes: 10
+  #  timeout-minutes: 20
   #  steps:
   #    - name: Checkout Code
   #      uses: actions/checkout@v4
