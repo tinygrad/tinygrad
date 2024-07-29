@@ -407,13 +407,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
-  def test_div_int(self):
+  def test_div_int_input(self):
     helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
     helper_test_op(None, lambda x: x/2, lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
+  def test_floor_div(self):
     torch_idiv, tiny_idiv = functools.partial(torch.div, rounding_mode="trunc"), functools.partial(Tensor.div, upcast=False)
     helper_test_op(None, torch_idiv, tiny_idiv, forward_only=True, vals=np.array([[5, -6, 7],[1, 2, 3]], dtype=np.int32))
-    x = Tensor(2**64 - 1, dtype=dtypes.uint64).div(1, upcast=False)
-    np.testing.assert_equal(x.numpy(), 2**64 - 1)
+    helper_test_op(None, torch_idiv, lambda x,y:x//y, forward_only=True, vals=np.array([[5, -6, 7],[1, 2, 3]], dtype=np.int32))
+    x = Tensor([2**64 - 1], dtype=dtypes.uint64).div(2, upcast=False)
+    np.testing.assert_equal(x.numpy(), (2**64 - 1)//2)
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1)
