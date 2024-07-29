@@ -738,7 +738,7 @@ class Kernel:
           store_buf, load_buf = tuple(MemBuffer(i%2, op.dtype, ShapeTracker.from_shape(s)) for i,s in enumerate(buf_shapes))
           reduce2 = LazyOp(op.op, (LazyOp(BufferOps.LOAD, (), load_buf),), (0,))
           kernel2 = LazyOp(MetaOps.KERNEL, (LazyOp(BufferOps.STORE, (reduce2,), store_buf),))
-          op.src[0].src = kernel2 # Insert kernel 2 after first reduce load
+          op.src[0].src = (kernel2,) # Insert kernel 2 after first reduce load
           return op
       elif op.op is MetaOps.KERNEL:
         arg = KernelInfo(self.local_dims, self.upcasted)
