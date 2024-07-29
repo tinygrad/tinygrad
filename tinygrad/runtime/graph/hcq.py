@@ -55,7 +55,7 @@ class HCQGraph(MultiGraphRunner):
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev = ji.prg.device if isinstance(ji.prg, CompiledRunner) else Device[ji.bufs[1].device] #type:ignore
       enqueue_queue = self.comp_queues[enqueue_dev] if isinstance(ji.prg, CompiledRunner) else self.copy_queues[enqueue_dev]
-      out_signal = self.signals[enqueue_queue]
+      out_signal = self.signals[enqueue_queue] #type:ignore
       writable_buffers = ji.prg.p.outcount if isinstance(ji.prg, CompiledRunner) else 1
       deps = self.access_resources(enqueue_queue, ji.bufs[writable_buffers:], ji.bufs[:writable_buffers], j + 1)
 

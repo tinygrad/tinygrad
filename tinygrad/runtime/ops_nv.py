@@ -168,8 +168,8 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     if global_size is not None: self.cmd_idx_to_global_dims[cmd_idx][:] = array.array('I', global_size)
     if local_size is not None: self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
 
-  def _signal(self, signal, value=0):
-    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 2)) is None or prev_qmd.release0_enable == 1: return super()._signal(signal, value)
+  def _signal(self, signal, value=0, timestamp=False):
+    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 2)) is None or prev_qmd.release0_enable == 1: return super()._signal(signal, value, timestamp)
     prev_qmd.release0_address_upper, prev_qmd.release0_address_lower = data64(mv_address(signal._signal))
     prev_qmd.release0_payload_upper, prev_qmd.release0_payload_lower = data64(value)
     prev_qmd.release0_enable = 1
@@ -192,7 +192,7 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
     if dest is not None: self._patch(cmd_idx, offset=3, data=data64(dest))
     if src is not None: self._patch(cmd_idx, offset=1, data=data64(src))
 
-  def _signal(self, signal, value=0):
+  def _signal(self, signal, value=0, timestamp=False):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *data64(mv_address(signal._signal)), value, 4]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
 
