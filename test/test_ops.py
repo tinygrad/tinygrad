@@ -797,7 +797,13 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
   @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA"], "not supported on these in CI")
   def test_gemm_fp16(self):
-    helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()))
+    try:
+      helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()))
+    except RuntimeError: # NOTE: cpu addmm not implemented for HALF in torch
+      a, b = Tensor.rand(64, 64).half().realize(), Tensor.rand(64, 64).half().realize()
+      c = a.matmul(b).numpy()
+      comp = a.numpy() @ b.numpy()
+      np.testing.assert_allclose(c, comp, atol=getenv("ATOL", 1e-4), rtol=getenv("RTOL", 3e-2))
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y))
   def test_big_gemm(self):
