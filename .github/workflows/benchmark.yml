@@ -26,7 +26,7 @@ jobs:
     defaults:
       run:
         shell: bash -o pipefail {0}
-    if: false
+    if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -126,7 +126,7 @@ jobs:
     defaults:
       run:
         shell: bash -o pipefail {0}
-    if: false
+    if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -235,7 +235,7 @@ jobs:
     defaults:
       run:
         shell: bash -o pipefail {0}
-    if: false
+    if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -300,8 +300,98 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: test
-      run: python3 test/external/process_replay/restore.py
+    - name: Symlink models and datasets
+      run: |
+        mkdir -p weights
+        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+        ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
+        ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
+        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
+        mkdir -p extra/datasets
+        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: Show off tinybox
+      run: /opt/rocm/bin/rocm-bandwidth-test
+    # TODO: unstable on AMD
+    #- name: Run model inference benchmark
+    #  run: LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
+    # TODO: unstable on AMD
+    #- name: Test speed vs torch
+    #  run: |
+    #    python3 -c "import torch; print(torch.__version__)"
+    #    LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Test tensor cores
+      run: |
+        AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+    - name: Run Tensor Core GEMM (AMD)
+      run: AMD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
+    # TODO: AMD compiler bug causes this to fail
+    #- name: Fuzz Padded Tensor Core GEMM
+    #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
+    - name: Run Stable Diffusion
+      run: AMD=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+    - name: Run SDXL
+      run: AMD=1 python3 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
+    - name: Run LLaMA 7B
+      run: |
+        AMD=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        AMD=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    - name: Run LLaMA 7B with BEAM
+      run: AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
+    - name: Run LLaMA 7B on 4 GPUs
+      run: AMD=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+    - name: Run LLaMA 7B on 6 GPUs
+      run: AMD=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
+    - name: Run LLaMA-3 8B BEAM
+      run: AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_beam.txt
+    - name: Run LLaMA-3 8B on 4 GPUs
+      run: AMD=1 python3 examples/llama3.py --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_four_gpu.txt
+    - name: Run LLaMA-3 8B on 6 GPUs
+      run: AMD=1 python3 examples/llama3.py --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_six_gpu.txt
+    - name: Run LLaMA-2 70B
+      run: AMD=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
+    - name: Run Mixtral 8x7B
+      run: time AMD=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
+    - name: Run GPT2
+      run: |
+        AMD=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        AMD=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+    - name: Run GPT2 w HALF
+      run: AMD=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
+    - name: Run GPT2 w HALF/BEAM
+      run: AMD=1 HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAST_BEFORE_VIEW=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Speed (AMD)
+        path: |
+          onnx_inference_speed.csv
+          torch_speed.txt
+          llama_unjitted.txt
+          llama_jitted.txt
+          llama_beam.txt
+          llama_four_gpu.txt
+          llama_six_gpu.txt
+          llama3_beam.txt
+          llama3_four_gpu.txt
+          llama3_six_gpu.txt
+          llama_2_70B.txt
+          gpt2_unjitted.txt
+          gpt2_jitted.txt
+          gpt2_half.txt
+          gpt2_half_beam.txt
+          matmul.txt
+          matmul_amd.txt
+          sd.txt
+          sdxl.txt
+          mixtral.txt
+    - name: Run process replay tests
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   testmoreamdbenchmark:
     name: tinybox red Training Benchmark
@@ -309,7 +399,7 @@ jobs:
     defaults:
       run:
         shell: bash -o pipefail {0}
-    if: false
+    if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
