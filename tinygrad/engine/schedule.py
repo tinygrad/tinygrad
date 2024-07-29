@@ -187,23 +187,23 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
-                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, None], cache:Set):
+                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, bool], cache:Set):
   """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
   if (tr, st) in cache: return
   cache.add((tr, st))
   if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
-    if not st.contiguous or st.size != r.st.size or tr in reduce_for_op or tr.device != r.device: group.setdefault(r)
-    return group.setdefault(tr)
+    group[tr] = st.contiguous and st.size == r.st.size and tr not in reduce_for_op and tr.device == r.device
+    return
   for tr_next in children[tr]:
     # max one reduceop per kernel
-    if tr_next.op in ReduceOps: return group.setdefault(r)
+    if tr_next.op in ReduceOps: return group.setdefault(r, False)
     # can only fuse contiguous
-    if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r)
+    if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r, False)
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
-def _get_isolated_children(r:LazyBuffer, group:Dict[LazyBuffer, None]) -> Dict[LazyBuffer, None]:
+def _get_isolated_children(r:LazyBuffer, group:Dict[LazyBuffer, bool]) -> Dict[LazyBuffer, bool]:
   rc_parents, cache = deque(group), set()
   while rc_parents:
     if (p:=rc_parents.pop()) in cache: continue
@@ -232,29 +232,28 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   for r in allbufs:
-    if r.op not in ReduceOps: continue
-    group: Dict[LazyBuffer, None] = {}
-    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache=set())
+    if r.op not in ReduceOps or r.forced_realize: continue
+    reduceop_children: Dict[LazyBuffer, bool] = {}
+    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, reduceop_children, cache=set())
     # max one reduceop per kernel
-    can_chase = all(tr not in reduce_for_op for tr in group)
-    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
-    forced_realize = r in group
-    if not forced_realize and len(group) > 1:
+    can_chase = all(tr not in reduce_for_op for tr in reduceop_children)
+    realize_reduceop = not all(reduceop_children.values())
+    group = {k:v for k,v in reduceop_children.items() if v}
+    if realize_reduceop or len(group) > 1:
       group = _get_isolated_children(r, group)
     # search descendants of the reduceop that can cleanly group
-    if not forced_realize:
-      descendants: Dict[LazyBuffer, None] = {}
-      for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
-      group = merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
+    descendants: Dict[LazyBuffer, bool] = {}
+    for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
+    group = merge_dicts([group, descendants if all(descendants.values()) else {}])
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is MetaOps.ASSIGN for x in group):
+    if any(x.op is MetaOps.ASSIGN for x in group):
       parents = deque((r, *group))
-      while parents and not forced_realize:
+      while parents and group:
         if (p:=parents.pop().base).realized or p in realizes:
-          if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
+          if p in assign_targets and assign_targets[p] not in group: group, can_chase = {}, False
           continue
         parents.extend(p.srcs)
-    if forced_realize or not group:
+    if not group:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
@@ -272,7 +271,9 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
-    else: reduce_for_op.update((tr, r) for tr in group)
+    else:
+      if realize_reduceop: realizes[r] = None
+      reduce_for_op.update((tr, r) for tr in group)
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
@@ -356,7 +357,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   if any(degree != 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
-  if len(schedule) > getenv("EXIT_SCHEDULE", 0): exit(0)
+  if len(schedule) > getenv("EXIT_SCHEDULE", 1e18): exit(0)
   return schedule, var_vals
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
