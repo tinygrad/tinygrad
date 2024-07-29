@@ -203,7 +203,14 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r, False)
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
 
-def _get_isolated_children(r:LazyBuffer, group:Dict[LazyBuffer, bool]) -> Dict[LazyBuffer, bool]:
+def _get_inputs(buf:LazyBuffer, r:LazyBuffer, realizes:Dict[LazyBuffer, None],\
+  inputs:Dict[LazyBuffer, None], cache:Set[LazyBuffer], first=True):
+  if buf.realized is not None or buf.op is MetaOps.CONST or buf in cache: return
+  cache.add(buf)
+  if not first and (buf in realizes or buf is r): return inputs.setdefault(buf)
+  for x in buf.srcs: _get_inputs(x.base, r, realizes, inputs, cache, first=False)
+
+def _get_isolated_children(r:LazyBuffer, realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, bool]) -> Dict[LazyBuffer, bool]:
   rc_parents, cache = deque(group), set()
   while rc_parents:
     if (p:=rc_parents.pop()) in cache: continue
@@ -211,6 +218,10 @@ def _get_isolated_children(r:LazyBuffer, group:Dict[LazyBuffer, bool]) -> Dict[L
     # max one reduceop per kernel
     if p.op in ReduceOps or p.st.size > r.st.size: return {}
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+  for buf in group.copy():
+    inputs: Dict[LazyBuffer, None] = {}
+    _get_inputs(buf, r, realizes, inputs, set())
+    if len(inputs) > 1: del group[buf]
   return group
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
@@ -240,7 +251,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     realize_reduceop = not all(reduceop_children.values())
     group = {k:v for k,v in reduceop_children.items() if v}
     if realize_reduceop or len(group) > 1:
-      group = _get_isolated_children(r, group)
+      group = _get_isolated_children(r, realizes, group)
     # search descendants of the reduceop that can cleanly group
     descendants: Dict[LazyBuffer, bool] = {}
     for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
