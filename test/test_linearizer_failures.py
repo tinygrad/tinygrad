@@ -354,6 +354,8 @@ class TestLinearizerFailures(unittest.TestCase):
 
   # llama3 8B failure with BEAM=2 https://github.com/tinygrad/tinygrad/actions/runs/10150118124/job/28066519425#step:14:1, these don't compile
   @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test needs shared")
   def test_failure_42(self):
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
   LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(25, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
@@ -363,6 +365,8 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
   @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test needs shared")
   def test_failure_43(self):
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
   LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(25, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
@@ -372,6 +376,8 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
   @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test needs shared")
   def test_failure_44(self):
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
   LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(25, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
