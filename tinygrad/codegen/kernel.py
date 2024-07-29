@@ -38,7 +38,7 @@ class Opt:
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, amt={self.amt})"
   def real_axis(self, k:Kernel):
     if self.axis is None: return -1
-    if self.op is OptOps.UNROLL: return k.first_reduce+self.axis
+    if self.op in {OptOps.UNROLL, OptOps.SPLIT}: return k.first_reduce+self.axis
     if self.op in {OptOps.GROUP, OptOps.GROUPTOP}: return k.first_reduce+k.group_for_reduces+self.axis
     return self.axis
 
@@ -101,6 +101,7 @@ class Kernel:
     # parameters for optimization
     self.applied_opts: List[Opt] = []
     self.group_for_reduces: int = 0
+    self.reduce_split: bool = False
     self.upcasted: int = 0
     self.local_dims: int = 0
     self.tensor_core: Optional[TensorCore] = None
@@ -128,8 +129,8 @@ class Kernel:
     ret.sts = self.sts[:len(ret.bufs)+len(ret.reduceops)*2] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
-    ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
-      self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
+    ret.applied_opts, ret.group_for_reduces, ret.reduce_split, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
+      self.applied_opts[:], self.group_for_reduces, self.reduce_split, self.upcasted, self.local_dims, self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, self.bufs_for_tensor_core
 
     # uncached since linearize didn't run
@@ -139,16 +140,15 @@ class Kernel:
 
   @staticmethod
   def split(ast:LazyOp, opts:Optional[Renderer]=None) -> Tuple[Kernel, ...]:
-    op = ast.src[0] or None
-    parent = ast
-    asts = [ast]
+    parent, op = ast, ast.src[0] or None
+    trees = [ast]
     while(op.src):
       if op.op is MetaOps.KERNEL:
         parent.src = ()
-        asts.append(op)
+        trees.append(op)
       parent = op
       op = op.src[0]
-    return tuple(Kernel(a, opts=opts) for a in asts)
+    return tuple(Kernel(a, opts=opts) for a in trees)
 
   @property
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
@@ -462,6 +462,10 @@ class Kernel:
       check(len(self.reduceops) == 1, "can't group with multiple reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
+    elif opt.op is OptOps.SPLIT:
+      check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to split")
+      self.shift_to(axis, amt, top=True, insert_before=self.first_reduce)
+      self.reduce_split = True # can only split once, new kernels are initialized
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.shape_len-self.upcasted, "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
@@ -728,7 +732,14 @@ class Kernel:
           local_buffer = MemBuffer(-1, start.dtype, ShapeTracker.from_shape(local_shape))
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
-          return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+          return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces))) 
+        if self.reduce_split:
+          buf_shapes = ((1,), (self.full_shape[0],))
+          store_buf, load_buf = tuple(MemBuffer(i%2, op.dtype, ShapeTracker.from_shape(s)) for i,s in enumerate(buf_shapes))
+          reduce2 = LazyOp(op.op, (LazyOp(BufferOps.LOAD, (), load_buf),), (0,))
+          kernel2 = LazyOp(MetaOps.KERNEL, (LazyOp(BufferOps.STORE, (reduce2,), store_buf),))
+          op.src[0].src = kernel2 # Insert kernel 2 after first reduce load
+          return op
       elif op.op is MetaOps.KERNEL:
         arg = KernelInfo(self.local_dims, self.upcasted)
       else:
