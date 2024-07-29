@@ -421,7 +421,7 @@ class Tensor:
     counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
 
     out = counts1.cat(counts2).rshift(8).cast(dtypes.float32).div(2 ** 24)[:num]
-    if not all(s >= 0 for s in shape): raise RuntimeError(f"Trying to create view with negative dimension: {shape=}")
+    if not all(s >= 0 for s in shape): raise RuntimeError(f"Trying to create Tensor with negative dimension: {shape=}")
     out = out.reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
@@ -443,7 +443,7 @@ class Tensor:
     print(Tensor.full((2, 3), False).numpy())
     ```
     """
-    if not all(s >= 0 for s in argfix(shape)): raise RuntimeError(f"Trying to create view with negative dimension: {shape=}")
+    if not all(s >= 0 for s in argfix(shape)): raise RuntimeError(f"Trying to create Tensor with negative dimension: {shape=}")
     return Tensor(fill_value, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
