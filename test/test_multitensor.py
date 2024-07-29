@@ -446,13 +446,26 @@ class TestMultiTensor(unittest.TestCase):
         X = ((Tensor(data).shard(devices, axis=0) + 1).realize() - 1).realize()
         np.testing.assert_equal(X.numpy(), data)
 
+  def test_uneven_shard_splits(self):
+    N = 4
+    X = Tensor.rand(16, 1, 17).contiguous().realize()
+    np_x = X.numpy()
+    devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+
+    # test empty shard
+    np.testing.assert_equal(X.shard(devices, 0, (2, 2, 12, 0)).numpy(), np_x)
+
+    # test reshape (see test_reshape_on_axis for more comprehensive reshape tests)
+    np.testing.assert_equal(X.shard(devices, 0, (2, 2, 10, 2)).reshape(8, 1, 34).numpy(), np_x.reshape(8, 1, 34))
+    np.testing.assert_equal(X.shard(devices, 0, (2, 2, 12, 0)).reshape(8, 1, 34).numpy(), np_x.reshape(8, 1, 34))
+
   def test_multiple_uneven_shard(self):
     N = 4
     X = Tensor.rand(4, 1, 257).contiguous().realize()
     Y = Tensor.rand(4, 1, 257).contiguous().realize()
     np_x, np_y = X.numpy(), Y.numpy()
     devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
-    X.shard_(devices, 2, (2, 38, 47, 170))
+    X.shard_(devices, 2, (0, 40, 47, 170))
     Y.shard_(devices, 2, (34, 53, 51, 119))
     np.testing.assert_equal(X.numpy(), np_x)
     np.testing.assert_equal(Y.numpy(), np_y)
