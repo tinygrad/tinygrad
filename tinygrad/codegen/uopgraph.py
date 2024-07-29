@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any
 import functools, itertools, heapq, math
-from tinygrad.dtype import dtypes, PtrDType, ImageDType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, exec_alu
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same
@@ -120,7 +120,7 @@ def vectorize_reduce(vec:UOp):
 def vectorize_alu(vec:UOp):
   if not all_same([x.arg for x in vec.src]): return None
   ret = UOp(vec.src[0].op, vec.dtype,
-            tuple(UOp(UOps.VECTORIZE, vec.src[0].src[i].dtype.vec(vec.dtype.count),
+            tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
                       tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
   return ret
 
@@ -587,7 +587,7 @@ class UOpGraph:
     # expand
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
-      sink = graph_rewrite(sink, self.folder+expander+float4_folding if self.opts.supports_float4 else self.folder+expander)
+      sink = graph_rewrite(sink, self.folder+expander+float4_folding if self.opts is not None and self.opts.supports_float4 else self.folder+expander)
       sink = graph_rewrite(sink, self.folder+expander+reducer)
 
     # for PTX only
