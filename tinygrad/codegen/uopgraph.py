@@ -57,6 +57,10 @@ def _get_offsets(new_srcs):
       elif root_src != idx.src[0]: return None
       assert idx.src[1].arg not in offsets
       offsets[idx.src[1].arg] = i
+    elif idx.op is UOps.CONST:
+      if root_src is None: root_src = "CONST"
+      elif root_src != "CONST": return None
+      offsets[idx.arg] = i
     else:
       if root_src is None: root_src = idx
       elif root_src != idx: return None
@@ -65,45 +69,49 @@ def _get_offsets(new_srcs):
   return offsets
 
 def fold_expanded_load(ex, buf):
+  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   offsets = _get_offsets(ex.src)
   if offsets is None: return None
   new_srcs = list(ex.src)
   used = set()
   for o in offsets:
     if o in used: continue
-    for fold_length in [4]:
+    for fold_length in [4, 2]:
       if all(o+i in offsets for i in range(1,fold_length)):
-        load_1 = new_srcs[offsets[o]]
+        load_1 = ex.src[offsets[o]]
         assert load_1.dtype.count == 1
         if not load_1.src[1].divides(fold_length): continue
         new_load = UOp(load_1.op, load_1.dtype.vec(fold_length), load_1.src, load_1.arg)
         for i in range(fold_length):
           new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
           used.add(o+i)
+        break
   return UOp(ex.op, ex.dtype, tuple(new_srcs), ex.arg) if ex.src != tuple(new_srcs) else None
 
 def fold_expanded_store(ex, buf):
+  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   offsets = _get_offsets(ex.src)
   if offsets is None: return None
-  new_srcs = []
+  new_srcs = list(ex.src)
   used = set()
   for o in offsets:
     if o in used: continue
-    for fold_length in [4]:
+    for fold_length in [4, 2]:
       if all(o+i in offsets for i in range(1, fold_length)):
         load_1 = ex.src[offsets[o]]
         if not load_1.src[1].divides(fold_length): continue
         stores = UOp(UOps.VECTORIZE, load_1.src[2].dtype.vec(fold_length), tuple(ex.src[offsets[o+i]].src[2] for i in range(fold_length)))
-        new_srcs.append(UOp(load_1.op, None, (load_1.src[0], load_1.src[1], stores), load_1.arg))
-        for i in range(0, fold_length): used.add(o+i)
-  for o in offsets:
-    if o in used: continue
-    new_srcs.append(ex.src[offsets[o]])
+        for i in range(0, fold_length):
+          new_srcs[offsets[o+i]] = None
+          used.add(o+i)
+        new_srcs[offsets[o]] = UOp(load_1.op, None, (load_1.src[0], load_1.src[1], stores), load_1.arg)
+        break
+  new_srcs = [x for x in new_srcs if x is not None]
   return UOp(ex.op, ex.dtype, tuple(new_srcs), ex.arg) if ex.src != tuple(new_srcs) else None
 
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat())), name="ex"), fold_expanded_load),
-  (UPat(UOps.SINK, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat())), name="ex"), fold_expanded_store),
+  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat())), name="ex"), fold_expanded_store),
 ])
 """
 # float(2,4) load
