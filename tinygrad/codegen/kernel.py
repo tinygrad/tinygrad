@@ -463,7 +463,7 @@ class Kernel:
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.SPLIT:
-      check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to split")
+      check(axis >= self.first_reduce and axis < self.shape_len-self.upcasted, "must be reduce axis to split")
       self.shift_to(axis, amt, top=True, insert_before=self.first_reduce)
       self.reduce_split = True # can only split once, new kernels are initialized
     elif opt.op is OptOps.UNROLL:                     # purple
