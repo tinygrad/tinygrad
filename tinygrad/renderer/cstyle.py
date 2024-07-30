@@ -50,6 +50,7 @@ class CStyleLanguage(Renderer):
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     elif dtype.scalar() == dtypes.bool: val = "1" if x else "0"
     elif dtype.scalar() == dtypes.float: val = f"{x}f"
+    elif dtype.scalar() == dtypes.uint64: val = f"{x}ULL"
     else: val = str(x)
     if dtype.count > 1: return self.render_vectorize([val] * dtype.count, dtype)
     return (self.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
@@ -139,8 +140,13 @@ class CStyleLanguage(Renderer):
           if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('alu',u)} = {val};")
         elif uop is UOps.SPECIAL:
-          kk(f"int {args[1]} = {self.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
-          r[u] = args[1]
+          kk(f"int {args[0]} = {self.code_for_workitem[args[0][0]](args[0][-1])}; /* {args[1]} */")
+          r[u] = args[0]
+        elif uop is UOps.DEFINE_VAR:
+          assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
+          seen_vars.add(args.expr)
+          bufs.append((args.expr, (dtype,False)))
+          r[u] = args.expr
         elif uop is UOps.LOAD:
           val = self.render_load(dtype, r[src[0]], src[0].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
           # NOTE: this relies on the load not happening if it's in the unselected branch
@@ -162,11 +168,6 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_LOCAL:
           kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
-        elif uop is UOps.DEFINE_VAR:
-          assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
-          seen_vars.add(args.expr)
-          bufs.append((args.expr, (dtype,False)))
-          r[u] = args.expr
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
@@ -194,6 +195,7 @@ class ClangRenderer(CStyleLanguage):
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
+
   # language options
   kernel_prefix = "__kernel "
   buffer_prefix = "__global "
@@ -210,10 +212,10 @@ class OpenCLRenderer(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = (lambda p: p + prefix if prefix else p)(["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]) # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
-
+  
 class IntelRenderer(OpenCLRenderer):
   device, kernel_prefix = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
-  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], thread_local_sizes=[[2,8], [16], [8]], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float)]]  # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float)]]  # noqa: E501
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = []
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
@@ -224,7 +226,7 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
 
   # language options
@@ -235,7 +237,7 @@ class MetalRenderer(CStyleLanguage):
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
   uses_ptr_arithmetic = True
-  code_for_workitem = {"g": lambda x: f"gid.{chr(120+x)}", "l": lambda x: f"lid.{chr(120+x)}"}
+  code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
@@ -274,7 +276,7 @@ class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
   def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
@@ -283,8 +285,8 @@ class CUDARenderer(CStyleLanguage):
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
   float4 = "make_float4"
-  code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
-                       "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"}
+  code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
+                       "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+x)}+threadIdx.{chr(120+int(x))})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
@@ -308,6 +310,11 @@ asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}
 return c;}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
+
+  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+    maxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
+    # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
+    return f"__launch_bounds__({maxThreadsPerBlock}) "
 
 code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
                     UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
@@ -334,7 +341,7 @@ def _make_hip_dtype(base_type, name, cnt):
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
-  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], thread_local_sizes=[[16],[16],[4,2]], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
 
   # language options
   kernel_prefix = """extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
@@ -394,7 +401,7 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def get_kernel_modifier(self, uops:UOpGraph) -> str:
-    requiredMaxThreadsPerBlock = prod(u.arg[2] for u in uops if u.op is UOps.SPECIAL and u.arg[1][0] == "l")
+    requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"

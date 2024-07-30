@@ -25,6 +25,8 @@ class _Device:
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     return ret
+  @property
+  def default(self) -> Compiled: return self[self.DEFAULT]
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
@@ -287,6 +289,20 @@ class HWCommandQueue:
     return self
   def _update_wait(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
 
+  def bind(self, device:HCQCompiled):
+    """
+    Associates the queue with a specific device for optimized execution.
+
+    This optional method allows backend implementations to tailor the queue for efficient use on the given device. When implemented, it can eliminate
+    the need to copy queues into the device, thereby enhancing performance.
+
+    Args:
+      device: The target device for queue optimization.
+
+    Note:
+      Implementing this method is optional but recommended for performance gains.
+    """
+
   def submit(self, device:HCQCompiled):
     """
     Submits the command queue to a specific device for execution.
@@ -321,14 +337,14 @@ class HWComputeQueue(HWCommandQueue):
     self._exec(prg, kernargs, global_size, local_size)
   def _exec(self, prg, kernargs, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
-  def update_exec(self, cmd_idx:int, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+  def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
     """
     Updates a previously queued execution command.
 
     Args:
       cmd_idx: Index of the execution command to update
-      global_size: New global work size
-      local_size: New local work size
+      global_size: New global work size (if None, keeps the original)
+      local_size: New local work size (if None, keeps the original)
     """
     if self.cmds_meta[cmd_idx] != "exec": raise RuntimeError("called update_exec not on an exec command")
     self._update_exec(cmd_idx, global_size, local_size)
@@ -364,6 +380,8 @@ class HWCopyQueue(HWCommandQueue):
   def _update_copy(self, cmd_idx, dest, src): raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
+  def __init__(self, value:int=0): self._set_value(value)
+
   @property
   def value(self) -> int: return self._get_value()
 
@@ -406,14 +424,58 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
   try: yield (st, en)
   finally:
     if enabled and queue is not None: queue.timestamp(en)
-    elif enabled: queue_type().timestamp(en).submit(dev)
+    elif enabled:
+      queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
+      dev.timeline_value += 1
 
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQProgram:
-  def __init__(self, kernargs_alloc_size:int, kernargs_args_offset:int=0):
-    self.kernargs_alloc_size, self.kernargs_args_offset = kernargs_alloc_size, kernargs_args_offset
-  def fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
+  def __init__(self, device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
+    self.device, self.name, self.kernargs_alloc_size, self.kernargs_args_offset = device, name, kernargs_alloc_size, kernargs_args_offset
+
+  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> int:
+    """
+    Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
+
+    Args:
+      bufs: Buffers to be written to kernel arguments.
+      vals: Values to be written to kernel arguments.
+      kernargs_ptr: Optional pointer to pre-allocated kernel arguments memory.
+
+    Returns:
+      Pointer to the filled kernel arguments.
+    """
+    self._fill_kernargs(ptr:=(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size)), bufs, vals)
+    return ptr
+  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
+
+  def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
+               vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
+    """
+    Enqueues the program for execution with the given arguments and dimensions.
+
+    Args:
+      bufs: Buffer arguments to execute the kernel with.
+      global_size: Specifies the global work size for kernel execution (equivalent to CUDA's grid size).
+      local_size: Specifies the local work size for kernel execution (equivalent to CUDA's block size).
+      vals: Value arguments to execute the kernel with.
+      wait: If True, waits for the kernel to complete execution.
+
+    Returns:
+      Execution time of the kernel if 'wait' is True, otherwise None.
+    """
+
+    q = self.device.hw_compute_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
+
+    with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
+      q.exec(self, self.fill_kernargs(bufs, vals), global_size, local_size)
+
+    q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+    self.device.timeline_value += 1
+
+    if wait: self.device.timeline_signal.wait(self.device.timeline_value - 1)
+    return ((sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class HCQCompiled(Compiled):
   """
@@ -432,11 +494,28 @@ class HCQCompiled(Compiled):
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
+    self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferOptions(cpu_access=True))
+    self.kernargs_ptr:int = self.kernargs_page.va_addr
+
+  def synchronize(self):
+    self.timeline_signal.wait(self.timeline_value - 1)
+
+    if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
+    if PROFILE: self._prof_process_events()
+
   def _gpu2cpu_time(self, gpu_time:float, is_copy:bool) -> float:
     """
     Translates local gpu time (timestamp) into global cpu time.
     """
     return gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff)
+
+  def _alloc_kernargs(self, alloc_size:int) -> int:
+    """
+    Allocates space for arguments passed to the kernel.
+    """
+    if self.kernargs_ptr >= (self.kernargs_page.va_addr + self.kernargs_page.size - alloc_size): self.kernargs_ptr = self.kernargs_page.va_addr
+    self.kernargs_ptr = (res:=self.kernargs_ptr) + alloc_size
+    return res
 
   def _prof_setup(self):
     if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
@@ -457,6 +536,7 @@ class HCQCompiled(Compiled):
   def _prof_finalize(self):
     for st, en, name, is_cp in self.raw_prof_records:
       self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
+    self.raw_prof_records = []
     del self.profile_logger
 
   def _wrap_timeline_signal(self):

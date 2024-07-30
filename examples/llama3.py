@@ -219,6 +219,7 @@ if __name__ == "__main__":
   parser.add_argument("--port", type=int, default=7776, help="Web server port")
   parser.add_argument("--debug", action="store_true", help="Enable debug mode")
   parser.add_argument("--seed", type=int, help="Random seed")
+  parser.add_argument("--temperature", type=int, default=0.85, help="Temperature")
   parser.add_argument("--benchmark", action="store_true", help="Run a benchmark")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data")
@@ -238,6 +239,7 @@ if __name__ == "__main__":
   if args.seed is not None: Tensor.manual_seed(args.seed)
   if args.benchmark: Tensor.manual_seed(42)
   print(f"seed = {Tensor._seed}")
+  TEMPERATURE = args.temperature
 
   tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))
   def encode_role(role: str):
@@ -407,7 +409,7 @@ if __name__ == "__main__":
       last_tok = tok
       generated += tokenizer.decode([tok])
       print(generated)
-    if "LLaMA-3/8B-SF-DPO" in args.model.as_posix():
+    if "LLaMA-3/8B-SF-DPO" in args.model.as_posix() and TEMPERATURE == 0.85:
       EXPECTED_TEXT = {
         1: "Hello! How can I help you today? If you have any questions or need assistance with anything,",
         2: "Hello! How can I help you today? If you have any questions, need assistance or just want",

@@ -126,6 +126,11 @@ generate_comgr() {
 
 generate_kfd() {
   clang2py /usr/include/linux/kfd_ioctl.h -o $BASE/kfd.py -k cdefstum
+  awk '/^#define AMDKFD_IOC_/ { if ($0 ~ /\\$/) { getline nextline; $0 = $0 nextline }
+    if (match($0, /AMDKFD_IOC_([A-Z_]+).*AMDKFD_(IOW?R?)\(0x([0-9A-F]+),.*struct ([a-z_]+)/, arr)) {
+      print "AMDKFD_IOC_" arr[1] " = (\"" arr[2] "\", 0x" arr[3] ", struct_" arr[4] ")"
+    }
+  }' /usr/include/linux/kfd_ioctl.h >> $BASE/kfd.py
   fixup $BASE/kfd.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"

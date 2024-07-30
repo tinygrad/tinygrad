@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Tuple, Optional, List, cast
 import ctypes, functools, hashlib, os
-import tinygrad.runtime.autogen.opencl as cl
+from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG, getenv
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.device import BufferOptions, LRUAllocator, Compiled, Compiler, CompileError
@@ -19,7 +19,7 @@ class CLCompiler(Compiler):
     super().__init__(f"compile_cl_{compile_key}")
   def compile(self, src:str) -> bytes:
     program = checked(cl.clCreateProgramWithSource(self.device.context, 1, to_char_p_p([src.encode()]), None, status := ctypes.c_int32()), status)
-    build_status: int = cl.clBuildProgram(program, 1, self.device.device_id, "-cl-intel-256-GRF-per-thread".encode(), cl.clBuildProgram.argtypes[4](), None)
+    build_status: int = cl.clBuildProgram(program, 1, self.device.device_id, None, cl.clBuildProgram.argtypes[4](), None)
     if build_status != 0:
       cl.clGetProgramBuildInfo(program, self.device.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, log_size := ctypes.c_size_t())
       cl.clGetProgramBuildInfo(program, self.device.device_id, cl.CL_PROGRAM_BUILD_LOG, log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)  # noqa: E501
