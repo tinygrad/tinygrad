@@ -239,7 +239,7 @@ ptx_matcher = PatternMatcher([
   (UPat(UOps.ALU, name="x", dtype=dtypes.bool, arg=BinaryOps.MAX),
     lambda x: UOp(UOps.ALU, dtypes.uint8, tuple(s.cast(dtypes.uint8) for s in x.src), x.arg).cast(dtypes.bool)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat(name="x"),UPat(name="y"),UPat(name="z"),UPat(name="k"))),
-    lambda root,x,y,z,k: UOp(root.op, dtypes.uint8, (x,y,z,k.cast(dtypes.uint8))).cast(dtypes.bool)),
+    lambda root,x,y,z,k: UOp(root.op, dtypes.uint8, (x,y,z.cast(dtypes.uint8),k)).cast(dtypes.bool)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat(),UPat())),
     lambda root: UOp(root.op, dtypes.uint8, root.src, root.arg).cast(dtypes.bool)),
   (UPat(UOps.STORE, name="root", src=(UPat(),UPat(),UPat(name="z",dtype=dtypes.bool), UPat())),
