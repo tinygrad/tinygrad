@@ -362,7 +362,7 @@ def do_expand(root:UOp):
   if root.op is UOps.IF:
     # merge ifs into an or
     combined_cond = functools.reduce(lambda x,y: x|y, dedup(x.src[0] for x in new_srcs))
-    barriers = tuple(x.src[1] for x in new_srcs)
+    barriers = tuple(set(x.src[1] for x in new_srcs))
     new_srcs = [UOp(UOps.IF, src=(combined_cond,)+barriers) for _ in new_srcs]
   assert prod([x[1] for x in expand_args]) == len(new_srcs)
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
@@ -438,11 +438,12 @@ def create_gate(root:UOp) -> Optional[UOp]:
 gate_creator = PatternMatcher([(NOp(UOps.STORE, name="root"), create_gate)])
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:
+  if len(root.src) == 3: return None
   @functools.lru_cache(None)
   def find_gate(x:UOp) -> Optional[UOp]:
     if x.op is UOps.IF: return x
     return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-  if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
+  if (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
 gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), delete_redundant_gates)])
