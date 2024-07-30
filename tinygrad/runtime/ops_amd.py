@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib
+import os, fcntl, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, \
                             HCQSignal, HCQProgram, BufferOptions
