@@ -210,8 +210,18 @@ class OpenCLRenderer(CStyleLanguage):
     return f"as_{self.render_dtype(var_dtype)}({x})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
+    if any(uop.dtype == dtypes.half for uop in uops): prefix = (lambda p: p + prefix if prefix else p)(["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]) # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+  
+class IntelRenderer(OpenCLRenderer):
+  device, kernel_prefix = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float)]]  # noqa: E501
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    prefix = []
+    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+      prefix.append(f"""{arg[3].name}8 __{arg[0]}({arg[2].name}16 a, {arg[2].name}16 b, {arg[3].name}8 c) {{
+    return intel_sub_group_f16_f16_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""")
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix or None)
 
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
