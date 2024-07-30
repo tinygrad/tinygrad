@@ -267,7 +267,10 @@ class TestInt32DType(TestDType): DTYPE = dtypes.int32
 class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 
 class TestInt64DType(TestDType): DTYPE = dtypes.int64
-class TestUint64DType(TestDType): DTYPE = dtypes.uint64
+class TestUint64DType(TestDType):
+  DTYPE = dtypes.uint64
+  def test_uint64_load(self):
+    assert Tensor(2**64 - 1, dtype=dtypes.uint64).numpy() == 2**64 - 1
 
 class TestBoolDType(TestDType): DTYPE = dtypes.bool
 

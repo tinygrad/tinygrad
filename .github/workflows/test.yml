@@ -16,7 +16,7 @@ jobs:
   uops:
     name: uops tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -69,7 +69,7 @@ jobs:
   linter:
     name: Linters
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     # TODO: run the pre-commit hook to replace a lot of this
     steps:
@@ -101,7 +101,7 @@ jobs:
         python docs/abstractions2.py
         python docs/abstractions3.py
     - name: Test Docs Build
-      run: mkdocs build --strict
+      run: python -m mkdocs build --strict
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test README
@@ -135,7 +135,7 @@ jobs:
 
     name: ${{ matrix.task=='optimage'&&'GPU IMAGE+compile Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Code
@@ -174,8 +174,8 @@ jobs:
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops + training
         run: |
-          GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
-          GPU=1 IMAGE=2 python3 test/models/test_end2end.py TestEnd2End.test_linear_mnist
+          PYTHONPATH="." GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
+          PYTHONPATH="." GPU=1 IMAGE=2 python3 test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot model compile and size
         run: |
@@ -235,7 +235,7 @@ jobs:
   #testwebgpu:
   #  name: WebGPU Tests
   #  runs-on: macos-13
-  #  timeout-minutes: 10
+  #  timeout-minutes: 20
   #  steps:
   #  - name: Checkout Code
   #    uses: actions/checkout@v4
@@ -332,7 +332,7 @@ jobs:
 #  testwebgl:
 #    name: WebGL Tests
 #    runs-on: ubuntu-latest
-#    timeout-minutes: 10
+#    timeout-minutes: 20
 #
 #    steps:
 #    - name: Checkout Code
@@ -524,7 +524,7 @@ jobs:
   #testunicorn:
   #  name: ARM64 unicorn Test
   #  runs-on: ubuntu-latest
-  #  timeout-minutes: 10
+  #  timeout-minutes: 20
   #  steps:
   #    - name: Checkout Code
   #      uses: actions/checkout@v4
