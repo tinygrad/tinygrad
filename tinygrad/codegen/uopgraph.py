@@ -439,6 +439,16 @@ def create_gate(root:UOp) -> Optional[UOp]:
 
 gate_creator = PatternMatcher([(NOp(UOps.STORE, name="root"), create_gate)])
 
+def simplify_gate(root:UOp) -> Optional[UOp]:
+  @functools.lru_cache(None)
+  def find_gate(x:UOp) -> Optional[UOp]:
+    if x.op is UOps.IF: return x
+    return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
+  if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
+  return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
+
+gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), simplify_gate)])
+
 # *** uop graph ***
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
@@ -506,6 +516,9 @@ class UOpGraph:
     # expand
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, self.folder+expander)
+
+    # gate folding
+    sink = graph_rewrite(sink, self.folder+gate_folder)
 
     # for PTX only
     if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
