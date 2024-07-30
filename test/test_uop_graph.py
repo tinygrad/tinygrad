@@ -438,7 +438,7 @@ class TestLoadStoreFolder(unittest.TestCase):
   def test_simple_load_fold_gated(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
     gate = UOp(UOps.DEFINE_VAR, dtypes.bool)
-    load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i), gate, UOp.const(dtypes.float, i))) for i in range(4)]
+    load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(UOps.EXPAND, dtypes.float, tuple(load), ((0,4),))
     sink = float4_rewrite(sink)
     assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 1
@@ -449,7 +449,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
     gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g1")
     gate2 = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g2")
-    load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i), gate if i == 0 else gate2, UOp.const(dtypes.float, i))) for i in range(4)]
+    load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate if i == 0 else gate2)) for i in range(4)]
     sink = UOp(UOps.EXPAND, dtypes.float, tuple(load), ((0,4),))
     sink = float4_rewrite(sink)
     assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 3
