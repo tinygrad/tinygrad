@@ -107,13 +107,11 @@ def reduce_before_expand(reduce, expand, x):
   expands = flatten([x.arg for x in reduce.src[1:] if x.op is UOps.EXPAND])
   if any(x in expands for x in expand.arg): return None
   red = UOp(UOps.REDUCE, x.dtype, (x,)+reduce.src[1:], reduce.arg)
-  gep = tuple(UOp(UOps.GEP, reduce.dtype, (red,), i) for i in range(x.dtype.count))
-  return UOp(expand.op, expand.dtype, gep, expand.arg)
+  return UOp(expand.op, expand.dtype, tuple(UOp(UOps.GEP, reduce.dtype, (red,), i) for i in range(x.dtype.count)), expand.arg)
 
 def sum_collapse(phi_input, loop, val1, val2):
   for v1,v2 in [(val1, val2), (val2, val1)]:
-    if loop not in v1.parents:
-      return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+v1*(loop.src[1]-loop.src[0]).cast(v1.dtype)
+    if loop not in v1.parents: return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+v1*(loop.src[1]-loop.src[0]).cast(v1.dtype)
   return None
 
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce, idx2=None, idx3=None):
@@ -400,7 +398,17 @@ def no_vectorized_alu(alu):
                    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
+def create_gate(root:UOp) -> Optional[UOp]:
+  @functools.lru_cache(None)
+  def _gate_srcs(u:UOp, gate:UOp) -> UOp:
+    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
+    return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
+  return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
+
 expander = PatternMatcher([
+  # create gate MUST BE BEFORE expander
+  (NOp(UOps.STORE, name="root"), create_gate),
+  # do expansion
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
   (NOp(UOps.CONTRACT, name="con"), do_contract),
@@ -414,23 +422,6 @@ expander = PatternMatcher([
   (NOp(UOps.EXPAND, src=(NOp.var('x'),), arg=()), lambda x: x),
 ])
 
-reducer = PatternMatcher([
-  (NOp(UOps.REDUCE, name="root"), do_reduce_with_expand),
-  # no ALU on vectorized dtypes
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
-  # VECTORIZE a CONST is a CONST (eventually remove this rule)
-  (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
-])
-
-def create_gate(root:UOp) -> Optional[UOp]:
-  @functools.lru_cache(None)
-  def _gate_srcs(u:UOp, gate:UOp) -> UOp:
-    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
-    return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
-  return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
-
-gate_creator = PatternMatcher([(NOp(UOps.STORE, name="root"), create_gate)])
-
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def find_gate(x:UOp) -> Optional[UOp]:
@@ -439,7 +430,15 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
-gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), delete_redundant_gates)])
+reducer = PatternMatcher([
+  (NOp(UOps.REDUCE, name="root"), do_reduce_with_expand),
+  # no ALU on vectorized dtypes
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
+  # VECTORIZE a CONST is a CONST (eventually remove this rule)
+  (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
+  # delete_redundant_gates (after expand, is this still needed?)
+  (NOp(UOps.STORE, name="root"), delete_redundant_gates),
+])
 
 # *** uop graph ***
 
@@ -508,9 +507,8 @@ class UOpGraph:
     # expand
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
-      base = self.folder+gate_creator+expander
-      sink = graph_rewrite(sink, base+float4_folding if self.opts is not None and self.opts.supports_float4 else base)
-      sink = graph_rewrite(sink, self.folder+expander+reducer+gate_folder)
+      sink = graph_rewrite(sink, self.folder+expander+float4_folding if self.opts is not None and self.opts.supports_float4 else self.folder+expander)
+      sink = graph_rewrite(sink, self.folder+expander+reducer)
 
     # for PTX only
     if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
