@@ -361,7 +361,7 @@ def do_expand(root:UOp):
     new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _choices_from_args(expand_args)]
   if root.op is UOps.IF:
     # merge ifs into an or
-    combined_cond = functools.reduce(lambda x,y: x.src[0]|y.src[0], new_srcs)
+    combined_cond = functools.reduce(lambda x,y: x|y, dedup(x.src[0] for x in new_srcs))
     barriers = tuple(x.src[1] for x in new_srcs)
     new_srcs = [UOp(UOps.IF, src=(combined_cond,)+barriers) for _ in new_srcs]
   assert prod([x[1] for x in expand_args]) == len(new_srcs)
@@ -430,16 +430,14 @@ def create_gate(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3: return None
   @functools.lru_cache(None)
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
-    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
-      if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
-      return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
+    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
     if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
     return u
   return ret if (ret:=_gate_srcs(root, root.src[3])) is not root else None
 
 gate_creator = PatternMatcher([(NOp(UOps.STORE, name="root"), create_gate)])
 
-def simplify_gate(root:UOp) -> Optional[UOp]:
+def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def find_gate(x:UOp) -> Optional[UOp]:
     if x.op is UOps.IF: return x
@@ -447,7 +445,7 @@ def simplify_gate(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
-gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), simplify_gate)])
+gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), delete_redundant_gates)])
 
 # *** uop graph ***
 
