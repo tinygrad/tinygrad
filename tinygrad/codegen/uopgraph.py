@@ -1,5 +1,4 @@
 from __future__ import annotations
-from dataclasses import replace
 from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING
 import functools, itertools, heapq, math
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
@@ -431,8 +430,9 @@ def simplify_gate(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def find_gate(x:UOp) -> Optional[UOp]:
     if x.op is UOps.IF: return x
-    return next((ret for s in x.src if (ret := find_gate(s)) is not None), None)
-  return replace(root, src=root.src[:3]) if len(root.src) == 4 and (gate:=find_gate(root)) is not None and gate.src[0] is root.src[3] else None
+    return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
+  if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
+  return UOp(UOps.STORE, root.dtype, root.src[3:], root.arg)
 
 gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), simplify_gate)])
 
@@ -504,9 +504,7 @@ class UOpGraph:
       if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
         if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
         return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
-      if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src:
-        #if u.op is UOps.STORE and u.src[3] is gate: replace_source = replace_source[:3]
-        return UOp(u.op, u.dtype, replace_source, u.arg)
+      if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
     sink_srcs = list(self.sink.src)
     for i, s in enumerate(sink_srcs):
