@@ -505,6 +505,8 @@ class Tensor:
     if stop is None: stop, start = start, 0
     assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
+    # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
+    if (stop-start)/step <= 0: return Tensor([], dtype=dtype, **kwargs)
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
@@ -523,6 +525,7 @@ class Tensor:
     print(Tensor.eye(2, 4).numpy())
     ```
     """
+    if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
     return Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)._slice((None,(0,n if m is None else m)))
 
   def full_like(self, fill_value:ConstType, **kwargs):
@@ -724,10 +727,10 @@ class Tensor:
         yield node
     return list(_walk(self, set()))
 
-  def backward(self) -> Tensor:
+  def backward(self, gradient:Optional[Tensor]=None) -> Tensor:
     """
     Propagates the gradient of a tensor backwards through the computation graph.
-    Must be used on a scalar tensor.
+    If the 'gradient' argument is not provided, the tensor must be a scalar, and the gradient is implicitly set to 1.0.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -735,11 +738,14 @@ class Tensor:
     print(t.grad.numpy())
     ```
     """
-    assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
+    if gradient is None:
+      assert self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
+      # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
+      # this is "implicit gradient creation"
+      gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
 
-    # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
-    # this is "implicit gradient creation"
-    self.grad = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
+    assert self.shape == gradient.shape, f"grad shape must match tensor shape, {gradient.shape!r} != {self.shape!r}"
+    self.grad = gradient
 
     for t0 in reversed(self._deepwalk()):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
@@ -1924,10 +1930,10 @@ class Tensor:
 
   def interpolate(self, size:Tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
     """
-    Downsamples or Upsamples to the requested size, accepts 0 to N batch dimensions.
+    Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
 
-    The type of sampling is selected with `mode` which currently only supports `linear`.
-    To run `bilinear` or `trilinear` pass in a 2D or 3D size.
+    The interpolation algorithm is selected with `mode` which currently only supports `linear`.
+    To run `bilinear` or `trilinear`, pass in a 2D or 3D size.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 2, 3, 4], [21, 22, 23, 24], [41, 42, 43, 44]])
@@ -1937,16 +1943,16 @@ class Tensor:
     print(t.interpolate(size=(2,3), mode="linear").numpy())
     ```
     """
-    assert isinstance(size, (tuple,list)) and all(isinstance(s, int) for s in size) and len(size) > 0 and len(size) <= self.ndim
-    assert mode == "linear", "only linear interpolate supported right now"
-    x, expand = self, list(s for s in self.shape)
+    assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
+    assert mode == "linear", "only supports linear interpolate"
+    x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
-      scale = (self.shape[i] - (1 if align_corners else 0)) / (size[i] - (1 if align_corners else 0))
-      arr, reshape = Tensor.arange(size[i]).cast(dtypes.float32), [1 for _ in range(self.ndim)]
+      scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
+      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32), [1] * self.ndim
       index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
       reshape[i] = expand[i] = size[i]
       low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-      x = x.gather(i, low)*(1.0 - perc) + x.gather(i, high)*perc
+      x = x.gather(i, low).lerp(x.gather(i, high), perc)
     return x
 
   # ***** unary ops *****
@@ -2139,6 +2145,7 @@ class Tensor:
     ```
     """
     return self + (end - self) * weight
+
   def square(self):
     """
     Squares the tensor element-wise.

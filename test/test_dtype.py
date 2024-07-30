@@ -267,7 +267,10 @@ class TestInt32DType(TestDType): DTYPE = dtypes.int32
 class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 
 class TestInt64DType(TestDType): DTYPE = dtypes.int64
-class TestUint64DType(TestDType): DTYPE = dtypes.uint64
+class TestUint64DType(TestDType):
+  DTYPE = dtypes.uint64
+  def test_uint64_load(self):
+    assert Tensor(2**64 - 1, dtype=dtypes.uint64).numpy() == 2**64 - 1
 
 class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
@@ -298,7 +301,7 @@ class TestEqStrDType(unittest.TestCase):
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
-    self.assertEqual(str(PtrDType(dtypes.float32)), "ptr.dtypes.float")
+    self.assertEqual(str(PtrDType(dtypes.float32)), "PtrDType(dtypes.float)")
 
 class TestHelpers(unittest.TestCase):
   signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
@@ -453,6 +456,9 @@ class TestTypeSpec(unittest.TestCase):
       _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
     _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7))
     _assert_eq(Tensor.arange(3, 8.5, 3), dtypes.default_float, np.arange(3, 8.5, 3))
+    # stop-start and step have different signs
+    _assert_eq(Tensor.arange(3, 5, -2), dtypes.default_int, np.arange(3, 5, -2))
+    _assert_eq(Tensor.arange(5.0, 3.0), dtypes.default_float, np.arange(5.0, 3.0))
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))
   def test_bool_ops(self, dtype, op):

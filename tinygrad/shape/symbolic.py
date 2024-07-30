@@ -43,6 +43,7 @@ class Node:
     if b == 1: return self
     return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
+  def __lshift__(self, b:int): return self*2**b
 
   # *** complex ops ***
 
@@ -74,7 +75,6 @@ class Node:
     assert b > 0
     if b == 1: return NumNode(0)
     if isinstance(self.max, int) and isinstance(self.min, int):
-      if self.min >= 0 and self.max < b: return self
       if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
       if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
@@ -231,7 +231,7 @@ class RedNode(Node):
   def __init__(self, nodes:List[Node]):
     self.nodes = nodes
     self.min, self.max = self.get_bounds()
-  def vars(self) -> Set[Variable]: return set.union(*[x.vars() for x in self.nodes], set())
+  def vars(self) -> Set[Variable]: return set().union(*[x.vars() for x in self.nodes])
   def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class SumNode(RedNode):
@@ -291,11 +291,7 @@ class SumNode(RedNode):
 class AndNode(RedNode):
   def get_bounds(self) -> Tuple[int, sint]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
-    subed = []
-    for node in self.nodes:
-      if not (sub:=node.substitute(var_vals)): return NumNode(0)
-      subed.append(sub)
-    return Node.ands(subed)
+    return Node.ands([node.substitute(var_vals) for node in self.nodes])
 
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 def sym_infer(a: Union[Node, int], var_vals: Optional[Dict[Variable, int]]) -> int:
