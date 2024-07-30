@@ -426,15 +426,18 @@ expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
 ])
 
-def simplify_gate(root:UOp) -> Optional[UOp]:
+def create_gate(root:UOp) -> Optional[UOp]:
+  if len(root.src) == 3: return
   @functools.lru_cache(None)
-  def find_gate(x:UOp) -> Optional[UOp]:
-    if x.op is UOps.IF: return x
-    return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-  if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
-  return UOp(UOps.STORE, root.dtype, root.src[3:], root.arg)
+  def _gate_srcs(u:UOp, gate:UOp) -> UOp:
+    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
+      if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
+      return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
+    if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
+    return u
+  return ret if (ret:=_gate_srcs(root, root.src[3])) is not root else None
 
-gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), simplify_gate)])
+gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), create_gate)])
 
 # *** uop graph ***
 
@@ -464,8 +467,7 @@ class UOpGraph:
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
-    # NOTE: gate folding must come after the expander
-    self.folder = constant_folder+gate_folder if opts is None or not opts.supports_float4 else (constant_folder+float4_folding)
+    self.folder = constant_folder+gate_folder if opts is None or not opts.supports_float4 else (constant_folder+gate_folder+float4_folding)
     if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
       self.folder = self.folder + transcendental_folding
 
@@ -498,22 +500,8 @@ class UOpGraph:
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
-    # replace UOps.STORE gate with an IF block
-    @functools.lru_cache(None)
-    def _replace_gates(u:UOp, gate:UOp) -> UOp:
-      if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
-        if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
-        return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
-      if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src: return UOp(u.op, u.dtype, replace_source, u.arg)
-      return u
-    sink_srcs = list(self.sink.src)
-    for i, s in enumerate(sink_srcs):
-      if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_replace_gates(s, s.src[3])) != s:
-        sink_srcs[i] = UOp(rw.op, rw.dtype, rw.src, rw.arg)
-    sink = UOp(UOps.SINK, None, tuple(sink_srcs))
-
     # do graph rewrite
-    sink = graph_rewrite(sink, self.folder)
+    sink = graph_rewrite(self.sink, self.folder)
 
     # expand
     UOpGraph.cnt += 1
