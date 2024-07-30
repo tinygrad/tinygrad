@@ -12,10 +12,16 @@ if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
 
-def _get_offsets(new_srcs, is_load, is_image):
-  offsets: DefaultDict[Any, dict] = defaultdict(dict)
+def fold_expanded(ex, buf):
+  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
+  new_srcs = dedup(list(ex.src))
+  old_new_srcs = new_srcs[:]
+  is_load, is_image = new_srcs[0].op is UOps.LOAD, isinstance(buf.dtype, ImageDType)
+
+  # first, extract all the relevant offsets
+  offsets_rootsrc: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
-    if is_image and s.src[1].dtype != dtypes.int.vec(3): continue
+    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype != dtypes.int.vec(3)): continue
     idx = s.src[1] if not is_image else s.src[1].src[2]  # only id4 for image
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
@@ -24,51 +30,35 @@ def _get_offsets(new_srcs, is_load, is_image):
     if is_image: root_src = (s.src[1].src[0:2], root_src)
     # add gates for gated
     if len(s.src) >= 4: root_src = (s.src[2] if is_load else s.src[3], root_src)  # maybe flip the gate and the const?
-    assert arg not in offsets[root_src]
-    offsets[root_src][arg] = i
-  return offsets
+    assert arg not in offsets_rootsrc[root_src]
+    offsets_rootsrc[root_src][arg] = i
 
-def fold_expanded(ex, buf):
-  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
-  new_srcs = dedup(list(ex.src))
-  old_new_srcs = new_srcs[:]
-  is_load, is_image = new_srcs[0].op is UOps.LOAD, isinstance(buf.dtype, ImageDType)
-  offsets_rootsrc = _get_offsets(new_srcs, is_load, is_image)
-  if offsets_rootsrc is None or len(offsets_rootsrc) == 0: return None
-  did_rewrite = False
-  for offsets in offsets_rootsrc.values():
-    used = set()
+  # then rewrite everything we can
+  used = set()
+  for rootsrc, offsets in offsets_rootsrc.items():
     for o in offsets:
       for fold_length in [4] if is_image else [4, 2]:
-        if all(o+i not in used and o+i in offsets for i in range(fold_length)):
-          folded = [new_srcs[offsets[o+i]] for i in range(fold_length)]
-          load_1 = folded[0]
-          if not is_image and not load_1.src[1].divides(fold_length): continue
+        if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
+          load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
+          if not is_image and not new_src[1].divides(fold_length): continue
           # for images, we rewrite the index
           if is_image: new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_src[1].src[0], new_src[1].src[1]))
           if is_load:
-            assert load_1.dtype.count == 1
-            # vectorize the const
-            if len(load_1.src) >= 4: new_src[3] = UOp(UOps.VECTORIZE, load_1.dtype.vec(fold_length), tuple([x.src[3] for x in folded]))
+            # vectorize the const. if we flip const and gate it's nicer here too
+            if len(new_src) >= 4:
+              new_src[3] = UOp(UOps.VECTORIZE, load_1.dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[3] for i in range(fold_length)))
             new_load = UOp(load_1.op, load_1.dtype.vec(fold_length), tuple(new_src), load_1.arg)
-            for i in range(fold_length):
-              new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
-              used.add(o+i)
+            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
           else:
-            stores = UOp(UOps.VECTORIZE, load_1.src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
-            for i in range(fold_length):
-              new_srcs[offsets[o+i]] = UOp(load_1.op, None, tuple(new_src[0:2]) + (stores,) + tuple(new_src[3:]), load_1.arg) if i == 0 else None
-              used.add(o+i)
-          break
-    if len(used): did_rewrite = True
-  if is_load:
-    # dedup expand for LOAD
-    if len(old_new_srcs) != len(ex.src): new_srcs = [new_srcs[old_new_srcs.index(s)] for s in ex.src]
-  else:
-    # remove Nones for STORE
-    new_srcs = [x for x in new_srcs if x is not None]
-  return UOp(ex.op, ex.dtype, tuple(new_srcs), ex.arg) if did_rewrite else None
+            new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
+            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(load_1.op, None, tuple(new_src), load_1.arg) if i == 0 else None
+          for i in range(fold_length): used.add((rootsrc,o+i))
+
+  # dedup expand for LOAD
+  if is_load and len(old_new_srcs) != len(ex.src): new_srcs = [new_srcs[old_new_srcs.index(s)] for s in ex.src]
+  # remove Nones for STORE
+  return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
 def vectorize_reduce(vec:UOp):
   if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None
@@ -76,10 +66,8 @@ def vectorize_reduce(vec:UOp):
 
 def vectorize_alu(vec:UOp):
   if not all_same([x.arg for x in vec.src]): return None
-  ret = UOp(vec.src[0].op, vec.dtype,
-            tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
-                      tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
-  return ret
+  return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
+                                             tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
 
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
