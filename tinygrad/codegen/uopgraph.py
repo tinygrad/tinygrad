@@ -13,19 +13,17 @@ if TYPE_CHECKING: from tinygrad.renderer import Renderer
 # ***** float4/image store handling *****
 
 def _get_offsets(new_srcs, is_load, is_image):
-  root_src: Any = None
   offsets: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
     if is_image and s.src[1].dtype != dtypes.int.vec(3): continue
-    idx = s.src[1] if not is_image else s.src[1].src[2]
+    idx = s.src[1] if not is_image else s.src[1].src[2]  # only id4 for image
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
     # add idx and idy for image
     if is_image: root_src = (s.src[1].src[0:2], root_src)
     # add gates for gated
-    if is_load and len(s.src) >= 4: root_src = (s.src[2], root_src)
-    elif not is_load and len(s.src) >= 4: root_src = (s.src[3], root_src)
+    if len(s.src) >= 4: root_src = (s.src[2] if is_load else s.src[3], root_src)  # maybe flip the gate and the const?
     assert arg not in offsets[root_src]
     offsets[root_src][arg] = i
   return offsets
@@ -60,7 +58,7 @@ def fold_expanded(ex, buf):
           else:
             stores = UOp(UOps.VECTORIZE, load_1.src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
             for i in range(fold_length):
-              new_srcs[offsets[o+i]] = UOp(load_1.op, None, tuple(new_src[0:2]) + (stores,), load_1.arg) if i == 0 else None
+              new_srcs[offsets[o+i]] = UOp(load_1.op, None, tuple(new_src[0:2]) + (stores,) + tuple(new_src[3:]), load_1.arg) if i == 0 else None
               used.add(o+i)
           break
     if len(used): did_rewrite = True
