@@ -158,7 +158,7 @@ class IndependentLowerer:
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         base_dtype = x.arg.dtype.scalar()
-        if idx.dtype is dtypes.int.vec(3):
+        if idx.dtype == dtypes.int.vec(3):
           # this should all simplify if there's consts for id4. if not, w/e
           id4 = idx.src[2]
           idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx.src[0], idx.src[1]))
