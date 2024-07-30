@@ -5,7 +5,7 @@ from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
 from tinygrad.codegen.uops import UOps, UOp, NOp, PatternMatcher
-from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite, expander, reducer, constant_folder
+from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite, expander, reducer, constant_folder, float4_folding
 
 simple_pm = PatternMatcher([
   (NOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -290,6 +290,7 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
 def expander_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + reducer)
+def float4_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + float4_folding)
 
 class TestExpander(unittest.TestCase):
   def test_expand_add_broadcast(self):
@@ -418,6 +419,57 @@ class TestExpander(unittest.TestCase):
     sink = UOp(UOps.REDUCE, dtypes.int, (e1,e2), ReduceOps.SUM)
     sink = expander_rewrite(sink)
     print(sink)
+
+class TestLoadStoreFolder(unittest.TestCase):
+  def test_simple_load_fold(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i))) for i in range(4)]
+    sink = UOp(UOps.EXPAND, dtypes.float, tuple(load), ((0,4),))
+    sink = float4_rewrite(sink)
+    assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 1
+
+  def test_two_load_fold(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i))) for i in range(8)]
+    sink = UOp(UOps.EXPAND, dtypes.float, tuple(load), ((0,8),))
+    sink = float4_rewrite(sink)
+    assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 2
+
+  def test_simple_load_fold_gated(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    gate = UOp(UOps.DEFINE_VAR, dtypes.bool)
+    load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i), gate, UOp.const(dtypes.float, i))) for i in range(4)]
+    sink = UOp(UOps.EXPAND, dtypes.float, tuple(load), ((0,4),))
+    sink = float4_rewrite(sink)
+    assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 1
+    single_load = [x for x in sink.sparents if x.op is UOps.LOAD][0]
+    self.assertListEqual([src.arg for src in single_load.src[3].src], [0.0, 1.0, 2.0, 3.0])
+
+  def test_simple_load_dont_fold_different_gated(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g1")
+    gate2 = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g2")
+    load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i), gate if i == 0 else gate2, UOp.const(dtypes.float, i))) for i in range(4)]
+    sink = UOp(UOps.EXPAND, dtypes.float, tuple(load), ((0,4),))
+    sink = float4_rewrite(sink)
+    assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 3
+
+  def test_simple_store_fold(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    load = [UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i))) for i in range(4)]
+    sink = UOp(UOps.SINK, None, tuple(load))
+    sink = float4_rewrite(sink)
+    assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 1
+
+  def test_simple_store_dont_fold(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g1")
+    gate2 = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g2")
+    load = [UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate if i == 0 else gate2)) for i in range(4)]
+    sink = UOp(UOps.SINK, None, tuple(load))
+    sink = float4_rewrite(sink)
+    print(sink)
+    assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 3
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

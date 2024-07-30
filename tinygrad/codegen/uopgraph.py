@@ -12,7 +12,7 @@ if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
 
-def _get_offsets(new_srcs, is_image=False):
+def _get_offsets(new_srcs, is_load, is_image):
   root_src: Any = None
   offsets: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
@@ -21,9 +21,12 @@ def _get_offsets(new_srcs, is_image=False):
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
+    # add idx and idy for image
     if is_image: root_src = (s.src[1].src[0:2], root_src)
-    # TODO: add gate to the root_src
-    if arg in offsets[root_src]: return None  # different gates maybe?
+    # add gates for gated
+    if is_load and len(s.src) >= 4: root_src = (s.src[2], root_src)
+    elif not is_load and len(s.src) >= 4: root_src = (s.src[3], root_src)
+    assert arg not in offsets[root_src]
     offsets[root_src][arg] = i
   return offsets
 
@@ -32,13 +35,13 @@ def fold_expanded(ex, buf):
   new_srcs = dedup(list(ex.src))
   old_new_srcs = new_srcs[:]
   is_load, is_image = new_srcs[0].op is UOps.LOAD, isinstance(buf.dtype, ImageDType)
-  offsets_rootsrc = _get_offsets(new_srcs, is_image)
+  offsets_rootsrc = _get_offsets(new_srcs, is_load, is_image)
   if offsets_rootsrc is None or len(offsets_rootsrc) == 0: return None
   did_rewrite = False
   for offsets in offsets_rootsrc.values():
     used = set()
     for o in offsets:
-      for fold_length in [4, 2]:
+      for fold_length in [4] if is_image else [4, 2]:
         if all(o+i not in used and o+i in offsets for i in range(fold_length)):
           folded = [new_srcs[offsets[o+i]] for i in range(fold_length)]
           load_1 = folded[0]
@@ -48,9 +51,8 @@ def fold_expanded(ex, buf):
           if is_image: new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_src[1].src[0], new_src[1].src[1]))
           if is_load:
             assert load_1.dtype.count == 1
-            if len(load_1.src) >= 4:
-              if not all_same([x.src[2:3] for x in folded]): continue  # gate must be the same
-              new_src[3] = UOp(UOps.VECTORIZE, load_1.dtype.vec(fold_length), tuple([x.src[3] for x in folded]))
+            # vectorize the const
+            if len(load_1.src) >= 4: new_src[3] = UOp(UOps.VECTORIZE, load_1.dtype.vec(fold_length), tuple([x.src[3] for x in folded]))
             new_load = UOp(load_1.op, load_1.dtype.vec(fold_length), tuple(new_src), load_1.arg)
             for i in range(fold_length):
               new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
@@ -84,7 +86,7 @@ def vectorize_alu(vec:UOp):
 
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat())), name="ex"), fold_expanded),
+  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   (UPat(UOps.VECTORIZE, src=UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}), name="vec"), vectorize_alu),
 ])
