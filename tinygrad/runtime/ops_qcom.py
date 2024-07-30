@@ -101,12 +101,17 @@ class QcomDevice(HCQCompiled):
 
     alloc = kgsl.struct_kgsl_gpuobj_alloc(size=size, flags=flags)
     self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_ALLOC, alloc)
-    info = kgsl.struct_kgsl_gpuobj_info(id=alloc.id)
-    self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_INFO, info)
+    va_addr, size = None, 0
+    if not (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP):
+      info = kgsl.struct_kgsl_gpuobj_info(id=alloc.id)
+      self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_INFO, info)
+      va_addr, size = info.gpuaddr, info.va_len
 
-    if map_to_cpu: libc.mmap(info.gpuaddr, info.va_len, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_FIXED, self.fd, info.id * 0x1000)
+    if map_to_cpu:
+      va_addr = libc.mmap(va_addr, size := (size or alloc.mmapsize), mmap.PROT_READ|mmap.PROT_WRITE,
+                          mmap.MAP_SHARED | (MAP_FIXED if size else 0), self.fd, info.id * 0x1000)
 
-    return SimpleNamespace(va_addr=info.gpuaddr, size=info.va_len, info=info)
+    return SimpleNamespace(va_addr=va_addr, size=size)
 
   def _gpu_free(self, opaque):
     free = kgsl.struct_kgsl_gpuobj_free(id=opaque.info.id)
