@@ -45,8 +45,8 @@ class TestSymbolic(unittest.TestCase):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
     self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
 
-  def test_div_becomes_num(self):
-    assert isinstance(Variable("a", 2, 3)//2, NumNode)
+  def test_div_reduction(self):
+   self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
   def test_var_becomes_num(self):
     assert isinstance(Variable("a", 2, 2), NumNode)
@@ -134,8 +134,9 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_min_max(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
 
-  def test_sum_div_factor(self):
+  def test_sum_div_mod_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, Variable("b", 0, 3)*4]) // 2, 0, 20, "((a*2)+(b*2))")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, Variable("b", 0, 3)*4]) % 2, 0, 0, "0")
 
   def test_sum_div_some_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*4]) // 2, 0, 23, "(((a*5)//2)+(b*2))")
@@ -191,6 +192,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_distribute_mul(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
+    self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, "((a*-2)+10)")
 
   def test_mod_mul_sum(self):
     self.helper_test_variable(Node.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, "(a+b)")
@@ -236,8 +238,9 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
-  def test_div_factor(self):
+  def test_div_mod_factor(self):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
+    self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
 
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")

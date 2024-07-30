@@ -4,10 +4,10 @@ import functools
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer
+from tinygrad.ops import BufferOps, LazyOp, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, all_int, get_contraction
+from tinygrad.helpers import getenv, all_int, get_contraction, prod
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -148,20 +148,21 @@ class IndependentLowerer:
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
         dtype = x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype
-        return UOp.alu(TernaryOps.WHERE, valid, UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
-      if x.arg.idx == -1:
-        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype), (), ("temp", x.arg.st.size))
+        return valid.where(UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
+      if x.arg.idx < 0:
+        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype),
+                  arg=(f"temp{-x.arg.idx}", x.arg.st.real_size()))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
                   (x.arg.idx, x.arg.idx < self.output_count))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
-      # NOTE: only store the local reduceop in the first thread
-      if x.arg.idx != -1:
-        has_valid = True
+      # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)
+      if x.arg.idx >= 0:
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
+        has_valid = valid.op is not UOps.CONST or valid.arg is not True
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
@@ -171,7 +172,8 @@ class IndependentLowerer:
     if x.op in ReduceOps:
       dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
       if x.op is ReduceOps.WMMA:
-        wmma_sz, upcast_axis = x.arg[4], x.arg[6]
+        upcast_axis = x.arg[-2]
+        wmma_sz = [prod(x[1] for x in l) for l in upcast_axis]
         ret = UOp(UOps.WMMA, dtype=dtype.vec(wmma_sz[2]), src=(
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=upcast_axis[0]),
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=upcast_axis[1]),
@@ -179,6 +181,6 @@ class IndependentLowerer:
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axis[2])
       # NOTE: always using ridxs is fine here
       return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
-    return UOp.alu(x.op, *in_uops)
+    return in_uops[0].alu(x.op, *in_uops[1:])
 
 def lazyop_to_uop(ast:LazyOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)
