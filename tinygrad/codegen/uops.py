@@ -107,18 +107,18 @@ class UOp:
     if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
     if self.op is UOps.CONST: return self, self
     if self.op is UOps.ALU:
+      s0,s1,_ = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
       if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(cast(DType, self.dtype)):
-        return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
-      if self.arg is BinaryOps.ADD:
-        return self.const(self.src[0].vmin.arg+self.src[1].vmin.arg), self.const(self.src[0].vmax.arg+self.src[1].vmax.arg)
-      if self.arg is BinaryOps.MUL and (self.src[0].vmin.arg >= 0 or self.src[1].vmin.arg >= 0):
+        return self.const(-s0.vmax.arg), self.const(-s0.vmin.arg)
+      if self.arg is BinaryOps.ADD: return self.const(s0.vmin.arg+s1.vmin.arg), self.const(s0.vmax.arg+s1.vmax.arg)
+      if self.arg is BinaryOps.MUL and (s0.vmin.arg >= 0 or s1.vmin.arg >= 0):
         # handle at lease one is non-negative
-        Lmin, Lmax = (self.src[0].vmin.arg, self.src[0].vmax.arg) if self.src[1].vmin.arg >= 0 else (self.src[0].vmax.arg, self.src[0].vmin.arg)
-        Rmin, Rmax = (self.src[1].vmin.arg, self.src[1].vmax.arg) if self.src[0].vmin.arg >= 0 else (self.src[1].vmax.arg, self.src[1].vmin.arg)
+        Lmin, Lmax = (s0.vmin.arg, s0.vmax.arg) if s1.vmin.arg >= 0 else (s0.vmax.arg, s0.vmin.arg)
+        Rmin, Rmax = (s1.vmin.arg, s1.vmax.arg) if s0.vmin.arg >= 0 else (s1.vmax.arg, s1.vmin.arg)
         return self.const(Lmin*Rmin), self.const(Lmax*Rmax)
-      if self.arg is BinaryOps.MOD and self.src[1].op is UOps.CONST and self.src[1].arg > 0: return self.const(0), self.const(self.src[1].arg-1)
-      if self.arg is BinaryOps.IDIV and self.src[1].op is UOps.CONST and self.src[1].arg > 0:
-        return self.const(self.src[0].vmin.arg//self.src[1].arg), self.const(self.src[0].vmax.arg//self.src[1].arg)
+      if self.arg is BinaryOps.MOD and s1.op is UOps.CONST and s1.arg > 0: return self.const(0), self.const(s1.arg-1)
+      if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST and s1.arg > 0:
+        return self.const(s0.vmin.arg//s1.arg), self.const(s0.vmax.arg//s1.arg)
     return None, None
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
