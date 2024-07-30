@@ -29,7 +29,7 @@ def fold_expanded(ex, buf):
     # add idx and idy for image
     if is_image: root_src = (s.src[1].src[0:2], root_src)
     # add gates for gated
-    if len(s.src) >= 4: root_src = (s.src[2] if is_load else s.src[3], root_src)  # maybe flip the gate and the const?
+    if len(s.src) >= 4: root_src = (s.src[3], root_src)
     assert arg not in offsets_rootsrc[root_src]
     offsets_rootsrc[root_src][arg] = i
 
@@ -44,15 +44,15 @@ def fold_expanded(ex, buf):
           if not is_image and not new_src[1].divides(fold_length): continue
           # for images, we rewrite the index
           if is_image: new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_src[1].src[0], new_src[1].src[1]))
+          # vectorize the store/loadconst
+          if not is_load or len(new_src) >= 4:
+            new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
+          # generate the folded new_srcs
           if is_load:
-            # vectorize the const. if we flip const and gate it's nicer here too
-            if len(new_src) >= 4:
-              new_src[3] = UOp(UOps.VECTORIZE, load_1.dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[3] for i in range(fold_length)))
-            new_load = UOp(load_1.op, load_1.dtype.vec(fold_length), tuple(new_src), load_1.arg)
+            new_load = UOp(UOps.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
             for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
           else:
-            new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
-            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(load_1.op, None, tuple(new_src), load_1.arg) if i == 0 else None
+            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.STORE, None, tuple(new_src)) if i == 0 else None
           for i in range(fold_length): used.add((rootsrc,o+i))
 
   # dedup expand for LOAD
@@ -286,11 +286,11 @@ constant_folder = PatternMatcher([
   (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (NOp(UOps.VECTORIZE, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
-  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.const(dtypes.bool, True), NOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
-  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.const(dtypes.bool, True), NOp.cvar("var"), NOp.var("barrier")),
+  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.cvar("var"), NOp.const(dtypes.bool, True)), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
+  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.cvar("var"), NOp.const(dtypes.bool, True), NOp.var("barrier")),
    lambda buf,idx,var,barrier: UOp.load(buf, idx, barrier, dtype=var.dtype)),
-  (NOp.load(NOp.var(), NOp.var(), NOp.const(dtypes.bool, False), NOp.cvar("var")), lambda var: var),
-  (NOp.load(NOp.var(), NOp.var(), NOp.const(dtypes.bool, False), NOp.cvar("var"), NOp.var()), lambda var: var),
+  (NOp.load(NOp.var(), NOp.var(), NOp.cvar("var"), NOp.const(dtypes.bool, False)), lambda var: var),
+  (NOp.load(NOp.var(), NOp.var(), NOp.cvar("var"), NOp.const(dtypes.bool, False), NOp.var()), lambda var: var),
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("val"), NOp.const(dtypes.bool, True)), UOp.store),
   (NOp.store(NOp.var(), NOp.var(), NOp.var(), NOp.const(dtypes.bool, False)), lambda: UOp(UOps.NOOP)),
   # remove NOOPs from SINK

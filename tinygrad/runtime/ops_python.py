@@ -18,7 +18,7 @@ def _load(m, i):
   return m[i]
 
 def load(inp, j=0):
-  if len(inp) == 4: return [_load(m, x+j) if gate else default for m,x,gate,default in zip(*inp)]
+  if len(inp) == 4: return [_load(m, x+j) if gate else default for m,x,default,gate in zip(*inp)]
   return [_load(m, x+j) for m,x in zip(inp[0], inp[1])]
 
 def _store(m, i, v):
