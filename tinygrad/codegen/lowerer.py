@@ -157,7 +157,15 @@ class IndependentLowerer:
                   (x.arg.idx, x.arg.idx < self.output_count))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
-        return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype.scalar(), 0)) if has_valid else ()) + barrier)
+        base_dtype = x.arg.dtype.scalar()
+        if isinstance(x.arg.dtype, ImageDType):
+          # this should all simplify if there's consts for id4. if not, w/e
+          id4 = idx.src[2]
+          idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx.src[0], idx.src[1]))
+          vec_load = UOp(UOps.LOAD, base_dtype.vec(4), (buf, idx) + ((valid, UOp.const(base_dtype.vec(4), 0)) if has_valid else ()) + barrier)
+          return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, base_dtype, (vec_load,), i)),
+                                  range(4), UOp.const(base_dtype, float('nan')))
+        return UOp(UOps.LOAD, base_dtype, (buf, idx) + ((valid, UOp.const(base_dtype, 0)) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)
       if x.arg.idx >= 0:
         for oidx, ridx in zip(self.idxs, self.ridxs):

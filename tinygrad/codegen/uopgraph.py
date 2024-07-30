@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any
+from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict
 import functools, itertools, heapq, math
+from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, exec_alu
@@ -24,91 +25,64 @@ def image_contract_store(buf, ex, idx, idy, ls, var):
 
 # ***** float4 handling *****
 
-def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0), idx2=None, idx3=None):
-  if len(ex.src) not in [2, 4]: return None
-  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
-  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
-  if idx2 is not None: idx = idx + idx2
-  if idx3 is not None: idx = idx + idx3
-  if idx.divides(len(ex.src)) is None: return None
-
-  if load.dtype.scalar() != load.dtype: return None  # how does this happen?
-  vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
-  return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
-
-def float4_contract_store(buf, ex, var, store, idx=UOp.const(dtypes.int, 0), idx2=None, idx3=None):
-  if len(ex.src) not in [2, 4]: return None
-  if tuple(x.arg for x in ex.src if x.op is UOps.CONST) != tuple(range(len(ex.src))): return None
-  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
-  if idx2 is not None: idx = idx + idx2
-  if idx3 is not None: idx = idx + idx3
-  if idx.divides(len(ex.src)) is None: return None
-
-  new_var = UOp(UOps.CONTRACT, var.dtype.vec(len(ex.src)), (var,), ((ex.arg[0][0],len(ex.src)),))
-  return UOp(UOps.STORE, None, (buf, idx, new_var) + store.src[3:])
-
-def _get_offsets(new_srcs):
+def _get_offsets(new_srcs, is_image=False):
   root_src: Any = None
-  offsets = {}
+  offsets: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
-    idx = s.src[1]
-    if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: this_root_src, arg = idx.src[0], idx.src[1].arg
-    elif idx.op is UOps.CONST: this_root_src, arg = "CONST", idx.arg
-    else: this_root_src, arg = idx, 0
-    if root_src is not None and root_src != this_root_src: return None
-    if arg in offsets: return None  # different gates maybe?
-    root_src = this_root_src
-    offsets[arg] = i
+    if is_image and s.src[1].dtype != dtypes.int.vec(3): continue
+    idx = s.src[1] if not is_image else s.src[1].src[2]
+    if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
+    elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
+    else: root_src, arg = idx, 0
+    if is_image: root_src = (s.src[1].src[0:2], root_src)
+    # TODO: add gate to the root_src
+    if arg in offsets[root_src]: return None  # different gates maybe?
+    offsets[root_src][arg] = i
   return offsets
 
-def fold_expanded_load(ex, buf):
+def fold_expanded(ex, buf):
   if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   new_srcs = dedup(list(ex.src))
   old_new_srcs = new_srcs[:]
-  offsets = _get_offsets(new_srcs)
-  if offsets is None: return None
-  used = set()
-  for o in offsets:
-    for fold_length in [4, 2]:
-      if all(o+i not in used and o+i in offsets for i in range(fold_length)):
-        load_1 = new_srcs[offsets[o]]
-        assert load_1.dtype.count == 1
-        if not load_1.src[1].divides(fold_length): continue
-        folded = [new_srcs[offsets[o+i]] for i in range(fold_length)]
-        if len(load_1.src) >= 4:
-          if not all_same([x.src[2:3] for x in folded]): continue  # gate must be the same
+  is_load, is_image = new_srcs[0].op is UOps.LOAD, isinstance(buf.dtype, ImageDType)
+  offsets_rootsrc = _get_offsets(new_srcs, is_image)
+  if offsets_rootsrc is None or len(offsets_rootsrc) == 0: return None
+  did_rewrite = False
+  for offsets in offsets_rootsrc.values():
+    used = set()
+    for o in offsets:
+      for fold_length in [4, 2]:
+        if all(o+i not in used and o+i in offsets for i in range(fold_length)):
+          folded = [new_srcs[offsets[o+i]] for i in range(fold_length)]
+          load_1 = folded[0]
+          if not is_image and not load_1.src[1].divides(fold_length): continue
           new_src = list(load_1.src)
-          new_src[3] = UOp(UOps.VECTORIZE, load_1.dtype.vec(fold_length), tuple([x.src[3] for x in folded]))
-          new_load = UOp(load_1.op, load_1.dtype.vec(fold_length), tuple(new_src), load_1.arg)
-        else:
-          new_load = UOp(load_1.op, load_1.dtype.vec(fold_length), load_1.src, load_1.arg)
-        for i in range(fold_length):
-          new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
-          used.add(o+i)
-        break
-  if len(old_new_srcs) != len(ex.src): new_srcs = [new_srcs[old_new_srcs.index(s)] for s in ex.src]
-  return UOp(ex.op, ex.dtype, tuple(new_srcs), ex.arg) if len(used) else None
-
-def fold_expanded_store(ex, buf):
-  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
-  new_srcs = dedup(list(ex.src))
-  offsets = _get_offsets(new_srcs)
-  if offsets is None: return None
-  used = set()
-  for o in offsets:
-    for fold_length in [4, 2]:
-      if all(o+i not in used and o+i in offsets for i in range(fold_length)):
-        load_1 = new_srcs[offsets[o]]
-        if not load_1.src[1].divides(fold_length): continue
-        # TODO: test this
-        stores = UOp(UOps.VECTORIZE, load_1.src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
-        for i in range(0, fold_length):
-          new_srcs[offsets[o+i]] = None
-          used.add(o+i)
-        new_srcs[offsets[o]] = UOp(load_1.op, None, (load_1.src[0], load_1.src[1], stores), load_1.arg)
-        break
-  new_srcs = [x for x in new_srcs if x is not None]
-  return UOp(ex.op, ex.dtype, tuple(new_srcs), ex.arg) if len(used) else None
+          # for images, we rewrite the index
+          if is_image: new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_src[1].src[0], new_src[1].src[1]))
+          if is_load:
+            assert load_1.dtype.count == 1
+            if len(load_1.src) >= 4:
+              if not all_same([x.src[2:3] for x in folded]): continue  # gate must be the same
+              new_src[3] = UOp(UOps.VECTORIZE, load_1.dtype.vec(fold_length), tuple([x.src[3] for x in folded]))
+            new_load = UOp(load_1.op, load_1.dtype.vec(fold_length), tuple(new_src), load_1.arg)
+            for i in range(fold_length):
+              new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
+              used.add(o+i)
+          else:
+            stores = UOp(UOps.VECTORIZE, load_1.src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
+            for i in range(0, fold_length):
+              new_srcs[offsets[o+i]] = None
+              used.add(o+i)
+            new_srcs[offsets[o]] = UOp(load_1.op, None, tuple(new_src[0:2]) + (stores,), load_1.arg)
+          break
+    if len(used): did_rewrite = True
+  if is_load:
+    # dedup expand for LOAD
+    if len(old_new_srcs) != len(ex.src): new_srcs = [new_srcs[old_new_srcs.index(s)] for s in ex.src]
+  else:
+    # remove Nones for STORE
+    new_srcs = [x for x in new_srcs if x is not None]
+  return UOp(ex.op, ex.dtype, tuple(new_srcs), ex.arg) if did_rewrite else None
 
 def vectorize_reduce(vec:UOp):
   if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None
@@ -122,8 +96,8 @@ def vectorize_alu(vec:UOp):
   return ret
 
 float4_folding = PatternMatcher([
-  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded_load),
-  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat())), name="ex"), fold_expanded_store),
+  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat())), name="ex"), fold_expanded),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   (UPat(UOps.VECTORIZE, src=UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}), name="vec"), vectorize_alu),
 ])
@@ -270,7 +244,6 @@ constant_folder = PatternMatcher([
   # const rules
   (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const(c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
-  (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
   (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, name="acc"), NOp.var("acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
   (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),)), NOp.var("x"))), lambda x: x),
@@ -498,6 +471,8 @@ reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce_with_expand),
   # no ALU on vectorized dtypes
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
+  # VECTORIZE a CONST is a CONST (eventually remove this rule)
+  (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
 ])
 
 # *** uop graph ***
