@@ -475,7 +475,9 @@ class UOpGraph:
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
-    self.folder = constant_folder+gate_creator if opts is None or not opts.supports_float4 else (constant_folder+gate_creator+float4_folding)
+    # NOTE: gate folding must come after expand
+    gate_pms = gate_creator+gate_folder if opts is None or not opts.supports_float4 else gate_creator
+    self.folder = constant_folder+gate_pms if opts is None or not opts.supports_float4 else constant_folder+gate_pms+float4_folding
     if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
       self.folder = self.folder + transcendental_folding
 
@@ -513,10 +515,7 @@ class UOpGraph:
 
     # expand
     UOpGraph.cnt += 1
-    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, self.folder+expander)
-
-    # gate folding
-    sink = graph_rewrite(sink, self.folder+gate_folder)
+    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, self.folder+expander+gate_folder)
 
     # for PTX only
     if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
