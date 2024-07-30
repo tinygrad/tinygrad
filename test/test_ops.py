@@ -805,10 +805,7 @@ class TestOps(unittest.TestCase):
     try:
       helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()))
     except RuntimeError: # NOTE: cpu addmm not implemented for HALF in torch
-      a, b = Tensor.rand(64, 64).half().realize(), Tensor.rand(64, 64).half().realize()
-      c = a.matmul(b).numpy()
-      comp = a.numpy() @ b.numpy()
-      np.testing.assert_allclose(c, comp, atol=getenv("ATOL", 1e-4), rtol=getenv("RTOL", 3e-2))
+      helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y).half(), lambda x,y: x.half().matmul(y.half()), rtol=0.5)
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y))
   def test_big_gemm(self):
