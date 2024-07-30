@@ -360,9 +360,10 @@ def do_expand(root:UOp):
     assert len(expand_args) == (len(old_args) + len(root.arg))
     new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _choices_from_args(expand_args)]
   if root.op is UOps.IF:
-    # merge IFs into an OR
-    combined = functools.reduce(lambda x,y: x.src[0]|y.src[0], new_srcs)
-    new_srcs = [UOp(UOps.IF, src=(combined,)+u.src[0:]) for u in new_srcs]
+    # merge ifs into an or
+    combined_cond = functools.reduce(lambda x,y: x.src[0]|y.src[0], new_srcs)
+    barriers = tuple(x.src[1] for x in new_srcs)
+    new_srcs = [UOp(UOps.IF, src=(combined_cond,)+barriers) for _ in new_srcs]
   assert prod([x[1] for x in expand_args]) == len(new_srcs)
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
@@ -425,6 +426,12 @@ expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
 ])
 
+def simplify_gate(root:UOp) -> Optional[UOp]:
+  if len(root.src) == 3: return None
+  raise Exception(root)
+
+gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), simplify_gate)])
+
 # *** uop graph ***
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
@@ -453,6 +460,7 @@ class UOpGraph:
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
+    #self.folder = constant_folder+gate_folder if opts is None or not opts.supports_float4 else (constant_folder+float4_folding+gate_folder)
     self.folder = constant_folder if opts is None or not opts.supports_float4 else (constant_folder+float4_folding)
     if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
       self.folder = self.folder + transcendental_folding
