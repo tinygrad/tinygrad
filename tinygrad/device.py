@@ -289,6 +289,20 @@ class HWCommandQueue:
     return self
   def _update_wait(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
 
+  def bind(self, device:HCQCompiled):
+    """
+    Associates the queue with a specific device for optimized execution.
+
+    This optional method allows backend implementations to tailor the queue for efficient use on the given device. When implemented, it can eliminate
+    the need to copy queues into the device, thereby enhancing performance.
+
+    Args:
+      device: The target device for queue optimization.
+
+    Note:
+      Implementing this method is optional but recommended for performance gains.
+    """
+
   def submit(self, device:HCQCompiled):
     """
     Submits the command queue to a specific device for execution.
@@ -366,6 +380,8 @@ class HWCopyQueue(HWCommandQueue):
   def _update_copy(self, cmd_idx, dest, src): raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
+  def __init__(self, value:int=0): self._set_value(value)
+
   @property
   def value(self) -> int: return self._get_value()
 

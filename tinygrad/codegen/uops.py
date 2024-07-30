@@ -111,8 +111,11 @@ class UOp:
         return self.const(-self.src[0].vmax.arg), self.const(-self.src[0].vmin.arg)
       if self.arg is BinaryOps.ADD:
         return self.const(self.src[0].vmin.arg+self.src[1].vmin.arg), self.const(self.src[0].vmax.arg+self.src[1].vmax.arg)
-      if self.arg is BinaryOps.MUL and self.src[0].vmin.arg >= 0 and self.src[1].vmin.arg >= 0:
-        return self.const(self.src[0].vmin.arg*self.src[1].vmin.arg), self.const(self.src[0].vmax.arg*self.src[1].vmax.arg)
+      if self.arg is BinaryOps.MUL and (self.src[0].vmin.arg >= 0 or self.src[1].vmin.arg >= 0):
+        # handle at lease one is non-negative
+        Lmin, Lmax = (self.src[0].vmin.arg, self.src[0].vmax.arg) if self.src[1].vmin.arg >= 0 else (self.src[0].vmax.arg, self.src[0].vmin.arg)
+        Rmin, Rmax = (self.src[1].vmin.arg, self.src[1].vmax.arg) if self.src[0].vmin.arg >= 0 else (self.src[1].vmax.arg, self.src[1].vmin.arg)
+        return self.const(Lmin*Rmin), self.const(Lmax*Rmax)
       if self.arg is BinaryOps.MOD and self.src[1].op is UOps.CONST and self.src[1].arg > 0: return self.const(0), self.const(self.src[1].arg-1)
       if self.arg is BinaryOps.IDIV and self.src[1].op is UOps.CONST and self.src[1].arg > 0:
         return self.const(self.src[0].vmin.arg//self.src[1].arg), self.const(self.src[0].vmax.arg//self.src[1].arg)

@@ -57,8 +57,7 @@ class MultiLazyBuffer:
       self.bounds = list(zip(splits, splits[1:]))
 
   @property
-  def shape(self):
-    return tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape))
+  def shape(self): return tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape))
 
   @property
   def size(self): return sum(x.size for x in self.real_lbs)
@@ -66,8 +65,7 @@ class MultiLazyBuffer:
   @property
   def real_lbs(self): return [lb for lb,r in zip(self.lbs, self.real) if r]
 
-  def __repr__(self):
-    return f"<MLB {self.axis=} {self.real=} {chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
+  def __repr__(self): return f"<MLB {self.axis=} {self.real=} {chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
 
   @staticmethod
   def from_sharded(lb:LazyBuffer, devices:Tuple[str, ...], axis:Optional[int]=None):
