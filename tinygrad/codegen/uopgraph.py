@@ -59,10 +59,9 @@ def fold_expanded(ex, buf):
               used.add(o+i)
           else:
             stores = UOp(UOps.VECTORIZE, load_1.src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
-            for i in range(0, fold_length):
-              new_srcs[offsets[o+i]] = None
+            for i in range(fold_length):
+              new_srcs[offsets[o+i]] = UOp(load_1.op, None, tuple(new_src[0:2]) + (stores,), load_1.arg) if i == 0 else None
               used.add(o+i)
-            new_srcs[offsets[o]] = UOp(load_1.op, None, tuple(new_src[0:2]) + (stores,), load_1.arg)
           break
     if len(used): did_rewrite = True
   if is_load:
@@ -530,7 +529,7 @@ class UOpGraph:
     # expand
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
-      base = self.folder+expander+gate_creator
+      base = self.folder+gate_creator+expander
       sink = graph_rewrite(sink, base+float4_folding if self.opts is not None and self.opts.supports_float4 else base)
       sink = graph_rewrite(sink, self.folder+expander+reducer+gate_folder)
 
