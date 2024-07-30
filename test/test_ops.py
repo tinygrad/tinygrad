@@ -113,24 +113,24 @@ class TestOps(unittest.TestCase):
     ]
 
     for method in creation_methods:
-      with self.assertRaises(RuntimeError): method(-3, 2)
-      with self.assertRaises(RuntimeError): method((2, -3))
-      with self.assertRaises(RuntimeError): method((2, -3, 0))
+      with self.assertRaises(ValueError): method(-3, 2)
+      with self.assertRaises(ValueError): method((2, -3))
+      with self.assertRaises(ValueError): method((2, -3, 0))
 
   def test_negative_dims_full(self):
-    with self.assertRaises(RuntimeError): Tensor.full(-3, 2)
-    with self.assertRaises(RuntimeError): Tensor.full((2, -3), 4)
-    with self.assertRaises(RuntimeError): Tensor.full((2, -3, 0), 4)
+    with self.assertRaises(ValueError): Tensor.full(-3, 2)
+    with self.assertRaises(ValueError): Tensor.full((2, -3), 4)
+    with self.assertRaises(ValueError): Tensor.full((2, -3, 0), 4)
 
   def test_negative_dims_eye(self):
-    with self.assertRaises(RuntimeError): Tensor.eye(-3, 3)
-    with self.assertRaises(AssertionError): Tensor.eye(3, -3)
-    with self.assertRaises(RuntimeError): Tensor.eye(-3, -3)
+    with self.assertRaises(ValueError): Tensor.eye(-3, 3)
+    with self.assertRaises(ValueError): Tensor.eye(3, -3)
+    with self.assertRaises(ValueError): Tensor.eye(-3, -3)
 
   def test_negative_dims_kaiming(self):
     creation_methods = [Tensor.kaiming_uniform, Tensor.kaiming_normal]
     for method in creation_methods:
-      with self.assertRaises(RuntimeError): method(-3, 3)
+      with self.assertRaises(ValueError): method(-3, 3)
       with self.assertRaises(ValueError): method((-3, 3), 3)
       with self.assertRaises(ValueError): method((-3, -3), 3)
 
