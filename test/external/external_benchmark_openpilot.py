@@ -3,7 +3,7 @@ import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, dtypes, TinyJit
-from tinygrad.helpers import colored, fetch
+from tinygrad.helpers import GlobalCounters, colored, fetch
 from tinygrad.tensor import _from_np_dtype
 import numpy as np
 
@@ -25,6 +25,7 @@ if __name__ == "__main__":
   # benchmark
   tms = []
   for _ in range(5):
+    GlobalCounters.reset()
     st = time.perf_counter_ns()
     ret = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
     tms.append(time.perf_counter_ns() - st)
@@ -33,6 +34,7 @@ if __name__ == "__main__":
   tms = []
   run_onnx_jit = TinyJit(run_onnx)
   for _ in range(5):
+    GlobalCounters.reset()
     st = time.perf_counter_ns()
     ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     tms.append(time.perf_counter_ns() - st)
