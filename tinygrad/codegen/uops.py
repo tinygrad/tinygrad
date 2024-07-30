@@ -115,8 +115,11 @@ class UOp:
         return self.sconst(-self.src[0].vmax.arg), self.sconst(-self.src[0].vmin.arg)
       if self.arg is BinaryOps.ADD:
         return self.sconst(self.src[0].vmin.arg+self.src[1].vmin.arg), self.sconst(self.src[0].vmax.arg+self.src[1].vmax.arg)
-      if self.arg is BinaryOps.MUL and self.src[0].vmin.arg >= 0 and self.src[1].vmin.arg >= 0:
-        return self.sconst(self.src[0].vmin.arg*self.src[1].vmin.arg), self.sconst(self.src[0].vmax.arg*self.src[1].vmax.arg)
+      if self.arg is BinaryOps.MUL and (self.src[0].vmin.arg >= 0 or self.src[1].vmin.arg >= 0):
+        # handle at lease one is non-negative
+        Lmin, Lmax = (self.src[0].vmin.arg, self.src[0].vmax.arg) if self.src[1].vmin.arg >= 0 else (self.src[0].vmax.arg, self.src[0].vmin.arg)
+        Rmin, Rmax = (self.src[1].vmin.arg, self.src[1].vmax.arg) if self.src[0].vmin.arg >= 0 else (self.src[1].vmax.arg, self.src[1].vmin.arg)
+        return self.sconst(Lmin*Rmin), self.sconst(Lmax*Rmax)
       if self.arg is BinaryOps.MOD and self.src[1].op is UOps.CONST and self.src[1].arg > 0: return self.sconst(0), self.sconst(self.src[1].arg-1)
       if self.arg is BinaryOps.IDIV and self.src[1].op is UOps.CONST and self.src[1].arg > 0:
         return self.sconst(self.src[0].vmin.arg//self.src[1].arg), self.sconst(self.src[0].vmax.arg//self.src[1].arg)
@@ -204,8 +207,9 @@ def type_verify(uops):
     if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
     if uop is UOps.VECTORIZE:
       assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
-      assert dtype == src[0].dtype.vec(len(src)), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
+      assert all(dtype == x.dtype.vec(len(src)) for x in src), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
     if uop is UOps.LOAD and len(src) > 3 and src[2].op is UOps.ALU: assert src[2].dtype == dtypes.bool and src[3].dtype == dtype
+    if uop is UOps.GEP: assert dtype == src[0].dtype.scalar(), f"GEP of {src[0].dtype=} should be {src[0].dtype.scalar()} != {dtype}"
     if uop is UOps.STORE:
       assert dtype is None, f"{uop} dtype must be None, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"

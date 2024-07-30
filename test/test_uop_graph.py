@@ -2,9 +2,10 @@ import unittest
 from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
+from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
 from tinygrad.codegen.uops import UOps, UOp, NOp, PatternMatcher
-from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite
+from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite, expander, constant_folder
 
 simple_pm = PatternMatcher([
   (NOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -76,6 +77,19 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.src[1].op, UOps.CONST)
     self.assertEqual(nout.src[1].arg, 3.0)
 
+  def test_consts_go_last(self):
+    a = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('a', 0, 1))
+    b = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('b', 0, 1))
+    c = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('c', 0, 1))
+    d = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('d', 0, 1))
+    outs = [2+a, 2+a+d+3+b+c+4] #, UOp(UOps.ALU, a.dtype, src=(a.const(2),a), arg=BinaryOps.ADD)]
+    for out in outs:
+      sink = graph_rewrite(out, constant_folder)
+      print(sink)
+      self.assertEqual(sink.op, UOps.ALU)
+      self.assertEqual(sink.src[1].op, UOps.CONST)
+      self.assertEqual(len([x for x in sink.sparents if x.op is UOps.CONST]), 1)
+
 class TestUOpGraph(TestUOps):
   def test_add_constant_fold(self):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
@@ -135,10 +149,14 @@ class TestUOpGraph(TestUOps):
     d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, False))
     d2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (2, False))
     idx = UOp.const(dtypes.int, 0)
-    def _test_vec(geps):
-      vec = UOp(UOps.VECTORIZE, dtypes.float.vec(4), geps)
+    def _test_vec(geps, count=4):
+      vec = UOp(UOps.VECTORIZE, dtypes.float.vec(count), geps)
       out = UOp(UOps.STORE, None, (d0, idx, vec))
-      return UOpGraph([out]).uops[-1].src[-1]
+      g = UOpGraph([out])
+      if DEBUG >= 4:
+        from tinygrad import Device
+        print(Device[Device.DEFAULT].renderer.render("test", g))
+      return g.uops[-1].src[-1]
 
     # possible
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
@@ -154,6 +172,9 @@ class TestUOpGraph(TestUOps):
     val = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
     xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), i) for i in range(2))
     self.assertIs(_test_vec(xy+xy).op, UOps.VECTORIZE)
+    val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
+    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), i) for i in range(2))
+    self.assertIs(_test_vec(xy, count=2).op, UOps.VECTORIZE)
 
     # different vals
     val1 = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
@@ -346,7 +367,6 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
 def expander_rewrite(sink):
-  from tinygrad.codegen.uopgraph import expander, constant_folder
   together = PatternMatcher(expander.patterns + constant_folder.patterns)
   return graph_rewrite(sink, together)
   #out = UOpGraph(UOp(UOps.SINK, None, (sink,)))
