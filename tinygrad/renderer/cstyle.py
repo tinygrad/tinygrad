@@ -148,10 +148,17 @@ class CStyleLanguage(Renderer):
           bufs.append((args.expr, (dtype,False)))
           r[u] = args.expr
         elif uop is UOps.LOAD:
-          val = self.render_load(dtype, r[src[0]], src[0].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
+          if self.device in {"NV", "CUDA"} and dtype == dtypes.half.vec(8):
+            val = self.render_load(dtypes.int.vec(4), r[src[0]], PtrDType(dtypes.int), strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
+          else:
+            val = self.render_load(dtype, r[src[0]], src[0].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
           # NOTE: this relies on the load not happening if it's in the unselected branch
           if len(src) > 3 and src[3].op is UOps.ALU: val = self.code_for_op[TernaryOps.WHERE](r[src[3]], val, r[src[2]], dtype)
-          kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
+          if self.device in {"NV", "CUDA"} and dtype == dtypes.half.vec(8):
+            kk(f"{self.render_dtype(dtype)} {(rval:=ssa('val',u))};") # = *(half8*)(&({val}));")
+            kk(f"*((int4*)&{rval}) = {val};")
+          else:
+            kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
           kk(f"{r[src[0]]} = {r[src[1]]};")
           r[u] = r[src[0]]
@@ -177,7 +184,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
-          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
+          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 8 else f".{'xyzwabcd'[args]}")
         else: raise RuntimeError(f"failed to render {u}")
 
     return self.render_kernel(name, kernel, bufs, uops)
