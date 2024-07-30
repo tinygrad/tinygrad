@@ -2986,7 +2986,7 @@ class Tensor:
       if not (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
       if isinstance(self.lazydata, MultiLazyBuffer): raise RuntimeError("MultiLazyBuffer shape changing bitcast not yet supported")
       if not (s:= self.lazydata.st.real_strides()[-1]) == 1: raise RuntimeError(f"shape changing bitcast requires stride[-1] == 1 but have {s}")
-      if self.dtype.itemsize < dtype.itemsize and not all((stride*self.dtype.itemsize) % dtype.itemsize == 0 for stride in self.lazydata.st.real_strides()[:-1]):
+      if self.dtype.itemsize < dtype.itemsize and not all((stride * self.dtype.itemsize) % dtype.itemsize == 0 for stride in s[:-1]):
         raise RuntimeError("shape changing bitcast requires all strides to be divisible by ratio of dtype sizes")
 
       if not self.lazydata.can_view_bitcast():
