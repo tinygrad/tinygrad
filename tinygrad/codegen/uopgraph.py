@@ -361,9 +361,9 @@ def do_expand(root:UOp):
     new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _choices_from_args(expand_args)]
   if root.op is UOps.IF:
     # merge ifs into an or
-    combined_cond = functools.reduce(lambda x,y: x|y, dedup(x.src[0] for x in new_srcs))
+    conditions = functools.reduce(lambda x,y: x|y, dedup(x.src[0] for x in new_srcs if x.src[0].op is not UOps.CONST or x.src[0].arg != 0))
     barriers = tuple(set(x.src[1] for x in new_srcs))
-    new_srcs = [UOp(UOps.IF, src=(combined_cond,)+barriers) for _ in new_srcs]
+    new_srcs = [UOp(UOps.IF, src=(conditions,)+barriers) for _ in new_srcs]
   assert prod([x[1] for x in expand_args]) == len(new_srcs)
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
