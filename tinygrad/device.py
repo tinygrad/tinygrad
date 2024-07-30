@@ -25,6 +25,8 @@ class _Device:
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     return ret
+  @property
+  def default(self) -> Compiled: return self[self.DEFAULT]
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
@@ -287,6 +289,20 @@ class HWCommandQueue:
     return self
   def _update_wait(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
 
+  def bind(self, device:HCQCompiled):
+    """
+    Associates the queue with a specific device for optimized execution.
+
+    This optional method allows backend implementations to tailor the queue for efficient use on the given device. When implemented, it can eliminate
+    the need to copy queues into the device, thereby enhancing performance.
+
+    Args:
+      device: The target device for queue optimization.
+
+    Note:
+      Implementing this method is optional but recommended for performance gains.
+    """
+
   def submit(self, device:HCQCompiled):
     """
     Submits the command queue to a specific device for execution.
@@ -321,14 +337,14 @@ class HWComputeQueue(HWCommandQueue):
     self._exec(prg, kernargs, global_size, local_size)
   def _exec(self, prg, kernargs, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
-  def update_exec(self, cmd_idx:int, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+  def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
     """
     Updates a previously queued execution command.
 
     Args:
       cmd_idx: Index of the execution command to update
-      global_size: New global work size
-      local_size: New local work size
+      global_size: New global work size (if None, keeps the original)
+      local_size: New local work size (if None, keeps the original)
     """
     if self.cmds_meta[cmd_idx] != "exec": raise RuntimeError("called update_exec not on an exec command")
     self._update_exec(cmd_idx, global_size, local_size)
@@ -364,6 +380,8 @@ class HWCopyQueue(HWCommandQueue):
   def _update_copy(self, cmd_idx, dest, src): raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
+  def __init__(self, value:int=0): self._set_value(value)
+
   @property
   def value(self) -> int: return self._get_value()
 
@@ -416,28 +434,48 @@ class HCQProgram:
   def __init__(self, device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
     self.device, self.name, self.kernargs_alloc_size, self.kernargs_args_offset = device, name, kernargs_alloc_size, kernargs_args_offset
 
-  def fill_kernargs(self, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None):
+  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> int:
     """
-    Fills arguments for the kernel, optionally allocating space from device if kernargs_ptr is not set.
+    Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
+
+    Args:
+      bufs: Buffers to be written to kernel arguments.
+      vals: Values to be written to kernel arguments.
+      kernargs_ptr: Optional pointer to pre-allocated kernel arguments memory.
+
+    Returns:
+      Pointer to the filled kernel arguments.
     """
     self._fill_kernargs(ptr:=(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size)), bufs, vals)
     return ptr
-  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
+  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
 
-  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    kernargs_ptr = self.fill_kernargs(args, vals)
+  def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
+               vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
+    """
+    Enqueues the program for execution with the given arguments and dimensions.
+
+    Args:
+      bufs: Buffer arguments to execute the kernel with.
+      global_size: Specifies the global work size for kernel execution (equivalent to CUDA's grid size).
+      local_size: Specifies the local work size for kernel execution (equivalent to CUDA's block size).
+      vals: Value arguments to execute the kernel with.
+      wait: If True, waits for the kernel to complete execution.
+
+    Returns:
+      Execution time of the kernel if 'wait' is True, otherwise None.
+    """
 
     q = self.device.hw_compute_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
     with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-      q.exec(self, kernargs_ptr, global_size, local_size)
+      q.exec(self, self.fill_kernargs(bufs, vals), global_size, local_size)
 
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
 
-    if wait:
-      self.device.timeline_signal.wait(self.device.timeline_value - 1)
-      return (sig_en.timestamp - sig_st.timestamp) / 1e6
+    if wait: self.device.timeline_signal.wait(self.device.timeline_value - 1)
+    return ((sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class HCQCompiled(Compiled):
   """
