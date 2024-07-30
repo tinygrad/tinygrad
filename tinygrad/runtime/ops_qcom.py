@@ -33,7 +33,7 @@ def parse_cl_lib(lib: bytes, name:str):
   # parse argument buffers layout
   buffs_info = []
   ptr = struct.unpack("I", lib[0x110:0x114])[0] # read img desc offset
-  ptr += (344 + len(name) + 1) # skip to bufs descr
+  ptr = round_up(ptr + 344 + len(name), 4) # skip to bufs descr, align name to 4 bytes
   while (ptr + 16 < len(lib)):
     length, num, type, offset_words = struct.unpack("I" * 4, lib[ptr:ptr+16])
     if length == 0: break
