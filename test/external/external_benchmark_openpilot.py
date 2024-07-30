@@ -41,7 +41,6 @@ if __name__ == "__main__":
 
   # validate
   ort_options = ort.SessionOptions()
-  ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
   ort_options.log_severity_level = 3
   onnx_session = ort.InferenceSession(onnx_path, ort_options)
   onnx_output = onnx_session.run([onnx_model.graph.output[0].name], new_inputs_np)
