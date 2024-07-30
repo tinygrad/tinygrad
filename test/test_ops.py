@@ -1,5 +1,6 @@
 import time, math, unittest
 import numpy as np
+from typing import List, Callable
 import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad import Tensor, Device, dtypes
@@ -96,6 +97,42 @@ class TestOps(unittest.TestCase):
 
   def test_full(self):
     helper_test_op([], lambda: torch.full((45,65), 4, dtype=torch.int32), lambda: Tensor.full((45,65), 4), forward_only=True)
+
+  def test_negative_dims(self):
+    creation_methods: List[Callable[..., Tensor]] = [
+      Tensor.empty,
+      Tensor.rand,
+      Tensor.zeros,
+      Tensor.ones,
+      Tensor.randn,
+      Tensor.randint,
+      Tensor.normal,
+      Tensor.uniform,
+      Tensor.scaled_uniform,
+      Tensor.glorot_uniform
+    ]
+
+    for method in creation_methods:
+      with self.assertRaises(RuntimeError): method(-3, 2)
+      with self.assertRaises(RuntimeError): method((2, -3))
+      with self.assertRaises(RuntimeError): method((2, -3, 0))
+
+  def test_negative_dims_full(self):
+    with self.assertRaises(RuntimeError): Tensor.full(-3, 2)
+    with self.assertRaises(RuntimeError): Tensor.full((2, -3), 4)
+    with self.assertRaises(RuntimeError): Tensor.full((2, -3, 0), 4)
+
+  def test_negative_dims_eye(self):
+    with self.assertRaises(RuntimeError): Tensor.eye(-3, 3)
+    with self.assertRaises(AssertionError): Tensor.eye(3, -3)
+    with self.assertRaises(RuntimeError): Tensor.eye(-3, -3)
+
+  def test_negative_dims_kaiming(self):
+    creation_methods = [Tensor.kaiming_uniform, Tensor.kaiming_normal]
+    for method in creation_methods:
+      with self.assertRaises(RuntimeError): method(-3, 3)
+      with self.assertRaises(ValueError): method((-3, 3), 3)
+      with self.assertRaises(ValueError): method((-3, -3), 3)
 
   def test_zeros(self):
     helper_test_op([], lambda: torch.zeros(45,65), lambda: Tensor.zeros(45,65), forward_only=True)
