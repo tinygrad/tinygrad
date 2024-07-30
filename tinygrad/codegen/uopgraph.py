@@ -428,17 +428,11 @@ expander = PatternMatcher([
 ])
 
 def simplify_gate(root:UOp) -> Optional[UOp]:
-  if len(root.src) == 3: return None
-  gate = None
   @functools.lru_cache(None)
-  def _find_gate(x:UOp) -> Optional[UOp]:
+  def find_gate(x:UOp) -> Optional[UOp]:
     if x.op is UOps.IF: return x
-    for s in x.src:
-      if (ret:=_find_gate(s)) is not None: return ret
-  gate = _find_gate(root)
-  assert gate is not None
-  if gate.src[0] is root.src[3]: return replace(root, src=root.src[:3])
-  return None
+    return next((ret for s in x.src if (ret := find_gate(s)) is not None), None)
+  return replace(root, src=root.src[:3]) if len(root.src) == 4 and (gate:=find_gate(root)) is not None and gate.src[0] is root.src[3] else None
 
 gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), simplify_gate)])
 
