@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
   # benchmark
   tms = []
-  for _ in range(10):
+  for _ in range(5):
     st = time.perf_counter_ns()
     ret = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
     tms.append(time.perf_counter_ns() - st)
@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
   tms = []
   run_onnx_jit = TinyJit(run_onnx)
-  for _ in range(10):
+  for _ in range(5):
     st = time.perf_counter_ns()
     ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     tms.append(time.perf_counter_ns() - st)
