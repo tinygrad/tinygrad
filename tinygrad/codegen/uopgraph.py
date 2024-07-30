@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import replace
 from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING
 import functools, itertools, heapq, math
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
@@ -428,7 +429,16 @@ expander = PatternMatcher([
 
 def simplify_gate(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3: return None
-  raise Exception(root)
+  gate = None
+  @functools.lru_cache(None)
+  def _find_gate(x:UOp) -> Optional[UOp]:
+    if x.op is UOps.IF: return x
+    for s in x.src:
+      if (ret:=_find_gate(s)) is not None: return ret
+  gate = _find_gate(root)
+  assert gate is not None
+  if gate.src[0] is root.src[3]: return replace(root, src=root.src[:3])
+  return None
 
 gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), simplify_gate)])
 
@@ -460,7 +470,6 @@ class UOpGraph:
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
-    #self.folder = constant_folder+gate_folder if opts is None or not opts.supports_float4 else (constant_folder+float4_folding+gate_folder)
     self.folder = constant_folder if opts is None or not opts.supports_float4 else (constant_folder+float4_folding)
     if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
       self.folder = self.folder + transcendental_folding
@@ -515,7 +524,8 @@ class UOpGraph:
 
     # expand
     UOpGraph.cnt += 1
-    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, self.folder+expander)
+    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, self.folder+expander+gate_folder)
+    else: sink = graph_rewrite(sink, self.folder+gate_folder)
 
     # for PTX only
     if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
