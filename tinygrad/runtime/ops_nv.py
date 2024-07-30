@@ -19,14 +19,14 @@ def nv_iowr(fd, nr, args):
 
 def rm_alloc(fd, clss, root, parant, params):
   made = nv_gpu.NVOS21_PARAMETERS(hRoot=root, hObjectParent=parant, hClass=clss,
-                                  pAllocParms=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params is not None else None) # type: ignore
+                                  pAllocParms=ctypes.cast(ctypes.byref(params), ctypes.c_void_p) if params is not None else None)
   nv_iowr(fd, nv_gpu.NV_ESC_RM_ALLOC, made)
   if made.status != 0: raise RuntimeError(f"rm_alloc returned {made.status}: {nv_gpu.nv_status_codes.get(made.status, 'Unknown error')}")
   return made
 
 def rm_control(cmd, sttyp, fd, client, obj, **kwargs):
   made = nv_gpu.NVOS54_PARAMETERS(hClient=client, hObject=obj, cmd=cmd, paramsSize=ctypes.sizeof(params:=sttyp(**kwargs)),
-                                  params=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params is not None else None) # type: ignore
+                                  params=ctypes.cast(ctypes.byref(params), ctypes.c_void_p) if params is not None else None)
   nv_iowr(fd, nv_gpu.NV_ESC_RM_CONTROL, made)
   if made.status != 0: raise RuntimeError(f"rm_control returned {made.status}: {nv_gpu.nv_status_codes.get(made.status, 'Unknown error')}")
   return params
