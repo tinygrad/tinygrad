@@ -40,7 +40,6 @@ if __name__ == "__main__":
     tms.append(time.perf_counter_ns() - st)
   print(f"jitted: {min(tms)*1e-6:7.2f} ms")
 
-  tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
-
+  # tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
   # np.testing.assert_allclose(ort_out, tinygrad_out, atol=2e-3, rtol=1e-2)
   # print(colored("outputs validated!", "green"))
