@@ -607,7 +607,6 @@ class TestLinearizer(unittest.TestCase):
     assert accs[0].dtype == stores[0].src[-1].dtype == dtypes.float.vec(4)
     assert stores[0].src[0].op is UOps.DEFINE_LOCAL
     # the second store is to gds with no upcasts
-    #assert accs[1].dtype == stores[1].src[2].dtype == dtypes.float
     assert stores[1].src[2].dtype == dtypes.float
     assert stores[1].src[0].op is UOps.DEFINE_GLOBAL
 
@@ -1092,6 +1091,7 @@ class TestFloat4(unittest.TestCase):
     # the first conv dot product is aligned in a. If we upcast the output and reduce
     # dimension, then we could do float4 for only that one set of loads, but we currently
     # don't.
+    # UPDATE: now we do this fusion
 
     s = create_schedule([c.lazydata])[0]
     k = Kernel(s.ast)
@@ -1099,10 +1099,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    #assert TestFloat4.count_float4(k) == (0, 1)
-
-    # NOTE: this is different now
-    assert TestFloat4.count_float4(k)[1] == 1
+    assert TestFloat4.count_float4(k) in {(0,1), (1,1)}
 
   def test_float4_noncontiguous(self):
     a = Tensor.rand(4, 2).realize()

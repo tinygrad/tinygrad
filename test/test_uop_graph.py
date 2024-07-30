@@ -233,7 +233,7 @@ class TestUOpGraph(TestUOps):
     idx = UOp.const(dtypes.int, 0)
     ld0 = UOp(UOps.LOAD, dtypes.int, (glbl1, idx, UOp.const(dtypes.bool, False), UOp.const(dtypes.int, 2)))
     ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.bool, True), UOp.const(dtypes.int, 3)))
-    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, ld0+ld1))])
+    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     uops.print()
     # ld0 becomes the invalid value
@@ -249,7 +249,7 @@ class TestUOpGraph(TestUOps):
     barrier = UOp(UOps.BARRIER, None, (st, ))
     ld0 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+1, UOp.const(dtypes.bool, False), UOp.const(dtypes.int, 2), barrier))
     ld1 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+2, UOp.const(dtypes.bool, True), UOp.const(dtypes.int, 3), barrier))
-    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, lidx, ld0+ld1))])
+    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, lidx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
     self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
