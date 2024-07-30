@@ -359,6 +359,10 @@ def do_expand(root:UOp):
     expand_args, old_args = tuple(sorted(root.arg+expand_args)), expand_args
     assert len(expand_args) == (len(old_args) + len(root.arg))
     new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _choices_from_args(expand_args)]
+  if root.op is UOps.IF:
+    # merge IFs into an OR
+    combined = functools.reduce(lambda x,y: x.src[0]|y.src[0], new_srcs)
+    new_srcs = [UOp(UOps.IF, src=(combined,)+u.src[0:]) for u in new_srcs]
   assert prod([x[1] for x in expand_args]) == len(new_srcs)
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
@@ -489,7 +493,7 @@ class UOpGraph:
         if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
         return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
       if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src:
-        if u.op is UOps.STORE and u.src[3] is gate: replace_source = replace_source[:3]
+        #if u.op is UOps.STORE and u.src[3] is gate: replace_source = replace_source[:3]
         return UOp(u.op, u.dtype, replace_source, u.arg)
       return u
     sink_srcs = list(self.sink.src)
