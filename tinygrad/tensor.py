@@ -525,6 +525,7 @@ class Tensor:
     print(Tensor.eye(2, 4).numpy())
     ```
     """
+    if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
     return Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)._slice((None,(0,n if m is None else m)))
 
   def full_like(self, fill_value:ConstType, **kwargs):
