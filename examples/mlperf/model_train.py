@@ -4,7 +4,7 @@ from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
@@ -351,11 +351,9 @@ def train_unet3d():
   from examples.mlperf.dataloader import batch_load_unet3d
   from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference, preprocess_dataset, BASEDIR
-  from tinygrad import Device, Tensor, GlobalCounters, Context
+  from tinygrad import Context
   from tinygrad.nn.optim import SGD
   from math import ceil
-
-  import time
 
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   for x in GPUS: Device[x]
@@ -389,6 +387,7 @@ def train_unet3d():
     "train_beam": TRAIN_BEAM,
     "eval_beam": EVAL_BEAM,
     "wino": WINO.value,
+    "fuse_conv_bw": FUSE_CONV_BW.value,
     "gpus": GPUS,
     "default_float": dtypes.default_float.name
   }
@@ -517,8 +516,6 @@ def train_unet3d():
 
     with Context(BEAM=EVAL_BEAM):
       if epoch == next_eval_at:
-        train_step.reset()
-
         next_eval_at += evaluate_every
         eval_loss = []
         scores = []
