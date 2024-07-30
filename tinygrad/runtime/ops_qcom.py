@@ -42,9 +42,10 @@ def parse_cl_lib(lib: bytes, name:str):
 
   # parse constants layout
   consts_info = []
-  ptr = struct.unpack("I", lib[0xb0:0xb4])[0] # read kernel desc offset
-  ptr += 200
+  ptr = struct.unpack("I", lib[0xb0:0xb4])[0]
+  # check for consts
   if ptr != 0:
+    ptr = struct.unpack("I", lib[0xac:0xb0])[0] # read consts desc offset
     # constant vals are placed just before a shader
     while (ptr + 40 < image_offset):
       cnst, offset_words = struct.unpack("I", lib[ptr:ptr+4])[0], struct.unpack("I", lib[ptr+16:ptr+20])[0]
