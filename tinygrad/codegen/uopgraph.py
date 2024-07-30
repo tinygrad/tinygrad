@@ -491,6 +491,9 @@ class UOpGraph:
       if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src:
         if u.op is UOps.STORE and u.src[3] is gate: replace_source = replace_source[:3]
         return UOp(u.op, u.dtype, replace_source, u.arg)
+      if u.op is UOps.STORE and u.src[3] is gate:
+        if_uop = UOp(UOps.IF, None, (gate,))
+        return UOp(UOps.STORE, u.dtype, u.src[:3] + (if_uop,), u.arg)
       return u
     sink_srcs = list(self.sink.src)
     for i, s in enumerate(sink_srcs):
@@ -553,6 +556,11 @@ class UOpGraph:
 
     # end scopes in toposort order
     for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+
+    # fix conditional stores by removing the condition if it's a IF (now that the store is between the IF and ENDIF)
+    for i, u in enumerate(self._uops):
+      if u.op is UOps.STORE and len(u.src) == 4 and u.src[3].op is UOps.IF:
+        self._uops[i] = UOp(UOps.STORE, u.dtype, u.src[:3], u.arg)
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
