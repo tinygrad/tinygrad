@@ -427,7 +427,7 @@ expander = PatternMatcher([
 ])
 
 def create_gate(root:UOp) -> Optional[UOp]:
-  if len(root.src) == 3: return
+  if len(root.src) == 3: return None
   @functools.lru_cache(None)
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
@@ -437,7 +437,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
     return u
   return ret if (ret:=_gate_srcs(root, root.src[3])) is not root else None
 
-gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), create_gate)])
+gate_creator = PatternMatcher([(NOp(UOps.STORE, name="root"), create_gate)])
 
 # *** uop graph ***
 
@@ -467,7 +467,7 @@ class UOpGraph:
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
-    self.folder = constant_folder+gate_folder if opts is None or not opts.supports_float4 else (constant_folder+gate_folder+float4_folding)
+    self.folder = constant_folder+gate_creator if opts is None or not opts.supports_float4 else (constant_folder+gate_creator+float4_folding)
     if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
       self.folder = self.folder + transcendental_folding
 
@@ -505,7 +505,7 @@ class UOpGraph:
 
     # expand
     UOpGraph.cnt += 1
-    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, self.folder+expander+gate_folder)
+    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, self.folder+expander)
 
     # for PTX only
     if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
