@@ -42,7 +42,7 @@ class CStyleLanguage(Renderer):
   def render_vectorize(self, x:List[str], var_dtype:DType) -> str:
     assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
-    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
+    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}" + (f"{{{','.join(x)}}}" if self.device == "CLANG" else f"({','.join(x)})")
 
   # returns a str expression of the const with the given type
   def render_const(self, x:ConstType, dtype:DType) -> str:
@@ -178,16 +178,13 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
-          index = (f"{'.data' if self.device == 'CLANG' and AMX else ''}[{args}]" if src[0].dtype.count > 4 else f".{'xyzw'[args]}")
-          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + index
+          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + f"[{args}]" if src[0].dtype.count>4 or self.device=='CLANG' else f".{'xyzw'[args]}"
         else: raise RuntimeError(f"failed to render {u}")
 
     return self.render_kernel(name, kernel, bufs, uops)
 
 def _make_clang_dtype(dtype):
-  vec, elems, header = dtype.name, ', '.join(_nms[:dtype.count]), ', '.join([f"{dtype.scalar().name} {x}" for x in _nms[:dtype.count]])
-  if dtype.count > 16: return f"""typedef struct {{ {dtype.scalar().name} data[{dtype.count}]; }} {vec};"""
-  return f"""typedef struct {{ union {{ struct {{ {dtype.scalar().name} {elems}; }}; {dtype.scalar().name} data[{dtype.count}]; }}; }} {vec};\n{vec} make_{vec}({header}) {{ {vec} r={{{{{{{elems}}}}}}}; return r; }}"""  #noqa: E501
+  return f"typedef {dtype.scalar().name} {dtype.name} __attribute__((vector_size({dtype.count*dtype.scalar().itemsize})));"
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
@@ -201,7 +198,7 @@ class ClangRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   if AMX:
-    float4 = "make_float4"
+    float4 = "(float4)"
     tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [64])]
     tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types]
 
