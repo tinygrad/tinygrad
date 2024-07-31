@@ -255,12 +255,25 @@ class TestBitCast(unittest.TestCase):
       # should fail because backprop through bitcast is undefined
       Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True).bitcast(dtypes.float16)
 
+    with self.assertRaises(RuntimeError):
+      # should fail because data cannot be combined across shards
+      Tensor.empty((8,), dtype=dtypes.int8).shard((Device.DEFAULT, "PYTHON"), axis=0).bitcast(dtypes.int64)
+
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_shape_change_bitcast_non_contiguous(self, dt1, dt2):
     if dt1 == dtypes.bool or dt2 == dtypes.bool or not is_dtype_supported(dt1) or not is_dtype_supported(dt2) or dt2 == dtypes.bfloat16: return
     data = rand_for_dtype(dt1, 16)
     t = Tensor(data).reshape(2, 1, 8).permute(1, 0, 2)
     tnp = np.array(data).reshape(2, 1, 8).transpose(1, 0, 2)
+    np.testing.assert_allclose(t.bitcast(dt2).numpy(), tnp.view(_to_np_dtype(dt2)))
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_shape_change_bitcast_non_contiguous_sharded(self, dt1, dt2):
+    if dt1 == dtypes.bool or dt2 == dtypes.bool or not is_dtype_supported(dt1) or not is_dtype_supported(dt2) or dt2 == dtypes.bfloat16: return
+    if not is_dtype_supported(dt1, 'PYTHON') or not is_dtype_supported(dt2, 'PYTHON'): return
+    data = rand_for_dtype(dt1, 32)
+    t = Tensor(data).reshape(2, 1, 16).permute(1, 0, 2).shard((Device.DEFAULT, 'PYTHON'), axis=-1)
+    tnp = np.array(data).reshape(2, 1, 16).transpose(1, 0, 2)
     np.testing.assert_allclose(t.bitcast(dt2).numpy(), tnp.view(_to_np_dtype(dt2)))
 
   def test_bitcast_float_to_int32(self):
