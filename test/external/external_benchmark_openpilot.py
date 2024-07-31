@@ -27,7 +27,7 @@ if __name__ == "__main__":
   for _ in range(5):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    ret = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
+    ret = next(iter(run_onnx(new_inputs).values())).realize()
     tms.append(time.perf_counter_ns() - st)
   print(f"unjitted: {min(tms)*1e-6:7.2f} ms")
 
@@ -36,7 +36,7 @@ if __name__ == "__main__":
   for _ in range(5):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
+    ret = next(iter(run_onnx_jit(new_inputs).values())).realize()
     tms.append(time.perf_counter_ns() - st)
   print(f"jitted: {min(tms)*1e-6:7.2f} ms")
 
