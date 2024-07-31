@@ -37,8 +37,8 @@ def test(devs: List[str], N: int, iters:int = 10):
 
   return (gflops/iters, gbs/iters, secs/iters)
 
-def run(sz, iters=10):
-  dev, n_gpus = Device.DEFAULT, getenv("GPUS", 6) # number of gpus
+def run(sz, n_gpus=6, iters=10):
+  dev = Device.DEFAULT
   devs = tuple([f"{dev}:{x}" for x in range(n_gpus)])
   N = sz // 4 # float32 is 4 bytes
 
@@ -49,11 +49,13 @@ def run(sz, iters=10):
   return (ring_gflops, ring_gbs, ring_secs), (naive_gflops, naive_gbs, naive_secs)
 
 def main():
+  n_gpus = getenv("GPUS", 6)
+
   if getenv("BENCHMARK_SPLIT"):
     l, r = 0, 512
     while r - l > 1:
       m = (l + r) // 2
-      (ring_gflops, ring_gbs, ring_secs), (naive_gflops, naive_gbs, naive_secs) = run(m * 1024 * 4, iters=100)
+      (ring_gflops, ring_gbs, ring_secs), (naive_gflops, naive_gbs, naive_secs) = run(m * 1024 * 4, n_gpus=n_gpus, iters=100)
       if ring_secs > naive_secs: l = m
       else: r = m
     print("Better split", r * 1024, "elements")
