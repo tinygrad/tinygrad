@@ -437,7 +437,7 @@ class TestLinearizerFailures(unittest.TestCase):
                 LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=4, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),
           LazyOp(UnaryOps.RECIP, arg=None, src=(
             LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=5, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),)),))
-    opts = [Opt(op=OptOps.UPCAST, axis=0, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=32)]
+    opts = [Opt(op=OptOps.UPCAST, axis=0, amt=2)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
 if __name__ == '__main__':
