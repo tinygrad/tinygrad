@@ -227,7 +227,9 @@ class LLaMa:
       if isinstance(device, tuple):
         for k,v in nn.state.get_state_dict(model).items():
           if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-          elif '.attention.' in k: v.shard_(device, axis=-1)
+          elif '.attention.' in k:
+            if getenv("SHARD_KVCACHE") and ('.wq.' in k or '.wk.' in k or '.wv.' in k): v.shard_(device, axis=0)
+            else: v.shard_(device, axis=-1)
           elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
           elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
           elif '.feed_forward.' in k: v.shard_(device, axis=-1)
