@@ -390,7 +390,7 @@ class TestLinearizerFailures(unittest.TestCase):
     for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
     self.assertLessEqual(len(ifs[0].src[0].sparents), 16)
 
-  @unittest.expectedFailure
+  @unittest.skip("this is an invalid lazyop")
   def test_failure_45(self):
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
       LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 3, 1, 1, 1), strides=(3, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))), src=(
