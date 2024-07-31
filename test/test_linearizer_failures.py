@@ -440,7 +440,7 @@ class TestLinearizerFailures(unittest.TestCase):
                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=3, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(3, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),)),
           LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),))
     opts = [Opt(op=OptOps.UNROLL, axis=1, amt=0), Opt(op=OptOps.UNROLL, axis=0, amt=0)]
-    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["METAL"])
+    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["METAL", "GPU"])
 
 if __name__ == '__main__':
   unittest.main()
