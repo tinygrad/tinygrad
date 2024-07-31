@@ -2998,13 +2998,13 @@ class Tensor:
     if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
     if dtype.itemsize != self.dtype.itemsize:
       if isinstance(self.lazydata, MultiLazyBuffer):
-        new_lbs = [Tensor(lb, device=lb.device).bitcast(dtype).lazydata for lb in self.lazydata.real_lbs]
+        new_lbs = [Tensor(lb, device=lb.device).bitcast(dtype).lazydata.lbs[0] for lb in self.lazydata.real_lbs]
         return Tensor(MultiLazyBuffer(new_lbs, self.lazydata.axis), device=self.device)
 
       if not all_int(self.shape): raise RuntimeError("shape changing bitcast with symbolic shape isn't supported yet")
       if not (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
       if not ((s:= self.lazydata.st.real_strides())[-1]) == 1: raise RuntimeError("shape changing bitcast requires final stride of 1")
-      if self.dtype.itemsize < dtype.itemsize and not all((stride * self.dtype.itemsize) % dtype.itemsize == 0 for stride in s[:-1]):
+      if self.dtype.itemsize < dtype.itemsize and not all((st * self.dtype.itemsize) % dtype.itemsize == 0 if st else False for st in s[:-1]):
         raise RuntimeError("shape changing bitcast requires all strides to be divisible by ratio of dtype sizes")
 
       if not self.lazydata.can_view_bitcast():
