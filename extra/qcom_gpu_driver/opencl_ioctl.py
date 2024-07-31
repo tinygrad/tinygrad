@@ -1,7 +1,7 @@
 import ctypes, ctypes.util, struct, fcntl, re
 from hexdump import hexdump
-from tinygrad.runtime.ops_gpu import CLDevice, CLAllocator
 import pathlib, sys
+from tinygrad.helpers import to_mv
 sys.path.append(pathlib.Path(__file__).parent.parent.parent.as_posix())
 
 ops = {}
@@ -44,6 +44,8 @@ def get_mem(addr, vlen):
   for k,v in mmaped.items():
     if k <= addr and addr < k+len(v):
       return v[addr-k:addr-k+vlen]
+  # hope it was mmapped by someone else
+  return bytes(to_mv(addr, vlen))
 
 def hprint(vals):
   ret = []
@@ -60,11 +62,11 @@ def parse_cmd_buf(dat):
   while ptr < len(dat):
     cmd = struct.unpack("I", dat[ptr:ptr+4])[0]
     if (cmd>>24) == 0x70:
-      # packet with opcode and opcode specific payload (replace pkt3)
+      # packet with opcode and opcode specific payload (replace pkt3 starting with a5xx)
       opcode, size = ((cmd>>16)&0x7F), cmd&0x3FFF
       vals = struct.unpack("I"*size, dat[ptr+4:ptr+4+4*size])
       print(f"{ptr:3X} -- typ 7: {size=:3d}, {opcode=:#x} {ops[opcode]}", hprint(vals))
-      if ops[opcode] == "CP_LOAD_STATE6_FRAG":
+      if ops[opcode] == "CP_LOAD_STATE6_FRAG": # for compute shaders CP_LOAD_STATE6_FRAG is used
         dst_off = vals[0] & 0x3FFF
         state_type = (vals[0]>>14) & 0x3
         state_src = (vals[0]>>16) & 0x3
@@ -76,9 +78,13 @@ def parse_cmd_buf(dat):
         if state_type == ST6_SHADER: disasm_raw(get_mem(((vals[2] << 32) | vals[1]), 0x180))
         if state_type == ST6_CONSTANTS: hexdump(get_mem(((vals[2] << 32) | vals[1]), min(0x180, num_unit*4)))
         pass
+      elif ops[opcode] == "CP_REG_TO_MEM":
+        reg, cnt, b64, accum = vals[0] & 0x3FFFF, (vals[0] >> 18) & 0xFFF, (vals[0] >> 30) & 0x1, (vals[0] >> 31) & 0x1
+        dest = vals[1] | (vals[2] << 32)
+        print(f"{reg=} {cnt=} {b64=} {accum=} {dest=:#x}")
       ptr += 4*size
     elif (cmd>>28) == 0x4:
-      # write one or more registers (replace pkt0)
+      # write one or more registers (replace pkt0 starting with a5xx)
       offset, size = ((cmd>>8)&0x7FFFF), cmd&0x7F
       vals = struct.unpack("I"*size, dat[ptr+4:ptr+4+4*size])
       print(f"{ptr:3X} -- typ 4: {size=:3d}, {offset=:#x}", hprint(vals))
@@ -100,7 +106,7 @@ def ioctl(fd, request, argp):
       mmaped[s.gpuaddr] = mmap.mmap(fd, s.size, offset=s.id*0x1000)
     if name == "IOCTL_KGSL_GPU_COMMAND":
       for i in range(s.numcmds):
-        cmd = get_struct(s.cmdlist+s.cmdsize*i, msm_kgsl.struct_kgsl_command_object)
+        cmd = get_struct(s.cmdlist+ctypes.sizeof(msm_kgsl.struct_kgsl_command_object)*i, msm_kgsl.struct_kgsl_command_object)
         print(f"cmd {i}:", format_struct(cmd))
         #hexdump(get_mem(cmd.gpuaddr, cmd.size))
         parse_cmd_buf(get_mem(cmd.gpuaddr, cmd.size))
@@ -131,41 +137,3 @@ def install_hook(c_function, python_function):
 
 libc = ctypes.CDLL(ctypes.util.find_library("libc"))
 install_hook(libc.ioctl, ioctl)
-
-"""
-print("***** init device")
-dev = CLDevice()
-print("***** alloc")
-alloc = CLAllocator(dev)
-a = alloc._alloc(16)
-#alloc._alloc(0x2000)
-ba = bytearray(b"hello")
-print(f"***** copyin {ctypes.addressof((ctypes.c_char * len(ba)).from_buffer(ba)):#x}")
-alloc.copyin(a, memoryview(ba))
-dev.synchronize()
-print("***** copyout")
-mv2 = memoryview(bytearray(b"nopeo"))
-alloc.copyout(mv2, a)
-dev.synchronize()
-print("***** done", bytes(mv2))
-exit(0)
-"""
-
-print("***** import tinygrad")
-from tinygrad import Tensor, Device, TinyJit
-print("***** access GPU")
-dev = Device["GPU"]
-print("***** create tensor a")
-a = Tensor([1.,2.]*200).realize()
-print("***** create tensor b")
-b = Tensor([3.,4.]*200).realize()
-@TinyJit
-def add(a, b): return (a+b).realize()
-for i in range(4):
-  print(f"***** add tensors {i}")
-  c = add(a, b)
-  #dev.synchronize()
-  c = add(b, a)
-  dev.synchronize()
-#print("***** copy out")
-#print(c.numpy())

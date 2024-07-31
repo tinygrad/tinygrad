@@ -176,16 +176,16 @@ class PTXRenderer(Renderer):
           assert src[0].dtype == dtypes.int64, "load isn't int64"
           assert src[1].op is UOps.CONST, f"load isn't const {u}"
           mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
-          has_gate = len(src) > 3 and src[2].op is UOps.ALU
+          has_gate = len(src) > 3 and src[3].op is UOps.ALU
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
             if has_gate:
               for v in r[u]: kk(f"mov.{self.mem_types[dtype.scalar()]} {v}, {render_val(0, dtype.scalar())};")
-            kk((f"@{r[src[2]]}"if has_gate else "")
+            kk((f"@{r[src[3]]}"if has_gate else "")
               + f" ld{mem_type}.v{dtype.count}.{self.mem_types[dtype.scalar()]} {{{', '.join(r[u])}}}, [{r[src[0]]}+{src[1].arg}];")
           else:
-            kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[2]] if has_gate else None,
-                                alt=r[src[3]] if has_gate else None, ss=mem_type, offset=src[1].arg))
+            kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[3]] if has_gate else None,
+                                alt=r[src[2]] if has_gate else None, ss=mem_type, offset=src[1].arg))
         elif uop is UOps.PHI:
           if dtype.count > 1:
             for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
@@ -239,7 +239,7 @@ ptx_matcher = PatternMatcher([
   (UPat(UOps.ALU, name="x", dtype=dtypes.bool, arg=BinaryOps.MAX),
     lambda x: UOp(UOps.ALU, dtypes.uint8, tuple(s.cast(dtypes.uint8) for s in x.src), x.arg).cast(dtypes.bool)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat(name="x"),UPat(name="y"),UPat(name="z"),UPat(name="k"))),
-    lambda root,x,y,z,k: UOp(root.op, dtypes.uint8, (x,y,z,k.cast(dtypes.uint8))).cast(dtypes.bool)),
+    lambda root,x,y,z,k: UOp(root.op, dtypes.uint8, (x,y,z.cast(dtypes.uint8),k)).cast(dtypes.bool)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat(),UPat())),
     lambda root: UOp(root.op, dtypes.uint8, root.src, root.arg).cast(dtypes.bool)),
   (UPat(UOps.STORE, name="root", src=(UPat(),UPat(),UPat(name="z",dtype=dtypes.bool), UPat())),

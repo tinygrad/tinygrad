@@ -125,6 +125,7 @@ class TestStatsOptimized(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.ast_gemm = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule()[-1].ast
+    cls.ast_reduce = (Tensor.empty(N*N).sum()).schedule()[-1].ast
 
   def check_gemm(self, p, extra_flops=0):
     #p.uops.print()
@@ -180,6 +181,24 @@ class TestStatsOptimized(unittest.TestCase):
     # NOTE: these are sort of wrong. they aren't honoring the IF statement
     self.check_gemm(p, extra_flops=SZ*4)
     self.assertEqual(p.lds_estimate, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
+
+  def test_reduce(self):
+    k = Kernel(self.ast_reduce)
+    p = k.to_program()
+    print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
+    self.assertEqual(p.op_estimate, N*N)
+    self.assertEqual(p.mem_estimate, N*N*4 + 4)
+
+  def test_reduce_group(self):
+    k = Kernel(self.ast_reduce)
+    try:
+      k.apply_opt(Opt(OptOps.GROUP, 0, 50))
+    except KernelOptError:
+      raise unittest.SkipTest("no locals")
+    p = k.to_program()
+    # NOTE: these are wrong, they don't respect the if statement
+    print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
+    p.uops.print()
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
