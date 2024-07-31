@@ -1,6 +1,6 @@
 from __future__ import annotations
 import itertools, functools
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict, Any
 
@@ -16,7 +16,6 @@ from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.uops import UOps, flops_mem
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.codegen.lowerer import lazyop_to_uop
-from dataclasses import dataclass
 from enum import Enum, auto
 
 class OptOps(Enum):
