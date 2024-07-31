@@ -1,10 +1,11 @@
+import time
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps
 from tinygrad.multi import MultiLazyBuffer, all_reduce
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
-from tinygrad.helpers import getenv, Context, RING
+from tinygrad.helpers import getenv, Context, RING, DEBUG
 from typing import List, Union
 
 def realize(x: Union[LazyBuffer, List[LazyBuffer]]):
@@ -22,11 +23,12 @@ def test(devs: List[str], N: int, iters:int = 10):
     lbs = [Tensor.full((N,), float(1+i), device=d).contiguous().lazydata for i,d in enumerate(devs)]
     realize(lbs)
     GlobalCounters.reset()
+    start = time.time()
     realize(_jitted(ReduceOps.SUM, Tensor(MultiLazyBuffer(lbs, 0), device=devs)).lazydata.lbs)
-    if i < 0:
-      # First time is slow due to kernel compilation
-      continue
-    i_secs = GlobalCounters.time_sum_s
+    if i < 0: continue # warm up jit
+    i_secs = time.time() - start
+
+    if DEBUG >= 2: i_secs = GlobalCounters.time_sum_s
     i_gflops = GlobalCounters.global_ops/i_secs/10**9
     i_gbs = (N*4)/i_secs/10**9
     print(f"{'ring_allreduce' if RING >= 2 else 'naive_allreduce'} iter {i+1}/{iters}: {i_secs:.6f} sec {i_gflops:.2f} GFLOP/s {i_gbs:.2f} GB/s")
@@ -41,9 +43,9 @@ def run(sz, n_gpus=6, iters=10):
   devs = tuple([f"{dev}:{x}" for x in range(n_gpus)])
   N = sz // 4 # float32 is 4 bytes
 
-  with Context(RING=2, DEBUG=2):
+  with Context(RING=2):
     (ring_gflops, ring_gbs, ring_secs) = test(devs, N, iters=iters)
-  with Context(RING=0, DEBUG=2):
+  with Context(RING=0):
     (naive_gflops, naive_gbs, naive_secs) = test(devs, N, iters=iters)
   return (ring_gflops, ring_gbs, ring_secs), (naive_gflops, naive_gbs, naive_secs)
 
