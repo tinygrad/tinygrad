@@ -20,16 +20,14 @@ def test(devs: List[str], N: int, iters:int = 10):
 
   secs, gflops, gbs = 0, 0, 0
   for i in range(-2, iters):
-    GlobalCounters.reset()
     lbs = [Tensor.full((N,), float(1+i), device=d).contiguous().lazydata for i,d in enumerate(devs)]
     realize(lbs)
-    start = time.time()
+    GlobalCounters.reset()
     realize(_jitted(ReduceOps.SUM, Tensor(MultiLazyBuffer(lbs, 0), device=devs)).lazydata.lbs)
-    end = time.time()
     if i < 0:
       # First time is slow due to kernel compilation
       continue
-    i_secs = end-start
+    i_secs = GlobalCounters.time_sum_s
     i_gflops = GlobalCounters.global_ops/i_secs/10**9
     i_gbs = (N*4)/i_secs/10**9
     print(f"{'ring_allreduce' if RING >= 2 else 'naive_allreduce'} iter {i+1}/{iters}: {i_secs:.6f} sec {i_gflops:.2f} GFLOP/s {i_gbs:.2f} GB/s")
@@ -39,22 +37,32 @@ def test(devs: List[str], N: int, iters:int = 10):
 
   return (gflops/iters, gbs/iters, secs/iters)
 
-
-def main():
+def run(sz):
   dev, n_gpus = Device.DEFAULT, getenv("GPUS", 6) # number of gpus
   devs = tuple([f"{dev}:{x}" for x in range(n_gpus)])
+  N = sz // 4 # float32 is 4 bytes
 
-  sz = getenv("SZ", 1000) * 10**6 # size of data on each gpu
-  f32 = 4 # 4 bytes
-  N = sz//f32
-
-  print(f"Using {sz/10**9:.2f} GB of numbers on each of {n_gpus} GPUs, {n_gpus*sz/10**9:.2f} GB total.")
-  with Context(RING=2):
+  with Context(RING=2, DEBUG=2):
     (ring_gflops, ring_gbs, ring_secs) = test(devs, N)
-  with Context(RING=0):
+  with Context(RING=0, DEBUG=2):
     (naive_gflops, naive_gbs, naive_secs) = test(devs, N)
-  print(f"Ring:\n  {ring_secs:.6f} seconds/iter\n  {ring_gflops:.2f} GFLOP/s\n  {ring_gbs:.2f} GB/s")
-  print(f"Naive:\n  {naive_secs:.6f} seconds/iter\n  {naive_gflops:.2f} GFLOP/s\n  {naive_gbs:.2f} GB/s")
+  return (ring_gflops, ring_gbs, ring_secs), (naive_gflops, naive_gbs, naive_secs)
+
+def main():
+  if getenv("BENCHMARK_SPLIT"):
+    l, r = 256, 512 << 10
+    while r - l > 0:
+      m = (l + r) // 2
+      ring_gflops, ring_gbs, ring_secs, naive_gflops, naive_gbs, naive_secs = run(m * 4)
+      if ring_secs > naive_secs: l = m
+      else: r = m
+    print("Better split", r)
+  else:
+    sz = getenv("SZ", 1000) * 10**6 # size of data on each gpu
+    print(f"Using {sz/10**9:.2f} GB of numbers on each of {n_gpus} GPUs, {n_gpus*sz/10**9:.2f} GB total.")
+    ring_gflops, ring_gbs, ring_secs, naive_gflops, naive_gbs, naive_secs = run(sz)
+    print(f"Ring:\n  {ring_secs:.6f} seconds/iter\n  {ring_gflops:.2f} GFLOP/s\n  {ring_gbs:.2f} GB/s")
+    print(f"Naive:\n  {naive_secs:.6f} seconds/iter\n  {naive_gflops:.2f} GFLOP/s\n  {naive_gbs:.2f} GB/s")
 
 if __name__ == "__main__":
   main()
