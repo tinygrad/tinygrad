@@ -579,7 +579,6 @@ class Kernel:
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast.
     if self.first_reduce < self.first_upcast and (prod(self.full_shape[self.first_upcast:]) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and (self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
       if (s:=self.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
-        # for r in self.reduceops:
         self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
         # if it's small, upcast a second reduce dimension too
         if self.first_reduce < self.first_upcast and s <= 3 and (s2:=self.full_unupcasted_shape[-1]) <= 3 and isinstance(s2, int):
@@ -707,13 +706,10 @@ class Kernel:
           return LazyOp(op.op, (ret,), new_reduce_axes) if (new_reduce_axes:=tuple(i for i in arg if i-self.first_upcast not in reduce_axes)) else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
-          # mask = tuple(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] for i in range(self.global_dims, self.global_dims+self.local_dims+self.group_for_reduces))
-          # sts = ShapeTracker.from_shape(tuple([1] * self.global_dims + [x if mask[i] or i < self.first_reduce else 1 for i,x in enumerate(list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]))] + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])) # noqa: E501
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
-          # local_buffer = MemBuffer(-1, start.dtype, sts)
-          local_buffer = MemBuffer(-1, start.dtype, ShapeTracker.from_shape(local_shape))
+          local_buffer = MemBuffer(-self.reduceops.index(op)-1, start.dtype, ShapeTracker.from_shape(local_shape))
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
           grouped_reduce =  LazyOp(op.op, (local_load,), tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))

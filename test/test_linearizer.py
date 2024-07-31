@@ -100,8 +100,10 @@ class TestLinearizer(unittest.TestCase):
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
-  @unittest.skip
-  def test_sum_multireduce(self):
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(32, dtype=dtypes.float).realize()
     first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((1, 32)).expand((32, 32))))
@@ -111,12 +113,41 @@ class TestLinearizer(unittest.TestCase):
     second_reduce = LazyOp(ReduceOps.SUM, (diff,), (0,))
     store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((1, 1))))
     opts = [
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # grouping
+      [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
+      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
+      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
     ]
-    wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1)
+    wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1).reshape(1,1)
     helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
 
-  @unittest.skip
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_mid_dim_multireduce(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 32, 1, 5))))
+    diff = (second_x-first_reduce)
+    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
+    store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
+    opts = [
+      [Opt(OptOps.LOCAL, 0, 3)], # locals
+      [Opt(OptOps.LOCAL, 0, 9)],
+      [Opt(OptOps.LOCAL, 0, 27)],
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # grouping
+      [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
+      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
+      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
+      # TODO: local + grouping, too many local dims for OpenCL? 
+      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+    ]
+    wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
+    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_double_sum_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(2, 32, 4, 16, dtype=dtypes.float).realize()
@@ -130,7 +161,6 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "ocelot/remu doesn't have multiple wave syncs yet")
-  @unittest.skip("still broken")
   def test_var_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(3, 27, 32, dtype=dtypes.float).realize()
@@ -449,7 +479,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
 
-  @unittest.skip("TODO: fix uops toposort")
+  # @unittest.skip("TODO: fix uops toposort")
   def test_mean_std_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
@@ -466,7 +496,7 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast((store,), [x], wanna_output=[wanna_output])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("TODO: fix uops toposort")
+  # @unittest.skip("TODO: fix uops toposort")
   def test_mean_std_multireduce_mid_dim(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
