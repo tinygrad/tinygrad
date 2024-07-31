@@ -17,7 +17,6 @@ if __name__ == "__main__":
   k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
   if getenv("GEMV"):
     opts = [
-      #Opt(op=OptOps.GROUP, axis=0, amt=8),
       Opt(op=OptOps.UNROLL, axis=0, amt=8),
       Opt(op=OptOps.GROUP, axis=0, amt=32),
     ]
