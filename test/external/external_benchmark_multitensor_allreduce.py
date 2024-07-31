@@ -1,4 +1,3 @@
-import time
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps
