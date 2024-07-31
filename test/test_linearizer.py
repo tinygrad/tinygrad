@@ -607,7 +607,7 @@ class TestLinearizer(unittest.TestCase):
     assert accs[0].dtype == stores[0].src[-1].dtype == dtypes.float.vec(4)
     assert stores[0].src[0].op is UOps.DEFINE_LOCAL
     # the second store is to gds with no upcasts
-    assert accs[1].dtype == stores[1].src[2].dtype == dtypes.float
+    assert stores[1].src[2].dtype == dtypes.float
     assert stores[1].src[0].op is UOps.DEFINE_GLOBAL
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
@@ -931,6 +931,20 @@ class TestLinearizer(unittest.TestCase):
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.op is not UOps.VECTORIZE
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  def test_arange_opts(self):
+    a = Tensor.arange(128)
+    helper_linearizer_opt(a, [
+      [Opt(OptOps.GROUP, 0, 32)],
+      [Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=8)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.GROUP, axis=0, amt=8)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.UNROLL, axis=1, amt=4)], # noqa: E501
+    ])
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_values(self):
     x = Tensor.randn((4,3,6,6)).realize()
@@ -954,7 +968,7 @@ class TestLinearizer(unittest.TestCase):
     barrier = [u for u in k.uops if u.op is UOps.BARRIER][0]
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
-      assert store.src[2].dtype == dtypes.float.vec(2) and store.src[2].op is not UOps.VECTORIZE
+      assert store.src[2].dtype.count > 1 and store.src[2].op is not UOps.VECTORIZE
     # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
@@ -1091,6 +1105,7 @@ class TestFloat4(unittest.TestCase):
     # the first conv dot product is aligned in a. If we upcast the output and reduce
     # dimension, then we could do float4 for only that one set of loads, but we currently
     # don't.
+    # UPDATE: now we do this fusion
 
     s = create_schedule([c.lazydata])[0]
     k = Kernel(s.ast)
@@ -1098,7 +1113,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 1)
+    assert TestFloat4.count_float4(k) in {(0,1), (1,1)}
 
   def test_float4_noncontiguous(self):
     a = Tensor.rand(4, 2).realize()

@@ -61,5 +61,23 @@ class TestLinearizerDumb(unittest.TestCase):
     prg.uops.print()
     print(prg.src)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
+  def test_expander_new_srcs(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+    LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(25, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
+      LazyOp(ReduceOps.SUM, arg=(1,), src=(
+        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(26, 49), strides=(0, -1), offset=48, mask=((0, 26), (24, 49)), contiguous=False), View(shape=(25, 25), strides=(1, 50), offset=0, mask=None, contiguous=False)))), src=()),)),)),))
+    opts = [Opt(op=OptOps.GROUP, axis=0, amt=0), Opt(op=OptOps.PADTO, axis=0, amt=32), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=0)]
+    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
+    k.required_optimizations()
+    for opt in opts: k.apply_opt(opt)
+    prg = k.to_program()
+    prg.uops.print()
+    print(prg.src)
+    if_uops = [u for u in k.uops if u.op is UOps.IF]
+    self.assertEqual(len(if_uops), 1)
+    conditions = if_uops[0].src[0].sparents
+    self.assertLessEqual(len(conditions), 8)
+
 if __name__ == '__main__':
   unittest.main()

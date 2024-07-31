@@ -1,5 +1,5 @@
 from __future__ import annotations
-import multiprocessing
+import multiprocessing, decimal
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
@@ -392,7 +392,7 @@ class HCQSignal:
   def _set_value(self, new_value:int): raise NotImplementedError("_set_value() method must be implemented")
 
   @property
-  def timestamp(self) -> float:
+  def timestamp(self) -> decimal.Decimal:
     """
     Get the timestamp field of the signal.
 
@@ -402,7 +402,7 @@ class HCQSignal:
       The timestamp in microseconds.
     """
     return self._get_timestamp()
-  def _get_timestamp(self) -> float: raise NotImplementedError("_get_timestamp() method must be implemented")
+  def _get_timestamp(self) -> decimal.Decimal: raise NotImplementedError("_get_timestamp() method must be implemented")
 
   def wait(self, value:int, timeout:int=10000):
     """
@@ -475,7 +475,7 @@ class HCQProgram:
     self.device.timeline_value += 1
 
     if wait: self.device.timeline_signal.wait(self.device.timeline_value - 1)
-    return ((sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
+    return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class HCQCompiled(Compiled):
   """
@@ -488,7 +488,7 @@ class HCQCompiled(Compiled):
     self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
-    self.raw_prof_records:List[Tuple[float, float, str, bool]] = []
+    self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool]] = []
     if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -503,11 +503,11 @@ class HCQCompiled(Compiled):
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE: self._prof_process_events()
 
-  def _gpu2cpu_time(self, gpu_time:float, is_copy:bool) -> float:
+  def _gpu2cpu_time(self, gpu_time:decimal.Decimal, is_copy:bool) -> float:
     """
     Translates local gpu time (timestamp) into global cpu time.
     """
-    return gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff)
+    return float(gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff))
 
   def _alloc_kernargs(self, alloc_size:int) -> int:
     """
@@ -524,7 +524,7 @@ class HCQCompiled(Compiled):
     def _sync_queue(q_t):
       q_t().timestamp(self.timeline_signal).signal(self.timeline_signal, self.timeline_value).submit(self)
       self.timeline_value += 1
-      cpu_start_time = time.perf_counter_ns() / 1e3
+      cpu_start_time = decimal.Decimal(time.perf_counter_ns()) / decimal.Decimal(1000)
       self.timeline_signal.wait(self.timeline_value - 1)
       return cpu_start_time - self.timeline_signal.timestamp
     self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff = _sync_queue(self.hw_compute_queue_t), _sync_queue(self.hw_copy_queue_t)
