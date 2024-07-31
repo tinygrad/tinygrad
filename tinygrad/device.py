@@ -1,5 +1,5 @@
 from __future__ import annotations
-import multiprocessing, decimal
+import multiprocessing, decimal, statistics
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
@@ -521,19 +521,35 @@ class HCQCompiled(Compiled):
     if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
     self.profile_logger = ProfileLogger()
 
-    def _sync_queue(q_t):
-      q_t().timestamp(self.timeline_signal).signal(self.timeline_signal, self.timeline_value).submit(self)
-      self.timeline_value += 1
+  def _ensure_shared_time_base(self):
+    if hasattr(self, 'gpu2cpu_compute_time_diff'): return
+    def _sync_queue(d, q_t):
+      q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.timeline_value).submit(d)
+      d.timeline_value += 1
       cpu_start_time = decimal.Decimal(time.perf_counter_ns()) / decimal.Decimal(1000)
-      self.timeline_signal.wait(self.timeline_value - 1)
-      return cpu_start_time - self.timeline_signal.timestamp
-    self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff = _sync_queue(self.hw_compute_queue_t), _sync_queue(self.hw_copy_queue_t)
+      d.timeline_signal.wait(d.timeline_value - 1)
+      return cpu_start_time - d.timeline_signal.timestamp
+
+    choices = []
+    for d in self.devices:
+      choices.append((d, d.hw_compute_queue_t, []))
+      choices.append((d, d.hw_copy_queue_t, []))
+
+    import random
+    for _ in range(10000*len(self.devices)):
+      d,q,l = random.choice(choices)
+      l.append(_sync_queue(d,q))
+
+    for d,q,l in choices:
+      if q == d.hw_compute_queue_t: d.gpu2cpu_compute_time_diff = statistics.median(l)
+      if q == d.hw_copy_queue_t: d.gpu2cpu_copy_time_diff = statistics.median(l)
 
   def _prof_process_events(self):
     self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
     self.sig_prof_records = []
 
   def _prof_finalize(self):
+    self._ensure_shared_time_base()
     for st, en, name, is_cp in self.raw_prof_records:
       self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
     self.raw_prof_records = []
