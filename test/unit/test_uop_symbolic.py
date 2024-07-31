@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import unittest, pickle
+from typing import Tuple
 #from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer, create_lt_node, create_ge_node
 
 # TODO: fix all the @unittest.expectedFailure
@@ -7,13 +8,13 @@ import unittest, pickle
 # *** fake symobilc uops ***
 
 from tinygrad.helpers import DEBUG
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes, PtrDType, ConstType
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.ops import BinaryOps
 import functools
 
-def render(self) -> str:
+def render(self) -> Tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(0,True))
   graph = UOpGraph([UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, 0), self))])
@@ -22,8 +23,9 @@ def render(self) -> str:
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
     code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
+  rewritten_uop = [uop for uop in graph.uops if uop.op is UOps.STORE][0].src[-1]
   fxn = TestRenderer().render("", graph)
-  return fxn.split("data0[0] = ")[1].split(";")[0]
+  return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin.arg, rewritten_uop.vmax.arg
 
 def NumNode(val): return UOp.const(dtypes.int, val)
 def Variable(expr, nmin, nmax):
@@ -52,12 +54,13 @@ class TestSymbolicPickle(unittest.TestCase):
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
+    rendered, nmin, nmax = render(v)
     if isinstance(s, set):
-      self.assertIn(render(v), s)
+      self.assertIn(rendered, s)
     else:
-      self.assertEqual(render(v), s)
-    #self.assertEqual(v.min, n)
-    #self.assertEqual(v.max, m)
+      self.assertEqual(rendered, s)
+    self.assertEqual(nmin, n)
+    self.assertEqual(nmax, m)
 
   def test_cmp_simple(self):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 4), 0, 1, "(a<4)")
@@ -188,8 +191,9 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_min_max(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
 
-  def test_sum_div_factor(self):
+  def test_sum_div_mod_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, Variable("b", 0, 3)*4]) // 2, 0, 20, "((a*2)+(b*2))")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, Variable("b", 0, 3)*4]) % 2, 0, 0, "0")
 
   @unittest.expectedFailure
   def test_sum_div_some_factor(self):
@@ -204,8 +208,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
 
   def test_mod_factor(self):
-    # NOTE: even though the mod max is 50, it can't know this without knowing about the mul
-    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, {"((b*50)%100)", "((b%2)*50)"})
 
   def test_mod_to_sub(self):
     # This is mod reduction
@@ -249,6 +252,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_distribute_mul(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, {"((a*3)+(b*3))", "((a+b)*3)"})
+    # TODO: simplify further
+    self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, {"((a*-2)+10)", "(((a+1)*(-2))+12)"})
 
   def test_mod_mul_sum(self):
     self.helper_test_variable(Node.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, "(a+b)")
@@ -297,8 +302,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
   @unittest.expectedFailure
-  def test_div_factor(self):
+  def test_div_mod_factor(self):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
+    self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
 
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
@@ -316,7 +322,6 @@ class TestSymbolic(unittest.TestCase):
   def test_div_numerator_negative(self):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
-  @unittest.expectedFailure
   def test_div_into_mod(self):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
@@ -325,6 +330,15 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 0, 25, "((1+idx)//4)")
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "(idx//4)")
     self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, -1, 24, "(((3+idx)//4)+-1)")
+
+  @unittest.expectedFailure
+  def test_div_neg_all_range(self):
+    gidx = Variable("gidx", 0, 124)
+    lidx = Variable("lidx", 0, 7)
+    self.helper_test_variable((-gidx*8-lidx+999)//-4 + 250, 0, 250, "(((1+lidx)//4)+(gidx*2))")
+    self.helper_test_variable((-gidx*8-lidx+1000)//-4 + 250, 0, 249, "((gidx*2)+(lidx//4))")
+    self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, -1, 249, "(((3+lidx)//4)+(gidx*2)+-1)")
+    self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, -1, 249, "(((2+lidx)//4)+(gidx*2)+-1)")
 
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):

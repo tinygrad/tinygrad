@@ -519,6 +519,8 @@ class Tensor:
     if stop is None: stop, start = start, 0
     assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
+    # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
+    if (stop-start)/step <= 0: return Tensor([], dtype=dtype, **kwargs)
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
@@ -537,6 +539,7 @@ class Tensor:
     print(Tensor.eye(2, 4).numpy())
     ```
     """
+    if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
     return Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)._slice((None,(0,n if m is None else m)))
 
   def full_like(self, fill_value:ConstType, **kwargs):
@@ -738,10 +741,10 @@ class Tensor:
         yield node
     return list(_walk(self, set()))
 
-  def backward(self) -> Tensor:
+  def backward(self, gradient:Optional[Tensor]=None) -> Tensor:
     """
     Propagates the gradient of a tensor backwards through the computation graph.
-    Must be used on a scalar tensor.
+    If the 'gradient' argument is not provided, the tensor must be a scalar, and the gradient is implicitly set to 1.0.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -749,11 +752,14 @@ class Tensor:
     print(t.grad.numpy())
     ```
     """
-    assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
+    if gradient is None:
+      assert self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
+      # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
+      # this is "implicit gradient creation"
+      gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
 
-    # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
-    # this is "implicit gradient creation"
-    self.grad = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
+    assert self.shape == gradient.shape, f"grad shape must match tensor shape, {gradient.shape!r} != {self.shape!r}"
+    self.grad = gradient
 
     for t0 in reversed(self._deepwalk()):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
