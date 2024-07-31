@@ -331,6 +331,15 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "(idx//4)")
     self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, -1, 24, "(((3+idx)//4)+-1)")
 
+  @unittest.expectedFailure
+  def test_div_neg_all_range(self):
+    gidx = Variable("gidx", 0, 124)
+    lidx = Variable("lidx", 0, 7)
+    self.helper_test_variable((-gidx*8-lidx+999)//-4 + 250, 0, 250, "(((1+lidx)//4)+(gidx*2))")
+    self.helper_test_variable((-gidx*8-lidx+1000)//-4 + 250, 0, 249, "((gidx*2)+(lidx//4))")
+    self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, -1, 249, "(((3+lidx)//4)+(gidx*2)+-1)")
+    self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, -1, 249, "(((2+lidx)//4)+(gidx*2)+-1)")
+
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
