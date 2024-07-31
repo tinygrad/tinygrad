@@ -733,7 +733,6 @@ class Kernel:
           return LazyOp(op.op, (ret,), new_reduce_axes) if new_reduce_axes else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
-          self.sts[self.first_reduce] = ShapeTracker.from_shape(1, )
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces] + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           local_buffer = MemBuffer(-1, start.dtype, ShapeTracker.from_shape(local_shape))
