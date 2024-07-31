@@ -419,5 +419,26 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=2, amt=0)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
+  def test_failure_46(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(BinaryOps.MUL, arg=None, src=(
+          LazyOp(ReduceOps.SUM, arg=(1,), src=(
+            LazyOp(UnaryOps.NEG, arg=None, src=(
+              LazyOp(BinaryOps.MUL, arg=None, src=(
+                LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
+                  LazyOp(BinaryOps.MUL, arg=None, src=(
+                    LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                      LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 1), offset=0, mask=None, contiguous=False),))), src=()),
+                        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(512, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+                      LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(512, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
+                LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=4, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),
+          LazyOp(UnaryOps.RECIP, arg=None, src=(
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=5, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),)),))
+    opts = [Opt(op=OptOps.UPCAST, axis=0, amt=2)]
+    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
+
 if __name__ == '__main__':
   unittest.main()
