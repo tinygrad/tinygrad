@@ -3,6 +3,7 @@ import unittest, random
 import numpy as np
 from tinygrad.codegen.kernel import KernelOptError
 from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.uops import UOps
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI
@@ -31,6 +32,7 @@ def helper_test_lin(lin: Kernel, opts, failed_platforms, rtol=1e-2, atol=1e-2):
     assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
   else:
     assert Device.DEFAULT in failed_platforms, f"failed on {Device.DEFAULT} with {compare_result[0]}"
+  return lin
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "failed on CUDA CI")
 class TestLinearizerFailures(unittest.TestCase):
@@ -381,7 +383,12 @@ class TestLinearizerFailures(unittest.TestCase):
     LazyOp(ReduceOps.SUM, arg=(1,), src=(
       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(26, 49), strides=(0, -1), offset=48, mask=((0, 26), (24, 49)), contiguous=False), View(shape=(25, 25), strides=(1, 50), offset=0, mask=None, contiguous=False)))), src=()),)),)),))
     opts = [Opt(op=OptOps.GROUP, axis=0, amt=0), Opt(op=OptOps.PADTO, axis=0, amt=32), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4)]
-    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
+    k = helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
+    assert k is not None
+    ifs = [u for u in k.uops if u.op is UOps.IF]
+    self.assertEqual(len(ifs), 1)
+    for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
+    self.assertLessEqual(len(ifs[0].src[0].sparents), 16)
 
 if __name__ == '__main__':
   unittest.main()
