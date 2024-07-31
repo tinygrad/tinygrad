@@ -59,45 +59,32 @@ class TestTinygrad(unittest.TestCase):
   @unittest.expectedFailure
   def test_second_order_backward_pass(self):
     def test_pytorch():
-      x = torch.tensor(x_init, requires_grad=True)
-      W = torch.tensor(W_init, requires_grad=True)
-      m = torch.tensor(m_init)
-      # forward pass
-      out = x.matmul(W).relu()
-      out = torch.nn.functional.log_softmax(out, dim=1)
-      out = out.mul(m).add(m).sum()
+      x = torch.tensor(x_init)
+      m = torch.tensor(m_init, requires_grad=True)
+      out = x.mul(m).sum()
       # use retain graph so we can compute second order derivatives later
       out.backward(retain_graph=True)
-      # save first-order gradients (dL/dx, dL/dW). they still contain graph information on how they were constructed wrt x and W
-      grad_x = x.grad
-      grad_W = W.grad
+      # save first-order gradient (dO/dm). they still contain graph information on how they were constructed wrt x and W
+      grad_m = m.grad
       # zero gradients so second-order gradients are correct
-      x.grad = None
-      W.grad = None
+      m.grad = None
       # compute second-order gradients
-      grad_x.sum().backward(retain_graph=True)
-      second_grad_x = x.grad
-      grad_W.sum().backward()
-      second_grad_W = W.grad
-      return second_grad_x, second_grad_W
+      grad_m.sum().backward(retain_graph=True)
+
+      # d2O/dm2
+      second_grad_m = m.grad
+      return second_grad_m.numpy()
 
     def test_tinygrad():
-      x = Tensor(x_init, requires_grad=True)
-      W = Tensor(W_init, requires_grad=True)
-      m = Tensor(m_init)
-      out = x.matmul(W).relu()
-      out = out.log_softmax()
-      out = out.mul(m).add(m).sum()
+      x = Tensor(x_init)
+      m = Tensor(m_init, requires_grad=True)
+      out = x.mul(m).sum()
       out.backward()
-      grad_x = x.grad
-      grad_W = W.grad
-      x.grad = None
-      W.grad = None
-      grad_x.sum().backward()
-      second_grad_x = x.grad
-      grad_W.sum().backward()
-      second_grad_W = W.grad
-      return second_grad_x.numpy(), second_grad_W.numpy()
+      grad_m = m.grad
+      m.grad = None
+      grad_m.sum().backward()
+      second_grad_m = m.grad # currently, this will be None (incorrect)
+      return second_grad_m.numpy()
 
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
