@@ -485,7 +485,7 @@ class UOpGraph:
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str(formatted_parents):32s} {u.arg}")
 
   cnt = 0
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None):
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, skip_check=False) -> UOpGraph:
     global acc_number
     acc_number = 0
 
@@ -551,19 +551,20 @@ class UOpGraph:
     for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-    bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
-    try:
-      type_verify(self.uops)
-      assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-      assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
-      # TODO: this should be enabled, and the valid clause should be removed
-      # NOTE: multiple identical stores to DEFINE_LOCAL is okay
-      assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \
-        == len(dedup(all_stores)), "repeated stores in uops"
-    except AssertionError as e:
-      self.print()
-      if not CI: self.graph()
-      raise e
+    if not skip_check:
+      bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
+      try:
+        type_verify(self.uops)
+        assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
+        assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
+        # TODO: this should be enabled, and the valid clause should be removed
+        # NOTE: multiple identical stores to DEFINE_LOCAL is okay
+        assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \
+          == len(dedup(all_stores)), "repeated stores in uops"
+      except AssertionError as e:
+        self.print()
+        if not CI: self.graph()
+        raise e
 
     # strip the SINK
     self._uops = self._uops[:-1]
@@ -571,3 +572,5 @@ class UOpGraph:
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import fuzz_uops
       self._fuzz_paths = fuzz_uops(self)
+
+    return self
