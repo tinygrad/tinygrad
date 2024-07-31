@@ -256,6 +256,9 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     if u.op is UOps.RANGE:
       mult_stack.append(mults)
       mults *= uop_alu_resolve(u.src[1]) - uop_alu_resolve(u.src[0])
+    elif u.op is UOps.SPECIAL:
+      mult_stack.append(mults)
+      mults *= u.arg[1]
     elif u.op is UOps.ENDRANGE:
       mults = mult_stack.pop(-1)
     elif u.op is UOps.LOAD:
