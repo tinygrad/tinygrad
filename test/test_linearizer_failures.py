@@ -419,5 +419,28 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=2, amt=0)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
+  def test_failure_46(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(BinaryOps.ADD, arg=None, src=(
+          LazyOp(BinaryOps.ADD, arg=None, src=(
+            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=3, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()),
+            LazyOp(UnaryOps.NEG, arg=None, src=(
+              LazyOp(ReduceOps.MAX, arg=(0,), src=(
+                LazyOp(BinaryOps.MUL, arg=None, src=(
+                  LazyOp(UnaryOps.CAST, arg=dtypes.int, src=(
+                    LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                      LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(3, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=()),
+                        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(3, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+                      LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(3, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
+                  LazyOp(BinaryOps.ADD, arg=None, src=(
+                    LazyOp(ReduceOps.SUM, arg=(1,), src=(
+                      LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 5), strides=(0, 0), offset=0, mask=((0, 4), (2, 5)), contiguous=False), View(shape=(3, 3), strides=(1, 6), offset=0, mask=None, contiguous=False)))), src=()),)),
+                    LazyOp(BufferOps.CONST, arg=ConstBuffer(val=3, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(3, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),)),
+          LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),))
+    opts = [Opt(op=OptOps.UNROLL, axis=1, amt=0), Opt(op=OptOps.UNROLL, axis=0, amt=0)]
+    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["METAL"])
+
 if __name__ == '__main__':
   unittest.main()
