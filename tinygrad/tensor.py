@@ -147,7 +147,7 @@ class Tensor:
         assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
         self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = data
       else:
-        self.lazydata = MultiLazyBuffer.from_sharded(data, device, None)
+        self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
     else:
       self.lazydata = data if data.device == device else data.copy_to_device(device)
 
@@ -320,20 +320,34 @@ class Tensor:
     if self.grad is not None and real.grad is not None: self.grad.lazydata = real.grad.lazydata
     self.lazydata = real.lazydata
 
-  def shard(self, devices:Tuple[str, ...], axis:Optional[int]=None) -> Tensor:
+  def shard(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None) -> Tensor:
     """
-    Shards the tensor across the given devices.
+    Shards the tensor across the given devices. Optionally specify which axis to shard on, and how to split it across devices.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.empty(2, 3)
+    print(t.shard((t.device, t.device), axis=1, splits=(2, 1)).lazydata)
+    ```
+
     """
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
-    canonical_devices = tuple(Device.canonicalize(x) for x in devices)
-    if axis is not None and axis < 0: axis += len(self.shape)
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis), device=canonical_devices, requires_grad=self.requires_grad)
+    canonical_devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
+    if axis is not None:
+      if axis < 0: axis += len(self.shape)
+      if splits is None:
+        sz = round_up(self.shape[axis], len(devices)) // len(devices)
+        splits = tuple([max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))])
+      assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
+      boundaries = tuple(itertools.accumulate(splits))
+      bounds = tuple(zip((0,) + boundaries, boundaries))
+    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, bounds),
+                  device=canonical_devices, requires_grad=self.requires_grad)
 
-  def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None):
+  def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):
     """
     Shards the tensor across the given devices in place.
     """
-    self.lazydata = self.shard(devices, axis).lazydata
+    self.lazydata = self.shard(devices, axis, splits).lazydata
     return self
 
   @staticmethod

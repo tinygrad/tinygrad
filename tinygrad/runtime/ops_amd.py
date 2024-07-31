@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib
+import os, fcntl, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, \
                             HCQSignal, HCQProgram, BufferOptions
@@ -50,7 +50,7 @@ class AMDSignal(HCQSignal):
     super().__init__(value)
   def __del__(self): AMDDevice.signals_pool.append(self._signal)
   def _get_value(self) -> int: return self._signal[0]
-  def _get_timestamp(self) -> float: return self._signal[1] / 1e2
+  def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(100)
   def _set_value(self, new_value:int): self._signal[0] = new_value
   def wait(self, value:int, timeout:int=10000):
     start_time = time.time() * 1000

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, time, array
+import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, time, array, decimal
 from typing import Tuple, List, Any, cast, Union, Dict
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
@@ -69,7 +69,7 @@ class NVSignal(HCQSignal):
     super().__init__(value)
   def __del__(self): NVDevice.signals_pool.append(self._signal)
   def _get_value(self) -> int: return self._signal[0]
-  def _get_timestamp(self) -> float: return self._signal[1] / 1e3
+  def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(1000)
   def _set_value(self, new_value:int): self._signal[0] = new_value
   def wait(self, value:int, timeout:int=10000):
     start_time = time.time() * 1000

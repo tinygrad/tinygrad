@@ -409,15 +409,18 @@ if __name__ == "__main__":
       last_tok = tok
       generated += tokenizer.decode([tok])
       print(generated)
-    if "LLaMA-3/8B-SF-DPO" in args.model.as_posix() and TEMPERATURE == 0.85:
-      EXPECTED_TEXT = {
-        1: "Hello! How can I help you today? If you have any questions or need assistance with anything,",
-        2: "Hello! How can I help you today? If you have any questions, need assistance or just want",
-        3: "Hello! How can I help you today? If you have any questions or need assistance, feel free",
-        4: "Hello! How can I assist you today? If you have any questions, need information, or require",
-        5: "Hello! How can I assist you today? If you have any questions or need help with something",
-        6: "Hello! How can I assist you today? If you have any questions, need information, or require",
-      }
+    if "LLaMA-3/8B-SF-DPO" in args.model.as_posix() and (TEMPERATURE == 0.85 or TEMPERATURE == 0):
+      if TEMPERATURE == 0.85:
+        EXPECTED_TEXT = {
+          1: "Hello! How can I help you today? If you have any questions or need assistance with anything,",
+          2: "Hello! How can I help you today? If you have any questions, need assistance or just want",
+          3: "Hello! How can I help you today? If you have any questions or need assistance, feel free",
+          4: "Hello! How can I assist you today? If you have any questions, need information, or require",
+          5: "Hello! How can I assist you today? If you have any questions or need help with something",
+          6: "Hello! How can I assist you today? If you have any questions, need information, or require",
+        }
+      else:
+        EXPECTED_TEXT = {k: "Hello! How can I assist you today? If you have any questions or need help with something," for k in range(1, 7)}
       assert generated == EXPECTED_TEXT[args.shard], f"{generated=} {EXPECTED_TEXT[args.shard]}"
       print("\n" + colored("output validated", "green"))  # NOTE: "\n" inside colored does not render the color in github action
   else:
