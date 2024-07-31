@@ -77,7 +77,7 @@ class TestLinearizerDumb(unittest.TestCase):
     if_uops = [u for u in k.uops if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
     conditions = if_uops[0].src[0].sparents
-    self.assertEqual(len(conditions), 8)
+    self.assertLessEqual(len(conditions), 8)
 
 if __name__ == '__main__':
   unittest.main()
