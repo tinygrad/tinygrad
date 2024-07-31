@@ -66,9 +66,9 @@ class ExternalTestDatasets(unittest.TestCase):
       np.testing.assert_equal(tinygrad_sample[1][:, 0].numpy(), ref_sample[1])
 
   def test_kits19_validation_set(self):
-    _, preproc_img_pths, preproc_lbl_pths = self._create_samples(True)
+    preproc_pth, preproc_img_pths, preproc_lbl_pths = self._create_samples(True)
     ref_dataset = self._create_kits19_ref_dataloader(preproc_img_pths, preproc_lbl_pths, True)
-    tinygrad_dataset = self._create_kits19_tinygrad_dataloader(Path(tempfile.gettempdir()), True, use_old_dataloader=True)
+    tinygrad_dataset = self._create_kits19_tinygrad_dataloader(preproc_pth, True, use_old_dataloader=True)
 
     for ref_sample, tinygrad_sample in zip(ref_dataset, tinygrad_dataset):
       np.testing.assert_equal(tinygrad_sample[0][:, 0], ref_sample[0])

@@ -1,10 +1,10 @@
 from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
-import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator, BufferOptions
-from tinygrad.runtime.ops_amd import AMDCompiler, disasm
+from tinygrad.runtime.autogen import hip
+from tinygrad.runtime.support.compiler_hip import AMDCompiler, disasm
 from tinygrad.renderer.cstyle import HIPRenderer
 
 def check(status):
@@ -51,7 +51,7 @@ class HIPAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferOptions):
     check(hip.hipSetDevice(self.device.device_id))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
-  def _free(self, opaque): check(hip.hipFree(opaque))
+  def _free(self, opaque, options:BufferOptions): check(hip.hipFree(opaque))
   def copyin(self, dest, src: memoryview):
     check(hip.hipSetDevice(self.device.device_id))
     check(hip.hipMemcpy(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice))
