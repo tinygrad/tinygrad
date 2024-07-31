@@ -76,6 +76,21 @@ float4_folding = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}), name="vec"), vectorize_alu),
 ])
 
+# ***** div and mod for integer alu *****
+
+def div_folding(x:UOp, c:UOp):
+  if (d:=x.divides(c.arg)) is not None: return d
+  if c.arg <= 0 or x.op is not UOps.ALU or x.arg is not BinaryOps.ADD: return None
+  p0, p1 = (div_folding(s, c) for s in x.src)
+  if p0 is not None: return p0 + (p1 if p1 is not None else x.src[1]//c)
+  return (x.src[0]//c + p1) if p1 is not None else None
+
+def mod_folding(x:UOp, c:UOp):
+  if x.divides(c.arg) is not None: return x.const(0)
+  if c.arg <= 0 or x.op is not UOps.ALU or x.arg is not BinaryOps.ADD: return None
+  if (p0:=mod_folding(x.src[0], c)) is not None and p0.op is UOps.CONST and p0.arg==0: return x.src[1]%c
+  if (p1:=mod_folding(x.src[1], c)) is not None and p1.op is UOps.CONST and p1.arg==0: return x.src[0]%c
+
 # ***** transcendental *****
 
 transcendental_folding = PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=k), cast(Callable, v))
@@ -235,6 +250,9 @@ constant_folder = PatternMatcher([
   # mul -> add -> mod
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) % NOp.cvar('c1'),
    lambda x,x2,c0,c1: x2%c1 if (r:=c0.arg%c1.arg) == 0 else (x*r+x2)%c1 if c0.arg >= c1.arg > 0 else None),
+  # sum into div / mod
+  (NOp.var('x') // NOp.cvar('c'), div_folding),
+  (NOp.var('x') % NOp.cvar('c'), mod_folding),
   # mul -> add -> div
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
    x*(c0.arg//g)//(c1.arg//g) if c0.arg > 0 and c1.arg > 0 and (g:=math.gcd(c0.arg,c1.arg)) > 1 and g > x2.vmax.arg and x2.vmin.arg >= 0 else None),
