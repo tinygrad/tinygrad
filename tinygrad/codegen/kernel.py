@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict
 from tinygrad.engine.graph import print_tree
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, \
-                         verify_lazyop, KernelInfo, get_lazyop_info, reduce_st
+                         verify_lazyop, KernelInfo, get_lazyop_info
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import dtypes, ImageDType
@@ -680,7 +680,7 @@ class Kernel:
         idx = self.bufs.index(op.arg)
         arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
         # fix store of a splitted reduce (globals changed)
-        if op.src and op.src[0] is op.src[0] == self.reduceop and self.reduce_split:
+        if op.src and op.src[0] is LazyOp and op.src[0] == self.reduceop and self.reduce_split:
           arg = MemBuffer(0, op.dtype, ShapeTracker.from_shape((self.full_shape[0], 1)))
       elif op.op in ReduceOps:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
