@@ -390,5 +390,34 @@ class TestLinearizerFailures(unittest.TestCase):
     for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
     self.assertLessEqual(len(ifs[0].src[0].sparents), 16)
 
+  @unittest.expectedFailure
+  def test_failure_45(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 3, 1, 1, 1), strides=(3, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(ReduceOps.SUM, arg=(2, 3), src=(
+          LazyOp(BinaryOps.MUL, arg=None, src=(
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(0, 0, 3, 1, 0), offset=0, mask=None, contiguous=False),))), src=()),
+            LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
+              LazyOp(BinaryOps.MUL, arg=None, src=(
+                LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                  LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),
+                    LazyOp(BinaryOps.ADD, arg=None, src=(
+                      LazyOp(ReduceOps.SUM, arg=(4,), src=(
+                        LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(3, 3), strides=(0, 0), offset=0, mask=((0, 3), (1, 3)), contiguous=False), View(shape=(2, 3, 2, 3, 2), strides=(0, 0, 1, 0, 4), offset=0, mask=None, contiguous=False)))), src=()),)),
+                      x12:=LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
+                  x13:=LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+                LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                  LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(3, 1, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),
+                    LazyOp(BinaryOps.ADD, arg=None, src=(
+                      LazyOp(ReduceOps.SUM, arg=(4,), src=(
+                        LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 5), strides=(0, 0), offset=0, mask=((0, 4), (2, 5)), contiguous=False), View(shape=(2, 3, 2, 3, 3), strides=(0, 0, 0, 1, 6), offset=0, mask=None, contiguous=False)))), src=()),)),
+                       x12,)),)),
+                   x13,)),)),)),)),)),)),))
+    # ValueError: size mismatched, can't reshape self.shape=(6, 2, 3, 3) -> new_shape=(6, 2, 3, 1, 2)
+    opts = [Opt(op=OptOps.UNROLL, axis=2, amt=0)]
+    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
+
 if __name__ == '__main__':
   unittest.main()
