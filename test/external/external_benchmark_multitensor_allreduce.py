@@ -37,30 +37,30 @@ def test(devs: List[str], N: int, iters:int = 10):
 
   return (gflops/iters, gbs/iters, secs/iters)
 
-def run(sz):
+def run(sz, iters=10):
   dev, n_gpus = Device.DEFAULT, getenv("GPUS", 6) # number of gpus
   devs = tuple([f"{dev}:{x}" for x in range(n_gpus)])
   N = sz // 4 # float32 is 4 bytes
 
   with Context(RING=2, DEBUG=2):
-    (ring_gflops, ring_gbs, ring_secs) = test(devs, N)
+    (ring_gflops, ring_gbs, ring_secs) = test(devs, N, iters=iters)
   with Context(RING=0, DEBUG=2):
-    (naive_gflops, naive_gbs, naive_secs) = test(devs, N)
+    (naive_gflops, naive_gbs, naive_secs) = test(devs, N, iters=iters)
   return (ring_gflops, ring_gbs, ring_secs), (naive_gflops, naive_gbs, naive_secs)
 
 def main():
   if getenv("BENCHMARK_SPLIT"):
-    l, r = 256, 512 << 10
-    while r - l > 0:
+    l, r = 0, 512
+    while r - l > 1:
       m = (l + r) // 2
-      ring_gflops, ring_gbs, ring_secs, naive_gflops, naive_gbs, naive_secs = run(m * 4)
+      (ring_gflops, ring_gbs, ring_secs), (naive_gflops, naive_gbs, naive_secs) = run(m * 1024 * 4, iters=100)
       if ring_secs > naive_secs: l = m
       else: r = m
-    print("Better split", r)
+    print("Better split", r * 1024, "elements")
   else:
     sz = getenv("SZ", 1000) * 10**6 # size of data on each gpu
     print(f"Using {sz/10**9:.2f} GB of numbers on each of {n_gpus} GPUs, {n_gpus*sz/10**9:.2f} GB total.")
-    ring_gflops, ring_gbs, ring_secs, naive_gflops, naive_gbs, naive_secs = run(sz)
+    (ring_gflops, ring_gbs, ring_secs), (naive_gflops, naive_gbs, naive_secs) = run(sz)
     print(f"Ring:\n  {ring_secs:.6f} seconds/iter\n  {ring_gflops:.2f} GFLOP/s\n  {ring_gbs:.2f} GB/s")
     print(f"Naive:\n  {naive_secs:.6f} seconds/iter\n  {naive_gflops:.2f} GFLOP/s\n  {naive_gbs:.2f} GB/s")
 
