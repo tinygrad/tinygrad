@@ -931,6 +931,20 @@ class TestLinearizer(unittest.TestCase):
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.op is not UOps.VECTORIZE
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  def test_arange_opts(self):
+    a = Tensor.arange(128)
+    helper_linearizer_opt(a, [
+      [Opt(OptOps.GROUP, 0, 32)],
+      [Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=8)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.GROUP, axis=0, amt=8)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.UNROLL, axis=1, amt=4)], # noqa: E501
+    ])
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_values(self):
     x = Tensor.randn((4,3,6,6)).realize()
