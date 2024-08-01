@@ -15,10 +15,11 @@ from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
 def _uops_to_prg(uops_list, print_uops=False):
   uops = UOpGraph(uops_list)
-  src = Device[Device.DEFAULT].renderer.render("test", uops)
+  uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
+  src = Device[Device.DEFAULT].renderer.render("test", uops.uops)
   if print_uops: uops.print()
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops))
+  return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops.uops))
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
@@ -325,6 +326,7 @@ class TestAssembly(unittest.TestCase):
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
     uops = UOpGraph([a1,a2])
+    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops.uops[-1].arg, BinaryOps.SHL)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.MUL)
@@ -337,6 +339,7 @@ class TestAssembly(unittest.TestCase):
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
     uops = UOpGraph([a1,a2])
+    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops.uops[-1].arg, BinaryOps.SHR)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.IDIV)

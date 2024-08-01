@@ -58,7 +58,6 @@ class TestLinearizerDumb(unittest.TestCase):
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
-    prg.uops.print()
     print(prg.src)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
@@ -72,7 +71,6 @@ class TestLinearizerDumb(unittest.TestCase):
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
-    prg.uops.print()
     print(prg.src)
     if_uops = [u for u in k.uops if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
