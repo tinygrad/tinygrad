@@ -155,6 +155,10 @@ class CapturedJit(Generic[ReturnType]):
   expected_names: List[Union[int, str]]
   expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]  # TODO: dedup with expected_buffers/expected_vars
 
+  def __reduce__(self):
+    return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs, self.expected_buffers,
+                            self.expected_vars, self.expected_names, self.expected_st_vars_dtype_device)
+
   def __post_init__(self):
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
     self._jit_cache: List[ExecItem] = self.jit_cache
@@ -171,8 +175,7 @@ class CapturedJit(Generic[ReturnType]):
 
   # Condense the items into a graph executor.
   def _apply_graph(self):
-    fake_input_buffers = [Buffer(device, size, dtype) for device, size, dtype in self.expected_buffers]
-    self._assign_inputs(fake_input_buffers, False)
+    self._assign_inputs(fake_input_buffers:=[Buffer(device, size, dtype) for device, size, dtype in self.expected_buffers], False)
     self._jit_cache = apply_graph_to_jit(self._jit_cache, fake_input_buffers, {v:v.min for v in self.expected_vars})
     self._input_replace = get_input_replace(self._jit_cache, fake_input_buffers)
     self._clear_inputs()
