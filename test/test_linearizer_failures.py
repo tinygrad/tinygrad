@@ -3,6 +3,7 @@ import unittest, random
 import numpy as np
 from tinygrad.codegen.kernel import KernelOptError
 from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.uops import UOps
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI
@@ -31,6 +32,7 @@ def helper_test_lin(lin: Kernel, opts, failed_platforms, rtol=1e-2, atol=1e-2):
     assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
   else:
     assert Device.DEFAULT in failed_platforms, f"failed on {Device.DEFAULT} with {compare_result[0]}"
+  return lin
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "failed on CUDA CI")
 class TestLinearizerFailures(unittest.TestCase):
@@ -381,6 +383,60 @@ class TestLinearizerFailures(unittest.TestCase):
     LazyOp(ReduceOps.SUM, arg=(1,), src=(
       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(26, 49), strides=(0, -1), offset=48, mask=((0, 26), (24, 49)), contiguous=False), View(shape=(25, 25), strides=(1, 50), offset=0, mask=None, contiguous=False)))), src=()),)),)),))
     opts = [Opt(op=OptOps.GROUP, axis=0, amt=0), Opt(op=OptOps.PADTO, axis=0, amt=32), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4)]
+    k = helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
+    assert k is not None
+    ifs = [u for u in k.uops if u.op is UOps.IF]
+    self.assertEqual(len(ifs), 1)
+    for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
+    self.assertLessEqual(len(ifs[0].src[0].sparents), 16)
+
+  def test_failure_45(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 3, 1, 1, 1), strides=(3, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(ReduceOps.SUM, arg=(2, 3), src=(
+          LazyOp(BinaryOps.MUL, arg=None, src=(
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(0, 0, 3, 1, 0), offset=0, mask=None, contiguous=False),))), src=()),
+            LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
+              LazyOp(BinaryOps.MUL, arg=None, src=(
+                LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                  LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),
+                    LazyOp(BinaryOps.ADD, arg=None, src=(
+                      LazyOp(ReduceOps.SUM, arg=(4,), src=(
+                        LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(3, 3), strides=(0, 0), offset=0, mask=((0, 3), (1, 3)), contiguous=False), View(shape=(2, 3, 2, 3, 3), strides=(0, 0, 1, 0, 4), offset=0, mask=((0, 2), (0, 3), (0, 2), (0, 3), (0, 2)), contiguous=False)))), src=()),)),
+                      x12:=LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
+                  x13:=LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+                LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                  LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(2, 3, 2, 3, 1), strides=(3, 1, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),
+                    LazyOp(BinaryOps.ADD, arg=None, src=(
+                      LazyOp(ReduceOps.SUM, arg=(4,), src=(
+                        LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(4, 5), strides=(0, 0), offset=0, mask=((0, 4), (2, 5)), contiguous=False), View(shape=(2, 3, 2, 3, 3), strides=(0, 0, 0, 1, 6), offset=0, mask=None, contiguous=False)))), src=()),)),
+                       x12,)),)),
+                   x13,)),)),)),)),)),)),))
+    # ValueError: size mismatched, can't reshape self.shape=(6, 2, 3, 3) -> new_shape=(6, 2, 3, 1, 2)
+    opts = [Opt(op=OptOps.UNROLL, axis=2, amt=0)]
+    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
+
+  def test_failure_46(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(BinaryOps.MUL, arg=None, src=(
+          LazyOp(ReduceOps.SUM, arg=(1,), src=(
+            LazyOp(UnaryOps.NEG, arg=None, src=(
+              LazyOp(BinaryOps.MUL, arg=None, src=(
+                LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
+                  LazyOp(BinaryOps.MUL, arg=None, src=(
+                    LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                      LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 1), offset=0, mask=None, contiguous=False),))), src=()),
+                        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(512, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+                      LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(512, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
+                LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=4, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),
+          LazyOp(UnaryOps.RECIP, arg=None, src=(
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=5, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),)),))
+    opts = [Opt(op=OptOps.UPCAST, axis=0, amt=2)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
 if __name__ == '__main__':

@@ -482,5 +482,61 @@ class TestLoadStoreFolder(unittest.TestCase):
     print(sink)
     assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 3
 
+def gate_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + reducer)
+
+class TestIFUOps(TestUOps):
+  def test_create_ifs(self):
+    gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 4))
+    valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
+    lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
+    gate = valid*(lidx.ne(2))
+    idx = UOp.const(dtypes.int, 0)
+    st = UOp(UOps.STORE, None, (sbuf, idx, UOp.const(dtypes.float, 42)))
+    barrier = UOp(UOps.BARRIER, None, (st,))
+    lbuf = UOp(UOps.LOAD, dtypes.float, (sbuf, UOp.const(dtypes.int, 0), barrier))
+    store = UOp(UOps.STORE, None, (gbuf, UOp.const(dtypes.int, 0), lbuf, gate))
+    sink = UOp(UOps.SINK, None, (store,))
+    sink = gate_rewrite(sink)
+    if_uops = [u for u in sink.parents if u.op is UOps.IF]
+    self.assertEqual(len(if_uops), 1)
+    self.assert_equiv_uops(if_uops[0].src[0], gate)
+    for st in sink.src:
+      self.assertEqual(len(st.src), 3)
+
+  def test_expand_ifs_one_gate(self):
+    gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 16))
+    valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 4)).lt(1)
+    lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
+    gate = valid*(lidx.ne(2))
+    st = UOp(UOps.STORE, None, (sbuf, lidx, UOp.const(dtypes.float, 42)))
+    barrier = UOp(UOps.BARRIER, None, (st,))
+    lbufs = [UOp(UOps.LOAD, dtypes.float, (sbuf, UOp.const(dtypes.int, i), barrier)) for i in range(4)]
+    stores = [UOp(UOps.STORE, None, (gbuf, UOp.const(dtypes.int, i), lbufs[i], gate)) for i in range(4)]
+    sink = UOp(UOps.SINK, None, tuple(stores))
+    sink = gate_rewrite(sink)
+    if_uops = [u for u in sink.parents if u.op is UOps.IF]
+    self.assertEqual(len(if_uops), 1)
+    self.assert_equiv_uops(if_uops[0].src[0], gate)
+    for st in sink.src:
+      self.assertEqual(len(st.src), 3)
+
+  # this will be fixed with the merge gated stores bounty
+  @unittest.expectedFailure
+  def test_expand_ifs_dumb(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
+    lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
+    gate = valid*(lidx.ne(2))
+    stores = [UOp(UOps.STORE, None, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
+    sink = UOp(UOps.SINK, None, tuple(stores))
+    sink = gate_rewrite(sink)
+    if_uops = [u for u in sink.parents if u.op is UOps.IF]
+    self.assertEqual(len(if_uops), 1)
+    self.assert_equiv_uops(if_uops[0].src[0], gate)
+    for st in sink.src:
+      self.assertEqual(len(st.src), 3)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

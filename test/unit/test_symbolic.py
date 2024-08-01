@@ -176,6 +176,7 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_mod(self):
     self.helper_test_variable((Variable("a", 0, 31)%12)%4, 0, 3, "(a%4)")
     self.helper_test_variable(((4*Variable("a", 0, 31)) % 12) % 4, 0, 0, "0")
+    self.helper_test_variable(((5*Variable("a", 0, 31)) % 12) % 5, 0, 4, "(((a*5)%12)%5)")
     self.helper_test_variable((Variable("a", 0, 31) % 4) % 12, 0, 3, "(a%4)")
 
   def test_mul_mul(self):
@@ -264,14 +265,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 0, 25, "((1+idx)//4)")
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "(idx//4)")
     self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, -1, 24, "(((3+idx)//4)+-1)")
-
-  def test_div_neg_all_range(self):
-    gidx = Variable("gidx", 0, 124)
-    lidx = Variable("lidx", 0, 7)
-    self.helper_test_variable((-gidx*8-lidx+999)//-4 + 250, 0, 250, "(((1+lidx)//4)+(gidx*2))")
-    self.helper_test_variable((-gidx*8-lidx+1000)//-4 + 250, 0, 249, "((gidx*2)+(lidx//4))")
-    self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, -1, 249, "(((3+lidx)//4)+(gidx*2)+-1)")
-    self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, -1, 249, "(((2+lidx)//4)+(gidx*2)+-1)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):

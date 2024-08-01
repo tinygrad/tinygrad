@@ -165,4 +165,6 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
     assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
     assert out.arg.st.size == ast.src[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
     assert_valid(out, out.arg.st)
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
+  assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
   return sts
