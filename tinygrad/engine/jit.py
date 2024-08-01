@@ -144,34 +144,49 @@ def _prepare_jit_inputs(args, kwargs):
 
 ReturnType = TypeVar('ReturnType')
 
-@dataclass(frozen=True)
+@dataclass
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
   jit_cache: List[ExecItem]
   input_replace: Dict[Tuple[int, int], int]
   extra_view_inputs: List[Tuple[int, int, str, int, DType]]
+  expected_buffers: List[Tuple[str, int, DType]]
   expected_names: List[Union[int, str]]
   expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]
-  def __post_init__(self): self.clear_jit_inputs()
+  expected_vars: List[Variable]
 
-  def clear_jit_inputs(self):
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
+  def _assign_inputs(self, input_buffers:List[Buffer], ensure_allocated:bool):
+    for idx, offset, device, size, dtype in self.extra_view_inputs:
+      buf = Buffer(device, size, dtype, base=input_buffers[idx], offset=offset)
+      input_buffers.append(buf.ensure_allocated() if ensure_allocated else buf)
+    for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
+  def _clear_inputs(self):
+    for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
+
+  def __post_init__(self):
+    # Condense the items into a graph executor.
+    self._jit_cache, self._input_replace = self.jit_cache, self.input_replace
+    if JIT < 2:
+      fake_input_buffers = [Buffer(device, size, dtype) for device, size, dtype in self.expected_buffers]
+      self._assign_inputs(fake_input_buffers, False)
+      self._jit_cache = apply_graph_to_jit(self._jit_cache, fake_input_buffers, {v:v.min for v in self.expected_vars})
+      self._input_replace = get_input_replace(self._jit_cache, fake_input_buffers)
+    self._clear_inputs()
 
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_buffers, var_vals, names, st_vars_dtype_device = _prepare_jit_inputs(args, kwargs)
     assert self.expected_names == names, f"args mismatch in JIT: {self.expected_names=} != {names}"
     assert self.expected_st_vars_dtype_device == st_vars_dtype_device, \
       f"args mismatch in JIT: {self.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
+    assert self.expected_vars == list(var_vals.keys()), f"args mismatch in JIT: {self.expected_vars} != {list(var_vals.keys())}"
 
     # jit exec
-    for idx, offset, device, size, dtype in self.extra_view_inputs:
-      input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
-    for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = input_buffers[input_idx]
-    if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
-    for ei in self.jit_cache: ei.run(var_vals, jit=True)
+    self._assign_inputs(input_buffers, True)
+    if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
+    for ei in self._jit_cache: ei.run(var_vals, jit=True)
 
     # cleanup
-    self.clear_jit_inputs()
+    self._clear_inputs()
     return self.ret
 
 class TinyJit(Generic[ReturnType]):
@@ -234,6 +249,8 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_buffers)} inputs")
 
       # track inputs that are views of buffers
+      # TODO: eventually expected_buffers should live in ExecItem
+      expected_buffers: List[Tuple[str, int, DType]] = [(b.device, b.size, b.dtype) for b in input_buffers]
       extra_view_inputs: List[Tuple[int, int, str, int, DType]] = []
       for item in jit_cache:
         for b in item.bufs:
@@ -247,14 +264,12 @@ class TinyJit(Generic[ReturnType]):
       assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
       jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
-      # Condense the items into a graph executor.
-      if JIT < 2: jit_cache = apply_graph_to_jit(jit_cache, input_buffers, var_vals)
-
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
       # set this for next run
-      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
+      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, expected_buffers,
+                                  names, st_vars_dtype_device, list(var_vals.keys()))
 
     self.cnt += 1
     return ret
