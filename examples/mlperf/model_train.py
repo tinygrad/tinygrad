@@ -350,7 +350,7 @@ def train_unet3d():
   from examples.mlperf.metrics import dice_score
   from examples.mlperf.dataloader import batch_load_unet3d
   from extra.models.unet3d import UNet3D
-  from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference, preprocess_dataset, BASEDIR
+  from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference, preprocess_dataset, TRAIN_PREPROCESSED_DIR, VAL_PREPROCESSED_DIR
   from tinygrad import Context
   from tinygrad.nn.optim import SGD
   from math import ceil
@@ -371,7 +371,6 @@ def train_unet3d():
   SAMPLES_PER_EPOCH = TRAIN_DATASET_SIZE // BS
   START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (SAMPLES_PER_EPOCH * BS)))
   EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (SAMPLES_PER_EPOCH * BS)))
-  PREPROCESSED_DIR = BASEDIR / ".." / "preprocessed"
   TRAIN_BEAM, EVAL_BEAM = getenv("TRAIN_BEAM", BEAM.value), getenv("EVAL_BEAM", BEAM.value)
   BENCHMARK = getenv("BENCHMARK")
   CKPT = getenv("CKPT")
@@ -455,15 +454,15 @@ def train_unet3d():
   if BENCHMARK: print("Benchmarking UNet3D")
   else: print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epoch(s) afterwards")
 
-  if not (PREPROCESSED_DIR / "train").exists(): preprocess_dataset(get_train_files(), PREPROCESSED_DIR, False)
-  if not (PREPROCESSED_DIR / "val").exists(): preprocess_dataset(get_val_files(), PREPROCESSED_DIR, True)
+  if not TRAIN_PREPROCESSED_DIR.exists(): preprocess_dataset(get_train_files(), TRAIN_PREPROCESSED_DIR, False)
+  if not VAL_PREPROCESSED_DIR.exists(): preprocess_dataset(get_val_files(), VAL_PREPROCESSED_DIR, True)
 
   for epoch in range(1, NUM_EPOCHS + 1):
     with Context(BEAM=TRAIN_BEAM):
       if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
         lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
 
-      train_dataloader = batch_load_unet3d(PREPROCESSED_DIR / "train", batch_size=BS, val=False, shuffle=True, seed=SEED)
+      train_dataloader = batch_load_unet3d(TRAIN_PREPROCESSED_DIR, batch_size=BS, val=False, shuffle=True, seed=SEED)
       it = iter(tqdm(train_dataloader, total=SAMPLES_PER_EPOCH, desc=f"epoch {epoch}", disable=BENCHMARK))
       i, proc = 0, data_get(it)
 
@@ -520,7 +519,7 @@ def train_unet3d():
         eval_loss = []
         scores = []
 
-        for x, y in tqdm(iterate(get_val_files(), preprocessed_dir=PREPROCESSED_DIR), total=VAL_DATASET_SIZE):
+        for x, y in tqdm(iterate(get_val_files(), preprocessed_dir=VAL_PREPROCESSED_DIR), total=VAL_DATASET_SIZE):
           eval_loss_value, score = eval_step(model, x, y)
           eval_loss.append(eval_loss_value)
           scores.append(score)
