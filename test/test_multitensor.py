@@ -446,6 +446,21 @@ class TestMultiTensor(unittest.TestCase):
         X = ((Tensor(data).shard(devices, axis=0) + 1).realize() - 1).realize()
         np.testing.assert_equal(X.numpy(), data)
 
+  def test_uneven_shard_with_empty(self):
+    N = 4
+    X = Tensor.rand(16, 1, 17).contiguous().realize()
+    np_x = X.numpy()
+    devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+
+    # test empty shard
+    np.testing.assert_equal(X.shard(devices, 0, (2, 2, 12, 0)).numpy(), np_x)
+
+    # test reshape with empty shard
+    np.testing.assert_equal(X.shard(devices, 0, (2, 2, 12, 0)).reshape(8, 1, 34).numpy(), np_x.reshape(8, 1, 34))
+
+    # test elementwise with empty shard
+    np.testing.assert_equal((X.shard(devices, 0, (2, 2, 12, 0)) + X.shard(devices, 0, (0, 0, 1, 15))).numpy(), np_x + np_x)
+
   def test_multiple_uneven_shard(self):
     N = 4
     X = Tensor.rand(4, 1, 257).contiguous().realize()
@@ -508,16 +523,30 @@ class TestMultiTensor(unittest.TestCase):
       t0.reshape((26*15,7))
 
   def test_reshape_on_axis_uneven(self):
-    t0 = Tensor.rand((4, 8, 15)).shard(devices_3, axis=1)
+    def reshape_helper(t0, t, t_axis):
+      np.testing.assert_allclose(t0.reshape(t.shape).numpy(), t.numpy())
+      assert t.lazydata.axis == t_axis
 
-    # no split axis if uneven
-    with self.assertRaises((AssertionError, ValueError)):
-      t0.reshape((4,4,2,15))
+    t0 = Tensor.rand((4, 42, 15)).shard(devices_3, axis=1, splits=[14, 7, 21])
 
-    # ok to split reshape left and right though
-    t1 = t0.reshape(2, 2, 8, 3, 5)
-    np.testing.assert_allclose(t0.numpy().flatten(), t1.numpy().flatten())
-    assert t1.lazydata.axis == 2
+    # ok to reshape as long as elements remain on same device
+    reshape_helper(t0, t0.reshape(2, 2, 42, 3, 5), 2)
+    # split to the right
+    reshape_helper(t0, t0.reshape(2, 2, 6, 7, 15), 2)
+    # split off and merge to the right
+    reshape_helper(t0, t0.reshape(4, 6, 105), 1)
+    # really blend the axes together
+    reshape_helper(t0, t0.reshape(4, 30, 21), 1)
+    # split off 1-shape
+    reshape_helper(t0, t0.reshape(4, 1, 42, 15), 2)
+    reshape_helper(t0, t0.reshape(4, 6, 1, 7, 15), 1)
+
+    # assert if cannot maintain shard axis without moving items between devices
+    with self.assertRaises(AssertionError): t0.reshape(4, 7, 6, 15)
+    # assert for degenerate reshape
+    with self.assertRaises(AssertionError): t0.reshape(4, 5, 7, 15)
+    # assert for cannot maintain axis
+    with self.assertRaises(AssertionError): t0.reshape(4, 3, 2, 7, 15)
 
   def test_mlb_assign_change_axis(self):
     t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()

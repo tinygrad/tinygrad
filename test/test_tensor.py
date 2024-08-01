@@ -56,6 +56,39 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+  @unittest.expectedFailure
+  def test_second_order_backward_pass(self):
+    def test_pytorch():
+      x = torch.tensor(x_init)
+      m = torch.tensor(m_init, requires_grad=True)
+      out = x.mul(m).sum()
+      # use retain graph so we can compute second order derivatives later
+      out.backward(retain_graph=True)
+      # save first-order gradient (dO/dm). they still contain graph information on how they were constructed wrt x and W
+      grad_m = m.grad
+      # zero gradients so second-order gradients are correct
+      m.grad = None
+      # compute second-order gradients
+      grad_m.sum().backward(retain_graph=True)
+
+      # d2O/dm2
+      second_grad_m = m.grad
+      return second_grad_m.numpy()
+
+    def test_tinygrad():
+      x = Tensor(x_init)
+      m = Tensor(m_init, requires_grad=True)
+      out = x.mul(m).sum()
+      out.backward()
+      grad_m = m.grad
+      m.grad = None
+      grad_m.sum().backward()
+      second_grad_m = m.grad # currently, this will be None (incorrect)
+      return second_grad_m.numpy()
+
+    for x,y in zip(test_tinygrad(), test_pytorch()):
+      np.testing.assert_allclose(x, y, atol=1e-5)
+
   # passing `gradient` to backward
   def test_backward_pass_vjp(self):
     def test_tinygrad():
