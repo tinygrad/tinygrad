@@ -96,7 +96,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(mv_address(signal._signal)), *data64_le(value),
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
 
-  def _timestamp(self, signal): return self._signal(signal)
+  def _timestamp(self, signal): return self._signal(signal, 0)
 
   def _update_wait(self, cmd_idx, signal=None, value=None):
     if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', data64_le(mv_address(signal._signal)))
