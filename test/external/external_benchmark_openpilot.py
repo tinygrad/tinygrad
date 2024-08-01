@@ -6,7 +6,7 @@ from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import GlobalCounters, fetch
 from tinygrad.tensor import _from_np_dtype
 
-OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
+OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 if __name__ == "__main__":
   Tensor.no_grad = True
