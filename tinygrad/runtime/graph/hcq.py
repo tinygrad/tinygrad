@@ -58,6 +58,8 @@ class HCQGraph(MultiGraphRunner):
       out_signal = self.signals[enqueue_queue] #type:ignore
       writable_buffers = ji.prg.p.outcount if isinstance(ji.prg, CompiledRunner) else 1
       deps = self.access_resources(enqueue_queue, ji.bufs[writable_buffers:], ji.bufs[:writable_buffers], j + 1)
+      prof_ji_desc = ji.prg.clprg.name if isinstance(ji.prg, CompiledRunner) else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
+      prof_info = ([(enqueue_dev.signal_t(), True) for _ in range(2)] + [enqueue_dev, prof_ji_desc, isinstance(ji.prg, BufferXfer)]) if PROFILE else None
 
       if isinstance(ji.prg, CompiledRunner):
         # Update signal on compute kernel to depend on the previous kernel.
@@ -66,6 +68,8 @@ class HCQGraph(MultiGraphRunner):
         # Remove self-dependency for AMD or NV with only 1 same-queue dep, since NV chains 2+ execs in this case, eliminating dep need.
         if (dname:=enqueue_dev.dname.split(":", 1)[0]) == "AMD" or (dname == "NV" and len(deps) == 1 and id(deps[0][0]) == id(out_signal)):
           deps = [x for x in deps if id(x[0]) != id(out_signal)]
+          if prof_info: prof_info = [(self.signal_sched[last_j][3][1][0], False)] + prof_info[1:]
+
       elif isinstance(ji.prg, BufferXfer): deps = [x for x in deps if id(x[0]) != id(out_signal)]
 
       # Go through all dependencies and, if we need the signal from that ji, enable it by setting the signal value in the signal schedule.
@@ -73,8 +77,6 @@ class HCQGraph(MultiGraphRunner):
         if id(sig) in [id(x) for x in self.signals.values()]:
           self.signal_sched[val - 1] = self.signal_sched[val - 1][:2] + (val,) + self.signal_sched[val - 1][3:]
 
-      prof_ji_desc = ji.prg.clprg.name if isinstance(ji.prg, CompiledRunner) else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
-      prof_info = ([enqueue_dev.signal_t() for _ in range(2)] + [enqueue_dev, prof_ji_desc, isinstance(ji.prg, BufferXfer)]) if PROFILE else None
       self.signal_sched[j] = (deps, out_signal, None if isinstance(ji.prg, CompiledRunner) else (j + 1), prof_info)
       self.last_ji[enqueue_queue] = j
 
@@ -95,7 +97,7 @@ class HCQGraph(MultiGraphRunner):
       for sig, val in deps:
         enqueue_queue.wait(sig, val)
         if id(sig) in [id(x) for x in self.dev_kickoff_signal.values()]: self.kickoff_wait_cmds[enqueue_queue].append(len(enqueue_queue) - 1)
-      if prof_info: enqueue_queue.timestamp(prof_info[0])
+      if prof_info and prof_info[0][1]: enqueue_queue.timestamp(prof_info[0][0])
 
       # Encode main commands based on ji type.
       if isinstance(ji.prg, CompiledRunner):
@@ -108,7 +110,7 @@ class HCQGraph(MultiGraphRunner):
       self.op_cmd_idx[j] = (enqueue_queue, len(enqueue_queue) - 1)
 
       # Encode finish profile timestamp (if needed).
-      if prof_info: enqueue_queue.timestamp(prof_info[1])
+      if prof_info and prof_info[1][1]: enqueue_queue.timestamp(prof_info[1][0])
 
       if signal_val is not None: enqueue_queue.signal(signal, signal_val)
 
@@ -130,7 +132,7 @@ class HCQGraph(MultiGraphRunner):
     self.dev_kickoff_signal['CPU'].value = self.kickoff_value
 
     if PROFILE and self.kickoff_value > 1:
-      for _,_,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): #type: ignore
+      for _,_,_,((st,_),(en,_),dev,desc,is_cp) in self.signal_sched.values(): #type: ignore
         dev.raw_prof_records += [(st.timestamp, en.timestamp, desc, is_cp)]
 
     # Update rawbuffers
@@ -182,6 +184,6 @@ class HCQGraph(MultiGraphRunner):
 
     # Graph is destructed. No need to keep signals any more, so return them as part of profiling.
     if PROFILE and self.kickoff_value > 1:
-      for _,_,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): dev.sig_prof_records += [(st, en, desc, is_cp)] #type: ignore
+      for _,_,_,((st,_),(en,_),dev,desc,is_cp) in self.signal_sched.values(): dev.sig_prof_records += [(st, en, desc, is_cp)] #type: ignore
 
     for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferOptions(cpu_access=True))
