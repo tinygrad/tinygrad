@@ -150,24 +150,24 @@ class CapturedJit(Generic[ReturnType]):
     self._input_replace: Dict[Tuple[int, int], int] = self.input_replace
     if JIT < 2: self._apply_graph()
 
-  def _assign_inputs(self, input_buffers:List[Buffer], ensure_allocated:bool):
+  def _assign_inputs(self, input_buffers:List[Buffer]):
     for idx, offset, device, size, dtype in self.extra_view_inputs:
-      buf = Buffer(device, size, dtype, base=input_buffers[idx], offset=offset)
-      input_buffers.append(buf.ensure_allocated() if ensure_allocated else buf)
+      input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
   def _clear_inputs(self):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
 
   # Condense the items into a graph executor.
   def _apply_graph(self):
-    self._assign_inputs(fake_input_buffers:=[Buffer(device, size, dtype) for device, size, dtype in self.expected_buffers], False)
+    # TODO: not need to allocate real buffers here
+    self._assign_inputs(fake_input_buffers:=[Buffer(device, size, dtype).ensure_allocated() for device, size, dtype in self.expected_buffers])
     self._jit_cache = apply_graph_to_jit(self._jit_cache, fake_input_buffers, {v:v.min for v in self.expected_vars})
     self._input_replace = get_input_replace(self._jit_cache, fake_input_buffers)
     self._clear_inputs()
 
   # jit exec
   def __call__(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]) -> ReturnType:
-    self._assign_inputs(rawbufs, True)
+    self._assign_inputs(rawbufs)
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
     self._clear_inputs()
