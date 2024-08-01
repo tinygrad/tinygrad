@@ -45,7 +45,7 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_jit(self):
     @TinyJit
-    def add(a, b): return a+b+1
+    def add(a, b): return a.sum()+b+1
     for _ in range(3): add(Tensor.rand(10, 10), Tensor.rand(10, 10))
     st = pickle.dumps(add)
     del add
@@ -55,7 +55,7 @@ class TestPickle(unittest.TestCase):
     y = Tensor.ones(10, 10).contiguous().realize()
     print("post jit")
     out = add_fxn(x, y)
-    np.testing.assert_equal(out.numpy(), 3)
+    np.testing.assert_equal(out.numpy(), 102)
 
   def test_pickle_schedule(self):
     a = Tensor([1,2])
