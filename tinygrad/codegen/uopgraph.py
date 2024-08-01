@@ -359,6 +359,11 @@ def do_expand(root:UOp):
     expand_args, old_args = tuple(sorted(root.arg+expand_args)), expand_args
     assert len(expand_args) == (len(old_args) + len(root.arg))
     new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _choices_from_args(expand_args)]
+  if root.op is UOps.IF:
+    # merge ifs into an or
+    conditions = functools.reduce(lambda x,y: x|y, dedup(x.src[0] for x in new_srcs if x.src[0].op is not UOps.CONST))
+    barriers = tuple(set(x.src[1] for x in new_srcs))
+    new_srcs = [UOp(UOps.IF, src=(conditions,)+barriers) for _ in new_srcs]
   assert prod([x[1] for x in expand_args]) == len(new_srcs)
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
@@ -421,6 +426,25 @@ expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
 ])
 
+def create_gate(root:UOp) -> Optional[UOp]:
+  @functools.lru_cache(None)
+  def _gate_srcs(u:UOp, gate:UOp) -> UOp:
+    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
+    return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
+  return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
+
+gate_creator = PatternMatcher([(NOp(UOps.STORE, name="root"), create_gate)])
+
+def delete_redundant_gates(root:UOp) -> Optional[UOp]:
+  @functools.lru_cache(None)
+  def find_gate(x:UOp) -> Optional[UOp]:
+    if x.op is UOps.IF: return x
+    return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
+  if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
+  return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
+
+gate_folder = PatternMatcher([(NOp(UOps.STORE, name="root"), delete_redundant_gates)])
+
 # *** uop graph ***
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
@@ -449,7 +473,9 @@ class UOpGraph:
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
-    self.folder = constant_folder if opts is None or not opts.supports_float4 else (constant_folder+float4_folding)
+    # NOTE: gate folding must come after expand
+    gate_pms = gate_creator+gate_folder if opts is None or not opts.supports_float4 else gate_creator
+    self.folder = constant_folder+gate_pms if opts is None or not opts.supports_float4 else constant_folder+gate_pms+float4_folding
     if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
       self.folder = self.folder + transcendental_folding
 
@@ -482,28 +508,12 @@ class UOpGraph:
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
-    # replace UOps.STORE gate with an IF block
-    @functools.lru_cache(None)
-    def _replace_gates(u:UOp, gate:UOp) -> UOp:
-      if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
-        if_uop = UOp(UOps.IF, None, (gate, u.src[-1]))
-        return UOp(u.op, u.dtype, u.src[:-1]+(if_uop,), u.arg)
-      if (replace_source:=tuple(_replace_gates(x, gate) for x in u.src)) != u.src:
-        if u.op is UOps.STORE and u.src[3] is gate: replace_source = replace_source[:3]
-        return UOp(u.op, u.dtype, replace_source, u.arg)
-      return u
-    sink_srcs = list(self.sink.src)
-    for i, s in enumerate(sink_srcs):
-      if s.op is UOps.STORE and len(s.src) == 4 and (rw:=_replace_gates(s, s.src[3])) != s:
-        sink_srcs[i] = UOp(rw.op, rw.dtype, rw.src, rw.arg)
-    sink = UOp(UOps.SINK, None, tuple(sink_srcs))
-
     # do graph rewrite
-    sink = graph_rewrite(sink, self.folder)
+    sink = graph_rewrite(self.sink, self.folder)
 
     # expand
     UOpGraph.cnt += 1
-    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, self.folder+expander)
+    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0): sink = graph_rewrite(sink, self.folder+expander+gate_folder)
 
     # for PTX only
     if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)

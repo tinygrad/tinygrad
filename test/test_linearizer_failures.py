@@ -353,7 +353,6 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["AMD", "HIP"])
 
   # llama3 8B failure with BEAM=2 https://github.com/tinygrad/tinygrad/actions/runs/10150118124/job/28066519425#step:14:1, these don't compile
-  @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test needs shared")
   def test_failure_42(self):
@@ -364,7 +363,6 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.GROUP, axis=0, amt=0), Opt(op=OptOps.PADTO, axis=0, amt=32), Opt(op=OptOps.UPCAST, axis=0, amt=2), Opt(op=OptOps.PADTO, axis=0, amt=32)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
-  @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test needs shared")
   def test_failure_43(self):
@@ -375,7 +373,6 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.GROUP, axis=0, amt=0), Opt(op=OptOps.PADTO, axis=0, amt=32), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=0)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
-  @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test needs shared")
   def test_failure_44(self):
