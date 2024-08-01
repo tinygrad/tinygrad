@@ -39,7 +39,7 @@ class ScheduleItem:
 
 def _recursive_lazyop(buf:LazyBuffer, inputs:Dict[LazyBuffer, int], outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer],
-                      reduce_info:Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> LazyOp:
+                      reduce_info:Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> LazyOp:
   """recursively create a lazyop"""
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   if (buf, st) in cache: return cache[(buf, st)]
@@ -76,8 +76,9 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:Dict[LazyBuffer, int], outputs:Tupl
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
     # if we are merging the reduce, skip it
-    if buf not in reduce_info: return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)
-    st, arg = reduce_info[buf]
+    if (buf, st) not in reduce_info:
+      return _recursive_lazyop(buf.srcs[0], inputs, outputs, var_vals, st, realizes, assign_targets, reduce_info, cache)
+    st, arg = reduce_info[(buf, st)]
 
   # otherwise we fuse it like normal
   return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, inputs, outputs, var_vals, st, realizes, assign_targets, \
@@ -89,13 +90,14 @@ def _permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeT
   return tmp, tmp.shape[-len(axis):]
 
 def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer],\
-    reduce_info:Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]], cache):
-  if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return
+    reduce_info:Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> Optional[Tuple[LazyBuffer, ShapeTracker]]:
+  if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return None
   cache.setdefault((buf, st))
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   input_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
-  for x in buf.srcs: _recurse_reduceops(x, input_st, realizes, outs, reduce_info, cache)
-  if buf.op in ReduceOps and buf not in reduce_info:
+  reduce_srcs = [r for x in buf.srcs if (r:=_recurse_reduceops(x, input_st, realizes, outs, reduce_info, cache)) is not None]
+  top_reduce = reduce_srcs[-1] if len(reduce_srcs) != 0 else None
+  if buf.op in ReduceOps:
     axis = buf.arg
     if not st.contiguous:
       # push the movementop to the input
@@ -110,15 +112,18 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
       # update the axis
       _, new_rshape = _permute_reduce(input_st, axis)
       axis = tuple(range(len(input_st.shape)-len(new_rshape), len(input_st.shape)))
-    elif reduce_info:
-      top_reduce, (top_reduce_input_st, top_reduce_axes) = deque(reduce_info.items(), 1).pop()
-      if buf.op is buf.srcs[0].base.op:
+    elif top_reduce is not None:
+      top_reduce_input_st, top_reduce_axes = reduce_info[top_reduce]
+      if buf.srcs[0] is top_reduce[0] and buf.op is top_reduce[0].op:
         # merge this reduce with its parent
         reduce_info[top_reduce] = (top_reduce_input_st, top_reduce_axes+axis)
-        return
-      # reshape this reduce per its top axis
+        return None
+      # reshape this reduceop based on the top reduce
       input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
-    reduce_info[buf] = (input_st, axis)
+    st = st.reshape(reduce_st(input_st, axis))
+    reduce_info[(buf, st)] = (input_st, axis)
+    return (buf, st)
+  return top_reduce
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
@@ -127,7 +132,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
     return LazyOp(MetaOps.KERNEL, (LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st)), )), [x.base for x in out.srcs], {}, []
   if out.op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}: return LazyOp(out.op, (), out.arg), [x.base for x in out.srcs], {}, []
   # unify the kernel dims
-  reduce_info: Dict[LazyBuffer, Tuple[ShapeTracker, Tuple[int, ...]]] = {}
+  reduce_info: Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]] = {}
   seen_ops: Dict[Tuple[LazyBuffer, ShapeTracker], None] = {}
   for out in outs: _recurse_reduceops(out, out.st, realizes, outs, reduce_info, seen_ops)
   # create the stores
