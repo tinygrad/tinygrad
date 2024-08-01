@@ -27,14 +27,14 @@ if __name__ == "__main__":
     GlobalCounters.reset()
     st = time.perf_counter_ns()
     ret = next(iter(run_onnx(new_inputs).values())).realize()
-    print(f"unjitted: {(st - time.perf_counter_ns())*1e-6:7.4f} ms")
+    print(f"unjitted: {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
   run_onnx_jit = TinyJit(run_onnx)
-  for _ in range(5):
+  for _ in range(10):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
     ret = next(iter(run_onnx_jit(new_inputs).values())).realize()
-    print(f"jitted:  {(st - time.perf_counter_ns())*1e-6:7.4f} ms")
+    print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
   # tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
   # np.testing.assert_allclose(ort_out, tinygrad_out, atol=2e-3, rtol=1e-2)
