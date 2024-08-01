@@ -5,7 +5,6 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
@@ -66,8 +65,8 @@ class CStyleLanguage(Renderer):
       return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{self.render_dtype(buf_dtype)}{output_dtype.count}*)({buf_name}+{idx}))"  # noqa: E501
     return f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
 
-  def get_kernel_modifier(self, uops:UOpGraph) -> str: return ""
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:UOpGraph, prefix=None) -> str:
+  def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
                 ("" if mutable else "const ")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
@@ -92,7 +91,7 @@ class CStyleLanguage(Renderer):
   def render_local(self, name:str, dtype:DType, size:int): return self.smem_align + self.smem_prefix + f"{self.render_dtype(dtype)} {name}[{size}];"
   def render_dtype(self, var_dtype:DType) -> str: return self.type_map.get(var_dtype, var_dtype.name)
 
-  def render(self, name:str, uops:UOpGraph) -> str:
+  def render(self, name:str, uops:List[UOp]) -> str:
     kernel = []
     bufs: List[Tuple[str, Tuple[DType, bool]]] = []
     depth = 1
@@ -302,7 +301,7 @@ return c;}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
-  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+  def get_kernel_modifier(self, uops:List[UOp]) -> str:
     maxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
@@ -391,7 +390,7 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+  def get_kernel_modifier(self, uops:List[UOp]) -> str:
     requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters

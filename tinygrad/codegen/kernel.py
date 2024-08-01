@@ -737,7 +737,8 @@ class Kernel:
 
   def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
-    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
+    self.uops.linearize(self.opts.extra_matcher)
+    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops.uops)
 
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{getenv('GITHUB_RUN_ATTEMPT')}"
@@ -765,4 +766,4 @@ class Kernel:
     mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
-    return Program(ansiname, src, self.opts.device, global_size, local_size, self.uops, ops, min(mem, mem_bytes), mem)
+    return Program(ansiname, src, self.opts.device, global_size, local_size, self.uops.uops, ops, min(mem, mem_bytes), mem)
