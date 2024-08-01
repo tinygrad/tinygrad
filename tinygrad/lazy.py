@@ -103,9 +103,11 @@ class LazyBuffer:
     if bitcast and self.dtype.itemsize != dtype.itemsize:
       # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
-      new_strides = tuple(((stride * self.dtype.itemsize) // dtype.itemsize for stride in self.st.real_strides() if stride))[:-1] + (1,)
+      if not all_int(strides := self.st.real_strides()): raise RuntimeError("shape changing bitcast with symbolic strides not supported")
+      new_strides = tuple(((stride * self.dtype.itemsize) // dtype.itemsize for stride in strides))[:-1] + (1,)
       ret = create_lazybuffer(self.device, ShapeTracker((View.create(new_shape, new_strides),)), dtype, MetaOps.VIEW, dtype, (self,))
       return ret._view(ShapeTracker((View.create(new_shape, new_strides),)))
+    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       # TODO: applying this makes gpt2 slower
       return self.base.cast(dtype, bitcast)._view(self.st)

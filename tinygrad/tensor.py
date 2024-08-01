@@ -3001,10 +3001,15 @@ class Tensor:
         new_lbs = [Tensor(lb, device=lb.device).bitcast(dtype).lazydata.lbs[0] for lb in self.lazydata.real_lbs]
         return Tensor(MultiLazyBuffer(new_lbs, self.lazydata.axis), device=self.device)
 
+      if isinstance(self.lazydata, MultiLazyBuffer):
+        new_lbs = [Tensor(lb, device=lb.device).bitcast(dtype).lazydata.lbs[0] for lb in self.lazydata.real_lbs]
+        return Tensor(MultiLazyBuffer(new_lbs, self.lazydata.axis), device=self.device)
+
       if not all_int(self.shape): raise RuntimeError("shape changing bitcast with symbolic shape isn't supported yet")
+      if not all_int(strides := self.lazydata.st.real_strides()): raise RuntimeError("shape changing bitcast with symbolic strides not supported")
       if not (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
-      if not ((s:= self.lazydata.st.real_strides())[-1]) == 1: raise RuntimeError("shape changing bitcast requires final stride of 1")
-      if self.dtype.itemsize < dtype.itemsize and not all((st * self.dtype.itemsize) % dtype.itemsize == 0 if st else False for st in s[:-1]):
+      if not (strides[-1]) == 1: raise RuntimeError("shape changing bitcast requires final stride of 1")
+      if self.dtype.itemsize < dtype.itemsize and not all((stride * self.dtype.itemsize) % dtype.itemsize == 0 for stride in strides[:-1]):
         raise RuntimeError("shape changing bitcast requires all strides to be divisible by ratio of dtype sizes")
 
       if not self.lazydata.can_view_bitcast():
@@ -3022,6 +3027,9 @@ class Tensor:
       shift_factors = (Tensor.arange(n, dtype=new_int, device=self.device)*8*self.dtype.itemsize).exp2().cast(new_int)
       a = self.bitcast(old_int).cast(new_int).reshape(new_shape + (-1,))
       return (a*shift_factors).sum(-1, acc_dtype=new_int).bitcast(dtype)
+    shift_factors = (Tensor.arange(n, dtype=old_int, device=self.device)*8*dtype.itemsize).exp2().cast(old_int)
+    a = self.bitcast(old_int).unsqueeze(-1).expand(self.shape + (n,))
+    return a.div(shift_factors, upcast=False).cast(new_int).reshape(new_shape).bitcast(dtype)
     shift_factors = (Tensor.arange(n, dtype=old_int, device=self.device)*8*dtype.itemsize).exp2().cast(old_int)
     a = self.bitcast(old_int).unsqueeze(-1).expand(self.shape + (n,))
     return a.div(shift_factors, upcast=False).cast(new_int).reshape(new_shape).bitcast(dtype)
