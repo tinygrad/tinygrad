@@ -760,11 +760,9 @@ class Kernel:
       global_size, local_size = None, None
 
     ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
-    run_count = prod((global_size or []) + (local_size or []))
     # group non-local MemBuffers by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
-    return Program(ansiname, src, self.opts.device, global_size, local_size, self.uops,
-                   ops * run_count, min(mem * run_count, mem_bytes), mem * run_count)
+    return Program(ansiname, src, self.opts.device, global_size, local_size, self.uops, ops, min(mem, mem_bytes), mem)

@@ -107,10 +107,10 @@ class HCQGraph(MultiGraphRunner):
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])
       self.op_cmd_idx[j] = (enqueue_queue, len(enqueue_queue) - 1)
 
-      if signal_val is not None: enqueue_queue.signal(signal, signal_val)
-
       # Encode finish profile timestamp (if needed).
       if prof_info: enqueue_queue.timestamp(prof_info[1])
+
+      if signal_val is not None: enqueue_queue.signal(signal, signal_val)
 
     for dev in self.devices:
       for dep_dev in list(self.copy_to_devs[dev]) + [dev]:

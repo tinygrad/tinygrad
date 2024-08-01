@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Union, Any, Tuple, List, Dict
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING
+from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.dtype import DType, ConstType
 from tinygrad.ops import BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer
@@ -15,7 +15,7 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   n_lbs, dim = len(lbs), prod(lbs[0].shape)
   # Ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
   # so just fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
-  use_ring = (RING >= 2 or (n_lbs > 2 and dim > 256_000 and RING >= 1))
+  use_ring = (RING >= 2 or (n_lbs > 2 and dim > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{dim} | {lbs[0].dtype}")
   if not use_ring:
     return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
@@ -132,17 +132,16 @@ class MultiLazyBuffer:
 
   def reshape(self, arg:Tuple[sint, ...]):
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None, self.real)
+    assert prod(self.shape) == prod(arg), "reshape must maintain prod(shape)"
     arg_acc:List[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
     # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
     # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
     new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.shape[:self.axis])) - 1
-    if arg[new_axis] != self.shape[self.axis]:
-      assert self.shape[self.axis] % len(self.real_lbs) == 0, f"cannot reshape on-axis for uneven shard {self.axis} {self.shape} {len(self.real_lbs)}"
-      assert arg[new_axis] % len(self.real_lbs) == 0, f"new on-axis shape must divide evenly between devices {new_axis} {arg} {len(self.real_lbs)}"
-    return MultiLazyBuffer([x.reshape(tuple(s if a != new_axis else
-                              x.shape[self.axis] if s == self.shape[self.axis] else
-                              s // len(self.real_lbs) for a,s in enumerate(arg))) for x in self.lbs],
-                           new_axis, self.real)
+    assert all(prod(lb.shape[self.axis:]) % prod(arg[new_axis + 1:]) == 0 for lb in self.lbs),\
+      f"reshape cannot move items between shards {self.shape} {arg} {self.bounds}"
+    return MultiLazyBuffer([x.reshape(
+      tuple(s if a != new_axis else prod(x.shape[self.axis:]) // prod(arg[new_axis + 1:]) for a, s in enumerate(arg))
+    ) for x in self.lbs], new_axis, self.real)
 
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]):
     assert self.axis is None or arg[self.axis] == (0,0) or not all(self.real), f"padding not supported for {arg=}"
