@@ -11,11 +11,12 @@ nx = np.zeros((N))
 ny = np.zeros((N))-1
 for i in range(TRUE_CNT):
   nx[i] = 1
-# np.random.shuffle(nx)
+np.random.shuffle(nx)
 
 nx = nx.astype(bool)
 ny = ny.astype(np.int32)
 print('ARG_DTYPES:', nx.dtype, ny.dtype)
+idx_real = np.sort(np.nonzero(nx)[0])
 
 device = CUDADevice("cuda:0")
 cudaalloc = CUDAAllocator(device)
@@ -50,5 +51,5 @@ et = time.perf_counter()
 
 print(f'Kernel runtime {(et-st)*1000} ms')
 cudaalloc.copyout(flat_mv(ny.data), y)
-np.testing.assert_equal(np.sort(ny[:TRUE_CNT]), np.arange(TRUE_CNT))
+np.testing.assert_equal(np.sort(ny[:TRUE_CNT]), idx_real)
 print(f'NUM OF TRUES MATCH: {(ny>=0).sum()==TRUE_CNT}')
