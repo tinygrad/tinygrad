@@ -1,10 +1,12 @@
 import time, sys
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
+import onnxruntime as ort
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, dtypes, TinyJit
-from tinygrad.helpers import GlobalCounters, fetch
+from tinygrad.helpers import GlobalCounters, fetch, colored
 from tinygrad.tensor import _from_np_dtype
+import numpy as np
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
@@ -34,3 +36,15 @@ if __name__ == "__main__":
     st = time.perf_counter_ns()
     ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
+
+  # validate
+  ort_options = ort.SessionOptions()
+  ort_options.log_severity_level = 3
+  onnx_session = ort.InferenceSession(onnx_path, ort_options)
+  onnx_output = onnx_session.run([onnx_model.graph.output[0].name], new_inputs_np)
+  ort_out = onnx_output[0]
+
+  tinygrad_out = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
+
+  np.testing.assert_allclose(ort_out, tinygrad_out, atol=2e-3, rtol=1e-2)
+  print(colored("outputs validated!", "green"))
