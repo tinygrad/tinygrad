@@ -214,9 +214,9 @@ class TinyJit(Generic[ReturnType]):
 
   # keep legacy code working
   @property
-  def jit_cache(self) -> List[ExecItem]: return self.captured.jit_cache if self.captured is not None else []
+  def jit_cache(self) -> List[ExecItem]: return self.captured._jit_cache if self.captured is not None else []
   @property
-  def input_replace(self) -> Dict[Tuple[int, int], int]: return self.captured.input_replace if self.captured is not None else {}
+  def input_replace(self) -> Dict[Tuple[int, int], int]: return self.captured._input_replace if self.captured is not None else {}
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
