@@ -15,8 +15,8 @@ np.random.shuffle(nx)
 
 nx = nx.astype(bool)
 ny = ny.astype(np.int32)
-zero = np.zeros((1)).astype(np.uint32)
-print('ARG_DTYPES:', nx.dtype, ny.dtype, zero.dtype)
+ncnt = np.zeros((1)).astype(np.uint32)
+print('ARG_DTYPES:', nx.dtype, ny.dtype, ncnt.dtype)
 idx_real = np.sort(np.nonzero(nx)[0])
 
 device = CUDADevice("cuda:0")
@@ -28,7 +28,7 @@ cnt_ptr = cudaalloc.alloc(4)
 
 cudaalloc.copyin(x, bytearray(nx))
 cudaalloc.copyin(y, bytearray(ny))
-cudaalloc.copyin(cnt_ptr, bytearray(zero))
+cudaalloc.copyin(cnt_ptr, bytearray(ncnt))
 
 print(device.arch)
 compiler = CUDACompiler(device.arch)
@@ -49,13 +49,14 @@ global_size, local_size = [N//1000,1,1], [1000, 1, 1]
 times, runs = 0, 100
 for i in range(runs):
   st = time.perf_counter()
+  cudaalloc.copyin(cnt_ptr, bytearray(ncnt))
   prog(x, y, cnt_ptr, global_size=global_size, local_size=local_size, wait=True)
-  cudaalloc.copyin(cnt_ptr, bytearray(zero))
   et = time.perf_counter()
   times+=(et-st)
 
 print(f'Ran {runs} times || Kernel AVG Runtime {times/runs*1000} ms')
 cudaalloc.copyout(flat_mv(ny.data), y)
-np.testing.assert_equal(np.sort(ny[:TRUE_CNT]), idx_real)
-print(f'NUM OF TRUES MATCH: {(ny>=0).sum()==TRUE_CNT}')
-print(f'Rest of array == -1: {ny[TRUE_CNT:].mean()==-1}')
+cudaalloc.copyout(flat_mv(ncnt.data), cnt_ptr)
+np.testing.assert_equal(np.sort(ny[:ncnt[0]]), idx_real)
+print(f'NUM OF TRUES MATCH: {(ny>=0).sum()==TRUE_CNT and ncnt[0]==TRUE_CNT}')
+print(f'Rest of array == -1: {ny[ncnt[0]:].mean()==-1}')
