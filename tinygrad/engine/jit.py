@@ -33,10 +33,10 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
       graphed_jit_cache.append(ExecItem(graph_runner, cast(List[Optional[Buffer]], input_rawbuffers)))
       max_batch_size *= 2
-      if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
+      if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
       graphed_jit_cache.extend(current_batch)
-      if DEBUG >= 2: print(f"\tJIT GRAPHing failed batch with {len(current_batch)} kernels on device {current_device}: {e}")
+      if DEBUG >= 2: print(f"JIT GRAPHing failed batch with {len(current_batch)} kernels on device {current_device}: {e}")
     current_batch = []
     current_device = None
 
@@ -135,39 +135,35 @@ class CapturedJit(Generic[ReturnType]):
   jit_cache: List[ExecItem]
   input_replace: Dict[Tuple[int, int], int]
   extra_view_inputs: List[Tuple[int, int, str, int, DType]]
-  expected_buffers: List[Tuple[str, int, DType]]
-  expected_vars: List[Variable]
   expected_names: List[Union[int, str]]
-  expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]  # TODO: dedup with expected_buffers/expected_vars
+  expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
-    return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs, self.expected_buffers,
-                            self.expected_vars, self.expected_names, self.expected_st_vars_dtype_device)
+    return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
+                            self.expected_names, self.expected_st_vars_dtype_device)
 
   def __post_init__(self):
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
     self._jit_cache: List[ExecItem] = self.jit_cache
     self._input_replace: Dict[Tuple[int, int], int] = self.input_replace
-    if JIT < 2: self._apply_graph()
+    self._graphed = False
+    self._clear_inputs()
 
-  def _assign_inputs(self, input_buffers:List[Buffer]):
-    for idx, offset, device, size, dtype in self.extra_view_inputs:
-      input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
-    for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
   def _clear_inputs(self):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
 
-  # Condense the items into a graph executor.
-  def _apply_graph(self):
-    # TODO: not need to allocate real buffers here
-    self._assign_inputs(fake_input_buffers:=[Buffer(device, size, dtype).ensure_allocated() for device, size, dtype in self.expected_buffers])
-    self._jit_cache = apply_graph_to_jit(self._jit_cache, fake_input_buffers, {v:v.min for v in self.expected_vars})
-    self._input_replace = get_input_replace(self._jit_cache, fake_input_buffers)
-    self._clear_inputs()
-
   # jit exec
-  def __call__(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]) -> ReturnType:
-    self._assign_inputs(rawbufs)
+  def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
+    # assign inputs
+    for idx, offset, device, size, dtype in self.extra_view_inputs:
+      input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
+    for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
+
+    # Condense the items into a graph executor.
+    if JIT < 2 and not self._graphed:
+      self._jit_cache = apply_graph_to_jit(self._jit_cache, input_buffers, var_vals)
+      self._input_replace = get_input_replace(self._jit_cache, input_buffers)
+      self._graphed = True
+
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
     self._clear_inputs()
@@ -251,7 +247,6 @@ class TinyJit(Generic[ReturnType]):
 
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
-      expected_buffers: List[Tuple[str, int, DType]] = [(b.device, b.size, b.dtype) for b in input_buffers]
       extra_view_inputs: List[Tuple[int, int, str, int, DType]] = []
       for item in jit_cache:
         for b in item.bufs:
@@ -269,8 +264,7 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
       # set this for next run
-      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs,
-                                  expected_buffers, list(var_vals.keys()), names, st_vars_dtype_device)
+      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
