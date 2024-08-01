@@ -47,7 +47,6 @@ class TestPickle(unittest.TestCase):
     @TinyJit
     def add(a, b): return a+b+1
     for _ in range(3): add(Tensor.rand(10, 10), Tensor.rand(10, 10))
-    del add.fxn  # pickling the JIT requires the function to be deleted
     st = pickle.dumps(add)
     del add
 
