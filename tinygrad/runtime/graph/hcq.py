@@ -72,7 +72,7 @@ class HCQGraph(MultiGraphRunner):
         # Remove self-dependency for AMD or NV with only 1 same-queue dep, since NV chains 2+ execs in this case, eliminating dep need.
         if (dname:=enqueue_dev.dname.split(":", 1)[0]) == "AMD" or (dname == "NV" and len(deps) == 1 and id(deps[0][0]) == id(out_signal)):
           deps = [x for x in deps if id(x[0]) != id(out_signal)]
-          if prof_info: prof_info = [(self.signal_sched[last_j][3][1][0], False)] + prof_info[1:]
+          if prof_info is not None: prof_info = [(self.signal_sched[last_j][3][1][0], False)] + prof_info[1:] # type: ignore
 
       elif isinstance(ji.prg, BufferXfer): deps = [x for x in deps if id(x[0]) != id(out_signal)]
 

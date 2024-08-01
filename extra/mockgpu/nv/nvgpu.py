@@ -101,11 +101,11 @@ class GPFIFO:
     lx, ly, lz = qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2
     gpuocelot_lib.ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt+vals_cnt, (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
     if qmd.release0_enable:
-      rel0 = to_mv(qmd.release0_address_lower + (qmd.release0_address_upper << 32), 0x8).cast('Q')
+      rel0 = to_mv(qmd.release0_address_lower + (qmd.release0_address_upper << 32), 0x16).cast('Q')
       rel0[0] = qmd.release0_payload_lower + (qmd.release0_payload_upper << 32)
       rel0[1] = int(time.perf_counter() * 1e9)
     if qmd.release1_enable:
-      rel1 = to_mv(qmd.release1_address_lower + (qmd.release1_address_upper << 32), 0x8).cast('Q')
+      rel1 = to_mv(qmd.release1_address_lower + (qmd.release1_address_upper << 32), 0x16).cast('Q')
       rel1[0] = qmd.release1_payload_lower + (qmd.release1_payload_upper << 32)
       rel1[1] = int(time.perf_counter() * 1e9)
     if qmd.dependent_qmd0_enable:
