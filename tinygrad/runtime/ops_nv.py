@@ -168,10 +168,10 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
       for i in range(2):
         if getattr(prev_qmd, f'release{i}_enable') == 0:
           setattr(prev_qmd, f'release{i}_enable', 1)
-          setattr(prev_qmd, f'release{i}_address_upper', data64(mv_address(signal._signal))[0])
-          setattr(prev_qmd, f'release{i}_address_lower', data64(mv_address(signal._signal))[1])
-          setattr(prev_qmd, f'release{i}_payload_upper', data64(value)[0])
-          setattr(prev_qmd, f'release{i}_payload_lower', data64(value)[1])
+          setattr(prev_qmd, f'release{i}_address_upper', (sigaddr:=data64(mv_address(signal._signal)))[0])
+          setattr(prev_qmd, f'release{i}_address_lower', sigaddr[1])
+          setattr(prev_qmd, f'release{i}_payload_upper', (val:=data64(value))[0])
+          setattr(prev_qmd, f'release{i}_payload_lower', val[1])
           self.cmd_idx_to_qmd[len(self) - 1] = prev_qmd
           self.cmd_idx_to_signal_id[len(self) - 1] = i
           return
@@ -181,13 +181,13 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
 
   def _update_signal(self, cmd_idx, signal=None, value=None):
-    if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_wait(cmd_idx, signal, value) # HACK: same offset
+    if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_wait(cmd_idx, signal, value) # reuse wait, same offsets to update.
     if signal is not None:
-      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address_upper', data64(mv_address(signal._signal))[0])
-      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address_lower', data64(mv_address(signal._signal))[1])
+      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address_upper', (sigaddr:=data64(mv_address(signal._signal)))[0])
+      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address_lower', sigaddr[1])
     if value is not None:
-      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload_upper', data64(value)[0])
-      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload_lower', data64(value)[1])
+      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload_upper', (val:=data64(value))[0])
+      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload_lower', val[1])
 
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).compute_gpfifo)
 
