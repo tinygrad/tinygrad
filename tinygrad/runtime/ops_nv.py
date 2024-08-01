@@ -56,6 +56,8 @@ def make_qmd_struct_type():
   for i,(name, data) in enumerate(bits):
     if i > 0 and (gap:=(data[1] - bits[i-1][1][0] - 1)) != 0: fields.append((f"_reserved{i}", ctypes.c_uint32, gap))
     fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[0]-data[1]+1))
+    if len(fields) >= 2 and fields[-2][0].endswith('_lower') and fields[-1][0].endswith('_upper') and fields[-1][0][:-6] == fields[-2][0][:-6]:
+      fields = fields[:-2] + [(fields[-1][0][:-6], ctypes.c_uint64, fields[-1][2] + fields[-2][2])]
   return init_c_struct_t(tuple(fields))
 qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
@@ -168,10 +170,8 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
       for i in range(2):
         if getattr(prev_qmd, f'release{i}_enable') == 0:
           setattr(prev_qmd, f'release{i}_enable', 1)
-          setattr(prev_qmd, f'release{i}_address_upper', (sigaddr:=data64(mv_address(signal._signal)))[0])
-          setattr(prev_qmd, f'release{i}_address_lower', sigaddr[1])
-          setattr(prev_qmd, f'release{i}_payload_upper', (val:=data64(value))[0])
-          setattr(prev_qmd, f'release{i}_payload_lower', val[1])
+          setattr(prev_qmd, f'release{i}_address', mv_address(signal._signal))
+          setattr(prev_qmd, f'release{i}_payload', value)
           self.cmd_idx_to_qmd[len(self) - 1] = prev_qmd
           self.cmd_idx_to_signal_id[len(self) - 1] = i
           return
@@ -182,12 +182,8 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
 
   def _update_signal(self, cmd_idx, signal=None, value=None):
     if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_wait(cmd_idx, signal, value) # reuse wait, same offsets to update.
-    if signal is not None:
-      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address_upper', (sigaddr:=data64(mv_address(signal._signal)))[0])
-      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address_lower', sigaddr[1])
-    if value is not None:
-      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload_upper', (val:=data64(value))[0])
-      setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload_lower', val[1])
+    if signal is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address', mv_address(signal._signal))
+    if value is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload', value)
 
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).compute_gpfifo)
 
@@ -254,7 +250,7 @@ class NVProgram(HCQProgram):
                             shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
                             max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
                             barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
-                            program_address_lower=self.program_addr&0xffffffff, program_address_upper=self.program_addr>>32, sass_version=0x89,
+                            program_address=self.program_addr, sass_version=0x89,
                             program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40)
 
     for i,(addr,sz) in self.constbufs.items():
