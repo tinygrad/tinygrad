@@ -291,7 +291,7 @@ class AMDProgram(HCQProgram):
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     if (given:=len(bufs)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
-    if len(bufs): to_mv(kernargs_ptr, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
+    if len(bufs): to_mv(kernargs_ptr, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr if b is not None else 0 for b in bufs])
     if len(vals): to_mv(kernargs_ptr + len(bufs) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
 
 class AMDAllocator(HCQAllocator):

@@ -128,22 +128,7 @@ class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
     for rawbuf in write: self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
     return list({id(x):x for x in wait_nodes}.values())
 
-def _prepare_jit_inputs(args, kwargs):
-  input_tensors: List[Tuple[Union[int, str], Tensor]] = \
-    [(cast(Union[int, str], name),t) for name,t in itertools.chain(enumerate(args), sorted(kwargs.items())) if t.__class__ is Tensor]
-  if input_tensors: Tensor.realize(*[t for _,t in input_tensors])
-  names: List[Union[int, str]] = [name for name,_ in input_tensors]
-  lbs: List[LazyBuffer] = flatten([t.lazydata.lbs for _,t in input_tensors])
-  st_varvals_dtype_device = [(*lb.st.unbind(), lb.dtype, lb.device) for lb in lbs]
-  input_buffers: List[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
-  assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
-  var_vals: Dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
-                                              [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
-  st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
-  return input_buffers, var_vals, names, st_vars_dtype_device
-
 ReturnType = TypeVar('ReturnType')
-
 @dataclass
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
@@ -187,6 +172,20 @@ class CapturedJit(Generic[ReturnType]):
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
     self._clear_inputs()
     return self.ret
+
+def _prepare_jit_inputs(args, kwargs):
+  input_tensors: List[Tuple[Union[int, str], Tensor]] = \
+    [(cast(Union[int, str], name),t) for name,t in itertools.chain(enumerate(args), sorted(kwargs.items())) if t.__class__ is Tensor]
+  if input_tensors: Tensor.realize(*[t for _,t in input_tensors])
+  names: List[Union[int, str]] = [name for name,_ in input_tensors]
+  lbs: List[LazyBuffer] = flatten([t.lazydata.lbs for _,t in input_tensors])
+  st_varvals_dtype_device = [(*lb.st.unbind(), lb.dtype, lb.device) for lb in lbs]
+  input_buffers: List[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
+  assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
+  var_vals: Dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
+                                              [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
+  st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
+  return input_buffers, var_vals, names, st_vars_dtype_device
 
 class TinyJit(Generic[ReturnType]):
   def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None):

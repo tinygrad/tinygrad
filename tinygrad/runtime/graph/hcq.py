@@ -29,7 +29,7 @@ class HCQGraph(MultiGraphRunner):
       self.kargs_addrs[j] = kernargs_ptrs[ji.prg.device]
       kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
 
-      ji.prg.clprg.fill_kernargs([b._buf if b.is_allocated() else 0 for b in cast(List[Buffer], ji.bufs)],
+      ji.prg.clprg.fill_kernargs([b._buf if b.is_allocated() else None for b in cast(List[Buffer], ji.bufs)],
                                  [var_vals[v] for v in ji.prg.p.vars], self.kargs_addrs[j])
       self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset, len(ji.bufs) * 8).cast('Q')
       self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset + len(ji.bufs) * 8, len(ji.prg.p.vars) * 4).cast('I')
