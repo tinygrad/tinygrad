@@ -167,9 +167,10 @@ class GPFIFO:
       assert flags == 0x182, f"unsupported flags in _exec_nvc6b5_dma: {flags}"
       ctypes.memmove(dst, src, sz)
     elif ((flags >> 3) & 0b11) != 0:
-      src = to_mv(self._state64(nv_gpu.NVC6B5_SET_SEMAPHORE_A), 0x4).cast('I')
+      src = to_mv(self._state64(nv_gpu.NVC6B5_SET_SEMAPHORE_A), 0x10).cast('Q')
       val = self._state(nv_gpu.NVC6B5_SET_SEMAPHORE_PAYLOAD)
       src[0] = val
+      src[1] = int(time.perf_counter() * 1e9)
     else: raise RuntimeError("unknown nvc6b5_dma flags")
 
   def _exec_pcas2(self):
