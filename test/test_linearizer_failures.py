@@ -439,5 +439,16 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=0, amt=2)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
+  def test_failure_47(self):
+    # upcast an arange, failed with UOP_IS_SYMBOLIC=1
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(60000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(BinaryOps.ADD, arg=None, src=(
+          LazyOp(ReduceOps.SUM, arg=(1,), src=(
+            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(60001, 119999), strides=(0, 0), offset=0, mask=((0, 60001), (59999, 119999)), contiguous=False), View(shape=(60000, 60000), strides=(1, 120000), offset=0, mask=None, contiguous=False)))), src=()),)),
+          LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(60000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),))
+    opts = [Opt(op=OptOps.UPCAST, axis=0, amt=3)]
+    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
+
 if __name__ == '__main__':
   unittest.main()
