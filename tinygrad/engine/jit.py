@@ -156,10 +156,10 @@ class CapturedJit(Generic[ReturnType]):
   expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]  # TODO: dedup with expected_buffers/expected_vars
 
   def __post_init__(self):
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
     self._jit_cache: List[ExecItem] = self.jit_cache
     self._input_replace: Dict[Tuple[int, int], int] = self.input_replace
     if JIT < 2: self._apply_graph()
-    self._clear_inputs()
 
   def _assign_inputs(self, input_buffers:List[Buffer], ensure_allocated:bool):
     for idx, offset, device, size, dtype in self.extra_view_inputs:
@@ -175,6 +175,7 @@ class CapturedJit(Generic[ReturnType]):
     self._assign_inputs(fake_input_buffers, False)
     self._jit_cache = apply_graph_to_jit(self._jit_cache, fake_input_buffers, {v:v.min for v in self.expected_vars})
     self._input_replace = get_input_replace(self._jit_cache, fake_input_buffers)
+    self._clear_inputs()
 
   # jit exec
   def __call__(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]) -> ReturnType:
