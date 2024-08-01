@@ -333,14 +333,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
   # TODO: simplify the expression
-  @unittest.expectedFailure
   def test_div_neg_cancel(self):
     self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 1, 26, "((((-idx)+199)//(-4))+50)")
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((((-idx)+200)//(-4))+50)")
     self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, 0, 25, "((((-idx)+201)//(-4))+50)")
 
   # TODO: simplify the expression
-  @unittest.expectedFailure
   def test_div_neg_all_range(self):
     gidx = Variable("gidx", 0, 124)
     lidx = Variable("lidx", 0, 7)
@@ -349,7 +347,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, 0, 250, "(((((-gidx)*8)+(-lidx)+1001)//(-4))+250)")
     self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, 0, 250, "(((((-gidx)*8)+(-lidx)+1002)//(-4))+250)")
 
-  @unittest.expectedFailure
   def test_div_neg_then_neg(self):
     # taken from arange opts
     lidx0 = Variable("lidx0", 0, 7)
