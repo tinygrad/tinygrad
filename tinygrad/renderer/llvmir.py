@@ -133,9 +133,9 @@ class LLVMRenderer(Renderer):
           reduce_phis.append(u)
         elif uop is UOps.LOAD:
           if len(src) > 2:
-            aug_idx = bb[-1].select(lvars[src[2]], lvars[src[1]], ir.Constant(ir.IntType(32), 0))
+            aug_idx = bb[-1].select(lvars[src[3]], lvars[src[1]], ir.Constant(ir.IntType(32), 0))
             val = bb[-1].load(bb[-1].gep(lvars[src[0]], [aug_idx], inbounds=True))
-            val = bb[-1].select(lvars[src[2]], val, lvars[src[3]])
+            val = bb[-1].select(lvars[src[3]], val, lvars[src[2]])
           else:
             val = bb[-1].load(bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
           lvars[u] = val

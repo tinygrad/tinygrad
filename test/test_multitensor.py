@@ -446,6 +446,18 @@ class TestMultiTensor(unittest.TestCase):
         X = ((Tensor(data).shard(devices, axis=0) + 1).realize() - 1).realize()
         np.testing.assert_equal(X.numpy(), data)
 
+  def test_multiple_uneven_shard(self):
+    N = 4
+    X = Tensor.rand(4, 1, 257).contiguous().realize()
+    Y = Tensor.rand(4, 1, 257).contiguous().realize()
+    np_x, np_y = X.numpy(), Y.numpy()
+    devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+    X.shard_(devices, 2, (2, 38, 47, 170))
+    Y.shard_(devices, 2, (34, 53, 51, 119))
+    np.testing.assert_equal(X.numpy(), np_x)
+    np.testing.assert_equal(Y.numpy(), np_y)
+    np.testing.assert_equal((X + Y).numpy(), np_x + np_y)
+
   def test_bn_ast_on_devices(self):
     t = Tensor.empty((16, 64, 112, 112)).shard(devices_4, axis=0)
     bn = nn.BatchNorm2d(64)
