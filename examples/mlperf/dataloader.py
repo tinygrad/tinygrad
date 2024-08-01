@@ -227,8 +227,9 @@ def batch_load_train_bert(BS:int):
   while True:
     batch = []
     for _ in range(BS):
-      random.shuffle(buffer)
-      batch.append(buffer.pop(0))
+      index = random.randint(0, 999)
+      batch.append(buffer[index])
+      buffer[index] = dataset.get()
     yield process_batch_bert(batch)
 
 # Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 416
