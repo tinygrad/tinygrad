@@ -151,9 +151,15 @@ class CapturedJit(Generic[ReturnType]):
   input_replace: Dict[Tuple[int, int], int]
   extra_view_inputs: List[Tuple[int, int, str, int, DType]]
   expected_buffers: List[Tuple[str, int, DType]]
-  expected_names: List[Union[int, str]]
-  expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]
   expected_vars: List[Variable]
+  expected_names: List[Union[int, str]]
+  expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]  # TODO: dedup with expected_buffers/expected_vars
+
+  def __post_init__(self):
+    self._jit_cache: List[ExecItem] = self.jit_cache
+    self._input_replace: Dict[Tuple[int, int], int] = self.input_replace
+    if JIT < 2: self._apply_graph()
+    self._clear_inputs()
 
   def _assign_inputs(self, input_buffers:List[Buffer], ensure_allocated:bool):
     for idx, offset, device, size, dtype in self.extra_view_inputs:
@@ -163,36 +169,27 @@ class CapturedJit(Generic[ReturnType]):
   def _clear_inputs(self):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
 
-  def __post_init__(self):
-    # Condense the items into a graph executor.
-    self._jit_cache, self._input_replace = self.jit_cache, self.input_replace
-    if JIT < 2:
-      fake_input_buffers = [Buffer(device, size, dtype) for device, size, dtype in self.expected_buffers]
-      self._assign_inputs(fake_input_buffers, False)
-      self._jit_cache = apply_graph_to_jit(self._jit_cache, fake_input_buffers, {v:v.min for v in self.expected_vars})
-      self._input_replace = get_input_replace(self._jit_cache, fake_input_buffers)
-    self._clear_inputs()
+  # Condense the items into a graph executor.
+  def _apply_graph(self):
+    fake_input_buffers = [Buffer(device, size, dtype) for device, size, dtype in self.expected_buffers]
+    self._assign_inputs(fake_input_buffers, False)
+    self._jit_cache = apply_graph_to_jit(self._jit_cache, fake_input_buffers, {v:v.min for v in self.expected_vars})
+    self._input_replace = get_input_replace(self._jit_cache, fake_input_buffers)
 
-  def __call__(self, *args, **kwargs) -> ReturnType:
-    input_buffers, var_vals, names, st_vars_dtype_device = _prepare_jit_inputs(args, kwargs)
-    assert self.expected_names == names, f"args mismatch in JIT: {self.expected_names=} != {names}"
-    assert self.expected_st_vars_dtype_device == st_vars_dtype_device, \
-      f"args mismatch in JIT: {self.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
-    assert self.expected_vars == list(var_vals.keys()), f"args mismatch in JIT: {self.expected_vars} != {list(var_vals.keys())}"
-
-    # jit exec
-    self._assign_inputs(input_buffers, True)
+  # jit exec
+  def __call__(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]) -> ReturnType:
+    self._assign_inputs(rawbufs, True)
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
-
-    # cleanup
     self._clear_inputs()
     return self.ret
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]):
+  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None):
+    assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
-    self.reset()
+    self.captured: Optional[CapturedJit] = captured
+    self.cnt: int = 2 if self.fxn is None else 0
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
@@ -207,12 +204,13 @@ class TinyJit(Generic[ReturnType]):
     self._jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None]))
 
   def reset(self):
-    self.cnt: int = 0
-    self.captured: Optional[CapturedJit] = None
+    assert self.fxn is not None, "can't reset without function"
+    self.cnt = 0
+    self.captured = None
 
   def __reduce__(self):
     assert self.captured is not None, "can't pickle an uncaptured JIT"
-    return CapturedJit, tuple(self.captured.__dict__.values())
+    return self.__class__, (None, self.captured)
 
   # keep legacy code working
   @property
@@ -223,16 +221,16 @@ class TinyJit(Generic[ReturnType]):
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
   def __call__(self, *args, **kwargs) -> ReturnType:
-    if self.captured is not None: return self.captured(*args, **kwargs)
-
     input_buffers, var_vals, names, st_vars_dtype_device = _prepare_jit_inputs(args, kwargs)
     if not JIT or self.cnt == 0:
       # jit ignore
+      assert self.fxn is not None
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
         ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
     elif self.cnt == 1:
       # jit capture
+      assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._jit_cache: List[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
@@ -268,8 +266,15 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
       # set this for next run
-      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, expected_buffers,
-                                  names, st_vars_dtype_device, list(var_vals.keys()))
+      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs,
+                                  expected_buffers, list(var_vals.keys()), names, st_vars_dtype_device)
+    elif self.cnt >= 2:
+      # jit exec
+      assert self.captured is not None
+      assert self.captured.expected_names == names, f"args mismatch in JIT: {self.captured.expected_names=} != {names}"
+      assert self.captured.expected_st_vars_dtype_device == st_vars_dtype_device, \
+        f"args mismatch in JIT: {self.captured.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
+      ret = self.captured(input_buffers, var_vals)
 
     self.cnt += 1
     return ret
