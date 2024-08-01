@@ -199,8 +199,11 @@ class TinyJit(Generic[ReturnType]):
     assert self.captured is not None, "can't pickle an uncaptured JIT"
     return CapturedJit, tuple(self.captured.__dict__.values())
 
+  # keep legacy code working
   @property
   def jit_cache(self) -> List[ExecItem]: return self.captured.jit_cache if self.captured is not None else []
+  @property
+  def input_replace(self) -> Dict[Tuple[int, int], int]: return self.captured.input_replace if self.captured is not None else {}
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
