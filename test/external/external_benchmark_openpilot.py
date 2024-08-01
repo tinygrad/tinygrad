@@ -26,14 +26,14 @@ if __name__ == "__main__":
   for _ in range(5):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    ret = next(iter(run_onnx(new_inputs).values())).realize()
+    ret = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
     print(f"unjitted: {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
   run_onnx_jit = TinyJit(run_onnx)
   for _ in range(10):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    ret = next(iter(run_onnx_jit(new_inputs).values())).realize()
+    ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
   # tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
