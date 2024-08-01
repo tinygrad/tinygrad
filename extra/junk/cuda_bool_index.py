@@ -45,7 +45,7 @@ extern "C" __global__ void boolidx_example(bool *x, int *y, unsigned int *cnt_pt
 
 """))
 
-global_size, local_size = [10000,1,1], [1000, 1, 1]
+global_size, local_size = [N//1000,1,1], [1000, 1, 1]
 times, runs = 0, 100
 for i in range(runs):
   st = time.perf_counter()
