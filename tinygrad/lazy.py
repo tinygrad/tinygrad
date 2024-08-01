@@ -91,7 +91,7 @@ class LazyBuffer:
     self.base.forced_realize = True
     return self
 
-  def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True):
+  def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True) -> LazyBuffer:
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:

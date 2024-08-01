@@ -35,7 +35,7 @@ class MetalGraph(GraphRunner):
       icb_command.setComputePipelineState_(unwrap2(
         self.device.device.newComputePipelineStateWithDescriptor_options_reflection_error_(descriptor, Metal.MTLPipelineOption(0), None, None)))
       for i,b in enumerate(ji.bufs):
-        if b is not None:
+        if b is not None and b not in input_rawbuffers:
           icb_command.setKernelBuffer_offset_atIndex_(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
       for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex_(self.int_buf.buf, self.vars.index(v)*4, len(ji.bufs)+i)
