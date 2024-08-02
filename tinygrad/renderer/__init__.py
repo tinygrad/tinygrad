@@ -38,6 +38,7 @@ class Program:
         if u.op is UOps.DEFINE_GLOBAL: self.globals.append(u.arg)
         if u.op is UOps.STORE: self.outs.extend([x.arg for x in u.src[0].sparents if x.op is UOps.DEFINE_GLOBAL])
         if u.op is UOps.SPECIAL:
+          # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0][0] == 'i': self.local_size = None
           if u.arg[0][0] == 'l':
             assert self.local_size is not None
