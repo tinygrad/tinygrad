@@ -60,4 +60,9 @@ class TestUOps(unittest.TestCase):
     self.assertEqual(uop1.dtype, uop2.dtype)
     self.assertEqual(uop1.arg, uop2.arg)
     self.assertEqual(len(uop1.src), len(uop2.src))
-    for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
+    try:
+      for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
+    except AssertionError as e:
+      print(f"{uop1=}")
+      print(f"{uop2=}")
+      raise e

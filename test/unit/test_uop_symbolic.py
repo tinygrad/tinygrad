@@ -257,7 +257,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, {"((a*-2)+10)", "(((a+1)*(-2))+12)"})
 
   def test_mod_mul_sum(self):
-    self.helper_test_variable(Node.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, "(a+b)")
+    self.helper_test_variable(Node.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, {"(a+b)", "(b+a)"})
 
   def test_sum_0(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)]), 0, 7, "a")
@@ -290,10 +290,9 @@ class TestSymbolic(unittest.TestCase):
   def test_and_remove(self):
     self.helper_test_variable(Node.ands([NumNode(1), Variable("a", 0, 1)]), 0, 1, "a")
 
-  @unittest.expectedFailure
   def test_mod_factor_negative(self):
-    self.helper_test_variable(Node.sum([NumNode(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
-    self.helper_test_variable(Node.sum([NumNode(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
+    self.helper_test_variable(Node.sum([NumNode(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, {"((27+a)%28)", "((a+27)%28)"})
+    self.helper_test_variable(Node.sum([NumNode(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, {"((27+a)%28)", "((a+27)%28)"})
 
   def test_sum_combine_num(self):
     self.helper_test_variable(Node.sum([NumNode(29), Variable("a", 0, 10), NumNode(-23)]), 6, 16, {"(6+a)", "(a+6)"})
@@ -306,7 +305,6 @@ class TestSymbolic(unittest.TestCase):
   def test_div_cancel(self):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
 
-  @unittest.expectedFailure
   def test_mod_cancel(self):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
 
