@@ -80,7 +80,7 @@ class HCQGraph(MultiGraphRunner):
       for sig, val in deps:
         if id(sig) in [id(x) for x in self.signals.values()]:
           self.signal_sched[val - 1] = self.signal_sched[val - 1][:2] + (val,) + self.signal_sched[val - 1][3:]
-          if PROFILE: self.prof_deps += [(prof_info, self.signal_sched[val - 1][3])]
+          if PROFILE: self.prof_deps += [(self.signal_sched[val - 1][3], prof_info)]
 
       self.signal_sched[j] = (deps, out_signal, None if isinstance(ji.prg, CompiledRunner) else (j + 1), prof_info)
       self.last_ji[enqueue_queue] = j
