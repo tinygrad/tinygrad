@@ -1,8 +1,8 @@
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Any
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import to_function_name
-from tinygrad.codegen.uopgraph import UOpGraph
+from tinygrad.helpers import to_function_name, dedup
+from tinygrad.codegen.uops import UOps, UOp, flops_mem
 from tinygrad.shape.symbolic import sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
@@ -21,19 +21,24 @@ class Program:
   dname:str
   global_size:Optional[List[int]]=None
   local_size:Optional[List[int]]=None
-  uops:Optional[UOpGraph]=None
-  op_estimate:sint=0
-  mem_estimate:sint=0
-  lds_estimate:sint=0
+  uops:Optional[List[UOp]]=None
+  mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
+
+  @property
+  def op_estimate(self) -> sint: return self._ops_lds[0]
+  @property
+  def lds_estimate(self) -> sint: return self._ops_lds[1]
+  @functools.cached_property
+  def _ops_lds(self) -> Tuple[sint, sint]: return (0,0) if self.uops is None else flops_mem(self.uops, ignore_indexing=True)
 
   @functools.cached_property
-  def vars(self) -> List[Variable]: return [] if self.uops is None else self.uops.vars()
+  def vars(self) -> List[Variable]:
+    return [] if self.uops is None else sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR], key=lambda v: v.expr)
+  @functools.cached_property
+  def globals(self) -> List[int]: return [] if self.uops is None else [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
 
   @functools.cached_property
-  def globals(self) -> List[Tuple[int, bool]]: return [] if self.uops is None else self.uops.globals()
-
-  @functools.cached_property
-  def outcount(self) -> int: return sum(x[1] for x in self.globals)
+  def outcount(self) -> int: return 1 if self.uops is None else len(dedup([x.src[0] for x in self.uops if x.op is UOps.STORE]))
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
@@ -55,5 +60,6 @@ class Renderer:
   local_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
+  extra_matcher: Any = None
 
-  def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("needs a renderer")
+  def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")

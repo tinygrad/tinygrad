@@ -15,10 +15,11 @@ from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
 def _uops_to_prg(uops_list, print_uops=False):
   uops = UOpGraph(uops_list)
-  src = Device[Device.DEFAULT].renderer.render("test", uops)
+  uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
+  src = Device[Device.DEFAULT].renderer.render("test", uops.uops)
   if print_uops: uops.print()
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops))
+  return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops.uops))
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
@@ -27,8 +28,8 @@ def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], ar
 def _test_single_value(vals, op, dts):
   uops = []
   output_dtype = dts[-1] if op is TernaryOps.WHERE else dtypes.bool if op is BinaryOps.CMPLT else dts[0]
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
-  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), (i+1, False)) for i,dtype in enumerate(dts)]
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
+  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
@@ -43,7 +44,7 @@ def _test_single_value(vals, op, dts):
 def _test_single_value_const(vals, op, dts):
   uops = []
   output_dtype = dts[-1] if op is TernaryOps.WHERE else dtypes.bool if op is BinaryOps.CMPLT else dts[0]
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
@@ -56,7 +57,7 @@ def _test_single_value_const(vals, op, dts):
 
 def _test_uops_result(output_dtype, uops, res):
   # uops = []
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   # res = output_fn(uops)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
@@ -239,7 +240,7 @@ class TestConstantFolding(unittest.TestCase):
 class TestGatedStoreRewrite(unittest.TestCase):
   @unittest.expectedFailure
   def test_tiny_gate_store(self):
-    gmem = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    gmem = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0 * UOp.const(dtypes.int, 2)
     val = UOp.const(dtypes.float, 42.0)
@@ -256,8 +257,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_gate_some_stores(self):
-    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
-    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, True))
+    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0*UOp.const(dtypes.int, 2)
     val = UOp.const(dtypes.float, 42.0)
@@ -275,8 +276,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
   # scaled down version of TestLinearizerDumb.test_unmerged_ifs
   @unittest.expectedFailure
   def test_merge_ifs_alt(self):
-    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
-    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, True))
+    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0*UOp.const(dtypes.int, 2)
     val = UOp.const(dtypes.float, 42.0)
@@ -318,25 +319,27 @@ class TestLocalAccess(unittest.TestCase):
 @unittest.skipUnless(getenv("PTX"), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
-    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
+    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 0)
     c1 = UOp(UOps.CONST, dtypes.int, (), 2)
     c2 = UOp(UOps.CONST, dtypes.int, (), 3)
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
     uops = UOpGraph([a1,a2])
+    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops.uops[-1].arg, BinaryOps.SHL)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.MUL)
 
   def test_bitshift_right(self):
-    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
+    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 0)
     c1 = UOp(UOps.CONST, dtypes.int, (), 2)
     c2 = UOp(UOps.CONST, dtypes.int, (), 3)
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
     uops = UOpGraph([a1,a2])
+    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops.uops[-1].arg, BinaryOps.SHR)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.IDIV)

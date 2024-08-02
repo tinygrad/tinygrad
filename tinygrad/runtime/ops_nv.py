@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, time, array, decimal
-from typing import Tuple, List, Any, cast, Union, Dict
+from typing import Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
                             HCQProgram, HCQSignal, BufferOptions
@@ -49,13 +49,15 @@ def make_uvm_type():
 uvm = make_uvm_type()
 
 def make_qmd_struct_type():
-  fields = []
+  fields: List[Tuple[str, Union[Type[ctypes.c_uint64], Type[ctypes.c_uint32]], Any]] = []
   bits = [(name,dt) for name,dt in nv_gpu.__dict__.items() if name.startswith("NVC6C0_QMDV03_00") and isinstance(dt, tuple)]
   bits += [(name+f"_{i}",dt(i)) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith("NVC6C0_QMDV03_00") and callable(dt)]
   bits = sorted(bits, key=lambda x: x[1][1])
   for i,(name, data) in enumerate(bits):
     if i > 0 and (gap:=(data[1] - bits[i-1][1][0] - 1)) != 0: fields.append((f"_reserved{i}", ctypes.c_uint32, gap))
     fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[0]-data[1]+1))
+    if len(fields) >= 2 and fields[-2][0].endswith('_lower') and fields[-1][0].endswith('_upper') and fields[-1][0][:-6] == fields[-2][0][:-6]:
+      fields = fields[:-2] + [(fields[-1][0][:-6], ctypes.c_uint64, fields[-1][2] + fields[-2][2])]
   return init_c_struct_t(tuple(fields))
 qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
@@ -96,13 +98,8 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(mv_address(signal._signal)), *data64_le(value),
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
 
-  def _signal(self, signal, value=0, timestamp=False):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(mv_address(signal._signal)), *data64_le(value),
-               (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
-    self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
-  def _timestamp(self, signal): return NVCommandQueue._signal(self, signal, timestamp=True)
+  def _timestamp(self, signal): return self._signal(signal, 0)
 
-  def _update_signal(self, cmd_idx, signal=None, value=None): return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
   def _update_wait(self, cmd_idx, signal=None, value=None):
     if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', data64_le(mv_address(signal._signal)))
     if value is not None: self.q[(valoff:=self.cmds_offset[cmd_idx]+3):valoff+2] = array.array('I', data64_le(value))
@@ -137,7 +134,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
 
 class NVComputeQueue(NVCommandQueue, HWComputeQueue):
   def __init__(self):
-    self.cmd_idx_to_qmd, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}
+    self.cmd_idx_to_qmd, self.cmd_idx_to_signal_id, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}, {}
     super().__init__()
 
   def _memory_barrier(self): self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
@@ -168,17 +165,25 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     if global_size is not None: self.cmd_idx_to_global_dims[cmd_idx][:] = array.array('I', global_size)
     if local_size is not None: self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
 
-  def _signal(self, signal, value=0, timestamp=False):
-    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 2)) is None or prev_qmd.release0_enable == 1: return super()._signal(signal, value, timestamp)
-    prev_qmd.release0_address_upper, prev_qmd.release0_address_lower = data64(mv_address(signal._signal))
-    prev_qmd.release0_payload_upper, prev_qmd.release0_payload_lower = data64(value)
-    prev_qmd.release0_enable = 1
-    self.cmd_idx_to_qmd[len(self) - 1] = prev_qmd # this command is embedded into qmd.
+  def _signal(self, signal, value=0):
+    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 2)) is not None:
+      for i in range(2):
+        if getattr(prev_qmd, f'release{i}_enable') == 0:
+          setattr(prev_qmd, f'release{i}_enable', 1)
+          setattr(prev_qmd, f'release{i}_address', mv_address(signal._signal))
+          setattr(prev_qmd, f'release{i}_payload', value)
+          self.cmd_idx_to_qmd[len(self) - 1] = prev_qmd
+          self.cmd_idx_to_signal_id[len(self) - 1] = i
+          return
+
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(mv_address(signal._signal)), *data64_le(value),
+               (1 << 0) | (1 << 20) | (1 << 24) | (1 << 25)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
+    self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
 
   def _update_signal(self, cmd_idx, signal=None, value=None):
-    if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_signal(cmd_idx, signal, value)
-    if signal is not None: qmd.release0_address_upper, qmd.release0_address_lower = data64(mv_address(signal._signal))
-    if value is not None: qmd.release0_payload_upper, qmd.release0_payload_lower = data64(value)
+    if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_wait(cmd_idx, signal, value) # reuse wait, same offsets to update.
+    if signal is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address', mv_address(signal._signal))
+    if value is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload', value)
 
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).compute_gpfifo)
 
@@ -192,7 +197,7 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
     if dest is not None: self._patch(cmd_idx, offset=3, data=data64(dest))
     if src is not None: self._patch(cmd_idx, offset=1, data=data64(src))
 
-  def _signal(self, signal, value=0, timestamp=False):
+  def _signal(self, signal, value=0):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *data64(mv_address(signal._signal)), value, 4]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
 
@@ -245,7 +250,7 @@ class NVProgram(HCQProgram):
                             shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
                             max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
                             barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
-                            program_address_lower=self.program_addr&0xffffffff, program_address_upper=self.program_addr>>32, sass_version=0x89,
+                            program_address=self.program_addr, sass_version=0x89,
                             program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40)
 
     for i,(addr,sz) in self.constbufs.items():
