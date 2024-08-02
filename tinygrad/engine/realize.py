@@ -163,8 +163,8 @@ class ExecItem:
   bufs: List[Optional[Buffer]]
   metadata: Optional[List[Metadata]] = None
   def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    bufs = [cast(Buffer, x).ensure_allocated() for x in self.bufs]
-    et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
+    # all real allocations of the buffer are just-in-time
+    et = self.prg([cast(Buffer, x).ensure_allocated() for x in self.bufs], var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
       GlobalCounters.global_ops += (op_est:=sym_infer(self.prg.op_estimate, var_vals))
