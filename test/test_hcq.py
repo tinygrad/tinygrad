@@ -397,7 +397,7 @@ def helper_collect_profile(*devs, random_setup_delay=False):
 def helper_profile_filter_node(profile, **kwargs):
   assert len(profile) > 0, "Empty profile"
   assert 'traceEvents' in profile, "traceEvents should present"
-  return [x for x in profile['traceEvents'] if all(x[k] == v for k,v in kwargs.items())]
+  return [x for x in profile['traceEvents'] if all(x.get(k, None) == v for k,v in kwargs.items())]
 
 def helper_profile_parse_pids(profile):
   pids, tids = {}, {}
@@ -409,11 +409,11 @@ def helper_profile_parse_pids(profile):
 
 def helper_profile_parse_deps(profile):
   deps = []
-  for s in helper_profile_filter_node(profile, ph=f"s"):
-    f = helper_profile_filter_node(profile, ph=f"f", id=s['id'])[0]
+  for s in helper_profile_filter_node(profile, ph="s"):
+    f = helper_profile_filter_node(profile, ph="f", id=s['id'])[0]
 
     starts, ends = [], []
-    for x in helper_profile_filter_node(profile, ph=f"X"):
+    for x in helper_profile_filter_node(profile, ph="X"):
       if s['pid'] == x['pid'] and s['tid'] == x['tid'] and x['ts'] <= s['ts'] <= x['ts'] + x['dur']: starts.append(x)
       if f['pid'] == x['pid'] and f['tid'] == x['tid'] and x['ts'] <= f['ts'] <= x['ts'] + x['dur']: ends.append(x)
 
@@ -497,6 +497,7 @@ class TestProfiler(unittest.TestCase):
     copyin_node_2 = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}:1")[0]
     helper_validate_node(copyin_node_2, profile=profile, pid_name=f"{Device.DEFAULT}:1", tid_name="DMA")
 
+  @unittest.skipIf(MOCKGPU and Device.DEFAULT == "AMD", "AMD mockgpu with indirect buffers does not support queue wait interrupts")
   def test_profile_deps(self):
     d1 = Device[f"{Device.DEFAULT}:1"]
 
