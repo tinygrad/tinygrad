@@ -567,9 +567,4 @@ class UOpGraph:
 
     # strip the SINK
     self._uops = self._uops[:-1]
-
-    if getenv("FUZZ_UOPS"):
-      from test.external.fuzz_uops import fuzz_uops
-      self._fuzz_paths = fuzz_uops(self)
-
     return self
