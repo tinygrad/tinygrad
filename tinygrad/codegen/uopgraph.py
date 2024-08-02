@@ -236,9 +236,9 @@ constant_folder = PatternMatcher([
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
    x*(c0.arg//g)//(c1.arg//g) if c0.arg > 0 and c1.arg > 0 and (g:=math.gcd(c0.arg,c1.arg)) > 1 and g > x2.vmax.arg and x2.vmin.arg >= 0 else None),
   # ** mod **
-  # mod folding and mod reduction
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: x if 0 <= x.vmin.arg <= x.vmax.arg < c.arg else \
-    (x-(x.vmin.arg//c.arg)*c.arg)%c if 0 < c.arg <= x.vmin.arg else None),
+  # mod folding
+  (NOp.var('x') % NOp.cvar('c'), lambda x,c:\
+   x-(x.vmin.arg//c.arg)*c.arg if 0 < c.arg and 0 <= x.vmin.arg and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1:\
    x*(c0.arg%c1.arg)%c1 if 0 < c1.arg <= c0.arg else (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
