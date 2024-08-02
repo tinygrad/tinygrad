@@ -453,3 +453,45 @@ jobs:
           train_cifar_six_gpu.txt
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+
+  testqualcommbenchmark:
+    name: comma Benchmark
+    runs-on: [self-hosted, Linux, comma]
+    defaults:
+      run:
+        shell: bash -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: openpilot compile 0.9.4
+      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python examples/openpilot/compile2.py | tee openpilot_compile_0_9_4.txt
+    - name: openpilot compile 0.9.7
+      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_compile_0_9_7.txt
+    - name: validate openpilot 0.9.7
+      run: PYTHONPATH=. FLOAT16=0 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
+    - name: benchmark openpilot 0.9.4
+      run: PYTHONPATH=. GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_4.txt
+    - name: benchmark openpilot 0.9.7
+      run: PYTHONPATH=. GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_7.txt
+    - name: benchmark openpilot w IMAGE=2 0.9.4
+      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_4.txt
+    - name: benchmark openpilot w IMAGE=2 0.9.7
+      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
+    - name: Run process replay tests
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Speed (comma)
+        path: |
+          openpilot_compile_0_9_4.txt
+          openpilot_compile_0_9_7.txt
+          openpilot_0_9_4.txt
+          openpilot_0_9_7.txt
+          openpilot_image_0_9_4.txt
+          openpilot_image_0_9_7.txt
