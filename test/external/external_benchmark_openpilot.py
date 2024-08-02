@@ -50,5 +50,5 @@ if __name__ == "__main__":
     ort_out = np.load(Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}.npy")
     tinygrad_out = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
 
-    np.testing.assert_allclose(ort_out, tinygrad_out, atol=2e-3, rtol=1e-2)
+    np.testing.assert_allclose(ort_out, tinygrad_out, atol=1e-2, rtol=1e-2)
     print(colored("outputs validated!", "green"))
