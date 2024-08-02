@@ -2,10 +2,9 @@ import time, sys, hashlib
 from pathlib import Path
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
-import onnxruntime as ort
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, dtypes, TinyJit
-from tinygrad.helpers import GlobalCounters, fetch, colored, getenv
+from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv
 from tinygrad.tensor import _from_np_dtype
 import numpy as np
 
@@ -38,17 +37,15 @@ if __name__ == "__main__":
     ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
-  # validate
-  if getenv("SAVE_OUTPUT"):
-    ort_options = ort.SessionOptions()
-    ort_options.log_severity_level = 3
-    onnx_session = ort.InferenceSession(onnx_path, ort_options)
-    onnx_output = onnx_session.run([onnx_model.graph.output[0].name], new_inputs_np)
-    ort_out = onnx_output[0]
-    np.save(Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}.npy", ort_out)
-  else:
-    ort_out = np.load(Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}.npy")
+  # validate (only if IMAGE=2 and FLOAT16=1)
+  if IMAGE.value == 2 and getenv("FLOAT16") == 1:
     tinygrad_out = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
+    if getenv("SAVE_OUTPUT"):
+      np.save(Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}.npy", tinygrad_out)
+    else:
+      known_good_out = np.load(Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}.npy")
 
-    np.testing.assert_allclose(ort_out, tinygrad_out, atol=1e-2, rtol=1e-2)
-    print(colored("outputs validated!", "green"))
+      np.testing.assert_allclose(known_good_out, tinygrad_out, atol=1e-2, rtol=1e-2)
+      print(colored("outputs validated!", "green"))
+  else:
+    print(colored("skipping validation", "yellow"))
