@@ -423,9 +423,10 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
     # test negative and out of bound indices
+    # do not compare to torch because this will return an error
     x = Tensor([-29, -28, -1, 28, 29])
     z = layer(x)
-    np.testing.assert_equal(z, Tensor.nan(len(x), embed_size))
+    np.testing.assert_equal(z.numpy(), Tensor.full(z.shape, float('nan')).numpy())
     
     # test with jit enabled
     @TinyJit
