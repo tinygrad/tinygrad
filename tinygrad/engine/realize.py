@@ -108,15 +108,6 @@ class CustomOp(Runner):
     super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
 
-class EmptyOp(Runner):
-  def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
-
-class ViewOp(Runner):
-  def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
-    assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1].base, f"must be base {rawbufs}"
-
 class BufferCopy(Runner):
   def __init__(self, total_sz, dest_device, src_device):
     if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
@@ -188,26 +179,27 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-def lower_schedule_item(si:ScheduleItem) -> ExecItem:
+def lower_schedule_item(si:ScheduleItem) -> List[ExecItem]:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is MetaOps.COPY or getenv("USE_COPY_KERNEL")
   if si.ast.op is MetaOps.KERNEL:
     runner = get_runner(si.outputs[0].device, si.ast)
-    return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
+    # NOTE: this can return multiple execitem kernels in the future (for things like split reduce op)
+    return [ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)]
   out = si.outputs[0]
   if si.ast.op is MetaOps.COPY:
-    kernel_type = BufferCopy
-    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
-      kernel_type = BufferXfer
-    return ExecItem(kernel_type(si.ast.arg, out.device, si.inputs[0].device), list(si.bufs))
-  if si.ast.op is MetaOps.CUSTOM: return ExecItem(CustomOp(si.ast.arg), list(si.bufs))
-  if si.ast.op is MetaOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if si.ast.op is MetaOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
+    kernel_type = BufferXfer if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0] \
+             else BufferCopy
+    return [ExecItem(kernel_type(si.ast.arg, out.device, si.inputs[0].device), list(si.bufs))]
+  if si.ast.op is MetaOps.CUSTOM: return [ExecItem(CustomOp(si.ast.arg), list(si.bufs))]
+  if si.ast.op is MetaOps.VIEW: assert si.bufs[0]._base is not None and si.bufs[0]._base == si.bufs[1].base, f"must be base {si.bufs}"
+  if si.ast.op in {MetaOps.EMPTY, MetaOps.VIEW}: return []
   raise RuntimeError(f"don't know how to lower {si.ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule):
     si = schedule.pop(0)
-    try: yield lower_schedule_item(si)
+    try:
+      for ei in lower_schedule_item(si): yield ei
     except Exception as e:
       if DEBUG >= 2:
         print(f"error lowering {si.ast.op}")

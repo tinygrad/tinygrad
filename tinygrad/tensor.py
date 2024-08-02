@@ -217,7 +217,7 @@ class Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="NPY", dtype=self.dtype)
-      self.contiguous().realize().lazydata.base.realized.copyin(x.numpy().data)
+      self.contiguous().realize().lazydata.base.realized.ensure_allocated().copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
