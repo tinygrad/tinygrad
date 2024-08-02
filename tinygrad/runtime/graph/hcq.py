@@ -52,7 +52,7 @@ class HCQGraph(MultiGraphRunner):
     self.last_timeline: Dict[HCQCompiled, Tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
     self.last_ji: Dict[HWCommandQueue, Optional[int]] = {q: None for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
-    self.prof_deps = []
+    self.prof_deps: List[Tuple[int, HCQCompiled, bool, int, HCQCompiled, bool]] = []
 
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev = ji.prg.device if isinstance(ji.prg, CompiledRunner) else Device[ji.bufs[1].device] #type:ignore
@@ -79,11 +79,11 @@ class HCQGraph(MultiGraphRunner):
       # Go through all dependencies and, if we need the signal from that ji, enable it by setting the signal value in the signal schedule.
       for sig, val in deps:
         if id(sig) in [id(x) for x in self.signals.values()]:
-          self.signal_sched[val - 1] = self.signal_sched[val - 1][:2] + (val,) + self.signal_sched[val - 1][3:]
+          self.signal_sched[val - 1] = (dep_sched:=(self.signal_sched[val - 1][:2] + (val,) + self.signal_sched[val - 1][3:]))
+          if PROFILE: self.prof_deps += [(dep_sched[3][1][0], dep_sched[3][2], dep_sched[3][4], prof_info[0][0], prof_info[2], prof_info[4])]
 
       self.signal_sched[j] = (deps, out_signal, None if isinstance(ji.prg, CompiledRunner) else (j + 1), prof_info)
       self.last_ji[enqueue_queue] = j
-      self.prof_deps += [[val - 1 for sig, val in deps if id(sig) in [id(x) for x in self.signals.values()]]] if PROFILE else []
 
     # Build hardware queues.
     self.op_cmd_idx: Dict[int, Tuple[Any, int]] = {}
@@ -184,12 +184,8 @@ class HCQGraph(MultiGraphRunner):
 
   def collect_timestamps(self):
     timestamps = [s.timestamp for s in self.prof_signals]
-    for j,(_,_,_,((st,_),(en,_),dev,desc,is_cp)) in enumerate(self.signal_sched.values()): #type: ignore
-      dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp)]
-
-      for dep_j in self.prof_deps[j]:
-        (dep_st,_),(dep_en,_),dep_dev,dep_desc,dep_is_cp = self.signal_sched[dep_j][3]
-        dev.dep_prof_records += [(timestamps[dep_en],dep_dev,dep_is_cp,timestamps[st],dev,is_cp)]
+    for _,_,_,((st,_),(en,_),dev,desc,is_cp) in self.signal_sched.values(): dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp)]
+    for d_st,d_dev,d_is_cp,st,dev,is_cp in self.prof_deps: dev.dep_prof_records += [(timestamps[d_st],d_dev,d_is_cp,timestamps[st],dev,is_cp)]
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])

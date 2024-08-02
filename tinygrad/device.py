@@ -532,10 +532,11 @@ class HCQCompiled(Compiled):
     Translates local gpu time (timestamp) into global cpu time.
     """
     self._ensure_shared_time_base()
-    return float(gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff))
+    return float(gpu_time + (self.gpu2cpu_copy_time_diff if False else self.gpu2cpu_compute_time_diff))
 
   def _prof_setup(self):
-    if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
+    if hasattr(self, 'profile_logger'): return
+    atexit.register(self._prof_finalize)
     self.profile_logger = ProfileLogger()
 
   def _prof_finalize(self):
