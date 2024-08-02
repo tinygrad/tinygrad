@@ -302,7 +302,7 @@ class Tensor:
       if self.lazydata.base.realized is None: self.realize()
       # Hack for unrealized .ones and .zeros
       if self.lazydata.base.realized is None:
-        self.cast(self.dtype.scalar()).contiguous().to("CLANG").realize().lazydata.base.realized.copyout(np_mv)
+        self.contiguous().realize().lazydata.base.realized.copyout(np_mv)
         return
       self.lazydata.base.realized.copyout(np_mv)
       return
