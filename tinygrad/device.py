@@ -489,7 +489,10 @@ class HCQCompiled(Compiled):
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool]] = []
-    if PROFILE: self._prof_setup()
+    self.dep_prof_records:List[Any] = []
+    if PROFILE:
+      self.profile_logger = ProfileLogger()
+      atexit.register(self._prof_finalize)
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
@@ -503,12 +506,6 @@ class HCQCompiled(Compiled):
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE: self._prof_process_events()
 
-  def _gpu2cpu_time(self, gpu_time:decimal.Decimal, is_copy:bool) -> float:
-    """
-    Translates local gpu time (timestamp) into global cpu time.
-    """
-    return float(gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff))
-
   def _alloc_kernargs(self, alloc_size:int) -> int:
     """
     Allocates space for arguments passed to the kernel.
@@ -517,26 +514,37 @@ class HCQCompiled(Compiled):
     self.kernargs_ptr = (res:=self.kernargs_ptr) + alloc_size
     return res
 
-  def _prof_setup(self):
-    if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
-    self.profile_logger = ProfileLogger()
+  def _ensure_shared_time_base(self):
+    if hasattr(self, 'gpu2cpu_compute_time_diff'): return
 
     def _sync_queue(q_t):
+      self.synchronize()
       q_t().timestamp(self.timeline_signal).signal(self.timeline_signal, self.timeline_value).submit(self)
       self.timeline_value += 1
       cpu_start_time = decimal.Decimal(time.perf_counter_ns()) / decimal.Decimal(1000)
       self.timeline_signal.wait(self.timeline_value - 1)
       return cpu_start_time - self.timeline_signal.timestamp
+
     self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff = _sync_queue(self.hw_compute_queue_t), _sync_queue(self.hw_copy_queue_t)
+
+  def _gpu2cpu_time(self, gpu_time:decimal.Decimal, is_copy:bool) -> float:
+    """
+    Translates local gpu time (timestamp) into global cpu time.
+    """
+    return float(gpu_time + (self.gpu2cpu_copy_time_diff if False else self.gpu2cpu_compute_time_diff))
 
   def _prof_process_events(self):
     self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
     self.sig_prof_records = []
 
   def _prof_finalize(self):
+    self._ensure_shared_time_base()
     for st, en, name, is_cp in self.raw_prof_records:
       self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
-    self.raw_prof_records = []
+    for dep_en,dep_dev,dep_is_cp,st,dev,is_cp in self.dep_prof_records:
+      dep_dev._ensure_shared_time_base()
+      self.profile_logger.deps += [(dep_dev._gpu2cpu_time(dep_en, dep_is_cp), dev._gpu2cpu_time(st, is_cp), dep_dev.dname, ["COMPUTE", "DMA"][dep_is_cp], dev.dname, ["COMPUTE", "DMA"][is_cp])]
+    self.raw_prof_records, self.dep_prof_records = [], []
     del self.profile_logger
 
   def _wrap_timeline_signal(self):
