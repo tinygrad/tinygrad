@@ -537,6 +537,7 @@ class HCQCompiled(Compiled):
     if hasattr(self, 'gpu2cpu_compute_time_diff'): return
     choices = [(d, d.hw_compute_queue_t, []) for d in self.devices] + [(d, d.hw_copy_queue_t, []) for d in self.devices]
 
+    # randomly sample the timing from GPU to CPU
     for _ in range(100*len(self.devices)):
       d,q,l = random.choice(choices)
       l.append(_sync_cpu_queue(d,q))
@@ -545,7 +546,7 @@ class HCQCompiled(Compiled):
       if q == d.hw_compute_queue_t: d.gpu2cpu_compute_time_diff = statistics.median(l)
       if q == d.hw_copy_queue_t: d.gpu2cpu_copy_time_diff = statistics.median(l)
 
-    # then test it by timing the GPUs
+    # then test it by timing the GPU to GPU times
     jitter_matrix = [[float('nan')]*len(self.devices) for _ in range(len(self.devices))]
     for i1, d1 in enumerate(self.devices):
       for i2, d2 in enumerate(self.devices):
