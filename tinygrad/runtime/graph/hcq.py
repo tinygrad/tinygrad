@@ -80,7 +80,7 @@ class HCQGraph(MultiGraphRunner):
       for sig, val in deps:
         if id(sig) in [id(x) for x in self.signals.values()]:
           self.signal_sched[val - 1] = (dep_sched:=(self.signal_sched[val - 1][:2] + (val,) + self.signal_sched[val - 1][3:]))
-          if PROFILE: self.prof_deps += [(dep_sched[3][1][0], dep_sched[3][2], dep_sched[3][4], prof_info[0][0], prof_info[2], prof_info[4])]
+          if prof_info: self.prof_deps += [(dep_sched[3][1][0], dep_sched[3][2], dep_sched[3][4], prof_info[0][0], prof_info[2], prof_info[4])]
 
       self.signal_sched[j] = (deps, out_signal, None if isinstance(ji.prg, CompiledRunner) else (j + 1), prof_info)
       self.last_ji[enqueue_queue] = j
@@ -184,7 +184,8 @@ class HCQGraph(MultiGraphRunner):
 
   def collect_timestamps(self):
     timestamps = [s.timestamp for s in self.prof_signals]
-    for _,_,_,((st,_),(en,_),dev,desc,is_cp) in self.signal_sched.values(): dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp)]
+    for _,_,_,((st,_),(en,_),dev,desc,is_cp) in self.signal_sched.values(): # type: ignore
+      dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp)]
     for d_st,d_dev,d_is_cp,st,dev,is_cp in self.prof_deps: dev.dep_prof_records += [(timestamps[d_st]-1,d_dev,d_is_cp,timestamps[st],dev,is_cp)]
 
   def __del__(self):
