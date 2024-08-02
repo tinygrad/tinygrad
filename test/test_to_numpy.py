@@ -17,21 +17,21 @@ class TestToNumpy(unittest.TestCase):
     shape = (36, 12345)
     tens = Tensor.rand(shape, dtype=dtypes.float32)
     np_holder = np.zeros(shape, dtype=np.float32)
-    tens.numpy(np_holder.data)
+    tens.to_numpy_mv(np_holder.data)
     np.testing.assert_equal(tens.numpy(), np_holder)
 
   def test_fp16_to_numpy_mv(self):
     shape = (36, 12345)
     tens = Tensor.rand(shape, dtype=dtypes.float16)
     np_holder = np.zeros(shape, dtype=np.float16)
-    tens.numpy(np_holder.data)
+    tens.to_numpy_mv(np_holder.data)
     np.testing.assert_equal(tens.numpy(), np_holder)
 
   def test_ones_to_numpy_mv(self):
     shape = (36, 12345)
     tens = Tensor.ones(shape, dtype=dtypes.float32)
     np_holder = np.zeros(shape, dtype=np.float32)
-    tens.numpy(np_holder.data)
+    tens.to_numpy_mv(np_holder.data)
     np.testing.assert_equal(tens.numpy(), np_holder)
 
 if __name__ == '__main__':

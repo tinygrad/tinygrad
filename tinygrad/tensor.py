@@ -285,26 +285,39 @@ class Tensor:
     """
     return self.data().tolist()
 
-  def numpy(self, np_mv=None) -> np.ndarray:
+  def numpy(self) -> np.ndarray:
     """
-    Returns the value of this tensor as a `numpy.ndarray` or writes to numpy memoryview if provided.
+    Returns the value of this tensor as a `numpy.ndarray`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4])
     print(repr(t.numpy()))
     ```
     """
-    if self.dtype == dtypes.bfloat16: return self.float().numpy(np_mv)
+    if self.dtype == dtypes.bfloat16: return self.float().numpy()
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    if np_mv is not None:
-      assert isinstance(self.lazydata, LazyBuffer), "Tensor is sharded, move to one device before this command"
-      if self.lazydata.base.realized is None: self.realize()
-      # Hack for unrealized .ones and .zeros
-      if self.lazydata.base.realized is None: self.contiguous().realize().lazydata.base.realized.copyout(np_mv)
-      else: self.lazydata.base.realized.copyout(np_mv)
-      return
-    else: return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
+    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
+
+  def to_numpy_mv(self, np_mv:memoryview):
+    """
+    Writes the value of this tensor to numpy memoryview.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4])
+    t_np = np.array([0,0,0,0])
+    t.to_numpy_mv(t_np.data)
+    print(repr(t_np))
+    ```
+    """
+    if self.dtype == dtypes.bfloat16: return self.float().to_numpy_mv(np_mv)
+    assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
+    assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
+    assert isinstance(self.lazydata, LazyBuffer), "Tensor is sharded, move to one device before this command"
+    if self.lazydata.base.realized is None: self.realize()
+    # Hack for unrealized .ones and .zeros
+    if self.lazydata.base.realized is None: self.contiguous().realize().lazydata.base.realized.copyout(np_mv)
+    else: self.lazydata.base.realized.copyout(np_mv)
 
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     """
