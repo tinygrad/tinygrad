@@ -41,7 +41,7 @@ class UOpsFuzzerRunner(CompiledRunner):
     assert self.p.uops is not None
     fuzz_paths = fuzz_uops(self.p.uops)
     init_rawbufs, init_name = {x:x.as_buffer() for x in rawbufs}, self.p.function_name
-    init_globals = {i:buf for i, buf in zip(self.p.globals, rawbufs)}
+    init_globals = dict(zip(self.p.globals, rawbufs))
     if DEBUG >= 1: print(colored(f"fuzzing {len(fuzz_paths)} uop permutations for {init_name}", "yellow"))
 
     super().__call__(rawbufs, var_vals, wait)
