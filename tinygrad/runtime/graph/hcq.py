@@ -54,9 +54,6 @@ class HCQGraph(MultiGraphRunner):
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
     self.prof_deps = []
 
-    # self.ji_enqueue_devs = [Device[ji.bufs[1].device] if isinstance(ji.prg, BufferXfer) else ji.prg.device for ji in self.jit_cache]
-    # self.ji_enqueue_queue = [(self.copy_queues if isinstance(ji.prg, BufferXfer) else self.comp_queues) for ji in self.jit_cache]
-
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev = ji.prg.device if isinstance(ji.prg, CompiledRunner) else Device[ji.bufs[1].device] #type:ignore
       enqueue_queue = self.comp_queues[enqueue_dev] if isinstance(ji.prg, CompiledRunner) else self.copy_queues[enqueue_dev]

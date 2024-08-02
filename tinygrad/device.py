@@ -504,7 +504,9 @@ class HCQCompiled(Compiled):
     self.timeline_signal.wait(self.timeline_value - 1)
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
-    if PROFILE: self._prof_process_events()
+    if PROFILE:
+      self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
+      self.sig_prof_records = []
 
   def _alloc_kernargs(self, alloc_size:int) -> int:
     """
@@ -531,18 +533,13 @@ class HCQCompiled(Compiled):
     """
     Translates local gpu time (timestamp) into global cpu time.
     """
+    self._ensure_shared_time_base()
     return float(gpu_time + (self.gpu2cpu_copy_time_diff if False else self.gpu2cpu_compute_time_diff))
 
-  def _prof_process_events(self):
-    self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
-    self.sig_prof_records = []
-
   def _prof_finalize(self):
-    self._ensure_shared_time_base()
     for st, en, name, is_cp in self.raw_prof_records:
       self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
     for dep_en,dep_dev,dep_is_cp,st,dev,is_cp in self.dep_prof_records:
-      dep_dev._ensure_shared_time_base()
       self.profile_logger.deps += [(dep_dev._gpu2cpu_time(dep_en, dep_is_cp), dev._gpu2cpu_time(st, is_cp), dep_dev.dname, ["COMPUTE", "DMA"][dep_is_cp], dev.dname, ["COMPUTE", "DMA"][is_cp])]
     self.raw_prof_records, self.dep_prof_records = [], []
     del self.profile_logger
