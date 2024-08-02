@@ -37,8 +37,8 @@ if __name__ == "__main__":
     ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
-  # validate (only if IMAGE=2 and FLOAT16=1)
-  if IMAGE.value == 2 and getenv("FLOAT16") == 1:
+  # validate (only if IMAGE=2 and FLOAT16=0)
+  if IMAGE.value == 2 and getenv("FLOAT16") == 0:
     tinygrad_out = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     if getenv("SAVE_OUTPUT"):
       np.save(Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}.npy", tinygrad_out)
