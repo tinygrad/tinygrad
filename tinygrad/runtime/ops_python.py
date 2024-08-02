@@ -7,8 +7,7 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.codegen.uops import UOps
-from tinygrad.codegen.uopgraph import UOpGraph
+from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer
@@ -189,8 +188,8 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
 
-  def render(self, name:str, uops:UOpGraph) -> str:
-    lops = [(u.op, u.dtype, [uops.uops.index(v) for v in u.src], u.arg) for u in uops]
+  def render(self, name:str, uops:List[UOp]) -> str:
+    lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
 class PythonCompiler(Compiler):

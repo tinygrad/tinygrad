@@ -231,7 +231,6 @@ def type_verify(uops):
         assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
 
 def uop_alu_resolve(u:UOp) -> sint:
-  if u.op is UOps.SPECIAL: return u.arg[1]-1
   if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
   if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
@@ -255,9 +254,11 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   for u in uops:
     if u.op is UOps.RANGE:
       mult_stack.append(mults)
-      mults *= uop_alu_resolve(u.src[1]) - uop_alu_resolve(u.src[0])
+      mults *= uop_alu_resolve(u.src[1] - u.src[0])
     elif u.op is UOps.ENDRANGE:
       mults = mult_stack.pop(-1)
+    elif u.op is UOps.SPECIAL:
+      mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
     elif u.op is UOps.LOAD:
       assert u.dtype is not None
       mem += u.dtype.itemsize * mults
