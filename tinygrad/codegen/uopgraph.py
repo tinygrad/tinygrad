@@ -3,7 +3,6 @@ from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE
 import functools, itertools, heapq, math
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.shape.symbolic import Variable
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, exec_alu
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same
 from tinygrad.codegen.uops import UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify
@@ -245,7 +244,7 @@ constant_folder = PatternMatcher([
    x*(c0.arg%c1.arg)%c1 if 0 < c1.arg <= c0.arg else (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
   # mul add mod
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) % NOp.cvar('c1'),
-   lambda x,x2,c0,c1: x2%c1 if c0.arg%c1.arg == 0 else None),
+   lambda x,x2,c0,c1: x2%c1 if (r:=c0.arg%c1.arg) == 0 else (x*r+x2)%c1 if 0 < c1.arg <= c0.arg else None),
   # mod mod
   ((NOp.var('x') % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c1 if c0.arg % c1.arg == 0 else None),
   # -(x+y) -> -x + -y
@@ -470,9 +469,6 @@ class UOpGraph:
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
-  def vars(self) -> List[Variable]: return sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR], key=lambda v: v.expr)
-  def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
-
   @property
   def uops(self) -> List[UOp]:
     if self._uops is None: self.linearize()
@@ -571,9 +567,4 @@ class UOpGraph:
 
     # strip the SINK
     self._uops = self._uops[:-1]
-
-    if getenv("FUZZ_UOPS"):
-      from test.external.fuzz_uops import fuzz_uops
-      self._fuzz_paths = fuzz_uops(self)
-
     return self

@@ -520,7 +520,9 @@ def train_bert():
 
   if not INITMLPERF:
     eval_it = iter(batch_load_val_bert(EVAL_BS))
-    train_it = iter(tqdm(batch_load_train_bert(BS, start_step), initial=start_step, total=train_steps, disable=BENCHMARK))
+    train_it = iter(tqdm(batch_load_train_bert(BS), total=train_steps, disable=BENCHMARK))
+    for _ in range(start_step): next(train_it) # Fast forward
+
 
   step_times = []
   # ** train loop **
