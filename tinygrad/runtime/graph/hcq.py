@@ -52,7 +52,7 @@ class HCQGraph(MultiGraphRunner):
     self.last_timeline: Dict[HCQCompiled, Tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
     self.last_ji: Dict[HWCommandQueue, Optional[int]] = {q: None for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
-    self.prof_deps: List[Tuple[int, int, HCQCompiled, bool, int, int, HCQCompiled, bool]] = []
+    self.prof_deps: List[Tuple[Tuple, Tuple]] = []
 
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev = ji.prg.device if isinstance(ji.prg, CompiledRunner) else Device[ji.bufs[1].device] #type:ignore
@@ -80,7 +80,7 @@ class HCQGraph(MultiGraphRunner):
       for sig, val in deps:
         if id(sig) in [id(x) for x in self.signals.values()]:
           self.signal_sched[val - 1] = self.signal_sched[val - 1][:2] + (val,) + self.signal_sched[val - 1][3:]
-          if PROFILE: self.prof_deps += [(self.signal_sched[val - 1][3], prof_info)]
+          if PROFILE: self.prof_deps += [(self.signal_sched[val - 1][3], prof_info)] # type: ignore
 
       self.signal_sched[j] = (deps, out_signal, None if isinstance(ji.prg, CompiledRunner) else (j + 1), prof_info)
       self.last_ji[enqueue_queue] = j
@@ -188,7 +188,7 @@ class HCQGraph(MultiGraphRunner):
     for _,_,_,((st,_),(en,_),dev,desc,is_cp) in self.signal_sched.values(): # type: ignore
       dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp)]
 
-    for ((a_st,_), (a_en,_), a_dev, _, a_is_cp), ((b_st,_), (b_en,_), b_dev, _, b_is_cp) in self.prof_deps: # type: ignore
+    for ((a_st,_), (a_en,_), a_dev, _, a_is_cp), ((b_st,_), (b_en,_), b_dev, _, b_is_cp) in self.prof_deps:
       b_dev.dep_prof_records += [(timestamps[a_st], timestamps[a_en], a_dev, a_is_cp, timestamps[b_st], timestamps[b_en], b_dev, b_is_cp)]
 
   def __del__(self):
