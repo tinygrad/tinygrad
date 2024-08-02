@@ -2,7 +2,7 @@ from typing import Optional, List, Tuple, Dict, Any
 import functools
 from dataclasses import dataclass
 from tinygrad.helpers import to_function_name, dedup
-from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uops import UOps, UOp, flops_mem
 from tinygrad.shape.symbolic import sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
@@ -22,9 +22,14 @@ class Program:
   global_size:Optional[List[int]]=None
   local_size:Optional[List[int]]=None
   uops:Optional[List[UOp]]=None
-  op_estimate:sint=0
-  mem_estimate:sint=0
-  lds_estimate:sint=0
+  mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
+
+  @property
+  def op_estimate(self) -> sint: return self._ops_lds[0]
+  @property
+  def lds_estimate(self) -> sint: return self._ops_lds[1]
+  @functools.cached_property
+  def _ops_lds(self) -> Tuple[sint, sint]: return (0,0) if self.uops is None else flops_mem(self.uops, ignore_indexing=True)
 
   @functools.cached_property
   def vars(self) -> List[Variable]:
