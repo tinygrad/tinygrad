@@ -554,10 +554,10 @@ class HCQCompiled(Compiled):
     for i1, d1 in enumerate(self.devices):
       for i2, d2 in enumerate(self.devices):
         if d1 == d2: continue
-        d1_to_d2 = sum(_sync_gpu_to_gpu_queue(d1, d2, d1.hw_compute_queue_t, d2.hw_compute_queue_t) - \
-                       _sync_gpu_to_gpu_queue(d2, d1, d2.hw_compute_queue_t, d1.hw_compute_queue_t) for _ in range(20)) / 40
-        jitter_matrix[i1][i2] = d1_to_d2 - d1.gpu2cpu_compute_time_diff + d2.gpu2cpu_compute_time_diff
-    print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join(['{:10}'.format(item) for item in row]) for row in jitter_matrix]))
+        d1_to_d2 = statistics.median(_sync_gpu_to_gpu_queue(d1, d2, d1.hw_compute_queue_t, d2.hw_compute_queue_t) - \
+                                     _sync_gpu_to_gpu_queue(d2, d1, d2.hw_compute_queue_t, d1.hw_compute_queue_t) for _ in range(20)) / 2
+        jitter_matrix[i1][i2] = d1_to_d2 - (d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff)
+    print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
 
   def _gpu2cpu_time(self, gpu_time:decimal.Decimal, is_copy:bool) -> float:
     """
