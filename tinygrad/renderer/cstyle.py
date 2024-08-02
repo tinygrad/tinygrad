@@ -93,7 +93,7 @@ class CStyleLanguage(Renderer):
 
   def render(self, name:str, uops:List[UOp]) -> str:
     kernel = []
-    bufs: List[Tuple[str, Tuple[DType, bool]]] = []
+    bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
     depth = 1
     def kk(s): kernel.append("  "*depth+s)
 
@@ -122,6 +122,8 @@ class CStyleLanguage(Renderer):
         kk("}")
       elif uop is UOps.STORE:
         assert src[0].dtype is not None and src[2].dtype is not None
+        # mark DEFINE_GLOBAL buf as writable
+        if src[0].op is UOps.DEFINE_GLOBAL: bufs[src[0]] = (bufs[src[0]][0], (bufs[src[0]][1][0], True))
         rendered_store = self.render_store(r[src[0]], src[0].dtype, r[src[2]], src[2].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
         kk(f"if ({r[src[3]]}) {{ {rendered_store} }}" if len(src) > 3 else rendered_store)
       else:
@@ -144,7 +146,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_VAR:
           assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
           seen_vars.add(args.expr)
-          bufs.append((args.expr, (dtype,False)))
+          bufs[u] = (args.expr, (dtype,False))
           r[u] = args.expr
         elif uop is UOps.LOAD:
           val = self.render_load(dtype, r[src[0]], src[0].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
@@ -168,7 +170,7 @@ class CStyleLanguage(Renderer):
           kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_GLOBAL:
-          bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
+          bufs[u] = (nm:=f"data{args}", (dtype, False))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
         elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
@@ -180,7 +182,8 @@ class CStyleLanguage(Renderer):
             (f"[{args}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) else f".{'xyzwabcd'[args]}")
         else: raise RuntimeError(f"failed to render {u}")
 
-    return self.render_kernel(name, kernel, bufs, uops)
+    # NOTE: this relies on bufs dict preserving order
+    return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"

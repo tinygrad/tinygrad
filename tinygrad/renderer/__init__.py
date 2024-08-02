@@ -1,7 +1,7 @@
 from typing import Optional, List, Tuple, Dict, Any
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import to_function_name
+from tinygrad.helpers import to_function_name, dedup
 from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.shape.symbolic import sym_infer, sint, Variable
 from tinygrad.dtype import DType
@@ -30,10 +30,10 @@ class Program:
   def vars(self) -> List[Variable]:
     return [] if self.uops is None else sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR], key=lambda v: v.expr)
   @functools.cached_property
-  def globals(self) -> List[Tuple[int, bool]]: return [] if self.uops is None else [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
+  def globals(self) -> List[int]: return [] if self.uops is None else [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
 
   @functools.cached_property
-  def outcount(self) -> int: return sum(x[1] for x in self.globals)
+  def outcount(self) -> int: return 1 if self.uops is None else len(dedup([x.src[0] for x in self.uops if x.op is UOps.STORE]))
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
