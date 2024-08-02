@@ -191,6 +191,6 @@ class HCQGraph(MultiGraphRunner):
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
 
-    if PROFILE and self.kickoff_value > 1: self.collect_timestamps()
+    if PROFILE and self.kickoff_value >= 1: self.collect_timestamps()
 
     for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferOptions(cpu_access=True))
