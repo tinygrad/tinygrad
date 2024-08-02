@@ -96,7 +96,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_ast((out0, out1), [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
 
     stores = [u for u in lin.uops if u.op is UOps.STORE]
-    mutable_bufs = dedup([u.src[0] for u in stores])
+    mutable_bufs = dedup(flatten([[x for x in u.src[0].sparents if x.op is UOps.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg for u in mutable_bufs] == [0, 1]
 
