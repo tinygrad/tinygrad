@@ -248,7 +248,7 @@ class PTXRenderer(Renderer):
           assert args[1]*dtype.itemsize <= 0xC000, "too large local"
           kk(*self.render_local(ssa('local', u, self.types[dtypes.ulong]), args[0], args[1], dtype))
         elif uop is UOps.DEFINE_GLOBAL:
-          bufs.append((nm:=f"data{args[0]}", dtype))
+          bufs.append((nm:=f"data{args}", dtype))
           r[u] = f"%{nm}"
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
           kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))

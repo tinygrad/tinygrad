@@ -71,7 +71,7 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
     from tinygrad.renderer.cstyle import OpenCLRenderer
 
     def render(s1, s2):
-      glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=("idxs", True))
+      glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg="idxs")
       st = tuple(UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, i), s)) for i,s in enumerate([s1,s2]))
       return OpenCLRenderer().render("indexing", UOpGraph(UOp(UOps.SINK, None, st)).linearize(skip_check=True).uops)
 
@@ -170,8 +170,7 @@ class IndependentLowerer:
         buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype),
                   arg=(f"temp{-x.arg.idx}", x.arg.st.real_size()))
       else:
-        buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
-                  (x.arg.idx, x.arg.idx < self.output_count))
+        buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (), x.arg.idx)
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         load_dtype = x.arg.dtype.scalar()
