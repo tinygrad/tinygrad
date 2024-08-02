@@ -2,7 +2,7 @@ from __future__ import annotations
 import multiprocessing, decimal, statistics, random
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
+from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Union
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
 from tinygrad.dtype import DType, ImageDType
@@ -477,29 +477,13 @@ class HCQProgram:
     if wait: self.device.timeline_signal.wait(self.device.timeline_value - 1)
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
-def _sync_cpu_queue(d, q_t):
-  q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.timeline_value).submit(d)
-  d.timeline_value += 1
-  st = time.perf_counter_ns()
-  d.timeline_signal.wait(d.timeline_value - 1)  # average of the two
-  et = time.perf_counter_ns()
-  return (decimal.Decimal(et+st) / 2000) - d.timeline_signal.timestamp
-
-def _sync_gpu_to_gpu_queue(d1, d2, q1_t, q2_t):
-  q1_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
-        .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
-  q2_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
-        .timestamp(d2.timeline_signal).signal(d2.timeline_signal, d2.timeline_value+1).submit(d2)
-  d1.timeline_value += 2
-  d2.timeline_value += 2
-  d1.timeline_signal.wait(d1.timeline_value - 1)
-  d2.timeline_signal.wait(d2.timeline_value - 1)
-  return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
-
 class HCQCompiled(Compiled):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
   """
+  devices: List[HCQCompiled] = []
+  gpu2cpu_copy_time_diff: decimal.Decimal = decimal.Decimal('nan')
+  gpu2cpu_compute_time_diff: decimal.Decimal = decimal.Decimal('nan')
 
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
                comp_queue_t:Type[HWComputeQueue], copy_queue_t:Type[HWCopyQueue], timeline_signals:Tuple[HCQSignal, HCQSignal]):
@@ -516,6 +500,7 @@ class HCQCompiled(Compiled):
 
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferOptions(cpu_access=True))
     self.kernargs_ptr:int = self.kernargs_page.va_addr
+    self.devices.append(self)
 
   def synchronize(self):
     self.timeline_signal.wait(self.timeline_value - 1)
@@ -534,17 +519,35 @@ class HCQCompiled(Compiled):
     return res
 
   def _ensure_shared_time_base(self):
-    if hasattr(self, 'gpu2cpu_compute_time_diff'): return
-    choices = [(d, d.hw_compute_queue_t, []) for d in self.devices] + [(d, d.hw_copy_queue_t, []) for d in self.devices]
+    if not self.gpu2cpu_compute_time_diff.is_nan(): return
+
+    def _sync_cpu_queue(d, q_t):
+      q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.timeline_value).submit(d)
+      d.timeline_value += 1
+      st = time.perf_counter_ns()
+      d.timeline_signal.wait(d.timeline_value - 1)  # average of the two
+      et = time.perf_counter_ns()
+      return (decimal.Decimal(et+st) / 2000) - d.timeline_signal.timestamp
 
     # randomly sample the timing from GPU to CPU
+    choices: List = [(d, d.hw_compute_queue_t, []) for d in self.devices] + [(d, d.hw_copy_queue_t, []) for d in self.devices]
     for _ in range(100*len(self.devices)):
       d,q,l = random.choice(choices)
       l.append(_sync_cpu_queue(d,q))
-
     for d,q,l in choices:
       if q == d.hw_compute_queue_t: d.gpu2cpu_compute_time_diff = statistics.median(l)
       if q == d.hw_copy_queue_t: d.gpu2cpu_copy_time_diff = statistics.median(l)
+
+    def _sync_gpu_to_gpu_queue(d1, d2, q1_t, q2_t):
+      q1_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
+            .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
+      q2_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
+            .timestamp(d2.timeline_signal).signal(d2.timeline_signal, d2.timeline_value+1).submit(d2)
+      d1.timeline_value += 2
+      d2.timeline_value += 2
+      d1.timeline_signal.wait(d1.timeline_value - 1)
+      d2.timeline_signal.wait(d2.timeline_value - 1)
+      return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
 
     # then test it by timing the GPU to GPU times
     jitter_matrix = [[float('nan')]*len(self.devices) for _ in range(len(self.devices))]

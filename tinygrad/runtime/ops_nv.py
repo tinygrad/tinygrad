@@ -312,7 +312,6 @@ class NVDevice(HCQCompiled):
   signals_pool: List[Any] = []
   uvm_vaddr: int = 0x1000000000
   host_object_enumerator: int = 0x1000
-  devices: List[NVDevice] = []
 
   def _new_gpu_fd(self):
     fd_dev = os.open(f"/dev/nvidia{NVDevice.gpus_info[self.device_id].minor_number}", os.O_RDWR | os.O_CLOEXEC)
@@ -451,7 +450,8 @@ class NVDevice(HCQCompiled):
                              hClient=self.root, hVaSpace=vaspace)
 
     for dev in self.devices:
-      uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuUuidB=nv_gpu.struct_nv_uuid(uuid=dev.gpu_uuid))
+      uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid),
+                                          gpuUuidB=nv_gpu.struct_nv_uuid(uuid=cast(NVDevice, dev).gpu_uuid))
 
     if NVDevice.signals_page is None:
       NVDevice.signals_page = self._gpu_system_alloc(16 * 65536, map_to_cpu=True)
@@ -484,7 +484,6 @@ class NVDevice(HCQCompiled):
                      functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue, timeline_signals=(NVSignal(), NVSignal()))
 
     self._setup_gpfifos()
-    NVDevice.devices.append(self)
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
     notifier = self._gpu_system_alloc(48 << 20)
