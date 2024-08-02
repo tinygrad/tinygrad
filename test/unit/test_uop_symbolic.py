@@ -177,7 +177,6 @@ class TestSymbolic(unittest.TestCase):
   def test_div_remove(self):
     self.helper_test_variable(Variable("a", 0, 7) // 20, 0, 0, "0")
 
-  @unittest.expectedFailure
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
 
@@ -189,7 +188,6 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_remove(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 20, 0, 0, "0")
 
-  @unittest.expectedFailure
   def test_sum_div_min_max(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
 
@@ -206,7 +204,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 0, 5, "(((a*3)+(b*3))//8)")
     self.helper_test_variable(Node.sum([NumNode(16), Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 1, 6, "((((a*3)+(b*3))//8)+1)")
 
-  @unittest.expectedFailure
   def test_sum_div_no_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
 
@@ -220,7 +217,6 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_const(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
 
-  @unittest.expectedFailure
   def test_sum_div_const_big(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 16, 0, 1, "(a//4)")
 
@@ -252,7 +248,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,12), 0, 1, {"((a*-1)<-2)", "(!(a<3))"})
     self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,13), 0, 1, {"((a*-1)<-3)", "(!(a<4))"})
 
-  @unittest.expectedFailure
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
 
@@ -318,7 +313,6 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
 
-  @unittest.expectedFailure
   def test_mul_div_factor_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//8, 0, 5, "(a//2)")
 
@@ -338,6 +332,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((((-idx)+200)//(-4))+50)")
     self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, 0, 25, "((((-idx)+201)//(-4))+50)")
 
+  # NOTE: tests are not correct in symbolic
   # TODO: simplify the expression
   def test_div_neg_all_range(self):
     gidx = Variable("gidx", 0, 124)
@@ -347,6 +342,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, 0, 250, "(((((-gidx)*8)+(-lidx)+1001)//(-4))+250)")
     self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, 0, 250, "(((((-gidx)*8)+(-lidx)+1002)//(-4))+250)")
 
+  # NOTE: tests are not correct in symbolic
   def test_div_neg_then_neg(self):
     # taken from arange opts
     lidx0 = Variable("lidx0", 0, 7)
