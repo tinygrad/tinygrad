@@ -187,7 +187,7 @@ class ProfileLogger:
     for en,st,dep_actor_name,dep_subactor_name,actor_name,subactor_name in self.deps:
       dep_pid, dep_tid = self._ensure_actor(dep_actor_name,dep_subactor_name)
       pid, tid = self._ensure_actor(actor_name,subactor_name)
-      self.mjson.append({"ph": "s", "pid": dep_pid, "tid": dep_tid, "id": len(self.mjson), "ts":en-0.1, "bp": "e"})
+      self.mjson.append({"ph": "s", "pid": dep_pid, "tid": dep_tid, "id": len(self.mjson), "ts":en, "bp": "e"})
       self.mjson.append({"ph": "f", "pid": pid, "tid": tid, "id": len(self.mjson)-1, "ts":st, "bp": "e"})
 
     ProfileLogger.writers -= 1
