@@ -301,10 +301,8 @@ class Tensor:
       assert isinstance(self.lazydata, LazyBuffer), "Tensor is sharded, move to one device before this command"
       if self.lazydata.base.realized is None: self.realize()
       # Hack for unrealized .ones and .zeros
-      if self.lazydata.base.realized is None:
-        self.contiguous().realize().lazydata.base.realized.copyout(np_mv)
-      else:
-        self.lazydata.base.realized.copyout(np_mv)
+      if self.lazydata.base.realized is None: self.contiguous().realize().lazydata.base.realized.copyout(np_mv)
+      else: self.lazydata.base.realized.copyout(np_mv)
     else: return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
 
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
