@@ -79,8 +79,8 @@ class HCQGraph(MultiGraphRunner):
       # Go through all dependencies and, if we need the signal from that ji, enable it by setting the signal value in the signal schedule.
       for sig, val in deps:
         if id(sig) in [id(x) for x in self.signals.values()]:
-          self.signal_sched[val - 1] = (dep_sched:=(self.signal_sched[val - 1][:2] + (val,) + self.signal_sched[val - 1][3:]))
-          if prof_info: self.prof_deps += [(dep_sched[3][1][0], dep_sched[3][2], dep_sched[3][4], prof_info[0][0], prof_info[2], prof_info[4])]
+          self.signal_sched[val - 1] = (sched:=(self.signal_sched[val - 1][:2] + (val,) + self.signal_sched[val - 1][3:]))
+          if PROFILE: self.prof_deps += [(sched[3][1][0], sched[3][2], sched[3][4], prof_info[0][0], prof_info[2], prof_info[4])] # type: ignore
 
       self.signal_sched[j] = (deps, out_signal, None if isinstance(ji.prg, CompiledRunner) else (j + 1), prof_info)
       self.last_ji[enqueue_queue] = j
