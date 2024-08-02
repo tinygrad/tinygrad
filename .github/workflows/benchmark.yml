@@ -468,6 +468,8 @@ jobs:
       run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python examples/openpilot/compile2.py | tee openpilot_compile_0_9_4.txt
     - name: openpilot compile 0.9.7
       run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_compile_0_9_7.txt
+    - name: validate openpilot 0.9.7
+      run: PYTHONPATH=. FLOAT16=0 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
     - name: benchmark openpilot 0.9.4
       run: PYTHONPATH=. GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_4.txt
     - name: benchmark openpilot 0.9.7
