@@ -489,7 +489,7 @@ class HCQCompiled(Compiled):
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool]] = []
-    self.dep_prof_records:List[Any] = []
+    self.dep_prof_records:List[Tuple[int, int, HCQCompiled, bool, int, int, HCQCompiled, bool]] = []
     if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -544,8 +544,10 @@ class HCQCompiled(Compiled):
 
     for st, en, name, is_cp in self.raw_prof_records:
       self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, qname[is_cp])]
-    for d_st, d_dev, d_cp, st, dev, cp in self.dep_prof_records:
-      self.profile_logger.deps += [(d_dev._gpu2cpu_time(d_st, d_cp), dev._gpu2cpu_time(st, cp), d_dev.dname, qname[d_cp], dev.dname, qname[cp])]
+    for a_st, a_en, a_dev, a_is_copy, b_st, b_en, b_dev, b_is_copy in self.dep_prof_records:
+      # Perfetto connects nodes based on timing data, ensuring every choice is valid by averaging times to a midpoint.
+      a_tm, b_tm = a_dev._gpu2cpu_time((a_st+a_en)/decimal.Decimal(2), a_is_copy), b_dev._gpu2cpu_time((b_st+b_en)/decimal.Decimal(2), b_is_copy)
+      self.profile_logger.deps += [(a_tm, b_tm, a_dev.dname, qname[a_is_copy], b_dev.dname, qname[b_is_copy])]
     self.raw_prof_records, self.dep_prof_records = [], []
 
     # Remove the logger, this flushes all data written by the device.
