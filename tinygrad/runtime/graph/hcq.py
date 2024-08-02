@@ -186,7 +186,7 @@ class HCQGraph(MultiGraphRunner):
     timestamps = [s.timestamp for s in self.prof_signals]
     for _,_,_,((st,_),(en,_),dev,desc,is_cp) in self.signal_sched.values(): # type: ignore
       dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp)]
-    for d_st,d_dev,d_is_cp,st,dev,is_cp in self.prof_deps: dev.dep_prof_records += [(timestamps[d_st]-1,d_dev,d_is_cp,timestamps[st],dev,is_cp)]
+    for d_st,d_dev,d_is_cp,st,dev,is_cp in self.prof_deps: dev.dep_prof_records += [(timestamps[d_st],d_dev,d_is_cp,timestamps[st]+1,dev,is_cp)]
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
