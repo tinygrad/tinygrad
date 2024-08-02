@@ -303,6 +303,7 @@ class Tensor:
       # Hack for unrealized .ones and .zeros
       if self.lazydata.base.realized is None: self.contiguous().realize().lazydata.base.realized.copyout(np_mv)
       else: self.lazydata.base.realized.copyout(np_mv)
+      return
     else: return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
 
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
