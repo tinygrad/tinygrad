@@ -490,9 +490,7 @@ class HCQCompiled(Compiled):
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool]] = []
     self.dep_prof_records:List[Any] = []
-    if PROFILE:
-      self.profile_logger = ProfileLogger()
-      atexit.register(self._prof_finalize)
+    if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
@@ -534,14 +532,22 @@ class HCQCompiled(Compiled):
     Translates local gpu time (timestamp) into global cpu time.
     """
     self._ensure_shared_time_base()
-    return float(gpu_time + (self.gpu2cpu_copy_time_diff if False else self.gpu2cpu_compute_time_diff))
+    return float(gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff))
+
+  def _prof_setup(self):
+    if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
+    self.profile_logger = ProfileLogger()
 
   def _prof_finalize(self):
+    qname = ["COMPUTE", "DMA"]
+
     for st, en, name, is_cp in self.raw_prof_records:
-      self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
-    for dep_en,dep_dev,dep_is_cp,st,dev,is_cp in self.dep_prof_records:
-      self.profile_logger.deps += [(dep_dev._gpu2cpu_time(dep_en, dep_is_cp), dev._gpu2cpu_time(st, is_cp), dep_dev.dname, ["COMPUTE", "DMA"][dep_is_cp], dev.dname, ["COMPUTE", "DMA"][is_cp])]
+      self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, qname[is_cp])]
+    for d_st, d_dev, d_cp, st, dev, cp in self.dep_prof_records:
+      self.profile_logger.deps += [(d_dev._gpu2cpu_time(d_st, d_cp), dev._gpu2cpu_time(st, cp), d_dev.dname, qname[d_cp], dev.dname, qname[cp])]
     self.raw_prof_records, self.dep_prof_records = [], []
+
+    # Remove the logger, this flushes all data written by the device.
     del self.profile_logger
 
   def _wrap_timeline_signal(self):
