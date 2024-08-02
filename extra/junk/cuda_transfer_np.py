@@ -43,6 +43,6 @@ for i in range(runs):
   et = time.perf_counter()
   times+=(et-st)
 
-print(f'Ran {runs} times || Kernel AVG Runtime {times/runs*1000} ms')
+print(f'Ran {runs} times || COPYOUT AVG Runtime {times/runs*1000} ms')
 print(nx[0])
 print(nout[0])
