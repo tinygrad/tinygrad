@@ -287,7 +287,7 @@ class Tensor:
 
   def numpy(self, np_mv=None) -> np.ndarray:
     """
-    Returns the value of this tensor as a `numpy.ndarray`.
+    Returns the value of this tensor as a `numpy.ndarray` or writes to numpy memoryview if provided.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4])
