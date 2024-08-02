@@ -143,7 +143,7 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.arg, 0.0)
 
   def test_noop_vectorize_fold(self):
-    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.float.vec(2), (d0, idx))
     vec = UOp(UOps.VECTORIZE, dtypes.float.vec(2), (ld,))
@@ -154,9 +154,9 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(len([x for x in g.uops if x.op is UOps.VECTORIZE]), 0)
 
   def test_gep_vec_fold(self):
-    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
-    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, False))
-    d2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (2, False))
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
+    d2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 2)
     idx = UOp.const(dtypes.int, 0)
     def _test_vec(geps, count=4):
       vec = UOp(UOps.VECTORIZE, dtypes.float.vec(count), geps)
@@ -193,8 +193,8 @@ class TestUOpGraph(TestUOps):
     self.assertIs(_test_vec(xy1+xy2).op, UOps.VECTORIZE)
 
   def test_cast_alu_fold(self):
-    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=(0, True))
-    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(1, False))
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=0)
+    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
     alu = ld.lt(1).cast(dtypes.bool)
@@ -203,8 +203,8 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
 
   def test_double_cast_fold(self):
-    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
-    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(1, False))
+    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0)
+    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
     alu = ld.cast(dtypes.float).cast(dtypes.float)
@@ -227,9 +227,9 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.src[1].arg, 6)
 
   def test_fold_gated_load(self):
-    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
-    glbl1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (1, False))
-    glbl2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (2, False))
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
+    glbl1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 1)
+    glbl2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 2)
     idx = UOp.const(dtypes.int, 0)
     ld0 = UOp(UOps.LOAD, dtypes.int, (glbl1, idx, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False)))
     ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True)))
@@ -241,7 +241,7 @@ class TestUOpGraph(TestUOps):
     self.assert_equiv_uops(ld0, UOp.load(glbl2, idx, dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
-    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     smem = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.int), (), ("temp", 1))
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(UOps.STORE, None, (smem, lidx, UOp.load(glbl0, lidx, dtype=dtypes.int)))
@@ -256,7 +256,7 @@ class TestUOpGraph(TestUOps):
     self.assert_equiv_uops(ld0, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
 
   def test_fold_gated_store(self):
-    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     idx0 = UOp.const(dtypes.int, 0)
     idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
@@ -268,14 +268,14 @@ class TestUOpGraph(TestUOps):
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
 
   def test_asserts_bad_gate(self):
-    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     idx = UOp.const(dtypes.int, 0)
     bad_gate = UOp.const(dtypes.int, 1)
     uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
     with self.assertRaises(AssertionError): uops.linearize()
 
   def test_switched_range_order(self):
-    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     c0 = UOp.const(dtypes.int, 0)
     c2 = UOp.const(dtypes.int, 2)
     cf = UOp.const(dtypes.float, 0.0)
@@ -486,7 +486,7 @@ def gate_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + 
 
 class TestIFUOps(TestUOps):
   def test_create_ifs(self):
-    gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 4))
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
@@ -505,7 +505,7 @@ class TestIFUOps(TestUOps):
       self.assertEqual(len(st.src), 3)
 
   def test_expand_ifs_one_gate(self):
-    gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 16))
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 4)).lt(1)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
@@ -525,7 +525,7 @@ class TestIFUOps(TestUOps):
   # this will be fixed with the merge gated stores bounty
   @unittest.expectedFailure
   def test_expand_ifs_dumb(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid*(lidx.ne(2))

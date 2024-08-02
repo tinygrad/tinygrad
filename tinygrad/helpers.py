@@ -161,24 +161,34 @@ class Profiling(contextlib.ContextDecorator):
 class ProfileLogger:
   writers: int = 0
   mjson: List[Dict] = []
-  actors: Dict[str, int] = {}
-  subactors: Dict[Tuple[str, str], int] = {}
+  actors: Dict[Union[str, Tuple[str, str]], int] = {}
 
-  def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
+  def __init__(self): self.events, self.deps, ProfileLogger.writers = [], [], ProfileLogger.writers + 1
 
   def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor)]
 
+  def _ensure_actor(self, actor_name, subactor_name):
+    if actor_name not in self.actors:
+      self.actors[actor_name] = (pid:=len(self.actors))
+      self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+
+    if (subactor_key:=(actor_name,subactor_name)) not in self.actors:
+      self.actors[subactor_key] = (tid:=len(self.actors))
+      self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
+
+    return self.actors[actor_name], self.actors.get(subactor_key, -1)
+
   def __del__(self):
+    # perfetto json docs: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
     for name,st,et,actor_name,subactor_name in self.events:
-      if actor_name not in self.actors:
-        self.actors[actor_name] = (pid:=len(self.actors))
-        self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+      pid, tid = self._ensure_actor(actor_name,subactor_name)
+      self.mjson.append({"name": name, "ph": "X", "pid": pid, "tid": tid, "ts":st, "dur":et-st})
 
-      if (subactor_key:=(actor_name,subactor_name)) not in self.subactors:
-        self.subactors[subactor_key] = (tid:=len(self.subactors))
-        self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
-
-      self.mjson.append({"name": name, "ph": "X", "pid": self.actors[actor_name], "tid": self.subactors.get(subactor_key, -1), "ts":st, "dur":et-st})
+    for en,st,dep_actor_name,dep_subactor_name,actor_name,subactor_name in self.deps:
+      dep_pid, dep_tid = self._ensure_actor(dep_actor_name,dep_subactor_name)
+      pid, tid = self._ensure_actor(actor_name,subactor_name)
+      self.mjson.append({"ph": "s", "pid": dep_pid, "tid": dep_tid, "id": len(self.mjson), "ts":en-0.1, "bp": "e"})
+      self.mjson.append({"ph": "f", "pid": pid, "tid": tid, "id": len(self.mjson)-1, "ts":st, "bp": "e"})
 
     ProfileLogger.writers -= 1
     if ProfileLogger.writers == 0 and len(self.mjson) > 0:

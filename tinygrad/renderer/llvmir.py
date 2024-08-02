@@ -3,7 +3,6 @@ from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Renderer
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
@@ -73,7 +72,7 @@ class LLVMRenderer(Renderer):
   has_shared = False
   global_max = None
 
-  def render(self, name:str, uops:UOpGraph) -> str:
+  def render(self, name:str, uops:List[UOp]) -> str:
     # all llvm stuff goes into a module
     module = ir.Module(name=__file__)
 

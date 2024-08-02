@@ -16,7 +16,7 @@ import functools
 
 def render(self) -> Tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
-  glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(0,True))
+  glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0)
   graph = UOpGraph([UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, 0), self))])
   graph.linearize()
   if DEBUG>=5: graph.print()
