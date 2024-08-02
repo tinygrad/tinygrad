@@ -5,7 +5,6 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
@@ -66,8 +65,8 @@ class CStyleLanguage(Renderer):
       return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{self.render_dtype(buf_dtype)}{output_dtype.count}*)({buf_name}+{idx}))"  # noqa: E501
     return f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
 
-  def get_kernel_modifier(self, uops:UOpGraph) -> str: return ""
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:UOpGraph, prefix=None) -> str:
+  def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
                 ("" if mutable else "const ")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
@@ -92,9 +91,9 @@ class CStyleLanguage(Renderer):
   def render_local(self, name:str, dtype:DType, size:int): return self.smem_align + self.smem_prefix + f"{self.render_dtype(dtype)} {name}[{size}];"
   def render_dtype(self, var_dtype:DType) -> str: return self.type_map.get(var_dtype, var_dtype.name)
 
-  def render(self, name:str, uops:UOpGraph) -> str:
+  def render(self, name:str, uops:List[UOp]) -> str:
     kernel = []
-    bufs: List[Tuple[str, Tuple[DType, bool]]] = []
+    bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
     depth = 1
     def kk(s): kernel.append("  "*depth+s)
 
@@ -123,6 +122,8 @@ class CStyleLanguage(Renderer):
         kk("}")
       elif uop is UOps.STORE:
         assert src[0].dtype is not None and src[2].dtype is not None
+        # mark DEFINE_GLOBAL buf as writable
+        if src[0].op is UOps.DEFINE_GLOBAL: bufs[src[0]] = (bufs[src[0]][0], (bufs[src[0]][1][0], True))
         rendered_store = self.render_store(r[src[0]], src[0].dtype, r[src[2]], src[2].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
         kk(f"if ({r[src[3]]}) {{ {rendered_store} }}" if len(src) > 3 else rendered_store)
       else:
@@ -145,7 +146,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_VAR:
           assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
           seen_vars.add(args.expr)
-          bufs.append((args.expr, (dtype,False)))
+          bufs[u] = (args.expr, (dtype,False))
           r[u] = args.expr
         elif uop is UOps.LOAD:
           val = self.render_load(dtype, r[src[0]], src[0].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
@@ -169,7 +170,7 @@ class CStyleLanguage(Renderer):
           kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_GLOBAL:
-          bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
+          bufs[u] = (nm:=f"data{args}", (dtype, False))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
         elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
@@ -181,7 +182,8 @@ class CStyleLanguage(Renderer):
             (f"[{args}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) else f".{'xyzwabcd'[args]}")
         else: raise RuntimeError(f"failed to render {u}")
 
-    return self.render_kernel(name, kernel, bufs, uops)
+    # NOTE: this relies on bufs dict preserving order
+    return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
@@ -302,7 +304,7 @@ return c;}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
-  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+  def get_kernel_modifier(self, uops:List[UOp]) -> str:
     maxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
@@ -391,7 +393,7 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+  def get_kernel_modifier(self, uops:List[UOp]) -> str:
     requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters

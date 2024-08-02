@@ -198,7 +198,6 @@ class TestStatsOptimized(unittest.TestCase):
     p = k.to_program()
     # NOTE: these are wrong, they don't respect the if statement
     print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
-    p.uops.print()
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

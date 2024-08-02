@@ -158,7 +158,7 @@ def get_runner(dname:str, ast:LazyOp) -> CompiledRunner:
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
     prg: Program = get_kernel(Device[dname].renderer, ast).to_program()
-    if hasattr(prg.uops, "_fuzz_paths"):
+    if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return UOpsFuzzerRunner(replace(prg, dname=dname))
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
@@ -192,7 +192,7 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is MetaOps.COPY or getenv("USE_COPY_KERNEL")
   if si.ast.op is MetaOps.KERNEL:
     runner = get_runner(si.outputs[0].device, si.ast)
-    return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals], si.metadata)
+    return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
   out = si.outputs[0]
   if si.ast.op is MetaOps.COPY:
     kernel_type = BufferCopy
