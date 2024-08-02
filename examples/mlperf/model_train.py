@@ -486,6 +486,9 @@ def train_retinanet():
   ANCHOR_NP = ANCHORS[0].numpy()
   mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,ANCHORS_STACK, m, b_t)
   mdl_class_loss = lambda c, m, l_t: model.head.classification_head.loss(c,m, l_t)
+  out_placeholder_shapes = [(BS_EVAL,90000,4), (BS_EVAL,22500,4), (BS_EVAL,5625,4), (BS_EVAL,1521,4), (BS_EVAL,441,4),
+                            (BS_EVAL, 23760000), (BS_EVAL, 5940000), (BS_EVAL, 1485000), (BS_EVAL, 401544), (BS_EVAL, 116424)]
+  out_np = [np.zeros(s, np.float32) for s in out_placeholder_shapes]
 
   def data_get(it):
     x, yb, yl, ym, cookie = next(it)
@@ -607,8 +610,10 @@ def train_retinanet():
         except StopIteration: next_proc = None
         nt = time.perf_counter()
 
-        offsets = [o.numpy(False) for o in out[:5]]
-        scores = [o.numpy(False) for o in out[5:]]
+        for tens, npp in zip(out, out_np):
+          tens.lazydata.base.realized.copyout(npp.data)
+        offsets = out_np[:5]
+        scores = out_np[5:]
         npt = time.perf_counter()
         
         predictions = model.postprocess_detections(offsets, scores, orig_image_sizes=orig_shapes)
