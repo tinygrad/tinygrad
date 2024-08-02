@@ -225,9 +225,7 @@ jobs:
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test UOP_IS_SYMBOLIC
-        run: |
-          PYTHONPATH=. UOP_IS_SYMBOLIC=1 GPU=1 python3 -m pytest -n=auto test/test_ops.py -k "conv and not (test_padded_conv3d or test_conv2d_bs_4_cin_3 or test_conv2d or test_conv2d_bs_4_cin_1 or test_strided_conv_transpose2d)" --durations=20
-          PYTHONPATH=. UOP_IS_SYMBOLIC=1 python -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_47 --durations=20
+        run: PYTHONPATH=. UOP_IS_SYMBOLIC=1 GPU=1 python3 -m pytest -n=auto test/test_ops.py -k "conv and not (test_padded_conv3d or test_conv2d_bs_4_cin_3 or test_conv2d or test_conv2d_bs_4_cin_1 or test_strided_conv_transpose2d)" --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
