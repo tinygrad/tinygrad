@@ -285,7 +285,7 @@ class Tensor:
     """
     return self.data().tolist()
 
-  def numpy(self) -> np.ndarray:
+  def numpy(self, np_mv:memoryview=None) -> np.ndarray:
     """
     Returns the value of this tensor as a `numpy.ndarray`.
 
@@ -294,10 +294,21 @@ class Tensor:
     print(repr(t.numpy()))
     ```
     """
-    if self.dtype == dtypes.bfloat16: return self.float().numpy()
+    if self.dtype == dtypes.bfloat16: return self.float().numpy(np_mv)
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
+    if np_mv is not None:
+      assert isinstance(self.lazydata, LazyBuffer), "Tensor is sharded, move to one device before this command"
+      if self.lazydata.base.realized is None: self.realize()
+      # Hack for unrealized .ones and .zeros
+      if self.lazydata.base.realized is None:
+        cpu = self.cast(self.dtype.scalar()).contiguous().to("CLANG").realize()
+        buf = cast(Buffer, cast(LazyBuffer, cpu.lazydata).base.realized)
+        buf.copyout(np_mv)
+        return
+      self.lazydata.base.realized.copyout(np_mv)
+      return
+    else: return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
 
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     """
