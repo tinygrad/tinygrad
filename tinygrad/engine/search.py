@@ -43,7 +43,7 @@ def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_
   try: car = CompiledRunner(p, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
-  input_bufs = [rawbufs[i] for i,_ in car.p.globals]
+  input_bufs = [rawbufs[i] for i in car.p.globals]
   for _ in range(cnt):
     if clear_l2:
       if hasattr(dev:=Device[p.dname], 'invalidate_caches'): dev.invalidate_caches()
