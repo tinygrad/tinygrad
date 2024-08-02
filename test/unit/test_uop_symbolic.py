@@ -215,8 +215,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mod_to_sub(self):
     # This is mod reduction
-    # TODO: fix expression
-    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, {"(-1+a)", "((a+1)%2)"})
+    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, {"(-1+a)", "(a+(-1))"})
 
   def test_sum_div_const(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
@@ -262,7 +261,6 @@ class TestSymbolic(unittest.TestCase):
     # TODO: simplify further
     self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, {"((a*-2)+10)", "(((a+1)*(-2))+12)"})
 
-  @unittest.expectedFailure
   def test_mod_mul_sum(self):
     self.helper_test_variable(Node.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, "(a+b)")
 
