@@ -270,9 +270,8 @@ class TestBitCast(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_shape_change_bitcast_non_contiguous_sharded(self, dt1, dt2):
     if dt1 == dtypes.bool or dt2 == dtypes.bool or not is_dtype_supported(dt1) or not is_dtype_supported(dt2) or dt2 == dtypes.bfloat16: return
-    if not is_dtype_supported(dt1, 'PYTHON') or not is_dtype_supported(dt2, 'PYTHON'): return
     data = rand_for_dtype(dt1, 32)
-    t = Tensor(data).reshape(2, 1, 16).permute(1, 0, 2).shard((Device.DEFAULT, 'PYTHON'), axis=-1)
+    t = Tensor(data).reshape(2, 1, 16).permute(1, 0, 2).shard((Device.DEFAULT, Device.DEFAULT), axis=-1)
     tnp = np.array(data).reshape(2, 1, 16).transpose(1, 0, 2)
     np.testing.assert_allclose(t.bitcast(dt2).numpy(), tnp.view(_to_np_dtype(dt2)))
 
