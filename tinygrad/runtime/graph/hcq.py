@@ -60,34 +60,36 @@ class HCQGraph(MultiGraphRunner):
       enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
       out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
 
-      # Get dependencies based on buffers to be used.
+      # Get dependencies based on input and output buffers.
       rdeps = self._access_resources(ji.bufs[(wb:=ji.prg.p.outcount if is_exec_prg else 1):], ji.bufs[:wb], (enqueue_queue, j + 1)) #type:ignore
 
-      # Update deps to depend on the previous kernel in the queue.
+      # Update dependencies to include previous kernel in queue. This is required for timeline signals.
       opt_deps, deps = [], rdeps + ([(enqueue_queue, prev_ji + 1)] if (prev_ji:=last_j[enqueue_queue]) is not None else [])
 
-      # Optimize dependencies removing all dependencies which are already know to be correct.
+      # Optimize dependencies by removing redundant ones. Remove waiting for the value of the queue which is known to be already
+      # synced with the current queue.
       for dep_queue, dep_val in sorted(deps, key=lambda x: x[1], reverse=True):
         if (qa:=queue_access[enqueue_queue][dep_queue]) is None or qa < dep_val:
           opt_deps.append((self.signals[dep_queue], dep_val))
           queue_access[enqueue_queue][dep_queue] = dep_val
 
-      # Need to be sure that device is ready to be used in this context, so issue a device kickoff sync.
+      # Ensure device is ready for use in current context: the graph has initialized the device and it's safe to operate on it within this graph.
       for dep_queue, _ in opt_deps: dev_access[enqueue_queue].update(dev_access[dep_queue])
       sync_signals = [(self.signals[bdev], self.kickoff_value) for b in ji.bufs if (bdev:=cast(Buffer, b).device) not in dev_access[enqueue_queue]]
       dev_access[enqueue_queue].update(cast(Buffer, b).device for b in ji.bufs)
 
       # Remove self-dependency for compute and copy queues.
-      # For compute, in case of NV optimize when only 1 same-queue dep, since NV chains 2+ execs in this case, eliminating dep need.
+      # For compute, in case of NV, optimize when only 1 same-queue dependency exists, since NV chains 2+ executions in this case,
+      # eliminating dependency need.
       dname = enqueue_dev.dname.split(":", 1)[0]
       can_opt = (dname == "AMD" or (dname == "NV" and len(sync_signals) == 0 and len(opt_deps) == 1 and id(opt_deps[0][0]) == id(out_signal)))
       if can_opt or isinstance(ji.prg, BufferXfer): opt_deps = [x for x in opt_deps if id(x[0]) != id(out_signal)]
 
-      # Go through all dependencies and, if we need the signal from that ji, enable it by setting the signal value in the signal schedule.
+      # Enable necessary signals in the schedule by setting the signal value.
       for sig, val in opt_deps: self.ji_schedule[val - 1] = self.ji_schedule[val - 1][:5] + (val,)
       self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if is_exec_prg else (j + 1))
 
-      # Collect profile info.
+      # Collect profile information if profiling is enabled.
       if PROFILE:
         prof_ji_desc = ji.prg.clprg.name if is_exec_prg else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
 
