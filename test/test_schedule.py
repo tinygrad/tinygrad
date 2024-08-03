@@ -1282,11 +1282,10 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(xt, 2)
     np.testing.assert_equal(xt.numpy(), X.numpy()[idxs.numpy()])
 
-  @unittest.expectedFailure
   def test_simple_indexing_alt(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[[1, 2], [1, 2]]
-    self.check_schedule(xt, 5)
+    self.check_schedule(xt, 3)
     np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
 
   @unittest.expectedFailure
@@ -1303,11 +1302,10 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(xt, 6)
     np.testing.assert_equal(xt.numpy(), 6)
 
-  @unittest.expectedFailure
   def test_advanced_simple_indexing_combined(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[1:2, [1, 2]]
-    self.check_schedule(xt, 4)
+    self.check_schedule(xt, 2)
     np.testing.assert_equal(xt.numpy(), np.arange(16).reshape(4, 4)[1:2, [1, 2]])
 
   def test_push_through_reshape(self):
