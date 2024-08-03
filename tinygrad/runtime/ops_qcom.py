@@ -180,7 +180,7 @@ class QcomComputeQueue(HWComputeQueue):
     self.q = []
   
   def _exec(self, prg, kernargs, global_size, local_size):
-    if local_size is not None: global_size = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
+    if local_size is not None: global_size_mp = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
 
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
     self.cmd(adreno.CP_SET_MARKER, adreno.RM6_COMPUTE)
@@ -201,9 +201,9 @@ class QcomComputeQueue(HWComputeQueue):
         3 | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT)
         | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT)
         | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT),
-        global_size[0], 0, global_size[1], 0, global_size[2], 0, # global size x,y,z followed by offsets
+        global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, # global size x,y,z followed by offsets
         0xccc0cf, 0x2fc,
-        global_size[0], global_size[1], global_size[2], # global sizes one again?
+        global_size[0], global_size[1], global_size[2], # original global sizes
     )
     self.reg(adreno.REG_A6XX_SP_CHICKEN_BITS, 0x20)
     self.reg(
