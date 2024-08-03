@@ -120,7 +120,10 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
         return None
       # reshape this reduceop based on the top reduce and give it a new axis
       input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
-      axis = tuple(i for i in range(len(input_st.shape)) if st.shape[i] != input_st.shape[i])
+      # NOTE: this assumes if there's a dim mismatch it's only extra 1s (which is asserted later in .reshape)
+      shape_len = max(len(input_st.shape), len(st.shape))
+      def _get_dim(shp:Tuple[sint, ...], i:int): return shp[i] if i < len(shp) else 1
+      axis = tuple(i for i in range(shape_len) if _get_dim(st.shape, i) != _get_dim(input_st.shape, i))
     st = st.reshape(reduce_st(input_st, axis))
     reduce_info[(buf, st)] = (input_st, axis)
     return (buf, st)
