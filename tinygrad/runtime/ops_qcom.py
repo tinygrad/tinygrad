@@ -186,7 +186,7 @@ class QcomComputeQueue(HWComputeQueue):
 
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
     self.cmd(adreno.CP_SET_MARKER, adreno.RM6_COMPUTE)
-    self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc)
+    self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc, 0x140)
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x60)
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x0)
     self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, 0x80)
@@ -196,7 +196,6 @@ class QcomComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, adreno.ISAMMODE_CL | (1 << 3)) # ISAMMODE|UNK3
     self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
     self.reg(adreno.REG_A6XX_UCHE_UNKNOWN_0E12, 0x10000000)
-    self.reg(adreno.REG_A6XX_HLSQ_CS_CNTL, 0x140) # TODO: adjust const count
     self.reg(
       adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
         # kernel dimenstion = 3
