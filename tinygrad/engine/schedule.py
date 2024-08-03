@@ -114,7 +114,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
       axis = tuple(range(len(input_st.shape)-len(new_rshape), len(input_st.shape)))
     elif top_reduce is not None:
       top_reduce_input_st, top_reduce_axes = reduce_info[top_reduce]
-      if buf.srcs[0] is top_reduce[0] and buf.op is top_reduce[0].op:
+      if buf.srcs[0].base is top_reduce[0] and buf.op is top_reduce[0].op:
         # merge this reduce with its parent
         reduce_info[top_reduce] = (top_reduce_input_st, top_reduce_axes+axis)
         return None
