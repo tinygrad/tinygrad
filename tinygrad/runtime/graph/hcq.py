@@ -38,66 +38,69 @@ class HCQGraph(MultiGraphRunner):
     # graph-related tasks. This synchronization uses a global timeline signal per device. Within the graph, the compute queue coordinates with
     # global operations and sets a kickoff signal. Any queue accessing a buffer from another device waits for this signal from the device’s
     # compute queue to ensure exclusive access. The compute queue signals the completion of the graph, synchronizing with the device's copy queue.
-    self.comp_queues: Dict[Compiled, HWComputeQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
-    self.copy_queues: Dict[Compiled, HWCopyQueue] = {} # lazy allocation
     self.ji_schedule: Dict[int, Tuple[HCQCompiled, HWCommandQueue, List, List, HCQSignal, Optional[int]]] = {}
+
+    self.comp_queues: Dict[HCQCompiled, HWComputeQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
+    self.copy_queues: Dict[HCQCompiled, HWCopyQueue] = {} # lazy allocation
+
     self.signals: Dict[Any, HCQSignal] = {**{dev.dname: dev.signal_t(value=0) for dev in self.devices}, **{"CPU": self.devices[0].signal_t(value=0)}}
     self.kickoff_value = 0
 
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
     self.prof_records = []
 
-    dev_access: Dict[HWCommandQueue, List[HCQCompiled]] = collections.defaultdict(set)
+    last_j: Dict[HWCommandQueue, Optional[int]] = collections.defaultdict(lambda: None)
     queue_access: Dict[HWCommandQueue, Dict[HWCommandQueue, Optional[int]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
-    last_j = collections.defaultdict(lambda: None)
+    dev_access: Dict[HWCommandQueue, Set[str]] = collections.defaultdict(set)
+
+    for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev.dname)
 
     for j,ji in enumerate(self.jit_cache):
-      enqueue_dev = ji.prg.device if isinstance(ji.prg, CompiledRunner) else Device[ji.bufs[1].device] #type:ignore
-      enqueue_queue = self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t()) if isinstance(ji.prg, BufferXfer) else self.comp_queues[enqueue_dev]
+      enqueue_dev = ji.prg.device if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
+      enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
       out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
 
-      deps = self._access_resources(ji.bufs[(wb:=1 if isinstance(ji.prg, BufferXfer) else ji.prg.p.outcount):], ji.bufs[:wb], (enqueue_queue, j + 1))
+      # Get dependencies based on buffers to be used.
+      rdeps = self._access_resources(ji.bufs[(wb:=ji.prg.p.outcount if is_exec_prg else 1):], ji.bufs[:wb], (enqueue_queue, j + 1)) #type:ignore
 
-      # Update signal on compute kernel to depend on the previous kernel.
-      opt_deps, deps2 = [], deps + ([(enqueue_queue, prev_ji + 1)] if (prev_ji:=last_j[enqueue_queue]) is not None else [])
+      # Update deps to depend on the previous kernel in the queue.
+      opt_deps, deps = [], rdeps + ([(enqueue_queue, prev_ji + 1)] if (prev_ji:=last_j[enqueue_queue]) is not None else [])
 
       # Optimize dependencies removing all dependencies which are already know to be correct.
-      for dep_queue, dep_val in sorted(deps2, key=lambda x: x[1], reverse=True):
+      for dep_queue, dep_val in sorted(deps, key=lambda x: x[1], reverse=True):
         if (qa:=queue_access[enqueue_queue][dep_queue]) is None or qa < dep_val:
           opt_deps.append((self.signals[dep_queue], dep_val))
           queue_access[enqueue_queue][dep_queue] = dep_val
 
       # Need to be sure that device is ready to be used in this context, so issue a device kickoff sync.
       for dep_queue, _ in opt_deps: dev_access[enqueue_queue].update(dev_access[dep_queue])
-      sync_signals = [(self.signals[buf.device], self.kickoff_value) for buf in ji.bufs if buf.device not in dev_access[enqueue_queue]]
-      dev_access[enqueue_queue].update(buf.device for buf in ji.bufs)
+      sync_signals = [(self.signals[bdev], self.kickoff_value) for b in ji.bufs if (bdev:=cast(Buffer, b).device) not in dev_access[enqueue_queue]]
+      dev_access[enqueue_queue].update(cast(Buffer, b).device for b in ji.bufs)
 
-      if isinstance(ji.prg, CompiledRunner):
-        # Remove self-dependency for AMD or NV with only 1 same-queue dep, since NV chains 2+ execs in this case, eliminating dep need.
-        if (dname:=enqueue_dev.dname.split(":", 1)[0]) == "AMD" or (dname == "NV" and len(opt_deps + sync_signals) == 1 and id(opt_deps[0][0]) == id(out_signal)):
-          opt_deps = [x for x in opt_deps if id(x[0]) != id(out_signal)]
-      elif isinstance(ji.prg, BufferXfer): opt_deps = [x for x in opt_deps if id(x[0]) != id(out_signal)]
+      # Remove self-dependency for compute and copy queues.
+      # For compute, in case of NV optimize when only 1 same-queue dep, since NV chains 2+ execs in this case, eliminating dep need.
+      dname = enqueue_dev.dname.split(":", 1)[0]
+      can_opt = (dname == "AMD" or (dname == "NV" and len(sync_signals) == 0 and len(opt_deps) == 1 and id(opt_deps[0][0]) == id(out_signal)))
+      if can_opt or isinstance(ji.prg, BufferXfer): opt_deps = [x for x in opt_deps if id(x[0]) != id(out_signal)]
 
       # Go through all dependencies and, if we need the signal from that ji, enable it by setting the signal value in the signal schedule.
       for sig, val in opt_deps: self.ji_schedule[val - 1] = self.ji_schedule[val - 1][:5] + (val,)
-      self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps, out_signal, None if isinstance(ji.prg, CompiledRunner) else (j + 1))
+      self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if is_exec_prg else (j + 1))
 
-      # assert queue_access[enqueue_queue][enqueue_queue] == j + 1, f"{queue_access[enqueue_queue][enqueue_queue]} != {j + 1}"
-
-      # Collect profile info as well
+      # Collect profile info.
       if PROFILE:
-        prof_ji_desc = ji.prg.clprg.name if isinstance(ji.prg, CompiledRunner) else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
+        prof_ji_desc = ji.prg.clprg.name if is_exec_prg else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
 
         sig_st, sig_en = (j * 2, True), (j * 2 + 1, True)
         if len(opt_deps) == 0 and (prev_ji:=last_j[enqueue_queue]) is not None: sig_st = (prev_ji * 2 + 1, False)
 
-        self.prof_records.append((sig_st, sig_en, enqueue_dev, prof_ji_desc, isinstance(ji.prg, BufferXfer), [d - 1 for _, d in deps2]))
+        self.prof_records.append((sig_st, sig_en, enqueue_dev, prof_ji_desc, not is_exec_prg, [d - 1 for _, d in rdeps]))
 
       last_j[enqueue_queue] = j
 
     # Build hardware queues.
     self.op_cmd_idx: Dict[int, Tuple[Any, int]] = {}
-    self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
+    self.copy_to_devs: Dict[HCQCompiled, Set[HCQCompiled]] = {dev: set() for dev in self.devices}
     self.kickoff_wait_cmds: Dict[HWCommandQueue, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
 
     for dev in self.devices:
@@ -120,7 +123,7 @@ class HCQGraph(MultiGraphRunner):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         cast(HCQAllocator, Device[src.device].allocator).map(dest._buf)
         cast(HWCopyQueue, enqueue_queue).copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
-        self.copy_to_devs[Device[dest.device]].add(Device[src.device])
+        self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
       self.op_cmd_idx[j] = (enqueue_queue, len(enqueue_queue) - 1)
 
       # Encode finish profile timestamp (if needed).
@@ -130,23 +133,19 @@ class HCQGraph(MultiGraphRunner):
 
     for dev in self.devices:
       for dep_dev in list(self.copy_to_devs[dev]) + [dev]:
-        if dep_dev in self.copy_queues: self.comp_queues[dev].wait(self.signals[(copy_q:=self.copy_queues[dep_dev])], last_j[copy_q] + 1)
-
-      # for dep_dev in list(self.copy_to_devs[dev]) + [dev]:
-      #   if (last_j:=self.last_ji[self.copy_queues[dep_dev]]) is None: continue
-      #   self.comp_queues[dev].wait(self.signals[self.copy_queues[dep_dev]], self.signal_sched[last_j][2])
+        if dep_dev in self.copy_queues: self.comp_queues[dev].wait(self.signals[(copy_q:=self.copy_queues[dep_dev])], cast(int, last_j[copy_q]) + 1)
 
       self.comp_queues[dev].signal(dev.timeline_signal, dev.timeline_value).bind(dev)
       if dev in self.copy_queues: copy_q.bind(dev)
 
     self.last_timeline: Dict[HCQCompiled, Tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
+    self.queue_signals_to_reset = [self.signals[q] for q in list(self.comp_queues.values()) + list(self.copy_queues.values()) if q in self.signals]
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
     self.kickoff_value += 1
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
-    for comp_queue in self.comp_queues.values(): self.signals[comp_queue].value = 0
-    for copy_queue in self.copy_queues.values(): self.signals[copy_queue].value = 0
+    for sig in self.queue_signals_to_reset: sig.value = 0
     self.signals['CPU'].value = self.kickoff_value
 
     if PROFILE and self.kickoff_value > 1: self.collect_timestamps()
@@ -192,12 +191,6 @@ class HCQGraph(MultiGraphRunner):
       for x in deps:
         (b_st,_), (b_en,_), b_dev, _, b_is_cp, _ = self.prof_records[x]
         dev.dep_prof_records += [(timestamps[b_st], timestamps[b_en], b_dev, b_is_cp, timestamps[st], timestamps[en], dev, is_cp)]
-
-    # for _,_,_,((st,_),(en,_),dev,desc,is_cp) in self.signal_sched.values(): # type: ignore
-    #   dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp)]
-
-    # for ((a_st,_), (a_en,_), a_dev, _, a_is_cp), ((b_st,_), (b_en,_), b_dev, _, b_is_cp) in self.prof_deps:
-    #   b_dev.dep_prof_records += [(timestamps[a_st], timestamps[a_en], a_dev, a_is_cp, timestamps[b_st], timestamps[b_en], b_dev, b_is_cp)]
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
