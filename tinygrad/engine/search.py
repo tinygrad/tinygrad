@@ -43,7 +43,7 @@ def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_
   try: car = CompiledRunner(p, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
-  input_bufs = [rawbufs[i] for i,_ in car.p.globals]
+  input_bufs = [rawbufs[i] for i in car.p.globals]
   for _ in range(cnt):
     if clear_l2:
       if hasattr(dev:=Device[p.dname], 'invalidate_caches'): dev.invalidate_caches()
@@ -61,9 +61,9 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tup
   # set timeout
   signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   try:
-    x[1].linearize()
-    if len(x[1].uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
     p = x[1].to_program(name_override="test")
+    assert p.uops is not None, "uop list wasn't generated?"
+    if len(p.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
     st = time.perf_counter()
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st

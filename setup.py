@@ -59,6 +59,7 @@ setup(name='tinygrad',
             "bottle",
         ],
         'docs': [
+            "mkdocs",
             "mkdocs-material",
             "mkdocstrings[python]",
             "markdown-callouts",

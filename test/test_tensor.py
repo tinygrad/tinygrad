@@ -16,6 +16,7 @@ U_init = np.random.randn(3,3).astype(np.float32)
 V_init = np.random.randn(3,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
+gradient = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
   def test_zerodim_initialization(self):
@@ -50,6 +51,64 @@ class TestTinygrad(unittest.TestCase):
       out = torch.nn.functional.log_softmax(out, dim=1)
       out = out.mul(m).add(m).sum()
       out.backward()
+      return out.detach().numpy(), x.grad, W.grad
+
+    for x,y in zip(test_tinygrad(), test_pytorch()):
+      np.testing.assert_allclose(x, y, atol=1e-5)
+
+  @unittest.expectedFailure
+  def test_second_order_backward_pass(self):
+    def test_pytorch():
+      x = torch.tensor(x_init)
+      m = torch.tensor(m_init, requires_grad=True)
+      out = x.mul(m).sum()
+      # use retain graph so we can compute second order derivatives later
+      out.backward(retain_graph=True)
+      # save first-order gradient (dO/dm). they still contain graph information on how they were constructed wrt x and W
+      grad_m = m.grad
+      # zero gradients so second-order gradients are correct
+      m.grad = None
+      # compute second-order gradients
+      grad_m.sum().backward(retain_graph=True)
+
+      # d2O/dm2
+      second_grad_m = m.grad
+      return second_grad_m.numpy()
+
+    def test_tinygrad():
+      x = Tensor(x_init)
+      m = Tensor(m_init, requires_grad=True)
+      out = x.mul(m).sum()
+      out.backward()
+      grad_m = m.grad
+      m.grad = None
+      grad_m.sum().backward()
+      second_grad_m = m.grad # currently, this will be None (incorrect)
+      return second_grad_m.numpy()
+
+    for x,y in zip(test_tinygrad(), test_pytorch()):
+      np.testing.assert_allclose(x, y, atol=1e-5)
+
+  # passing `gradient` to backward
+  def test_backward_pass_vjp(self):
+    def test_tinygrad():
+      x = Tensor(x_init, requires_grad=True)
+      W = Tensor(W_init, requires_grad=True)
+      m = Tensor(m_init)
+      out = x.dot(W).relu()
+      out = out.log_softmax()
+      out = out.mul(m).add(m)
+      out.backward(Tensor(gradient))
+      return out.numpy(), x.grad.numpy(), W.grad.numpy()
+
+    def test_pytorch():
+      x = torch.tensor(x_init, requires_grad=True)
+      W = torch.tensor(W_init, requires_grad=True)
+      m = torch.tensor(m_init)
+      out = x.matmul(W).relu()
+      out = torch.nn.functional.log_softmax(out, dim=1)
+      out = out.mul(m).add(m)
+      out.backward(torch.tensor(gradient))
       return out.detach().numpy(), x.grad, W.grad
 
     for x,y in zip(test_tinygrad(), test_pytorch()):

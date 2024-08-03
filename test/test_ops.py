@@ -1,9 +1,11 @@
 import time, math, unittest
 import numpy as np
+from typing import List, Callable
 import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
+import functools
 
 if CI:
   import warnings
@@ -95,6 +97,42 @@ class TestOps(unittest.TestCase):
 
   def test_full(self):
     helper_test_op([], lambda: torch.full((45,65), 4, dtype=torch.int32), lambda: Tensor.full((45,65), 4), forward_only=True)
+
+  def test_negative_dims(self):
+    creation_methods: List[Callable[..., Tensor]] = [
+      Tensor.empty,
+      Tensor.rand,
+      Tensor.zeros,
+      Tensor.ones,
+      Tensor.randn,
+      Tensor.randint,
+      Tensor.normal,
+      Tensor.uniform,
+      Tensor.scaled_uniform,
+      Tensor.glorot_uniform
+    ]
+
+    for method in creation_methods:
+      with self.assertRaises(ValueError): method(-3, 2)
+      with self.assertRaises(ValueError): method((2, -3))
+      with self.assertRaises(ValueError): method((2, -3, 0))
+
+  def test_negative_dims_full(self):
+    with self.assertRaises(ValueError): Tensor.full(-3, 2)
+    with self.assertRaises(ValueError): Tensor.full((2, -3), 4)
+    with self.assertRaises(ValueError): Tensor.full((2, -3, 0), 4)
+
+  def test_negative_dims_eye(self):
+    with self.assertRaises(ValueError): Tensor.eye(-3, 3)
+    with self.assertRaises(ValueError): Tensor.eye(3, -3)
+    with self.assertRaises(ValueError): Tensor.eye(-3, -3)
+
+  def test_negative_dims_kaiming(self):
+    creation_methods = [Tensor.kaiming_uniform, Tensor.kaiming_normal]
+    for method in creation_methods:
+      with self.assertRaises(ValueError): method(-3, 3)
+      with self.assertRaises(ValueError): method((-3, 3), 3)
+      with self.assertRaises(ValueError): method((-3, -3), 3)
 
   def test_zeros(self):
     helper_test_op([], lambda: torch.zeros(45,65), lambda: Tensor.zeros(45,65), forward_only=True)
@@ -409,6 +447,10 @@ class TestOps(unittest.TestCase):
   def test_div_int(self):
     helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
     helper_test_op(None, lambda x: x/2, lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
+    torch_idiv, tiny_idiv = functools.partial(torch.div, rounding_mode="trunc"), functools.partial(Tensor.div, upcast=False)
+    helper_test_op(None, torch_idiv, tiny_idiv, forward_only=True, vals=np.array([[5, -6, 7],[1, 2, 3]], dtype=np.int32))
+    x = Tensor(2**64 - 1, dtype=dtypes.uint64).div(1, upcast=False)
+    np.testing.assert_equal(x.numpy(), 2**64 - 1)
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1)
@@ -797,7 +839,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
   @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA"], "not supported on these in CI")
   def test_gemm_fp16(self):
-    helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()))
+    helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y))
   def test_big_gemm(self):

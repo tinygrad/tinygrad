@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Optional, Any, Tuple, List
+from typing import Union, Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata
 from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, reduce_st
@@ -71,7 +71,7 @@ class LazyBuffer:
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
   def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
-    assert isinstance(val, (int,float,bool)), f"{val=} has {type(val)=}, not a ConstType"
+    assert isinstance(val, get_args(ConstType)), f"{val=} has {type(val)=}, not a ConstType"
     shape = self.shape if shape is None else shape
     return LazyBuffer.metaop(MetaOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
 
@@ -91,7 +91,7 @@ class LazyBuffer:
     self.base.forced_realize = True
     return self
 
-  def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True):
+  def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True) -> LazyBuffer:
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:

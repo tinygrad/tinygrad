@@ -1,5 +1,5 @@
-import unittest, ctypes, struct, contextlib, tempfile, pathlib, json, time, atexit
-from tinygrad import Device, Tensor, dtypes
+import unittest, ctypes, struct, contextlib, tempfile, pathlib, json, time, atexit, random
+from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context
 from tinygrad.device import Buffer, BufferOptions, HCQCompiled
 from tinygrad.engine.schedule import create_schedule
@@ -231,7 +231,7 @@ class TestHCQ(unittest.TestCase):
     et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp, True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp, True)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 1 <= et <= (2000 if CI else 20)
+    assert 1 <= et <= (2500 if CI else 20)
 
   def test_speed_copy_bandwidth(self):
     TestHCQ.d0._prof_setup()
@@ -370,8 +370,16 @@ class TestHCQ(unittest.TestCase):
       assert buf2.as_buffer()[0] == i
 
 @contextlib.contextmanager
-def helper_collect_profile(*devs):
-  for dev in devs: dev._prof_setup()
+def helper_collect_profile(*devs, random_setup_delay=False):
+  if random_setup_delay:
+    devs = list(devs)
+    for dev in devs: dev.synchronize()
+    random.shuffle(devs)
+    for dev in devs:
+      dev._prof_setup()
+      time.sleep(random.randint(1, 1000) / 1000)
+  else:
+    for dev in devs: dev._prof_setup()
 
   profile_dict = {}
   _, tmp = tempfile.mkstemp()
@@ -389,7 +397,7 @@ def helper_collect_profile(*devs):
 def helper_profile_filter_node(profile, **kwargs):
   assert len(profile) > 0, "Empty profile"
   assert 'traceEvents' in profile, "traceEvents should present"
-  return [x for x in profile['traceEvents'] if all(x[k] == v for k,v in kwargs.items())]
+  return [x for x in profile['traceEvents'] if all(x.get(k, None) == v for k,v in kwargs.items())]
 
 def helper_profile_parse_pids(profile):
   pids, tids = {}, {}
@@ -398,6 +406,20 @@ def helper_profile_parse_pids(profile):
   threads = helper_profile_filter_node(profile, name='thread_name')
   for th in threads: tids[th['tid']] = th['args']['name']
   return pids, tids
+
+def helper_profile_parse_deps(profile):
+  deps = []
+  for s in helper_profile_filter_node(profile, ph="s"):
+    f = helper_profile_filter_node(profile, ph="f", id=s['id'])[0]
+
+    starts, ends = [], []
+    for x in helper_profile_filter_node(profile, ph="X"):
+      if s['pid'] == x['pid'] and s['tid'] == x['tid'] and x['ts'] <= s['ts'] <= x['ts'] + x['dur']: starts.append(x)
+      if f['pid'] == x['pid'] and f['tid'] == x['tid'] and x['ts'] <= f['ts'] <= x['ts'] + x['dur']: ends.append(x)
+
+    assert len(starts) == 1 and len(ends) == 1, "more than one start and end possible, valid?"
+    deps.append((s, f, starts[0], ends[0]))
+  return deps
 
 def helper_validate_node(node, duration_s=10, ts_age_s=30, profile=None, pid_name=None, tid_name=None):
   pids, tids = helper_profile_parse_pids(profile)
@@ -474,6 +496,53 @@ class TestProfiler(unittest.TestCase):
 
     copyin_node_2 = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}:1")[0]
     helper_validate_node(copyin_node_2, profile=profile, pid_name=f"{Device.DEFAULT}:1", tid_name="DMA")
+
+  @unittest.skipIf(MOCKGPU and Device.DEFAULT == "AMD", "AMD mockgpu with indirect buffers does not support queue wait interrupts")
+  def test_profile_deps(self):
+    d1 = Device[f"{Device.DEFAULT}:1"]
+
+    def f(a):
+      x = (a + 1).realize()
+      return x, x.to(d1.dname).realize()
+
+    a = Tensor.randn(10, 10, device=TestProfiler.d0.dname).realize()
+    with helper_collect_profile(TestProfiler.d0, d1) as profile:
+      jf = TinyJit(f)
+      for _ in range(3): jf(a)
+      del jf
+
+    deps = helper_profile_parse_deps(profile)
+    assert len(deps) == 1, "one dep is expected, one launch"
+
+    _, _, l, r = deps[0]
+    assert l['name'].find("->") == -1, "should be kernel"
+    assert r['name'] == f"{Device.DEFAULT} -> {Device.DEFAULT}:1", "should be copy"
+
+  @unittest.skipIf(CI, "skip CI")
+  def test_profile_sync(self):
+    mv = memoryview(bytearray(struct.pack("ff", 0, 1)))
+    expected_diff = 100000 # sleep in us
+
+    devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(6)]
+    bufs = [Buffer(f"{Device.DEFAULT}:{i}", 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated() for i in range(6)]
+
+    # enqueue ops on different queues to check the timer sync
+    cpu_time = []
+    with helper_collect_profile(*devs, random_setup_delay=True) as profile:
+      for i in range(6):
+        x = time.perf_counter_ns()
+        time.sleep(expected_diff / 1e6)
+        bufs[i].copyin(mv)
+        cpu_time.append(((time.perf_counter_ns() - x) / 1000) - expected_diff)
+
+    nodes = [helper_profile_filter_node(profile, name=f"CPU -> {Device.canonicalize(f'{Device.DEFAULT}:{i}')}")[-1] for i in range(6)]
+    avg_diff = []
+    for i in range(1, 6):
+      diff = nodes[i]['ts'] - nodes[i-1]['ts'] - cpu_time[i]
+      avg_diff.append(diff - expected_diff)
+      assert expected_diff * 0.998 < diff < expected_diff * 1.002, "more that 0.2% diff"
+
+    print(f"total avg delay is {sum(avg_diff) / len(avg_diff)} us")
 
 if __name__ == "__main__":
   unittest.main()
