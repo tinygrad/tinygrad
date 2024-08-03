@@ -118,12 +118,10 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
         # merge this reduce with its parent
         reduce_info[top_reduce] = (top_reduce_input_st, top_reduce_axes+axis)
         return None
-      # reshape this reduceop based on the top reduce
-      new_shape = tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape))
-      axis = tuple(i for i in range(len(new_shape)) if (st.shape[i] if i < len(st.shape) else 1) != new_shape[i])
-      input_st = input_st.reshape(new_shape)
+      # reshape this reduceop based on the top reduce and give it a new axis
+      input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
+      axis = tuple(i for i in range(len(input_st.shape)) if st.shape[i] != input_st.shape[i])
     st = st.reshape(reduce_st(input_st, axis))
-
     reduce_info[(buf, st)] = (input_st, axis)
     return (buf, st)
   return top_reduce
