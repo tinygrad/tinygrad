@@ -131,10 +131,18 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
     rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((out.arg,))))
     return LazyOp(MetaOps.KERNEL, (LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st)), )), [x.base for x in out.srcs], {}, []
   if out.op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}: return LazyOp(out.op, (), out.arg), [x.base for x in out.srcs], {}, []
-  # unify the kernel dims
+  # push through all movementops between reduceops
   reduce_info: Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]] = {}
   seen_ops: Dict[Tuple[LazyBuffer, ShapeTracker], None] = {}
   for out in outs: _recurse_reduceops(out, out.st, realizes, outs, reduce_info, seen_ops)
+  # pad all reduceops to the max of each dimension
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[input_st.shape for input_st,_ in reduce_info.values()])]
+  for i,dims in enumerate(shape_dims):
+    if len(dims) == 1 or (len(dims) == 2 and dims[0] == 1): continue
+    for (r,view),(input_st,axis) in reduce_info.items():
+      if (dim:=input_st.shape[i]) > 1 and dim != max(dims):
+        input_st = input_st.pad(((0, 0),)*i+((0, max(dims)-dim),))
+        reduce_info[(r, view)] = (input_st, axis)
   # create the stores
   var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
   assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
