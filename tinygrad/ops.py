@@ -134,8 +134,6 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
 def reduce_st(st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(st.shape))
-def get_reduce_axis(st:ShapeTracker, new_shape:Tuple[sint, ...]) -> Tuple[int, ...]:
-  return tuple(i for i in range(len(new_shape)) if (st.shape[i] if i < len(st.shape) else 1) != new_shape[i])
 
 # the living definition of LazyOps
 def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
