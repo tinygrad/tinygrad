@@ -293,8 +293,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   def _can_fold_reduce(r:LazyBuffer, group:Dict[LazyBuffer, None]) -> bool:
     if DEBUG_ARANGE:=(getenv("DEBUG_ARANGE")): print(f"checking {r} {group=}")
     if any(tr.forced_realize or tr in outs for tr in group): return False
-    outside_children = [c for tr in group for c in children[tr] if c not in group and c.op not in {MetaOps.COPY, MetaOps.VIEW}]
-    if len(outside_children) == 0: return False
     if DEBUG_ARANGE: print(colored(f"folding {r}", "green"))
     return True
   for r in reduce_of_const:

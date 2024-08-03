@@ -1287,7 +1287,7 @@ class TestIndexing(unittest.TestCase):
     xt = X[[1, 2], [1, 2]]
     self.check_schedule(xt, 5)
     np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
-  
+
   @unittest.expectedFailure
   def test_advanced_indexing(self):
     X = Tensor.arange(10)+1
@@ -1337,6 +1337,66 @@ class TestIndexing(unittest.TestCase):
     out = x.argmax(-1)
     self.check_schedule(out, 2)
     np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
+
+  def test_arange_transposed(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randint(4, 1)
+    a = (Tensor.arange(4,)*x).T
+    self.check_schedule(a, 2)
+    np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T)
+
+  def test_arange_transposed_descendants(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randint(4, 1)
+    a = (Tensor.arange(4,)*x).T
+    b = Tensor.randint(4, 4).realize()
+    out = a+b
+    self.check_schedule(out, 2)
+    np.testing.assert_equal(out.numpy(), (np.arange(4)*x.numpy()).T+b.numpy())
+
+  def test_arange_index(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(5, 2).realize()
+    a = Tensor.arange(10)
+    out = (x + a[2]).sum()
+    self.check_schedule(out, 1)
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum())
+
+  def test_arange_index_contiguous(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(5, 2).realize()
+    a = Tensor.arange(10).contiguous()
+    out = (x + a[2]).sum()
+    self.check_schedule(out, 2)
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum())
+
+  def test_arange_index_child(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(5, 2).realize()
+    a = Tensor.arange(10)+1
+    out = (x + a[2]).sum()
+    self.check_schedule(out, 1)
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum())
+
+  def test_arange_index_contiguous_child(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(5, 2).realize()
+    a = (Tensor.arange(10)+1).contiguous()
+    out = (x + a[2]).sum()
+    self.check_schedule(out, 2)
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum())
+
+  def test_arange_childless(self):
+    a = Tensor.arange(4)
+    self.check_schedule(a, 1)
+    np.testing.assert_equal(a.numpy(), np.arange(4))
+
+  def test_arange_group_childless(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randint(4)
+    a = Tensor.arange(4)+x
+    self.check_schedule(a, 1)
+    np.testing.assert_equal(a.numpy(), np.arange(4)+x.numpy())
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
