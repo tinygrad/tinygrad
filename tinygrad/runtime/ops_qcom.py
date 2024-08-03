@@ -25,7 +25,7 @@ def pkt4_hdr(reg: int, cnt: int): return adreno.CP_TYPE4_PKT | cnt & 0x7F | prt(
 
 def parse_cl_lib(lib: bytes, name:str):
   """
-  Extract information from OpenCL binary used to run a shader: image offset, image size, offsets to argument buffers,
+  Extract information from OpenCL binary used to run a shader: image offset, image size, prg_offset, offsets to argument buffers,
   constants offsets and values, HALFREGFOOTPRINT and FULLREGFOOTPRINT
   """
   image_offset, image_size = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0]
@@ -33,6 +33,8 @@ def parse_cl_lib(lib: bytes, name:str):
   # parse argument buffers layout
   buffs_info = []
   ptr = struct.unpack("I", lib[0x110:0x114])[0] # read img desc offset
+  prg_offset = struct.unpack("I", lib[ptr+196:ptr+200])[0]
+
   ptr = round_up(ptr + 344 + len(name), 4) # skip to bufs descr, align name to 4 bytes
   while (ptr + 16 < len(lib)):
     length, num, type, offset_words = struct.unpack("I" * 4, lib[ptr:ptr+16])
@@ -55,7 +57,7 @@ def parse_cl_lib(lib: bytes, name:str):
   ptr = struct.unpack("I", lib[0x34:0x38])[0] # read main offset
   fullreg, halfreg = struct.unpack("II", lib[ptr+20:ptr+28])
 
-  return image_offset, image_size, buffs_info, consts_info, halfreg, fullreg
+  return image_offset, image_size, prg_offset, buffs_info, consts_info, halfreg, fullreg
 
 class QcomCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
@@ -210,9 +212,9 @@ class QcomComputeQueue(HWComputeQueue):
       adreno.REG_A6XX_SP_CS_CTRL_REG0,
       (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT) 
       | (prg.halfreg << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT)
-      | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT) 
+      | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT)
       | (3 << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
-      0x41, 0, 0, # offsets
+      0x41, 0, prg.prg_offset, # offsets
       *data64_le(prg.lib_gpu.va_addr), 0, *data64_le(prg.private_gpu.va_addr), prg.private_gpu.size,
     )
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG, 0x100)
