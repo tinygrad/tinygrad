@@ -44,10 +44,10 @@ class HCQGraph(MultiGraphRunner):
     self.copy_queues: Dict[HCQCompiled, HWCopyQueue] = {} # lazy allocation
 
     self.signals: Dict[Any, HCQSignal] = {**{dev.dname: dev.signal_t(value=0) for dev in self.devices}, **{"CPU": self.devices[0].signal_t(value=0)}}
-    self.kickoff_value = 0
+    self.kickoff_value: int = 0
 
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
-    self.prof_records = []
+    self.prof_records: List[Tuple[Tuple[int, bool], Tuple[int, bool], HCQCompiled, str, bool, List[int]]] = []
 
     last_j: Dict[HWCommandQueue, Optional[int]] = collections.defaultdict(lambda: None)
     queue_access: Dict[HWCommandQueue, Dict[HWCommandQueue, Optional[int]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
