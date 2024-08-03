@@ -78,9 +78,9 @@ float4_folding = PatternMatcher([
 # ***** mod *****
 
 def _get_add_chain(x:UOp):
-  if not (x.op is UOps.ALU and x.arg is BinaryOps.ADD): yield x
-  else:
+  if x.op is UOps.ALU and x.arg is BinaryOps.ADD:
     for s in x.src: yield from _get_add_chain(s)
+  else: yield x
 
 def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x in x % c
@@ -263,15 +263,16 @@ constant_folder = PatternMatcher([
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
    x*(c0.arg//g)//(c1.arg//g) if c0.arg > 0 and c1.arg > 0 and (g:=math.gcd(c0.arg,c1.arg)) > 1 and g > x2.vmax.arg and x2.vmin.arg >= 0 else None),
   # ** mod **
-  # mod folding
+  # apply mod to mod input
+  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx%c if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # remove mod
   (NOp.var('x') % NOp.cvar('c'), lambda x,c:\
    x-(x.vmin.arg//c.arg)*c.arg if 0 < c.arg and 0 <= x.vmin.arg and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
   # mod mod
   ((NOp.var('x') % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c1 if c0.arg % c1.arg == 0 else None),
-  # generic mod
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx%c if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # ** combine terms **
   # -(x+y) -> -x + -y
   #(-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
   # (x*c0)+(x*c1) -> x*(c0+c1)
