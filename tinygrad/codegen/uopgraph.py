@@ -368,16 +368,14 @@ def do_expand(root:UOp):
   assert prod([x[1] for x in expand_args]) == len(new_srcs)
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
+# maybe move this to linearizer?
 acc_number = 0
 def do_reduce(root):
   global acc_number
-  const = UOp.const(root.dtype.scalar(), 0 if root.arg is ReduceOps.SUM else dtypes.min(root.dtype))
-  ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
+  const = UOp.const(root.dtype.scalar(), 0 if root.arg is BinaryOps.ADD else dtypes.min(root.dtype))
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
   acc_number += 1
-  alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)]
-  ret = ret.alu(alu_op, root.src[0])
-  ret = UOp(UOps.PHI, ret.dtype, (acc, ret))
-  return ret
+  return UOp(UOps.PHI, root.dtype, (acc, acc.alu(root.arg, root.src[0])))
 
 def do_contract(con:UOp):
   ex = con.src[0]
