@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
-import functools, itertools, heapq, math
+import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, exec_alu
@@ -74,6 +74,33 @@ float4_folding = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   (UPat(UOps.VECTORIZE, src=UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}), name="vec"), vectorize_alu),
 ])
+
+# ***** mod *****
+
+def _get_add_chain(x:UOp):
+  if x.op is UOps.ALU and x.arg is BinaryOps.ADD:
+    for s in x.src: yield from _get_add_chain(s)
+  else: yield x
+
+def mod_folding(x:UOp, c:int) -> Optional[UOp]:
+  # simplify x in x % c
+  # None means no change
+  remainder, something_changed = [], False
+  for u in _get_add_chain(x):
+    if u.op is UOps.CONST and (r:=u.arg%c) != u.arg:
+      if r: remainder.append(u.const(r))
+      something_changed = True
+    elif u.op is UOps.ALU and u.arg is BinaryOps.MUL:
+      if (u0:=u.src[0]).op is UOps.CONST and (r:=u0.arg%c) != u0.arg:
+        if r: remainder.append(u.src[1] if r==1 else u.const(r)*u.src[1])
+        something_changed = True
+      elif (u1:=u.src[1]).op is UOps.CONST and (r:=u1.arg%c) != u1.arg:
+        if r: remainder.append(u.src[0] if r==1 else u.src[0]*u.const(r))
+        something_changed = True
+      else: remainder.append(u)
+    else: remainder.append(u)
+  if not something_changed: return None
+  return functools.reduce(operator.add, remainder) if remainder else x.const(0)
 
 # ***** transcendental *****
 
@@ -236,17 +263,16 @@ constant_folder = PatternMatcher([
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
    x*(c0.arg//g)//(c1.arg//g) if c0.arg > 0 and c1.arg > 0 and (g:=math.gcd(c0.arg,c1.arg)) > 1 and g > x2.vmax.arg and x2.vmin.arg >= 0 else None),
   # ** mod **
-  # mod folding and mod reduction
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: x if 0 <= x.vmin.arg <= x.vmax.arg < c.arg else \
-    (x-(x.vmin.arg//c.arg)*c.arg)%c if 0 < c.arg <= x.vmin.arg else None),
+  # apply mod to mod input
+  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx%c if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # remove mod
+  (NOp.var('x') % NOp.cvar('c'), lambda x,c:\
+   x-(x.vmin.arg//c.arg)*c.arg if 0 < c.arg and 0 <= x.vmin.arg and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
   # mul mod
-  ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1:\
-   x*(c0.arg%c1.arg)%c1 if 0 < c1.arg <= c0.arg else (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
-  # mul add mod
-  (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) % NOp.cvar('c1'),
-   lambda x,x2,c0,c1: x2%c1 if (r:=c0.arg%c1.arg) == 0 else (x*r+x2)%c1 if 0 < c1.arg <= c0.arg else None),
+  ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
   # mod mod
   ((NOp.var('x') % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c1 if c0.arg % c1.arg == 0 else None),
+  # ** combine terms **
   # -(x+y) -> -x + -y
   #(-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
   # (x*c0)+(x*c1) -> x*(c0+c1)
@@ -567,9 +593,4 @@ class UOpGraph:
 
     # strip the SINK
     self._uops = self._uops[:-1]
-
-    if getenv("FUZZ_UOPS"):
-      from test.external.fuzz_uops import fuzz_uops
-      self._fuzz_paths = fuzz_uops(self)
-
     return self

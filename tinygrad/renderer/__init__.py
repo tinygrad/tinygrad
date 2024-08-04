@@ -1,6 +1,6 @@
 from typing import Optional, List, Tuple, Dict, Any
 import functools
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup
 from tinygrad.codegen.uops import UOps, UOp, flops_mem
 from tinygrad.shape.symbolic import sym_infer, sint, Variable
@@ -14,15 +14,41 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
 
-@dataclass(frozen=True)
+@dataclass
 class Program:
   name:str
   src:str
   dname:str
-  global_size:Optional[List[int]]=None
-  local_size:Optional[List[int]]=None
   uops:Optional[List[UOp]]=None
   mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
+
+  # filled in from uops (if we have uops)
+  global_size:Optional[List[int]]=None
+  local_size:Optional[List[int]]=None
+  vars:List[Variable]=field(default_factory=list)
+  globals:List[int]=field(default_factory=list)
+  outs:List[int]=field(default_factory=list)
+  _ran_post_init:bool=False  # NOTE: this is needed if you call replace on the Program
+
+  def __post_init__(self):
+    if not self._ran_post_init and self.uops is not None:
+      # single pass through the uops
+      for u in self.uops:
+        if u.op is UOps.DEFINE_VAR: self.vars.append(u.arg)
+        if u.op is UOps.DEFINE_GLOBAL: self.globals.append(u.arg)
+        if u.op is UOps.STORE: self.outs.extend([x.arg for x in u.src[0].sparents if x.op is UOps.DEFINE_GLOBAL])
+        if u.op is UOps.SPECIAL:
+          # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
+          if u.arg[0][0] == 'i': self.local_size = None
+          if u.arg[0][0] == 'l':
+            assert self.local_size is not None
+            self.local_size[int(u.arg[0][-1])] = u.arg[1]
+          else:
+            assert self.global_size is not None
+            self.global_size[int(u.arg[0][-1])] = u.arg[1]
+      self.vars = sorted(self.vars, key=lambda v: v.expr)
+      self.outs = sorted(dedup(self.outs))
+      self._ran_post_init = True
 
   @property
   def op_estimate(self) -> sint: return self._ops_lds[0]
@@ -31,14 +57,8 @@ class Program:
   @functools.cached_property
   def _ops_lds(self) -> Tuple[sint, sint]: return (0,0) if self.uops is None else flops_mem(self.uops, ignore_indexing=True)
 
-  @functools.cached_property
-  def vars(self) -> List[Variable]:
-    return [] if self.uops is None else sorted([x.arg for x in self.uops if x.op is UOps.DEFINE_VAR], key=lambda v: v.expr)
-  @functools.cached_property
-  def globals(self) -> List[int]: return [] if self.uops is None else [x.arg for x in self.uops if x.op is UOps.DEFINE_GLOBAL]
-
-  @functools.cached_property
-  def outcount(self) -> int: return 1 if self.uops is None else len(dedup([x.src[0] for x in self.uops if x.op is UOps.STORE]))
+  @property
+  def outcount(self) -> int: return len(self.outs)
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
