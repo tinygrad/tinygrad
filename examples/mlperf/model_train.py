@@ -502,7 +502,7 @@ def train_bert():
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=config["GLOBAL_BATCH_SIZE"] * config["TRAIN_STEPS"])
 
   # ** resume from checkpointing **
-  start_step = 1
+  start_step = 0
   previous_step = None
   if ckpt:=getenv("RESUME", ""):
     load_training_state(model, optimizer_group, scheduler_group, safe_load(ckpt))
