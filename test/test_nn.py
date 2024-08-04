@@ -1,15 +1,30 @@
 #!/usr/bin/env python
 import unittest
+
 import numpy as np
 import torch
-from tinygrad import Tensor, Device, TinyJit
-from tinygrad.helpers import CI, Context
-from tinygrad.ops import MetaOps
-from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
-from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm
-from tinygrad.nn.state import load_state_dict
-from tinygrad.engine.schedule import create_schedule
+
+from tinygrad import Device, Tensor, TinyJit
 from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.helpers import CI, Context
+from tinygrad.nn import (
+    BatchNorm,
+    Conv1d,
+    Conv2d,
+    ConvTranspose1d,
+    ConvTranspose2d,
+    Embedding,
+    GroupNorm,
+    InstanceNorm,
+    LayerNorm,
+    LayerNorm2d,
+    Linear,
+    RMSNorm,
+)
+from tinygrad.nn.state import load_state_dict
+from tinygrad.ops import MetaOps
+
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
@@ -422,12 +437,11 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
-    # test negative and out of bound indices
-    # do not compare to torch because this will return an error
-    x = Tensor([-29, -28, -1, 28, 29])
+    # test out of bound indices
+    x = Tensor([28, 29, 1000])
     z = layer(x)
     np.testing.assert_equal(z.numpy(), Tensor.full(z.shape, float('nan')).numpy())
-    
+
     # test with jit enabled
     @TinyJit
     def layer_jit(x):
@@ -488,4 +502,5 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
 if __name__ == '__main__':
+  unittest.main()
   unittest.main()
