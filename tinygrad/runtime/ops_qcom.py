@@ -245,7 +245,7 @@ class QcomProgram(HCQProgram):
 
     self.private_gpu = self.device._gpu_alloc(0x101, 0xC0F00)
 
-    image_offset, self.image_size, self.buffs_info, self.consts_info, self.halfreg, self.fullreg, = parse_cl_lib(self.lib, self.name)
+    image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.halfreg, self.fullreg = parse_cl_lib(self.lib, self.name)
     image = bytearray(lib[image_offset:image_offset+self.image_size])
     self.lib_gpu = self.device._gpu_alloc(len(image), 0x10C0A00, map_to_cpu=True)
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), self.image_size)
@@ -254,11 +254,10 @@ class QcomProgram(HCQProgram):
     super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=0x140)
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
-    if len(bufs) < len(self.buffs_info): RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
-    for i, b in enumerate(bufs):
-      ctypes.cast(kernargs_ptr + self.buffs_info[i], ctypes.POINTER(ctypes.c_int64))[0] = b.va_addr
-    for cnst_val, cnst_off in self.consts_info:
-      ctypes.cast(kernargs_ptr + cnst_off, ctypes.POINTER(ctypes.c_int32))[0] = cnst_val
+    if len(bufs) + len(vals) != len(self.buffs_info): RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
+    for i, b in enumerate(bufs): ctypes.cast(kernargs_ptr + self.buffs_info[i], ctypes.POINTER(ctypes.c_int64))[0] = b.va_addr
+    for i, v in enumerate(vals): ctypes.cast(kernargs_ptr + self.buffs_info[i+len(bufs)], ctypes.POINTER(ctypes.c_int32))[0] = v
+    for cnst_val, cnst_off in self.consts_info: ctypes.cast(kernargs_ptr + cnst_off, ctypes.POINTER(ctypes.c_int32))[0] = cnst_val
 
 
 if __name__ == '__main__':
