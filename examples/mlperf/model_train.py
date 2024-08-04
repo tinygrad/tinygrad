@@ -590,13 +590,12 @@ def train_retinanet():
       eval_times = []
       coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
-      batch_loader = batch_load_retinanet(batch_size=BS_EVAL, shuffle=False, seed=SEED, val=True)
+      batch_loader = batch_load_retinanet(batch_size=BS_EVAL, shuffle=False, seed=SEED, val=True, pad_first_batch=PART_BATCH)
       it = iter(tqdm(batch_loader, total=len(val_files)//BS_EVAL, desc=f"epoch_val {epoch}"))
       cnt, proc = 0, data_get_val(it)
 
       while proc is not None:
         coco_eval = COCOeval(coco_val, iouType="bbox")
-        cnt+=1
         GlobalCounters.reset()
         st = time.perf_counter()
         
@@ -610,10 +609,18 @@ def train_retinanet():
         except StopIteration: next_proc = None
         nt = time.perf_counter()
 
-        for tens, npp in zip(out, out_np):
-          tens.lazydata.base.realized.copyout(npp.data)
-        offsets = out_np[:5]
-        scores = out_np[5:]
+        if cnt==0 and PART_BATCH:
+          pl = round_up(len(val_files), BS_EVAL) - len(val_files)
+          out = [o[pl:] for o in out]
+          offsets = [o.numpy() for o in out[:5]]
+          scores = [o.numpy() for o in out[5:]]
+          img_ids = img_ids[pl:]
+          orig_shapes = orig_shapes[pl:]
+        else:
+          for tens, npp in zip(out, out_np):
+            tens.lazydata.base.realized.copyout(npp.data)
+          offsets = out_np[:5]
+          scores = out_np[5:]
         npt = time.perf_counter()
         
         predictions = model.postprocess_detections(offsets, scores, orig_image_sizes=orig_shapes)
@@ -640,6 +647,7 @@ def train_retinanet():
         if WANDB: wandb.log({"eval/step_time": ct - st, "eval/model_time": pt - st, "eval/post_proc": dt - npt, "eval/data": nt - pt, 
                              "eval/np": npt - nt, "eval/evaluate": ct - dt, "eval/GFLOPS": GlobalCounters.global_ops * 1e-9 / (pt - st), 
                              "epoch": epoch - 1 + (cnt + 1) / (len(val_files)//BS_EVAL)})
+        cnt+=1
 
       coco_eval.params.imgIds = evaluated_imgs
       coco_eval._paramsEval.imgIds = evaluated_imgs
