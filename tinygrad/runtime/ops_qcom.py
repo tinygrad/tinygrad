@@ -196,7 +196,6 @@ class QcomComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, adreno.A6XX_SP_PERFCTR_ENABLE_CS)
     self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, adreno.ISAMMODE_CL | (1 << 3)) # ISAMMODE|UNK3
     self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
-    self.reg(adreno.REG_A6XX_UCHE_UNKNOWN_0E12, 0x10000000)
     self.reg(
       adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
         # kernel dimenstion = 3
@@ -213,7 +212,7 @@ class QcomComputeQueue(HWComputeQueue):
       (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT) 
       | (prg.halfreg << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT)
       | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT)
-      | (3 << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
+      | (16 << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
       0x41, 0, prg.prg_offset, # offsets
       *data64_le(prg.lib_gpu.va_addr), 0, *data64_le(prg.private_gpu.va_addr), prg.private_gpu.size,
     )
@@ -231,8 +230,7 @@ class QcomComputeQueue(HWComputeQueue):
             | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
             | (math.ceil(prg.image_size / 128) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT),
             *data64_le(prg.lib_gpu.va_addr))
-    self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.lib_gpu.size // 4)
-
+    self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.image_size // 4)
     self.cmd(adreno.CP_RUN_OPENCL, 0)
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
 
