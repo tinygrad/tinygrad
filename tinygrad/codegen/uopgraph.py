@@ -102,6 +102,29 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   if not something_changed: return None
   return functools.reduce(operator.add, remainder) if remainder else x.const(0)
 
+def div_folding(x:UOp, c:int) -> Optional[UOp]:
+  # simplify x // c, None means no change
+  quotient, remainder, something_changed = [], [], False
+  for u in _get_add_chain(x):
+    if u.op is UOps.CONST and u.arg%c == 0:
+      if (q:=u.arg//c): quotient.append(u.const(q))
+      something_changed = True
+    elif u.op is UOps.ALU and u.arg is BinaryOps.MUL:
+      if (u0:=u.src[0]).op is UOps.CONST and u0.arg%c == 0:
+        if (q:=u0.arg//c): quotient.append(u.src[1] if q==1 else -u.src[1] if q==-1 else u.const(q)*u.src[1])
+        something_changed = True
+      elif (u1:=u.src[1]).op is UOps.CONST and u1.arg%c == 0:
+        if (q:=u1.arg//c): quotient.append(u.src[0] if q==1 else -u.src[0] if q==-1 else u.src[0]*u.const(q))
+        something_changed = True
+      else: remainder.append(u)
+    else: remainder.append(u)
+  if not something_changed: return None
+  rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
+  if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
+  quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
+  if quo is None: return x.const(0) if rem is None else rem//c
+  return quo if rem is None else quo+rem//c
+
 # ***** transcendental *****
 
 transcendental_folding = PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=k), cast(Callable, v))
@@ -251,9 +274,8 @@ constant_folder = PatternMatcher([
   # neg lt -> lt
   (NOp.lt(-NOp.var('x'), NOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(c.const(-c.arg), x)),
   # ** div **
-  # div folding
-  (NOp.var('x') // NOp.cvar('c'), lambda x,c: x.const(x.vmin.arg//c.arg) if c.arg > 0 and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
-  (NOp.var('x') // NOp.cvar('c'), lambda x,c: d if c.arg > 0 and (d:=x.divides(c.arg)) is not None else None),
+  # # div folding
+  (NOp.var('x') // NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=div_folding(x,c.arg)) is not None else None),
   # mul div
   ((NOp.var("x") * NOp.cvar("c0")) // NOp.cvar("c1"),
    lambda x,c0,c1: x*(c0.arg//gcd)//(c1.arg//gcd) if c1.arg!=0 and (gcd:=math.gcd(c0.arg,c1.arg))> 1 else None),
