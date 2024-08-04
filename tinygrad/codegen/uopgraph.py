@@ -400,9 +400,7 @@ def do_contract(con:UOp):
   ex = con.src[0]
   assert con.dtype is not None
   # CONTRACT without EXPAND repeats the element VECTORIZED
-  if ex.op is not UOps.EXPAND or not all(x in ex.arg for x in con.arg):
-    assert ex.op is not UOps.EXPAND or not any(x in ex.arg for x in con.arg), "partial contract not supported"
-    return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
+  if ex.op is not UOps.EXPAND: return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from EXPAND
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   srcs = []
@@ -439,6 +437,9 @@ expander = PatternMatcher([
   (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
   # empty EXPAND is NOOP
   (NOp(UOps.EXPAND, src=(NOp.var('x'),), arg=()), lambda x: x),
+  # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU
+  (NOp(UOps.EXPAND, name="ex", src=tuple(NOp.var('x').gep(i)+NOp.var('y').gep(i) for i in range(8))),
+    lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(8)), ex.arg)),
 ])
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:

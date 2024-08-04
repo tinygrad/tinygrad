@@ -2,7 +2,7 @@ from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv
+from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu # noqa F401
@@ -364,7 +364,8 @@ class TestUOpStr(TestEqUOps):
     t = Tensor.arange(10)
     t = t + t * Tensor.rand(10)
     # nice big complicated uop
-    sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
+    with Context(NOOPT=1):
+      sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
     self.assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
