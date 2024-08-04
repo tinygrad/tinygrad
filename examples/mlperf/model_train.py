@@ -374,7 +374,7 @@ def train_retinanet():
   np.random.seed(SEED)
   if WANDB:
     import wandb
-    wandb.init(project='RetinaNet', config=config)
+    wandb.init(project='RetinaNet', config=config, resume='allow')
  
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
