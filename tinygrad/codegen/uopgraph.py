@@ -369,24 +369,14 @@ def do_expand(root:UOp):
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
 acc_number = 0
-def do_reduce_with_expand(root):
+def do_reduce(root):
   global acc_number
-  expands = [x for x in root.src[1:] if x.op is UOps.EXPAND]
-  expands_reduce = [x for x in expands if root.src[0].op is UOps.EXPAND and all(y in root.src[0].arg for y in x.arg)]
-  expands_non_reduce = [x for x in expands if x not in expands_reduce]
   const = UOp.const(root.dtype.scalar(), 0 if root.arg is ReduceOps.SUM else dtypes.min(root.dtype))
   ret = acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x.op is not UOps.EXPAND), (acc_number,))
   acc_number += 1
   alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, root.arg)]
-  if len(expands_reduce):
-    assert root.src[0].op is UOps.EXPAND
-    expand_reduce_args = dedup(flatten([x.arg for x in expands_reduce]))
-    assert prod([y[1] for y in expand_reduce_args]) == len(root.src[0].src)
-    ret = functools.reduce(lambda x,y: x.alu(alu_op, y), (ret,)+root.src[0].src)
-  else:
-    ret = ret.alu(alu_op, root.src[0])
+  ret = ret.alu(alu_op, root.src[0])
   ret = UOp(UOps.PHI, ret.dtype, (acc, ret))
-  if len(expands_non_reduce): ret = ret * prod([sz for _,sz in flatten([x.arg for x in expands_non_reduce])])
   return ret
 
 def do_contract(con:UOp):
@@ -444,7 +434,7 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
 reducer = PatternMatcher([
-  (NOp(UOps.REDUCE, name="root"), do_reduce_with_expand),
+  (NOp(UOps.REDUCE, name="root"), do_reduce),
   # no ALU on vectorized dtypes
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
   # VECTORIZE a CONST is a CONST (eventually remove this rule)
