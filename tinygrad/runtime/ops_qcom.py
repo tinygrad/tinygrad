@@ -85,12 +85,13 @@ class QcomDevice(HCQCompiled):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
     QcomDevice.signals_page = self._gpu_alloc(16 * 65536, flags=0xC0A00, map_to_cpu=True, uncached=True)
     QcomDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
+    self.ctx = self._ctx()
 
     super().__init__(device, QcomAllocator(self), OpenCLRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
                      QcomSignal, QcomComputeQueue, QcomCopyQueue, timeline_signals=(QcomSignal(), QcomSignal()))
 
   def _ctx(self):
-    cr = kgsl.struct_kgsl_drawctxt_create(flags=(kgsl.KGSL_CONTEXT_TYPE_CL<<kgsl.KGSL_CONTEXT_TYPE_SHIFT) | 0x10 | 0x2)
+    cr = kgsl.struct_kgsl_drawctxt_create(flags=(kgsl.KGSL_CONTEXT_TYPE_CL<<kgsl.KGSL_CONTEXT_TYPE_SHIFT) | 0x10 | 0x2 | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE)
     self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
     self.context_id = cr.drawctxt_id
     return self.context_id
@@ -176,7 +177,7 @@ class QcomComputeQueue(HWComputeQueue):
     submit_req.cmdlist = ctypes.addressof(obj)
     submit_req.cmdsize = ctypes.sizeof(kgsl.struct_kgsl_command_object)
     submit_req.numcmds = 1
-    submit_req.context_id = device._ctx()
+    submit_req.context_id = device.ctx
 
     device._ioctl(0x4A, submit_req)
     self.q = []
