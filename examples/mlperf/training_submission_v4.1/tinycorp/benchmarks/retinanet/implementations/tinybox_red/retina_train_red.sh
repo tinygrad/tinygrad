@@ -15,4 +15,7 @@ python3 extra/datasets/openimages.py
 
 TRAIN_ONLY=1 python3 examples/mlperf/model_train.py
 
-EVAL_ONLY=1 python3 examples/mlperf/model_train.py
+EVAL_ONLY=1 CHKPT_PATH='ckpts/retinanet_6xtinyred_B96_E1.safe' python3 examples/mlperf/model_train.py
+EVAL_ONLY=1 CHKPT_PATH='ckpts/retinanet_6xtinyred_B96_E2.safe' python3 examples/mlperf/model_train.py
+EVAL_ONLY=1 CHKPT_PATH='ckpts/retinanet_6xtinyred_B96_E3.safe' python3 examples/mlperf/model_train.py
+EVAL_ONLY=1 CHKPT_PATH='ckpts/retinanet_6xtinyred_B96_E4.safe' python3 examples/mlperf/model_train.py
