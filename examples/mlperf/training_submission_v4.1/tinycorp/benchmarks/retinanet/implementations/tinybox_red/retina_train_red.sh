@@ -9,7 +9,7 @@ export TRAIN_BEAM=3 IGNORE_JIT_FIRST_BEAM=1 BEAM_UOPS_MAX=1500 BEAM_UPCAST_MAX=6
 export DATAPATH='/raid/datasets/open-images'
 export PART_BATCH=1
 export WANDB=1
-export WANDB_RUN_ID=$(date +%Y%m%d%H%M%S)
+export WANDB_RUN_ID=$(date +%Y%m%d%H%M%S%N)
 
 # Download dataset if missing
 python3 extra/datasets/openimages.py
