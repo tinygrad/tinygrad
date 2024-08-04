@@ -572,7 +572,6 @@ class HCQCompiled(Compiled):
     self.profile_logger = ProfileLogger()
 
   def _prof_finalize(self):
-    self._ensure_shared_time_base()
     qname = ["COMPUTE", "DMA"]
 
     for st, en, name, is_cp in self.raw_prof_records:
