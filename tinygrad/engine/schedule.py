@@ -301,7 +301,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   for r in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is r}
     if DEBUG_ARANGE:=(getenv("DEBUG_ARANGE")): print(f"checking {r} {group=}")
-    if any(tr.forced_realize or tr in outs for tr in group): continue
+    if any(tr.forced_realize for tr in group) or any(x.base in group for x in outs): continue
     if DEBUG_ARANGE: print(colored(f"folding {r}", "green"))
     for tr in group: del realizes[tr]
 
