@@ -12,15 +12,15 @@ python3 -m pip install -e .
 
 After you have installed tinygrad, try the [MNIST tutorial](mnist.md)
 
-We also have [developer docs](developer/developer.md), and Di Zhu has created a [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) to help understand how tinygrad works. Additionally, if you are new to tensor libraries, learn how they work by solving puzzles from [tinygrad-tensor-puzzles](https://github.com/obadakhalili/tinygrad-tensor-puzzles), adapted by Obada Khalili from [Sasha's Tensor Puzzles](https://github.com/srush/Tensor-Puzzles).
+We also have [developer docs](developer/developer.md), and Di Zhu has created a [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) to help understand how tinygrad works. Additionally, if you are new to tensor libraries, learn how to use them by solving puzzles from [tinygrad-tensor-puzzles](https://github.com/obadakhalili/tinygrad-tensor-puzzles), adapted by Obada Khalili from [Sasha's Tensor Puzzles](https://github.com/srush/Tensor-Puzzles).
 
 ## tinygrad Usage
 
-The main class you will interact with is [Tensor](tensor/index.md). It functions very similarly to PyTorch, but has a bit more of a functional style. tinygrad supports [many datatypes](dtypes.md).  All operations in tinygrad are lazy, meaning they won't do anything until you realize.
+The main class you will interact with is [Tensor](tensor/index.md). It functions very similarly to PyTorch, but has a bit more of a functional style. tinygrad supports [many datatypes](dtypes.md). All operations in tinygrad are lazy, meaning they won't do anything until you realize.
 
-* tinygrad has a built in [neural network library](nn.md) with some classes, optimizers, and load/save state management.
-* tinygrad has a JIT to make things fast. Decorate your pure function with `TinyJit`
-* tinygrad has amazing support for multiple GPUs, allowing you to shard your Tensors with `Tensor.shard`
+- tinygrad has a built in [neural network library](nn.md) with some classes, optimizers, and load/save state management.
+- tinygrad has a JIT to make things fast. Decorate your pure function with `TinyJit`
+- tinygrad has amazing support for multiple GPUs, allowing you to shard your Tensors with `Tensor.shard`
 
 To understand what training looks like in tinygrad, you should read `beautiful_mnist.py`
 
