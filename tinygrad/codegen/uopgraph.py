@@ -400,9 +400,7 @@ def do_contract(con:UOp):
   ex = con.src[0]
   assert con.dtype is not None
   # CONTRACT without EXPAND repeats the element VECTORIZED
-  if ex.op is not UOps.EXPAND or not all(x in ex.arg for x in con.arg):
-    assert ex.op is not UOps.EXPAND or not any(x in ex.arg for x in con.arg), "partial contract not supported"
-    return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
+  if ex.op is not UOps.EXPAND: return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from EXPAND
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   srcs = []
