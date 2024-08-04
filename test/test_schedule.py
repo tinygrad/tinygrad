@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps, verify_lazyop
-from tinygrad.helpers import DEBUG, FUSE_ARANGE, flatten, getenv
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -1412,7 +1412,7 @@ class TestIndexing(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_precompute_freqs_cis(self):
-    args = {"dim":128, "end":8192, "theta":10000, "dtype":dtypes.half}
+    args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000, "dtype":dtypes.half}
     fused = precompute_freqs_cis(**args)
     self.check_schedule(fused, 1)
     ref = precompute_freqs_cis(**args)
