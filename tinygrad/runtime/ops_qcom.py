@@ -122,6 +122,7 @@ class QcomDevice(HCQCompiled):
     return SimpleNamespace(va_addr=va_addr, size=va_len)
 
   def _gpu_free(self, opaque):
+    pass
     free = kgsl.struct_kgsl_gpuobj_free(id=opaque.info.id)
     self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_FREE, free)
 
