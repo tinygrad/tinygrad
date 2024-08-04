@@ -15,6 +15,7 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported, Context
 from tinygrad.lazy import LazyBuffer, view_supported_devices
+from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
@@ -1408,6 +1409,15 @@ class TestIndexing(unittest.TestCase):
     a = Tensor.arange(4)+x
     a[0] = 6
     np.testing.assert_equal(a.numpy(), [6., 2., 3., 4.])
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_precompute_freqs_cis(self):
+    args = {"dim":128, "end":8192, "theta":10000, "dtype":dtypes.half}
+    fused = precompute_freqs_cis(**args)
+    self.check_schedule(fused, 1)
+    ref = precompute_freqs_cis(**args)
+    run_schedule(check_schedule(ref, 3))
+    np.testing.assert_equal(fused.numpy(), ref.numpy())
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
