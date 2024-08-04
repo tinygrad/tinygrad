@@ -403,12 +403,12 @@ def train_retinanet():
   resnet.Conv2d = Conv2dHeNormal
   resnet.Linear = Linear
   if SYNCBN:
-    def cust_call_bn(self, x:Tensor):
-      batch_mean = self.running_mean
-      batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
-      return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(dtypes.default_float)
-    resnet.BatchNorm = functools.partial(BatchNorm2d, eps=0.0)
-    resnet.BatchNorm.__call__ = cust_call_bn
+    class CustBatchNorm(BatchNorm2d):
+      def __call__(self, x:Tensor):
+        batch_mean = self.running_mean
+        batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
+        return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(dtypes.default_float)
+    resnet.BatchNorm = functools.partial(CustBatchNorm, eps=0.0)
   else:
     class CustUnsyncedBN(UnsyncedBatchNorm):
       def __call__(self, x:Tensor):
@@ -423,7 +423,6 @@ def train_retinanet():
           batch_mean, batch_invstd, axis=(0, 2))
         return ret.reshape(x.shape).cast(x.dtype)
     resnet.BatchNorm = functools.partial(CustUnsyncedBN, num_devices=len(GPUS))
-    # resnet.BatchNorm.__call__ = cust_call_unbn
   resnet_model = resnet.ResNeXt50_32X4D()
   resnet_model.load_from_pretrained()
 
