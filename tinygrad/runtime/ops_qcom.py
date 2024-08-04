@@ -36,7 +36,7 @@ def parse_cl_lib(lib: bytes, name:str):
   prg_offset = struct.unpack("I", lib[ptr+196:ptr+200])[0]
 
   ptr = round_up(ptr + 344 + len(name), 4) # skip to bufs descr, align name to 4 bytes
-  while (ptr + 16 < len(lib)):
+  while (ptr + 16 <= len(lib)):
     length, num, type, offset_words = struct.unpack("I" * 4, lib[ptr:ptr+16])
     if length == 0: break
     ptr += length
@@ -49,10 +49,10 @@ def parse_cl_lib(lib: bytes, name:str):
   if ptr != 0:
     ptr = struct.unpack("I", lib[0xac:0xb0])[0] # read consts desc offset
     # constant vals are placed just before a shader
-    while (ptr + 40 < image_offset):
-      cnst, offset_words = struct.unpack("I", lib[ptr:ptr+4])[0], struct.unpack("I", lib[ptr+16:ptr+20])[0]
+    while (ptr + 40 <= image_offset):
+      cnst, offset_words, _, is32 = struct.unpack("I", lib[ptr:ptr+4])[0], *struct.unpack("III", lib[ptr+16:ptr+28])
       ptr += 40
-      consts_info.append((cnst, offset_words * 4))
+      consts_info.append((cnst, offset_words * (sz_bytes:=(2 << is32)), sz_bytes))
 
   ptr = struct.unpack("I", lib[0x34:0x38])[0] # read main offset
   fullreg, halfreg = struct.unpack("II", lib[ptr+20:ptr+28])
@@ -257,7 +257,8 @@ class QcomProgram(HCQProgram):
     if len(bufs) + len(vals) != len(self.buffs_info): RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
     for i, b in enumerate(bufs): ctypes.cast(kernargs_ptr + self.buffs_info[i], ctypes.POINTER(ctypes.c_int64))[0] = b.va_addr
     for i, v in enumerate(vals): ctypes.cast(kernargs_ptr + self.buffs_info[i+len(bufs)], ctypes.POINTER(ctypes.c_int32))[0] = v
-    for cnst_val, cnst_off in self.consts_info: ctypes.cast(kernargs_ptr + cnst_off, ctypes.POINTER(ctypes.c_int32))[0] = cnst_val
+    for cnst_val, cnst_off, cnst_sz in self.consts_info:
+      ctypes.memmove(kernargs_ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
 
 
 if __name__ == '__main__':
