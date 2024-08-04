@@ -437,6 +437,9 @@ expander = PatternMatcher([
   (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
   # empty EXPAND is NOOP
   (NOp(UOps.EXPAND, src=(NOp.var('x'),), arg=()), lambda x: x),
+  # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU
+  (NOp(UOps.EXPAND, name="ex", src=tuple(NOp.var('x').gep(i)+NOp.var('y').gep(i) for i in range(8))),
+    lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(8)), ex.arg)),
 ])
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:
