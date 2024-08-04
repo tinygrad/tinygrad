@@ -4,10 +4,10 @@ import functools
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer
+from tinygrad.ops import BufferOps, LazyOp, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer, BinaryOps
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, all_int, get_contraction, prod
+from tinygrad.helpers import getenv, all_int, get_contraction, prod, partition, flatten
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -203,7 +203,13 @@ class IndependentLowerer:
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axes[2])
       # NOTE: always using ridxs is fine here
-      return UOp(UOps.REDUCE, dtype, (in_uops[0],) + tuple(self.ridxs[i] for i in x.arg), x.op)
+      reduce_range, reduce_expand = partition([self.ridxs[i] for i in x.arg], lambda y: y.op is UOps.RANGE)
+      ret = in_uops[0]
+      if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
+        alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, x.op)]
+        ret = UOp(UOps.CONTRACT, dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
+        ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(cast(DType, ret.dtype).count)])
+      return UOp(UOps.REDUCE, dtype, (ret,) + tuple(reduce_range), x.op) if len(reduce_range) else ret
     return in_uops[0].alu(x.op, *in_uops[1:])
 
 def lazyop_to_uop(ast:LazyOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)
