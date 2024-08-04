@@ -10,7 +10,8 @@ import tinygrad.runtime.autogen.kgsl as kgsl
 import tinygrad.runtime.autogen.adreno as adreno
 import tinygrad.runtime.autogen.opencl as cl
 import tinygrad.runtime.autogen.libc as libc
-from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice, check, checked, OpenCLRenderer
+from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
+from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, data64_le, to_char_p_p, DEBUG, prod, PROFILE
 
 # if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl # noqa: F401
@@ -87,7 +88,7 @@ class QcomDevice(HCQCompiled):
     QcomDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
     self.ctx = self._ctx()
 
-    super().__init__(device, QcomAllocator(self), OpenCLRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
+    super().__init__(device, QcomAllocator(self), QCOMRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
                      QcomSignal, QcomComputeQueue, QcomCopyQueue, timeline_signals=(QcomSignal(), QcomSignal()))
 
   def _ctx(self):
