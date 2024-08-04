@@ -2996,7 +2996,36 @@ class Tensor:
     ```
     """
     if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
+    if dtype.itemsize != self.dtype.itemsize:
+      if isinstance(self.lazydata, MultiLazyBuffer):
+        new_lbs = [Tensor(lb, device=lb.device).bitcast(dtype).lazydata.lbs[0] for lb in self.lazydata.real_lbs]
+        return Tensor(MultiLazyBuffer(new_lbs, self.lazydata.axis), device=self.device)
+
+      if not all_int(self.shape): raise RuntimeError("shape changing bitcast with symbolic shape isn't supported yet")
+      if not all_int(strides := self.lazydata.st.real_strides()): raise RuntimeError("shape changing bitcast with symbolic strides not supported")
+      if not (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
+      if not (strides[-1]) == 1: raise RuntimeError("shape changing bitcast requires final stride of 1")
+      if self.dtype.itemsize < dtype.itemsize and not all((stride * self.dtype.itemsize) % dtype.itemsize == 0 for stride in strides[:-1]):
+        raise RuntimeError("shape changing bitcast requires all strides to be divisible by ratio of dtype sizes")
+
+      if not self.lazydata.can_view_bitcast():
+        return self._view_dtype(dtype)
     return F.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
+
+  def _view_dtype(self, dtype:DType) -> Tensor:
+    # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
+    # only called when we cannot use MetaOps.VIEW
+    int_lookup = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}
+    new_shape = self.shape[:-1] + ((self.shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
+    new_int, old_int = int_lookup[dtype.itemsize], int_lookup[self.dtype.itemsize]
+    n = max(dtype.itemsize, self.dtype.itemsize) // min(dtype.itemsize, self.dtype.itemsize)
+    if dtype.itemsize > self.dtype.itemsize:
+      shift_factors = (Tensor.arange(n, dtype=new_int, device=self.device)*8*self.dtype.itemsize).exp2().cast(new_int)
+      a = self.bitcast(old_int).cast(new_int).reshape(new_shape + (-1,))
+      return (a*shift_factors).sum(-1, acc_dtype=new_int).bitcast(dtype)
+    shift_factors = (Tensor.arange(n, dtype=old_int, device=self.device)*8*dtype.itemsize).exp2().cast(old_int)
+    a = self.bitcast(old_int).unsqueeze(-1).expand(self.shape + (n,))
+    return a.div(shift_factors, upcast=False).cast(new_int).reshape(new_shape).bitcast(dtype)
 
   def float(self) -> Tensor:
     """
