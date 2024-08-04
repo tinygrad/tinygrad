@@ -334,22 +334,15 @@ def _choices_from_args(args:Tuple[Tuple[int, int], ...]) -> List[Dict[int, int]]
   return [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
 
 def do_expand(root:UOp):
-  if root.op is UOps.REDUCE:
-    if root.src[0].op is not UOps.EXPAND: return None
-    reduce_expand_args = flatten([x.arg for x in root.src[1:] if x.op is UOps.EXPAND])
-    expand_args = tuple(x for x in root.src[0].arg if x not in reduce_expand_args)
-    if len(expand_args) == 0: return None
-    dont_expand_args = tuple(x for x in root.src[0].arg if x in reduce_expand_args)
+  expands = [x for x in root.src if x.op is UOps.EXPAND]
+  if len(expands) == 0: return None
+  expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
+  if root.op is UOps.WMMA:
+    # both the reduce and upcast args are not expanded here
+    dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1] or x[0] in [y[0] for y in flatten(root.arg[-2])])
+    expand_args = tuple(x for x in expand_args if x not in dont_expand_args)
   else:
-    expands = [x for x in root.src if x.op is UOps.EXPAND]
-    if len(expands) == 0: return None
-    expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
-    if root.op is UOps.WMMA:
-      # both the reduce and upcast args are not expanded here
-      dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1] or x[0] in [y[0] for y in flatten(root.arg[-2])])
-      expand_args = tuple(x for x in expand_args if x not in dont_expand_args)
-    else:
-      dont_expand_args = ()
+    dont_expand_args = ()
   new_srcs: List[UOp] = []
   lrpks = _choices_from_args(dont_expand_args)
   for rpk in _choices_from_args(expand_args):
