@@ -192,7 +192,7 @@ def _make_clang_dtype(self, dtype):
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
-  float4 = "(float4)" if AMX else None
+  supports_float4 = bool(AMX)
   has_local = False
   global_max = None
 
@@ -202,6 +202,7 @@ class ClangRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   if AMX:
+    float4 = "(float4)"
     tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [64])]
     tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types]
 
