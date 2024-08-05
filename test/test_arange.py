@@ -3,20 +3,31 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes
 from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import run_schedule
+from tinygrad.codegen.kernel import Opt, OptOps, Kernel
 
 class TestArange(unittest.TestCase):
-  def _get_flops(self, N):
+  def _get_flops(self, N, opts=None):
     GlobalCounters.reset()
-    with Context(NOOPT=1):
-      Tensor.arange(N).realize()
-    return GlobalCounters.global_ops
+    sched = Tensor.arange(N).schedule()
+    self.assertEqual(len(sched), 1)
+    k = Kernel(sched[-1].ast)
+    if opts is not None:
+      for o in opts: k.apply_opt(o)
+    p = k.to_program()
+    print(p.name)
+    print(p.src)
+    return p.op_estimate
 
-  def test_complexity(self):
+  def test_complexity(self, opts=None):
     # add 1 to avoid divide by 0. arange is 0 flops now!
-    f1 = self._get_flops(256) + 1
-    f2 = self._get_flops(2560) + 1
+    f1 = self._get_flops(256, opts) + 1
+    f2 = self._get_flops(2560, opts) + 1
     print(f"{f1=}, {f2=}")
     assert f2 / f1 < 15, f"bad complexity, flops {f2/f1:.1f}X while inputs 10X"
+
+  def test_complexity_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)])
+  def test_complexity_w_unroll(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)])
+  def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)])
 
 class TestIndexing(unittest.TestCase):
   def test_arange_2_reduce(self):
