@@ -43,8 +43,8 @@ def get_kernels(renderer:Renderer, ast:LazyOp) -> Tuple[Kernel, ...]:
           with Context(DEBUG=0, BEAM=0, CAPTURING=0):
             rand_bufs = [Tensor.normal(buf.size, std=0.1, dtype=buf.dtype).data() if dtypes.is_float(buf.dtype) else \
                         (Tensor.randint(buf.size, low=0, high=2).cast(buf.dtype).data() if buf.dtype == dtypes.bool else \
-                        Tensor.randint(buf.size, low=dtypes.min(buf.dtype), high=dtypes.max(buf.dtype), dtype=buf.dtype).data()) \
-                        for buf in rawbufs]
+                         Tensor.randint(buf.size, low=dtypes.min(buf.dtype), high=dtypes.max(buf.dtype), dtype=buf.dtype).data()) \
+                         for buf in rawbufs]
           for _, tk in lins[::-1]:
             for buf,data in zip(rawbufs, rand_bufs): buf.ensure_allocated().copyin(data)
             time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True, disable_cache=True)
@@ -59,8 +59,8 @@ def get_kernels(renderer:Renderer, ast:LazyOp) -> Tuple[Kernel, ...]:
                   diff_count = (b != bufs[0]).sum().item()
                 if diff_count != 0:
                   raise RuntimeError(f"mismatch of {diff_count}/{b.numel()} items with type {b.dtype}, max {(b-bufs[0]).abs().max().item()}")
-    if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
-    if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
+  if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
+  if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
   return (k,)
 
 # **************** Runners ****************
