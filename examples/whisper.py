@@ -236,10 +236,8 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   return model, enc
 
 def load_file_waveform(filename):
-  print(f'doing {int(librosa.get_duration(path=filename)+1)//SEGMENT_SECONDS + 1} segments')
   for i in range(0, int(librosa.get_duration(path=filename)+1), SEGMENT_SECONDS):
-    waveform, _ = librosa.load(filename, sr=RATE, offset=i, duration=SEGMENT_SECONDS)
-    yield waveform
+    yield librosa.load(filename, sr=RATE, offset=i, duration=SEGMENT_SECONDS)[0]
 
 def transcribe_file(model, enc, filename):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)])
