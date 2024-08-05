@@ -265,6 +265,10 @@ def _make_cuda_dtype(base_type, name, cnt, align):
   vec, elems, header = f"{name}{cnt}", ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
   return f"struct __align__({align}) {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
+def _make_cuda_dtype2(base_type, name, cnt, align):
+  vec, elems, header = f"{base_type}{cnt}", ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
+  return f"struct __align__({align}) {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
+
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
   global_max = (2147483647, 65535, 65535)
@@ -286,14 +290,14 @@ class CUDARenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
-    dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("bfloat16","bf16"), }
+    dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"), }
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     if any(uop.dtype == dtypes.half for uop in uops):
       prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", "half", x, x*2) for x in [4, 8]]
 
     if any(uop.dtype == dtypes.bfloat16 for uop in uops):
-      prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", "bfloat16", x, x*2) for x in [4, 8]]
+      prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype2("nv_bfloat16", "bfloat16", x, x*2) for x in [4, 8]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
