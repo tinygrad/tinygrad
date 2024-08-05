@@ -187,12 +187,12 @@ class CStyleLanguage(Renderer):
     # NOTE: this relies on bufs dict preserving order
     return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
-def _make_clang_dtype(dtype):
-  return f"typedef {dtype.scalar().name} {dtype.name} __attribute__((vector_size({dtype.count*dtype.scalar().itemsize})));"
+def _make_clang_dtype(self, dtype):
+  return f"typedef {self.render_dtype(dtype.scalar())} {self.render_dtype(dtype)} __attribute__((vector_size({dtype.itemsize})));"
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
-  supports_float4 = bool(AMX)
+  float4 = "(float4)" if AMX else None
   has_local = False
   global_max = None
 
@@ -202,12 +202,11 @@ class ClangRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   if AMX:
-    float4 = "(float4)"
     tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [64])]
     tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types]
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix, macros = [_make_clang_dtype(dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)], []
+    prefix, macros = [_make_clang_dtype(self, dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)], []
     for name, (N, M, K), dtype_in, _, _, _, _ in set([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       macros = ['#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")', '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")'] # noqa: E501
       prefix += [f"""{dtype_in.vec(K*K).name} __{name}({dtype_in.vec(N).name} data1, {dtype_in.vec(M).name} data2){{
