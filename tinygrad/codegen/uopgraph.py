@@ -176,10 +176,10 @@ constant_folder = PatternMatcher([
   # threefry
   (NOp(UOps.ALU, dtype=dtypes.uint64, src=(NOp.var("x"), NOp.var("seed")), arg=BinaryOps.THREEFRY), threefry2x32),
   # sum collapse to mul (with possible GEP)
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),
-                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
-  (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),)),
-                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  #(UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),
+  #                     UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  #(UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=[UPat(UOps.CONST), UPat(UOps.RANGE, name="loop")]),)),
+  #                     UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # extra arange loop folding because we don't fold adds. TODO: fold adds
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2") + NOp.var("idx3"))
@@ -208,11 +208,15 @@ constant_folder = PatternMatcher([
   (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const(c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
-  (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, name="acc"), NOp.var("acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
-  (NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),)), NOp.var("x"))), lambda x: x),
-  (NOp(UOps.PHI, src=(NOp.cvar(), NOp.var("x"))), lambda x: x),
-  # a DEFINE_ACC without inputs is a const + GEP on a const is the const
-  (NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),), name="root"), lambda root: UOp.cast(root.src[0], root.dtype)),
+  #(NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, name="acc"), NOp.var("acc"))), lambda acc: UOp.cast(acc.src[0], acc.dtype)),
+  #(NOp(UOps.PHI, src=(NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),)), NOp.var("x"))), lambda x: x),
+  #(NOp(UOps.PHI, src=(NOp.cvar(), NOp.var("x"))), lambda x: x),
+  # a DEFINE_ACC without inputs is a const
+  #(NOp(UOps.DEFINE_ACC, src=(NOp.cvar(),), name="root"), lambda root: UOp.cast(root.src[0], root.dtype)),
+
+  # a REDUCE without ranges is a NOOP
+  (NOp(UOps.REDUCE, src=(NOp.var('x'),)), lambda x: x),
+  # GEP on a const is the const
   (NOp(UOps.GEP, src=(NOp.cvar("x"),), name="root"), lambda root,x: root.const(x.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
