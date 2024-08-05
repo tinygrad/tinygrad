@@ -679,7 +679,7 @@ class Kernel:
         idx = self.bufs.index(op.arg)
         arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
         # fix store of a splitted reduce (globals changed)
-        if op.src and op.src[0] == self.reduceop and self.reduce_split:
+        if self.reduce_split and op.src and op.src[0] is not None and op.src[0] == self.reduceop:
           arg = MemBuffer(0, op.dtype, ShapeTracker.from_shape((self.full_shape[0],) + (1,)*(self.shape_len-1)))
       elif op.op in ReduceOps:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
