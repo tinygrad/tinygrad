@@ -1,3 +1,5 @@
+
+#%%
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys, base64, multiprocessing, itertools
@@ -240,10 +242,10 @@ def load_file_waveform(filename):
   waveform, _ = librosa.load(filename, sr=RATE)
   return waveform
 
-def transcribe_file(model, enc, filename):
-  return transcribe_waveform(model, enc, [load_file_waveform(filename)])
+def transcribe_file(model, enc, filename, stream=False):
+  return transcribe_waveform(model, enc, [load_file_waveform(filename)], stream = stream)
 
-def transcribe_waveform(model, enc, waveforms, truncate=False):
+def transcribe_waveform(model:Whisper, enc, waveforms, truncate=False, stream = False):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
@@ -256,18 +258,15 @@ def transcribe_waveform(model, enc, waveforms, truncate=False):
     # if we really want this feature, we can consider padding or trimming prompt tokens of varying lengths to make them consistent
     raise Exception("Multi-segment transcription not supported with batch audio input")
 
-  start_tokens = [enc._special_tokens["<|startoftranscript|>"]]
-  if model.is_multilingual:
-    # TODO detect language
-    language_token = enc._special_tokens["<|startoftranscript|>"] + 1 + tuple(LANGUAGES.keys()).index("en")
-    start_tokens.append(language_token)
-    start_tokens.append(enc._special_tokens["<|transcribe|>"])
-  start_tokens.append(enc._special_tokens["<|notimestamps|>"])
+  # TODO detect language
+  start_tokens = ["<|startoftranscript|>", *(["<|en|>", "<|transcribe|>"] if model.is_multilingual else []), "<|notimestamps|>"]
+  start_tokens = [enc._special_tokens[x] for x in start_tokens]
   transcription_start_index = len(start_tokens)
   eot = enc._special_tokens["<|endoftext|>"]
   transcription_tokens = [np.array([], dtype=np.int32)] * log_spec.shape[0]
 
   for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
+    frame_reset = False
     encoded_audio = model.encoder.encode(Tensor(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
     pos = 0
     curr_segment_tokens = np.tile(start_tokens, (log_spec.shape[0], 1))
@@ -277,23 +276,38 @@ def transcribe_waveform(model, enc, waveforms, truncate=False):
         [enc._special_tokens["<|startofprev|>"]],
         transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:],
         start_tokens))
+      print(enc.decode(prompt))
       curr_segment_tokens = np.tile(prompt, (log_spec.shape[0], 1))
       transcription_start_index = len(curr_segment_tokens[0])
 
     for i in range(model.decoder.max_tokens_to_sample):
-      out = model.decoder(Tensor(curr_segment_tokens if i == 0 else curr_segment_tokens[:, -1:]), pos, encoded_audio, streaming=curr_frame > 0)
+      
+      if pos >= model.decoder.max_tokens_to_sample * 2:
+        if frame_reset or curr_frame == 0 or N_audio > 1: raise RuntimeError("Token overflow")
+        frame_reset = True
+        transcription_tokens[0] = np.concatenate((transcription_tokens[0], curr_segment_tokens[0][transcription_start_index:]))
+        if stream: yield enc.decode(curr_segment_tokens[0][transcription_start_index:-1])
+        prompt = np.concatenate((start_tokens, transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:]))
+        curr_segment_tokens = np.tile(prompt, (log_spec.shape[0], 1))
+
+        transcription_start_index = len(curr_segment_tokens[0])
+        out = model.decoder(Tensor(curr_segment_tokens), 0, encoded_audio, streaming=True)
+      else:
+        out = model.decoder(Tensor(curr_segment_tokens if i == 0 else curr_segment_tokens[:, -1:]), pos, encoded_audio, streaming=curr_frame > 0)
       next_tokens = out[:, -1].argmax(axis=-1).numpy().astype(np.int32)
       next_tokens[curr_segment_tokens[:, -1] == eot] = eot
       curr_segment_tokens = np.concatenate((curr_segment_tokens, next_tokens.reshape(-1, 1)), axis=1)
       pos = curr_segment_tokens.shape[-1] - 1
+
       if DEBUG >= 1: print(i, list(map(lambda tokens: enc.decode(tokens), curr_segment_tokens)))
-      if (curr_segment_tokens[:, -1] == eot).all():
-        break
+      if (curr_segment_tokens[:, -1] == eot).all(): break
 
     for i, t in enumerate(curr_segment_tokens):
       eot_index = np.where(t == eot)[0]
       eot_index = None if len(eot_index) == 0 else eot_index[0]
       transcription_tokens[i] = np.concatenate((transcription_tokens[i], t[transcription_start_index:eot_index]))
+
+    if stream: yield enc.decode(curr_segment_tokens[0][transcription_start_index:-1])
 
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip(), transcription_tokens))
   return transcriptions[:N_audio] if N_audio > 1 else transcriptions[0]
@@ -316,7 +330,7 @@ if __name__ == "__main__":
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
 
   if len(sys.argv) > 1:
-    print(transcribe_file(model, enc, sys.argv[1]))
+    for chunk in transcribe_file(model, enc, sys.argv[1], stream=True): print(chunk)
   else:
     # online
     q = multiprocessing.Queue()
