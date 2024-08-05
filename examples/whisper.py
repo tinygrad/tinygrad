@@ -1,5 +1,3 @@
-
-#%%
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys, base64, multiprocessing, itertools
@@ -56,7 +54,6 @@ class MultiHeadAttention:
     attn = Tensor.scaled_dot_product_attention(q, k, v, mask[:n_ctx,:n_ctx] if mask is not None else None)
     wv = attn.permute(0, 2, 1, 3).flatten(start_dim=2)
     return self.out(wv)
-
 
 class ResidualAttentionBlock:
   def __init__(self, n_state, n_head, is_decoder_block=False, max_self_attn_cache_len=None):
@@ -280,7 +277,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms, truncate=False):
       transcription_start_index = len(curr_segment_tokens[0])
 
     for i in range(model.decoder.max_tokens_to_sample):
-      
       if pos >= model.decoder.max_tokens_to_sample * 2:
         if frame_reset or curr_frame == 0 or N_audio > 1: raise RuntimeError("Token overflow")
         frame_reset = True
