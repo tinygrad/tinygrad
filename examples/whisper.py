@@ -239,7 +239,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   return model, enc
 
 def load_file_waveform(filename):
-  waveform, _ = librosa.load(filename, sr=RATE)
+  waveform, _ = librosa.load(filename, sr=RATE, duration=60*20)
   return waveform
 
 def transcribe_file(model, enc, filename):
@@ -276,7 +276,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms, truncate=False):
         [enc._special_tokens["<|startofprev|>"]],
         transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:],
         start_tokens))
-      print(enc.decode(prompt))
       curr_segment_tokens = np.tile(prompt, (log_spec.shape[0], 1))
       transcription_start_index = len(curr_segment_tokens[0])
 
@@ -327,7 +326,7 @@ if __name__ == "__main__":
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
 
   if len(sys.argv) > 1:
-    for chunk in transcribe_file(model, enc, sys.argv[1]): print(chunk)
+    print(transcribe_file(model, enc, sys.argv[1]))
   else:
     # online
     q = multiprocessing.Queue()
