@@ -23,7 +23,7 @@ class ShapeTracker:
     return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
 
   @staticmethod
-  def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
+  def from_shape(shape:Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker((View.create(shape),))
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
@@ -47,7 +47,7 @@ class ShapeTracker:
     assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
     return ret+1
 
-  def vars(self) -> Set[Variable]: return set.union(*[v.vars() for v in self.views], set())
+  def vars(self) -> Set[Variable]: return set().union(*[v.vars() for v in self.views])
 
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])

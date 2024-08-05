@@ -12,7 +12,8 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import fetch
 
 BASEDIR = Path(__file__).parent / "kits19" / "data"
-PREPROCESSED_DIR =  Path(__file__).parent / "kits19" / "preprocessed"
+TRAIN_PREPROCESSED_DIR =  Path(__file__).parent / "kits19" / "preprocessed" / "train"
+VAL_PREPROCESSED_DIR =  Path(__file__).parent / "kits19" / "preprocessed" / "val"
 
 """
 To download the dataset:
@@ -73,24 +74,22 @@ def preprocess(file_path):
   return image, label
 
 def preprocess_dataset(filenames, preprocessed_dir, val):
-  preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train")) if preprocessed_dir is not None else None
-  if not preprocessed_dataset_dir.is_dir(): os.makedirs(preprocessed_dataset_dir)
+  if not preprocessed_dir.is_dir(): os.makedirs(preprocessed_dir)
   for fn in tqdm(filenames, desc=f"preprocessing {'validation' if val else 'training'}"):
     case = os.path.basename(fn)
     image, label = preprocess(fn)
     image, label = image.astype(np.float32), label.astype(np.uint8)
-    np.save(preprocessed_dataset_dir / f"{case}_x.npy", image, allow_pickle=False)
-    np.save(preprocessed_dataset_dir / f"{case}_y.npy", label, allow_pickle=False)
+    np.save(preprocessed_dir / f"{case}_x.npy", image, allow_pickle=False)
+    np.save(preprocessed_dir / f"{case}_y.npy", label, allow_pickle=False)
 
 def iterate(files, preprocessed_dir=None, val=True, shuffle=False, bs=1):
   order = list(range(0, len(files)))
-  preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train")) if preprocessed_dir is not None else None
   if shuffle: random.shuffle(order)
   for i in range(0, len(files), bs):
     samples = []
     for i in order[i:i+bs]:
-      if preprocessed_dataset_dir is not None:
-        x_cached_path, y_cached_path = preprocessed_dataset_dir / f"{os.path.basename(files[i])}_x.npy", preprocessed_dataset_dir / f"{os.path.basename(files[i])}_y.npy"
+      if preprocessed_dir is not None:
+        x_cached_path, y_cached_path = preprocessed_dir / f"{os.path.basename(files[i])}_x.npy", preprocessed_dir / f"{os.path.basename(files[i])}_y.npy"
         if x_cached_path.exists() and y_cached_path.exists():
           samples += [(np.load(x_cached_path), np.load(y_cached_path))]
       else: samples += [preprocess(files[i])]

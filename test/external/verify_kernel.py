@@ -4,7 +4,6 @@ from extra.optimization.helpers import kern_str_to_lin
 from test.external.fuzz_linearizer import compare_linearizer
 from tinygrad.helpers import colored
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.engine.graph import print_tree
 from tinygrad.engine.search import time_linearizer
 
 # Use this with the LOGKERNS options to verify that all executed kernels are valid and evaluate to the same ground truth results
@@ -51,7 +50,6 @@ if __name__ == "__main__":
   failures = defaultdict(list)
   for i, test_lin in enumerate(test_lins):
     print(f"testing kernel {i}")
-    print_tree(test_lin.ast)
     print(test_lin.ast)
     print(test_lin.applied_opts)
     unoptimized_lin = Kernel(test_lin.ast)

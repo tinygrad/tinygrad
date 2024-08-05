@@ -1,16 +1,15 @@
 from typing import List
 from extra.models.resnet import ResNet50
+from extra.mcts_search import mcts_search
 from examples.mlperf.helpers import get_mlperf_bert_model
 from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Compiled
-from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
-from tinygrad.helpers import DEBUG, ansilen, getenv
-from tinygrad.ops import MetaOps, get_lazyop_info
+from tinygrad.helpers import DEBUG, ansilen, getenv, colored
+from tinygrad.ops import MetaOps
 from tinygrad.shape.symbolic import sym_infer
-
 
 def get_sched_resnet():
   mdl = ResNet50()
@@ -79,10 +78,7 @@ if __name__ == "__main__":
   running_gflops = 0
   usage = {}
   for i,si in enumerate(sched):
-    ops = get_lazyop_info(si.ast.src[0]).flops
-
-    if DEBUG >= 2:
-      print_tree(si.ast)
+    if DEBUG >= 3: print(si.ast)
 
     rawbufs = bufs_from_lin(Kernel(si.ast))
 
@@ -92,34 +88,48 @@ if __name__ == "__main__":
     # always try hand coded opt
     lin = Kernel(si.ast, opts=device.renderer)
     lin.hand_coded_optimizations()
-    lins.append(lin)
+    lins.append((lin, "HC"))
 
     # maybe try tensor cores
     lin = Kernel(si.ast, opts=device.renderer)
     if lin.apply_tensor_cores():
-      lins.append(lin)
+      lins.append((lin, "TC"))
 
     # try a beam search
     if beam:=getenv("BEAM"):
       lin = Kernel(si.ast, opts=device.renderer)
       lin = beam_search(lin, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
-      lins.append(lin)
+      lins.append((lin, "BEAM"))
+
+    # try MCTS
+    if mcts:=getenv("MCTS"):
+      lin = Kernel(si.ast, opts=device.renderer)
+      lin = mcts_search(lin, rawbufs, mcts)
+      lins.append((lin, "MCTS"))
 
     # benchmark the programs
     choices = []
-    for lin in lins:
-      tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10)
+    for (lin, nm) in lins:
+      tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
+      ops = (prg:=lin.to_program()).op_estimate
       gflops = sym_infer(ops, {k:k.min for k in lin.ast.vars()})*1e-9/tm
-      choices.append((tm, gflops, lin.linearize()))
+      choices.append((tm, gflops, lin, prg, nm))
 
-      # print all kernels
-      if DEBUG >= 1: print(f"                 kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS")
-    tm, gflops, lin = sorted(choices, key=lambda x: x[0])[0]
+    sorted_choices = sorted(choices, key=lambda x: x[0])
+    if DEBUG >= 1: # print all kernels
+      for tm, gflops, lin, prg, nm in choices:
+        print(f"                 kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(prg.global_size):18s} {str(prg.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS -- {colored(nm, 'green') if lin is sorted_choices[0][2] else nm}")
+
+    tm, gflops, lin, prg, nm = sorted_choices[0]
+    if getenv("SRC"):
+      print(si.ast)
+      print(lin.applied_opts)
+      print(lin.to_program().src)
     total_tm += tm
     running_gflops += gflops * tm
     if (key := str([str(m) for m in si.metadata] if si.metadata is not None else None)) not in usage: usage[key] = (0, 0)
     usage[key] = (usage[key][0] + tm, usage[key][1] + 1)
-    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[str(m) for m in si.metadata] if si.metadata is not None else ''}")
+    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(prg.global_size):18s} {str(prg.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[str(m) for m in si.metadata] if si.metadata is not None else ''}")
   print(f"******* total {total_tm*1000:.2f} ms, {running_gflops/total_tm:6.0f} GFLOPS")
   print("usage:")
   for k in sorted(usage, key=lambda x: -usage[x][0])[:10]:

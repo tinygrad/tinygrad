@@ -13,7 +13,7 @@ settings.load_profile("my_profile")
 
 class TestTranscendentalMath(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
-  @unittest.skipIf(getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV"), "crashed")
+  @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashed")
   @given(ht.float64, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
   def test_float64(self, x, op):
     if op[0] == Tensor.sin:
@@ -25,7 +25,7 @@ class TestTranscendentalMath(unittest.TestCase):
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float64))),
                                  atol=3e-2, rtol=1e-5)  # sin can have bigger atol for very big x
 
-  @unittest.skipIf(getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV"), "crashed")
+  @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashed")
   @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
   def test_float32(self, x, op):
     with Context(TRANSCENDENTAL=2):

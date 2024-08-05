@@ -26,6 +26,7 @@ Each runtime should implement the required functions that are defined in the `HW
             "timestamp",
             "update_signal",
             "update_wait",
+            "bind",
             "submit",
         ]
         show_source: false
@@ -61,45 +62,44 @@ To implement custom commands in the queue, use the @hcq_command decorator for yo
 
 ### HCQ Compatible Device
 
-The `HCQCompatCompiled` class defines the API for HCQ-compatible devices. This class serves as an abstract base class that device-specific implementations should inherit from and implement.
+The `HCQCompiled` class defines the API for HCQ-compatible devices. This class serves as an abstract base class that device-specific implementations should inherit from and implement.
 
-::: tinygrad.device.HCQCompatCompiled
+::: tinygrad.device.HCQCompiled
     options:
-        members: [
-            "_alloc_signal",
-            "_free_signal",
-            "_read_signal",
-            "_read_timestamp",
-            "_set_signal",
-            "_wait_signal",
-            "_gpu2cpu_time",
-        ]
         show_source: false
 
 #### Signals
 
-Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a `value` and a `timestamp` within the same signal. The following Python code demonstrates the usage of signals:
+Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a `value` and a `timestamp` within the same signal. HCQ-compatible backend implementations should use `HCQSignal` as a base class.
+
+::: tinygrad.device.HCQSignal
+    options:
+        members: [value, timestamp, wait]
+        show_source: false
+
+The following Python code demonstrates the usage of signals:
 
 ```python
-signal = your_device._alloc_signal()
+signal = your_device.signal_t()
 
 HWComputeQueue().timestamp(signal) \
                 .signal(signal, value_to_fire) \
                 .submit(your_device)
 
-your_device._wait_signal(signal, value_to_fire)
-timestamp = your_device._read_timestamp()
+signal.wait(value_to_fire)
+signaled_value = signal.value # should be the same as `value_to_fire`
+timestamp = signal.timestamp
 ```
 
 ##### Synchronization signals
 
-Each HCQ-compatible device must allocate two signals for global synchronization purposes. These signals are passed to the `HCQCompatCompiled` base class during initialization: an active timeline signal `self.timeline_signal` and a shadow timeline signal `self._shadow_timeline_signal` which helps to handle signal value overflow issues. You can find more about synchronization in the [synchronization section](#synchronization)
+Each HCQ-compatible device must allocate two signals for global synchronization purposes. These signals are passed to the `HCQCompiled` base class during initialization: an active timeline signal `self.timeline_signal` and a shadow timeline signal `self._shadow_timeline_signal` which helps to handle signal value overflow issues. You can find more about synchronization in the [synchronization section](#synchronization)
 
 ### HCQ Compatible Allocator
 
-The `HCQCompatAllocator` base class simplifies allocator logic by leveraging [command queues](#commandqueues) abstractions. This class efficiently handles copy and transfer operations, leaving only the alloc and free functions to be implemented by individual backends.
+The `HCQAllocator` base class simplifies allocator logic by leveraging [command queues](#commandqueues) abstractions. This class efficiently handles copy and transfer operations, leaving only the alloc and free functions to be implemented by individual backends.
 
-::: tinygrad.device.HCQCompatAllocator
+::: tinygrad.device.HCQAllocator
     options:
         members: [
             "_alloc",
@@ -109,18 +109,18 @@ The `HCQCompatAllocator` base class simplifies allocator logic by leveraging [co
 
 #### HCQ Allocator Result Protocol
 
-Backends must adhere to the `HCQCompatAllocRes` protocol when returning allocation results.
+Backends must adhere to the `HCQBuffer` protocol when returning allocation results.
 
-::: tinygrad.device.HCQCompatAllocRes
+::: tinygrad.device.HCQBuffer
     options:
         members: true
         show_source: false
 
 ### HCQ Compatible Program
 
-The `HCQCompatProgram` is a helper base class for defining programs compatible with HCQ-compatible devices. Currently, the arguments consist of pointers to buffers, followed by `vals` fields. The convention expects a packed struct containing the passed pointers, followed by `vals` located at `kernargs_args_offset`.
+The `HCQProgram` is a helper base class for defining programs compatible with HCQ-compatible devices. Currently, the arguments consist of pointers to buffers, followed by `vals` fields. The convention expects a packed struct containing the passed pointers, followed by `vals` located at `kernargs_args_offset`.
 
-::: tinygrad.device.HCQCompatProgram
+::: tinygrad.device.HCQProgram
     options:
         members: true
         show_source: false
@@ -137,7 +137,7 @@ HWComputeQueue().wait(your_device.timeline_signal, your_device.timeline_value - 
 your_device.timeline_value += 1
 
 # Optionally wait for execution
-your_device._wait_signal(your_device.timeline_signal, your_device.timeline_value - 1)
+your_device.timeline_signal.wait(your_device.timeline_value - 1)
 ```
 
 ## HCQGraph
