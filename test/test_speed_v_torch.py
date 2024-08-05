@@ -11,7 +11,7 @@ import numpy as np
 np.set_printoptions(linewidth=160)
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored, getenv, CI
+from tinygrad.helpers import colorize_float, getenv, CI
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
@@ -25,15 +25,6 @@ elif str(torch_device) == "cuda":
   def sync(): torch.cuda.synchronize()
 else:
   def sync(): pass
-
-def colorize_float(x):
-  ret = f"{x:7.2f}x"
-  if x < 0.75:
-    return colored(ret, 'green')
-  elif x > 1.15:
-    return colored(ret, 'red')
-  else:
-    return colored(ret, 'yellow')
 
 save_ops, save_mem = 0, 0
 CNT = getenv("CNT", 8)
@@ -78,7 +69,7 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
 
-  helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(lambda a,b:f2(a,b).realize()), (tiny_a, tiny_b))
+  helper_test_generic(f"{name:30s} {N:5d}x{N:5d}", f1, (torch_a, torch_b), TinyJit(f2), (tiny_a, tiny_b))
 
 def helper_test_matvec(name, N, M):
   torch.manual_seed(0)
@@ -88,7 +79,7 @@ def helper_test_matvec(name, N, M):
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy())
 
-  helper_test_generic(f"{name:30s} {N:5d}x{M:5d}", lambda a,b: a@b, (torch_a, torch_b), TinyJit(lambda a,b:(a@b).realize()), (tiny_a, tiny_b))
+  helper_test_generic(f"{name:30s} {N:5d}x{M:5d}", lambda a,b: a@b, (torch_a, torch_b), TinyJit(lambda a,b:a@b), (tiny_a, tiny_b))
 
 prefix = None
 def helper_test_generic(name, f1, f1_args, f2, f2_args):
@@ -117,7 +108,7 @@ def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_
   helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} k:{kernel_size}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
 @unittest.skipIf(getenv("BIG") == 0, "no big tests")
-@unittest.skipIf(getenv("CUDACPU") or getenv("MOCKGPU"), "no CUDACPU or MOCKGPUs")
+@unittest.skipIf(getenv("MOCKGPU"), "no MOCKGPUs")
 class TestBigSpeed(unittest.TestCase):
   def test_add(self):
     def f(a, b): return a+b
@@ -138,7 +129,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_matvec_16384_4096(self): helper_test_matvec('matvec_16384_4096', 16384, 4096)
 
 @unittest.skipIf(getenv("BIG") == 1, "only big tests")
-@unittest.skipIf(getenv("CUDACPU") or getenv("MOCKGPU"), "no CUDACPU or MOCKGPUs")
+@unittest.skipIf(getenv("MOCKGPU"), "no MOCKGPUs")
 class TestSpeed(unittest.TestCase):
   def test_sub(self):
     def f(a, b): return a-b

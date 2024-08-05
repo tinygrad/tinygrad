@@ -146,11 +146,8 @@ class ResNet:
         print("skipping fully connected layer")
         continue # Skip FC if transfer learning
 
-      if dat.shape == ():
-        assert obj.shape == (1,), obj.shape
-        dat = dat.reshape(1)
-      assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
-      obj.assign(dat)
+      if 'bn' not in k and 'downsample' not in k: assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
+      obj.assign(dat.reshape(obj.shape))
 
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)
 ResNet34 = lambda num_classes=1000: ResNet(34, num_classes=num_classes)

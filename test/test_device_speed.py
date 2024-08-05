@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Device
-from tinygrad.codegen.uops import UOpGraph
+from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.helpers import Timing, Profiling
 
 class TestDeviceSpeed(unittest.TestCase):

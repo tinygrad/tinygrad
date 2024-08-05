@@ -6,7 +6,7 @@ from tinygrad.helpers import DEBUG, getenv, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator, BufferOptions, Runner, Device, Buffer, MallocAllocator, update_stats, Compiler, CompilerOptions
 from tinygrad.renderer.cstyle import HIPRenderer
-from tinygrad.runtime.driver.hip_comgr import compile_hip
+from tinygrad.runtime.support.hip_comgr import compile_hip
 from tinygrad.renderer.rdna import uops_to_rdna
 
 class RDNACompiler(Compiler):

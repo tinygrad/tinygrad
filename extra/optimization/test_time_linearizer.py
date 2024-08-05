@@ -1,5 +1,5 @@
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
-from tinygrad.engine.search import bufs_from_lin, time_linearizer, get_linearizer_actions
+from tinygrad.engine.search import bufs_from_lin, time_linearizer, get_kernel_actions
 
 if __name__ == "__main__":
   ast_strs = load_worlds()
@@ -9,7 +9,7 @@ if __name__ == "__main__":
     test_tm = time_linearizer(lin, rawbufs)
     if test_tm < 1e-2: continue
     print(f"EXAMPLE {i}")
-    acted_lins = get_linearizer_actions(lin)
+    acted_lins = get_kernel_actions(lin)
     ok_avg, short_avg = 0, 0
     for k,v in acted_lins.items():
       tm1 = time_linearizer(v, rawbufs)

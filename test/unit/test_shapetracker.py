@@ -7,10 +7,10 @@ from tinygrad.shape.symbolic import Variable, NumNode
 from itertools import product
 
 def shapetracker_getitem(st, val):
-  locals = {"idx0": val, "valid": 1}
+  _locals = {"idx0": val, "valid": 1}
   idx, valid = st.reshape((st.size,)).expr_idxs()
-  exec(f"valid={valid.render()};idx0={idx.render()}", None, locals)
-  return locals["idx0"] if locals["valid"] else -1
+  exec(f"valid={valid.render()};idx0={idx.render()}", None, _locals)
+  return _locals["idx0"] if _locals["valid"] else -1
 
 class CheckingShapeTracker:
   def __init__(self, shape):

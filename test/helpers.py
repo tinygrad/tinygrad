@@ -15,24 +15,27 @@ def derandomize_model(model):
       p.realize()
 
 def assert_jit_cache_len(fxn, expected_len):
-  assert len(fxn.jit_cache) > 0
+  if not fxn.jit_cache:
+    assert expected_len == 0, expected_len
+    return
   # until we have a better way of typing the prg in ExecItem
   if issubclass(type(fxn.jit_cache[0].prg), Runner) and not type(fxn.jit_cache[0].prg).__name__.endswith('Graph'):
-    assert len(fxn.jit_cache) == expected_len
+    assert len(fxn.jit_cache) == expected_len, len(fxn.jit_cache)
   else:
-    assert len(fxn.jit_cache) == 1
+    assert len(fxn.jit_cache) == 1, len(fxn.jit_cache)
     # until we have a better way of typing the prg in ExecItem
     assert type(fxn.jit_cache[0].prg).__name__.endswith('Graph')
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
 
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
+  if dtype == dtypes.bigint and device != "PYTHON": return False
   if dtype == dtypes.bfloat16:
     # NOTE: this requires bf16 buffer support
     return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
   if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
-  # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
+  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
     if device == "GPU": return not CI and not OSX
@@ -57,4 +60,9 @@ class TestUOps(unittest.TestCase):
     self.assertEqual(uop1.dtype, uop2.dtype)
     self.assertEqual(uop1.arg, uop2.arg)
     self.assertEqual(len(uop1.src), len(uop2.src))
-    for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
+    try:
+      for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
+    except AssertionError as e:
+      print(f"{uop1=}")
+      print(f"{uop2=}")
+      raise e

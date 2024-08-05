@@ -1,14 +1,14 @@
 import ctypes, collections, time, itertools
 from typing import List, Any, Dict, cast, Optional, Tuple
-from tinygrad.helpers import GraphException, init_c_var, round_up
+from tinygrad.helpers import init_c_var, round_up
 from tinygrad.device import Buffer, BufferOptions
 from tinygrad.device import Compiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
-from tinygrad.engine.jit import MultiGraphRunner
+from tinygrad.engine.jit import MultiGraphRunner, GraphException
 import tinygrad.runtime.autogen.hsa as hsa
-from tinygrad.runtime.driver.hsa import check, AQLQueue, AQL_PACKET_SIZE, EMPTY_SIGNAL
+from tinygrad.runtime.support.hsa import check, AQLQueue, AQL_PACKET_SIZE, EMPTY_SIGNAL
 
 def dedup_signals(signals): return [hsa.hsa_signal_t(hndl) for hndl in set([x.handle for x in signals if isinstance(x, hsa.hsa_signal_t)])]
 

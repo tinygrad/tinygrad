@@ -74,7 +74,7 @@ document.addEventListener("alpine:init", () => {
           start_time = Date.now();
           this.time_till_first = start_time - prefill_start;
         } else {
-          const diff = Date.now() - start_time
+          const diff = Date.now() - start_time;
           if (diff > 0) {
             this.tokens_per_second = tokens / (diff / 1000);
           }
@@ -108,10 +108,10 @@ document.addEventListener("alpine:init", () => {
 
     updateTotalTokens(messages) {
       fetch(`${this.endpoint}/chat/token/encode`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages })
-      }).then(response => response.json()).then(data => {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages }),
+      }).then((response) => response.json()).then((data) => {
         this.total_tokens = data.length;
       }).catch(console.error);
     },

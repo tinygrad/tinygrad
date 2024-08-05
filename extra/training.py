@@ -1,7 +1,6 @@
 import numpy as np
-from tqdm import trange
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, trange
 from tinygrad.engine.jit import TinyJit
 
 

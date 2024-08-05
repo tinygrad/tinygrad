@@ -7,7 +7,7 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.codegen.uops import UOpGraph, UOps
+from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer
@@ -17,7 +17,7 @@ def _load(m, i):
   return m[i]
 
 def load(inp, j=0):
-  if len(inp) == 4: return [_load(m, x+j) if gate else default for m,x,gate,default in zip(*inp)]
+  if len(inp) == 4: return [_load(m, x+j) if gate else default for m,x,default,gate in zip(*inp)]
   return [_load(m, x+j) for m,x in zip(inp[0], inp[1])]
 
 def _store(m, i, v):
@@ -41,7 +41,7 @@ class PythonProgram:
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {UOps.STORE, UOps.ENDRANGE, UOps.BARRIER, UOps.IF, UOps.ENDIF}
-        if uop is UOps.DEFINE_ACC: idp.clear()
+        if uop is UOps.DEFINE_ACC: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
@@ -63,11 +63,11 @@ class PythonProgram:
               if g: _store(m, o, v)
           i += 1
           continue
-        elif uop is UOps.ENDRANGE:
+        if uop is UOps.ENDRANGE:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        elif uop in (UOps.BARRIER, UOps.IF, UOps.ENDIF):
+        if uop in (UOps.BARRIER, UOps.IF, UOps.ENDIF):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -83,14 +83,12 @@ class PythonProgram:
         elif uop is UOps.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is UOps.SPECIAL:
-          if arg[1][0] == 'g':
-            ul[i] = [idxs[2-arg[0]]] * warp_size
-          elif arg[1][0] == 'l':
-            ul[i] = [x[2-arg[0]] for x in warp]
+          if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
+          elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
         elif uop is UOps.CONST:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
-          ul[i] = [[arg[0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg[0]] * warp_size
+          ul[i] = [[inp[0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is UOps.RANGE:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
@@ -100,20 +98,19 @@ class PythonProgram:
               del ul[i]
               i = loop_ends[i] + 1
               continue
-        elif uop in (UOps.CAST, UOps.BITCAST):
-          if dtype.count > 1: ul[i] = inp
+        elif uop is UOps.VECTORIZE: ul[i] = inp
+        elif uop in {UOps.CAST, UOps.BITCAST}:
+          assert dtp[0].fmt and dtype.fmt
+          pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
+          if uop is UOps.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
           else:
-            assert dtp[0].fmt and dtype.fmt
-            pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-            if uop is UOps.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-            else:
-              casted = [dtypes.as_const(x, dtype) for x in inp[0]]
-              if dtypes.is_int(dtype):
-                overflow_adjust = 2**(dtype.itemsize*8 - 1) if not dtypes.is_unsigned(dtype) else 0
-                casted = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) for x in casted]
-              elif dtypes.is_float(dtype):
-                casted = [truncate.get(dtype, lambda dt: dt)(x) for x in casted]
-              ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *casted)))
+            casted = [dtypes.as_const(x, dtype) for x in inp[0]]
+            if dtypes.is_int(dtype):
+              overflow_adjust = 2**(dtype.itemsize*8 - 1) if not dtypes.is_unsigned(dtype) else 0
+              casted = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) for x in casted]
+            elif dtypes.is_float(dtype):
+              casted = [truncate.get(dtype, lambda dt: dt)(x) for x in casted]
+            ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *casted)))
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.count == 4
@@ -136,9 +133,9 @@ class PythonProgram:
         elif uop is UOps.WMMA:
           # here are the models for the WMMA instruction on the different hardware
           def wmma_helper(WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
-            assert len(inp[0]) == NUM_A, f"A must have {NUM_A} elements per thread"
-            assert len(inp[1]) == NUM_B, f"B must have {NUM_B} elements per thread"
-            assert len(inp[2]) == NUM_C, f"C must have {NUM_C} elements per thread"
+            assert len(inp[0]) == NUM_A, f"A must have {NUM_A} elements per thread, it has {len(inp[0])}"
+            assert len(inp[1]) == NUM_B, f"B must have {NUM_B} elements per thread, it has {len(inp[1])}"
+            assert len(inp[2]) == NUM_C, f"C must have {NUM_C} elements per thread, it has {len(inp[2])}"
             assert len(flatten(inp[0])) == NUM_A * warp_size, f"WMMA must have {NUM_A * warp_size} total elements for A in WMMA"
             assert len(flatten(inp[1])) == NUM_B * warp_size, f"WMMA must have {NUM_B * warp_size} total elements for B in WMMA"
             assert len(flatten(inp[2])) == NUM_C * warp_size, f"WMMA must have {NUM_C * warp_size} total elements for C in WMMA"
@@ -152,13 +149,13 @@ class PythonProgram:
             return out
 
           # TODO: refactor these to a shared TensorCoreLayout in kernel.py
-          if arg[5] == "METAL":
+          if arg[4] == "METAL":
             # A (2 elements on 32 threads): row major
             def a_b_elem(x, i, j, goff): return x[(i%2)][goff+(i//2)%2+(j%4)*2+(i//4)*8+(j//4)*16]
             # (i, j), C, D (2 elements on 32 threads): row major same as A/B
             def c_map(lane, elem): return (elem + ((lane%2)*2) + ((lane//8)%2)*4, ((lane//2)%4) + (lane//16)*4)
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
-          elif arg[5] == "AMD":
+          elif arg[4] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
             def a_elem(x, i, j, goff):
               assert x[i][goff+j] == x[i][goff+j+16], "warp elements not duplicated properly across lanes"
@@ -167,7 +164,7 @@ class PythonProgram:
             def b_elem(x, i, j, goff): return a_elem(x, j, i, goff)  # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
-          elif arg[5] == "CUDA":
+          elif arg[4] == "CUDA":
             # A (8 elements on 32 threads)
             def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4]
             # B (4 elements on 32 threads)
@@ -191,8 +188,8 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
 
-  def render(self, name:str, uops:UOpGraph) -> str:
-    lops = [(u.op, u.dtype, [uops.uops.index(v) for v in u.src], u.arg) for u in uops]
+  def render(self, name:str, uops:List[UOp]) -> str:
+    lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
 class PythonCompiler(Compiler):

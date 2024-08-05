@@ -6,12 +6,13 @@ from tiktoken.load import load_tiktoken_bpe
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
-from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tinytqdm
+from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
   def __init__(self, model_path: str):
     mergeable_ranks = load_tiktoken_bpe(model_path)
+    self.num_base_tokens = len(mergeable_ranks)
     special_tokens = [
       "<|begin_of_text|>",
       "<|end_of_text|>",
@@ -36,7 +37,7 @@ class Tokenizer:
   @property
   def stop_tokens(self): return {self.special_tokens["<|end_of_text|>"], self.special_tokens["<|eot_id|>"]}
 
-  def decode(self, toks): return self.model.decode(toks)
+  def decode(self, toks): return self.model.decode([t for t in toks if t < self.num_base_tokens])
   def encode(self, text, allow_special=False):
     return self.model.encode(text, allowed_special="all" if allow_special else set(), disallowed_special=set())
 
@@ -166,6 +167,8 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
       for k,v in nn.state.get_state_dict(model).items():
         if 'scale' in k: v.shard_(device, axis=None)  # from quantized
         elif '.attention.' in k: v.shard_(device, axis=-1)
+        elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
+        elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
         elif '.feed_forward.' in k: v.shard_(device, axis=-1)
         elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
         elif 'output.weight' in k: v.shard_(device, axis=0)
@@ -179,7 +182,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
 TEMPERATURE = 0.85
 TOP_K = 25
 TOP_P = 0.9
-ALPHA_F = 1.1
+ALPHA_F = 0.1
 ALPHA_P = 0.0
 
 last_seen_toks = []
@@ -196,7 +199,7 @@ def prefill(model, toks, start_pos=0):
     toks = toks[i:]
 
   # prefill the model
-  for tok in tinytqdm(toks):
+  for tok in tqdm(toks):
     GlobalCounters.reset()
     model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
     start_pos += 1
@@ -207,7 +210,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser()
   parser.add_argument("--download_model", action="store_true", help="Download a 8B model")
-  parser.add_argument("--model", type=Path, required=True, help="Model path")
+  parser.add_argument("--model", type=Path, help="Model path")
   parser.add_argument("--size", choices=["8B", "70B"], default="8B", help="Model size")
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
   parser.add_argument("--quantize", choices=["int8", "nf4"], help="Quantization method")
@@ -216,6 +219,7 @@ if __name__ == "__main__":
   parser.add_argument("--port", type=int, default=7776, help="Web server port")
   parser.add_argument("--debug", action="store_true", help="Enable debug mode")
   parser.add_argument("--seed", type=int, help="Random seed")
+  parser.add_argument("--temperature", type=int, default=0.85, help="Temperature")
   parser.add_argument("--benchmark", action="store_true", help="Run a benchmark")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data")
@@ -230,9 +234,12 @@ if __name__ == "__main__":
     fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", "model-00004-of-00004.safetensors", subdir="llama3-8b-sfr")
     args.model = fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", "model.safetensors.index.json", subdir="llama3-8b-sfr")
 
+  assert args.model is not None, "please provide --model option"
+
   if args.seed is not None: Tensor.manual_seed(args.seed)
   if args.benchmark: Tensor.manual_seed(42)
   print(f"seed = {Tensor._seed}")
+  TEMPERATURE = args.temperature
 
   tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))
   def encode_role(role: str):
@@ -316,7 +323,7 @@ if __name__ == "__main__":
       toks = [tokenizer.bos_id]
       for message in rjson["messages"]:
         toks += encode_message(message["role"], message["content"])
-      if message["role"] == "user":
+      if len(rjson["messages"]) > 0 and message["role"] == "user":
         toks += encode_role("assistant")
       return json.dumps(toks)
 
@@ -402,16 +409,20 @@ if __name__ == "__main__":
       last_tok = tok
       generated += tokenizer.decode([tok])
       print(generated)
-    EXPECTED_TEXT = {
-      1: "Hello! How can I help you today? If you have any questions or need assistance with anything,",
-      2: "Hello! How can I help you today? If you have any questions, need assistance or just want",
-      3: "Hello! How can I help you today? If you have any questions or need assistance, feel free",
-      4: "Hello! How can I assist you today? If you have any questions, need information, or require",
-      5: "Hello! How can I assist you today? If you have any questions or need help with something",
-      6: "Hello! How can I assist you today? If you have any questions, need information, or require",
-    }
-    assert generated == EXPECTED_TEXT[args.shard], f"{generated=} {EXPECTED_TEXT[args.shard]}"
-    print("\n" + colored("output validated", "green"))  # NOTE: "\n" inside colored does not render the color in github action
+    if "LLaMA-3/8B-SF-DPO" in args.model.as_posix() and (TEMPERATURE == 0.85 or TEMPERATURE == 0):
+      if TEMPERATURE == 0.85:
+        EXPECTED_TEXT = {
+          1: "Hello! How can I help you today? If you have any questions or need assistance with anything,",
+          2: "Hello! How can I help you today? If you have any questions, need assistance or just want",
+          3: "Hello! How can I help you today? If you have any questions or need assistance, feel free",
+          4: "Hello! How can I assist you today? If you have any questions, need information, or require",
+          5: "Hello! How can I assist you today? If you have any questions or need help with something",
+          6: "Hello! How can I assist you today? If you have any questions, need information, or require",
+        }
+      else:
+        EXPECTED_TEXT = {k: "Hello! How can I assist you today? If you have any questions or need help with something," for k in range(1, 7)}
+      assert generated == EXPECTED_TEXT[args.shard], f"{generated=} {EXPECTED_TEXT[args.shard]}"
+      print("\n" + colored("output validated", "green"))  # NOTE: "\n" inside colored does not render the color in github action
   else:
     prompt = [tokenizer.bos_id] + encode_message("system", "You are an helpful assistant.")
 

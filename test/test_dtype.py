@@ -202,7 +202,7 @@ class TestFloatDType(TestDType):
 
 class TestDoubleDType(TestDType):
   DTYPE = dtypes.double
-  @unittest.skipIf((CI and Device.DEFAULT in {"CUDA", "NV"}) or getenv("PTX"), "conversion not supported on CUDACPU and PTX")  # TODO: why not?
+  @unittest.skipIf((CI and Device.DEFAULT in {"CUDA", "NV"}) or getenv("PTX"), "conversion not supported on CI CUDA and PTX")  # TODO: why not?
   def test_float64_increased_precision(self):
     for func in [
       lambda t: t.exp(),
@@ -267,7 +267,10 @@ class TestInt32DType(TestDType): DTYPE = dtypes.int32
 class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 
 class TestInt64DType(TestDType): DTYPE = dtypes.int64
-class TestUint64DType(TestDType): DTYPE = dtypes.uint64
+class TestUint64DType(TestDType):
+  DTYPE = dtypes.uint64
+  def test_uint64_load(self):
+    assert Tensor(2**64 - 1, dtype=dtypes.uint64).numpy() == 2**64 - 1
 
 class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
@@ -298,7 +301,7 @@ class TestEqStrDType(unittest.TestCase):
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
-    self.assertEqual(str(PtrDType(dtypes.float32)), "ptr.dtypes.float")
+    self.assertEqual(str(PtrDType(dtypes.float32)), "PtrDType(dtypes.float)")
 
 class TestHelpers(unittest.TestCase):
   signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
@@ -347,6 +350,20 @@ class TestHelpers(unittest.TestCase):
     with self.assertRaises(RuntimeError): dtypes.from_py({})
     with self.assertRaises(RuntimeError): dtypes.from_py(set())
 
+  def test_dtype_range(self):
+    for dt in core_dtypes:
+      if dtypes.is_float(dt):
+        np.testing.assert_equal(dtypes.min(dt), -math.inf)
+        np.testing.assert_equal(dtypes.max(dt), math.inf)
+      elif dtypes.is_int(dt):
+        info = np.iinfo(_to_np_dtype(dt))
+        np.testing.assert_equal(dtypes.min(dt), info.min)
+        np.testing.assert_equal(dtypes.max(dt), info.max)
+      else:
+        assert dt == dtypes.bool, dt
+        np.testing.assert_equal(dtypes.min(dt), False)
+        np.testing.assert_equal(dtypes.max(dt), True)
+
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
@@ -377,6 +394,23 @@ class TestTypeSpec(unittest.TestCase):
     with self.assertRaises(subprocess.CalledProcessError):
       subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
                       shell=True, check=True)
+
+  def test_dtype_str_arg(self):
+    n = np.random.normal(0, 1, (10, 10)).astype(np.float32)
+    tested = 0
+    for dtype_str, dtype in [
+      ("bool", dtypes.bool), ("int8", dtypes.int8), ("int", dtypes.int), ("uint32", dtypes.uint32), ("float32", dtypes.float32)]:
+      np.testing.assert_equal(Tensor(n, dtype=dtype_str).numpy(), Tensor(n, dtype=dtype).numpy())
+      np.testing.assert_equal(Tensor(n).cast(dtype_str).numpy(), Tensor(n).cast(dtype).numpy())
+      if dtype.itemsize == 4:
+        np.testing.assert_equal(Tensor(n).bitcast(dtype_str).numpy(), Tensor(n).bitcast(dtype).numpy())
+        tested += 1
+    assert tested == 3
+
+    with self.assertRaises(AttributeError): Tensor([1, 2, 3], dtype="nonexistdtype")
+    with self.assertRaises(AttributeError): Tensor([1, 2, 3], dtype="")
+
+    np.testing.assert_equal(Tensor(n).sum(acc_dtype="int16").numpy(), Tensor(n).sum(acc_dtype=dtypes.int16).numpy())
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
@@ -439,6 +473,9 @@ class TestTypeSpec(unittest.TestCase):
       _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
     _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7))
     _assert_eq(Tensor.arange(3, 8.5, 3), dtypes.default_float, np.arange(3, 8.5, 3))
+    # stop-start and step have different signs
+    _assert_eq(Tensor.arange(3, 5, -2), dtypes.default_int, np.arange(3, 5, -2))
+    _assert_eq(Tensor.arange(5.0, 3.0), dtypes.default_float, np.arange(5.0, 3.0))
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))
   def test_bool_ops(self, dtype, op):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import pathlib, json
-from tqdm import trange
+from tinygrad.helpers import trange
 from extra.datasets import fetch_mnist
 from PIL import Image
 import numpy as np

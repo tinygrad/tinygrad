@@ -174,14 +174,14 @@ def BatchNormalization(X: Tensor, scale, B, input_mean, input_var, epsilon=1e-05
 def InstanceNormalization(x: Tensor, scale: Tensor, bias: Tensor, epsilon=1e-05):
   axis = tuple(range(2, x.ndim))
   mean = x.mean(axis=axis, keepdim=True)
-  invstd = x.sub(mean).pow(2).mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
+  invstd = x.sub(mean).square().mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
   return x.sub(mean).mul(scale.reshape(shape=[-1, 1, 1])).mul(invstd).add(bias.reshape(shape=[-1, 1, 1]))
 
 def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_type=1):
   assert stash_type == 1, "only float32 is supported"
   axis = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
   mean = x.mean(axis=axis, keepdim=True)
-  return x.layernorm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).pow(2).mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
+  return x.layernorm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).square().mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
 
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
@@ -532,9 +532,9 @@ def EyeLike(x: Tensor, dtype=None, k=0):
   else: dtype = DTYPE_MAP[int(dtype)]
   dim = min(x.shape)
   if x.shape[0] == x.shape[1]:
-    return Tensor.eye(dim=dim, dtype=dtype)
+    return Tensor.eye(dim, dtype=dtype)
   padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
-  return Tensor.eye(dim=dim, dtype=dtype).pad(padarg)
+  return Tensor.eye(dim, dtype=dtype).pad(padarg)
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 

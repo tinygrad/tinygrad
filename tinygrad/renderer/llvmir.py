@@ -2,7 +2,7 @@ from typing import Final, Dict, Callable, Any, List, Optional
 from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
-from tinygrad.codegen.uops import UOps, UOp, UOpGraph
+from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.renderer import Renderer
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
@@ -24,7 +24,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   BinaryOps.CMPNE: lambda builder, x, y, dtype: builder.icmp_unsigned("!=", x, y) if is_bool_or_unsigned(dtype) else builder.icmp_signed("!=", x, y) if dtypes.is_int(dtype) else builder.fcmp_unordered("!=", x, y, flags=MFLAGS),  # noqa: E501
   BinaryOps.MAX: lambda builder, x, y, dtype: builder.select(builder.icmp_unsigned(">", x, y) if is_bool_or_unsigned(dtype) else builder.icmp_signed(">", x, y) if dtypes.is_int(dtype) else builder.fcmp_unordered(">", x, y, flags=MFLAGS), x, y),  # noqa: E501
   BinaryOps.MOD: lambda builder, x, y, dtype: builder.urem(x, y) if is_bool_or_unsigned(dtype) else builder.srem(x, y) if dtypes.is_int(dtype) else builder.frem(x, y),  # noqa: E501
-  BinaryOps.XOR: lambda builder, x, y, dtype: builder.xor(x, y),
+  BinaryOps.XOR: lambda builder, x, y, dtype: builder.xor(x, y), BinaryOps.AND: lambda builder, x, y, dtype: builder.and_(x, y), BinaryOps.OR: lambda builder, x, y, dtype: builder.or_(x, y), # noqa: E501
   TernaryOps.WHERE: lambda builder, x, y, z, dtype: builder.select(x, y, z)}
 
 dtype_to_llvm_dtype = { dtypes.bool:ir.IntType(1), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.int16:ir.IntType(16),
@@ -72,7 +72,7 @@ class LLVMRenderer(Renderer):
   has_shared = False
   global_max = None
 
-  def render(self, name:str, uops:UOpGraph) -> str:
+  def render(self, name:str, uops:List[UOp]) -> str:
     # all llvm stuff goes into a module
     module = ir.Module(name=__file__)
 
@@ -85,10 +85,6 @@ class LLVMRenderer(Renderer):
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() if isinstance(dt, PtrDType) else x for x,dt in func_dtypes]), name=name)
     for a in func.args:
       if a.type.is_pointer: a.add_attribute("noalias")
-
-    # add the function attribute "no-nans-fp-math"="true", which informs llvm that it allowed to use vectorization optimizations
-    func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
-    func.attributes.add('"no-nans-fp-math"="true"')
 
     bb = [ir.IRBuilder(func.append_basic_block("entry"))]
     loop_blocks: List = []
@@ -132,13 +128,13 @@ class LLVMRenderer(Renderer):
           lvars[u].add_incoming(lvars[src[0]], bb[-2].block)
           loop_blocks.append((bb[-1].block, phis))
         elif uop is UOps.DEFINE_ACC:
-          lvars[u] = const(args[0], dtype)
+          lvars[u] = const(src[0].arg, dtype)
           reduce_phis.append(u)
         elif uop is UOps.LOAD:
           if len(src) > 2:
-            aug_idx = bb[-1].select(lvars[src[2]], lvars[src[1]], ir.Constant(ir.IntType(32), 0))
+            aug_idx = bb[-1].select(lvars[src[3]], lvars[src[1]], ir.Constant(ir.IntType(32), 0))
             val = bb[-1].load(bb[-1].gep(lvars[src[0]], [aug_idx], inbounds=True))
-            val = bb[-1].select(lvars[src[2]], val, lvars[src[3]])
+            val = bb[-1].select(lvars[src[3]], val, lvars[src[2]])
           else:
             val = bb[-1].load(bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
           lvars[u] = val
@@ -149,10 +145,9 @@ class LLVMRenderer(Renderer):
           while backward.op is UOps.PHI: backward = backward.src[0]
           lvars[backward] = lvars[u]
         elif uop is UOps.ALU:
-          lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in src], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else src[0].dtype)
+          lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in src], src[0].dtype if args in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype)
         elif uop in {UOps.CAST, UOps.BITCAST}: lvars[u] = cast(bb, lvars[src[0]], src[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
         elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
-        elif uop is UOps.SPECIAL: lvars[u] = lvars[args.expr]
         elif uop is UOps.CONST: lvars[u] = const(args, dtype)
         else: raise RuntimeError(f"failed to render {uop}")
 

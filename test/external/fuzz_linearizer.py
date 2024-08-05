@@ -2,15 +2,14 @@ import random, traceback, ctypes, argparse
 from typing import List, Tuple, DefaultDict
 import numpy as np
 from collections import defaultdict
-from extra.optimization.helpers import load_worlds, ast_str_to_lin
+from extra.optimization.helpers import load_worlds, ast_str_to_lin, kern_str_to_lin
 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.uops import UOp
 from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.engine.search import get_linearizer_actions, bufs_from_lin
-from tinygrad.engine.graph import print_tree
+from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
 from tinygrad.ops import LazyOp, UnaryOps, BufferOps
@@ -53,7 +52,7 @@ def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
       rawbuf.copyin(mv)
   return rawbuf
 
-def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
+def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None):
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
   if var_vals is None: var_vals = {v: v.min for v in lin.ast[0].vars()}
 
@@ -72,7 +71,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
   return "PASS"
 
-def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
+def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
   # TODO: for bfloat16 it compiles linearizer, but it does not run because numpy cannot generate bf16 buffer.
   has_bf16 = any(b.dtype == dtypes.bfloat16 for b in lin.membufs)
 
@@ -87,10 +86,10 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
 
   if var_vals is None:
     # TODO: handle symbolic max case
-    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast[0].vars()}
+    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast.vars()}
 
   if ground_truth is None and not has_bf16:
-    unoptimized = Linearizer(*lin.ast)
+    unoptimized = Kernel(lin.ast)
     unoptimized.required_optimizations()
     if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
       return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth,)
@@ -117,11 +116,11 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
 
   return ("PASS", rawbufs, var_vals, ground_truth,)
 
-def fuzz_linearizer(lin: Linearizer, rtol=1e-2, atol=1e-2):
+def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
   SEED = getenv("SEED", 42)
   random.seed(SEED)
   np.random.seed(SEED)
-  for op in lin.ast: print_tree(op)
+  print(lin.ast)
   print(lin.colored_shape())
   seen_uops = {}
   last_lins = [lin]
@@ -142,7 +141,7 @@ def fuzz_linearizer(lin: Linearizer, rtol=1e-2, atol=1e-2):
   for depth in range(getenv("DEPTH", 1 if FUZZ_ALL_ACTIONS else 10)):
     next_lins = []
     for lin in last_lins:
-      actions = get_linearizer_actions(lin, include_0=False)
+      actions = get_kernel_actions(lin, include_0=False)
       if not actions: continue
       if depth == 0 and getenv("FUZZ_REQUIRE_TC", 0):
         tc_acts = {i: k for k in actions.values() if k.applied_opts[0].op == OptOps.TC}
@@ -157,7 +156,14 @@ def fuzz_linearizer(lin: Linearizer, rtol=1e-2, atol=1e-2):
         if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        tuops = tuplize_uops(test_lin.linearize().uops.uops)
+        try: tuops = tuplize_uops(test_lin.linearize().uops.uops)
+        except BaseException as e:
+          print(test_lin.ast)
+          print(test_lin.applied_opts)
+          print(e)
+          failures["LINEARIZE_ERROR"].append((test_lin.ast, test_lin.applied_opts))
+          continue
+
         if tuops in seen_uops: continue
         seen_uops[tuops] = tuple(test_lin.applied_opts)
 
@@ -177,9 +183,9 @@ def fuzz_linearizer(lin: Linearizer, rtol=1e-2, atol=1e-2):
     if FUZZ_ALL_ACTIONS: print(f"depth={depth} total_lins={len(last_lins)} {failures=}")
   return failures
 
-def _is_simple(lin: Linearizer) -> bool:
-  if len(lin.ast) > 1: return False
-  ast:LazyOp = lin.ast[0]
+def _is_simple(lin: Kernel) -> bool:
+  if len(lin.ast.src) > 1: return False
+  ast:LazyOp = lin.ast.src[0]
   if ast.src[0] and ast.src[0].op is UnaryOps.CAST and ast.src[0].src[0] and ast.src[0].src[0].op is BufferOps.LOAD: return True
   return False
 
@@ -187,6 +193,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run a fuzz testing on one or more kernels", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--ast", type=str, default=None, help="the ast for the kernel to be optimized")
   parser.add_argument("--file", type=str, default=None, help="a file containing asts to be optimized, one per line")
+  parser.add_argument("--logfile", type=str, default=None, help="a file containing a tuple of ast and applied_opts, one per line")
   parser.add_argument("--expected-failures", type=int, default=0, help="the number of expected failed kernels")
   parser.add_argument("--rtol", type=float, default=1e-2, help="relative tolerance for numerical comparison")
   parser.add_argument("--atol", type=float, default=1e-2, help="absolute tolerance for numerical comparison")
@@ -199,6 +206,12 @@ if __name__ == "__main__":
     print(f"loading ASTs from file '{args.file}'")
     with open(args.file, 'r') as file:
       ast_strs = file.readlines()
+  elif args.logfile is not None:
+    print(f"loading ASTs from LOGKERNS file '{args.file}'")
+    with open(args.logfile, 'r') as file:
+      kern_strs = file.readlines()
+      test_lins = [kern_str_to_lin(kern_str) for kern_str in kern_strs]
+      ast_strs = [f"{lin.ast}" for lin in test_lins]
   else:
     print("loading ASTs from world")
     ast_strs = load_worlds(filter_reduce=False, filter_novariable=False)
