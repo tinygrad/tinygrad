@@ -3,7 +3,7 @@
 import difflib, pickle, multiprocessing, os, logging, sqlite3, requests, io, zipfile
 from tabulate import tabulate
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, cast
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Device
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, temp, tqdm
@@ -41,7 +41,8 @@ def diff_kernel(offset:int, ref_schedule:List[LazyOp], kernel_changed):
       with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
         k = Kernel(ast, opts=opts)
         for opt in applied_opts: k.apply_opt(opt)
-        good_src = k.opts.render(name, k.linearize().uops)
+        # NOTE: replay with the captured renderer, not the one in master
+        good_src = k.opts.render(name, cast(List,k.to_program().uops))
     except Exception as e:
       logging.warning("FAILED TO RECREATE KERNEL")
       logging.info(ast)
