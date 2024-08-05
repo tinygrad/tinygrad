@@ -31,13 +31,17 @@ class TestHCQ(unittest.TestCase):
   # Test signals
   def test_signal(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
+      if queue_type is None: continue
+
       with self.subTest(name=str(queue_type)):
         queue_type().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
   def test_signal_update(self):
-    for queue_type in [TestHCQ.d0.hw_compute_queue_t]:
+    for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
+      if queue_type is None: continue
+
       with self.subTest(name=str(queue_type)):
         q = queue_type().signal(TestHCQ.d0.signal_t(), 0x1000)
 
@@ -52,6 +56,8 @@ class TestHCQ(unittest.TestCase):
   # Test wait
   def test_wait(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
+      if queue_type is None: continue
+
       with self.subTest(name=str(queue_type)):
         fake_signal = TestHCQ.d0.signal_t()
         fake_signal.value = 1
@@ -63,6 +69,8 @@ class TestHCQ(unittest.TestCase):
   @unittest.skipIf(MOCKGPU, "Can't handle async update on MOCKGPU for now")
   def test_wait_late_set(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
+      if queue_type is None: continue
+
       with self.subTest(name=str(queue_type)):
         fake_signal = TestHCQ.d0.signal_t()
         queue_type().wait(fake_signal, 1) \
@@ -78,6 +86,8 @@ class TestHCQ(unittest.TestCase):
 
   def test_wait_update(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
+      if queue_type is None: continue
+
       with self.subTest(name=str(queue_type)):
         fake_signal = TestHCQ.d0.signal_t()
         q = queue_type().wait(TestHCQ.d0.timeline_signal, 0xffffffff).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
@@ -136,6 +146,8 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
 
   def test_copy_long(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
     sz = 64 << 20
     buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
@@ -186,9 +198,9 @@ class TestHCQ(unittest.TestCase):
   # Test bind api
   def test_bind(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
-      with self.subTest(name=str(queue_type)):
-        if not hasattr(queue_type(), 'bind'): self.skipTest("queue does not support bind api")
+      if queue_type is None: continue
 
+      with self.subTest(name=str(queue_type)):
         fake_signal = TestHCQ.d0.signal_t()
         q = queue_type().wait(TestHCQ.d0.timeline_signal, 0xffffffff).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
         q.bind(TestHCQ.d0)
@@ -201,6 +213,8 @@ class TestHCQ(unittest.TestCase):
 
   # Test multidevice
   def test_multidevice_signal_wait(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
     d1 = Device[f"{Device.DEFAULT}:1"]
 
     TestHCQ.d0.hw_copy_queue_t().signal(sig:=TestHCQ.d0.signal_t(value=0), value=0xfff) \
@@ -234,6 +248,8 @@ class TestHCQ(unittest.TestCase):
     assert 1 <= et <= (2500 if CI else 20)
 
   def test_speed_copy_bandwidth(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
     TestHCQ.d0._prof_setup()
 
     # THEORY: the bandwidth is low here because it's only using one SDMA queue. I suspect it's more stable like this at least.
@@ -258,6 +274,8 @@ class TestHCQ(unittest.TestCase):
     assert (0.3 if CI else 10) <= gb_s <= 1000
 
   def test_speed_cross_device_copy_bandwidth(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
     TestHCQ.d0._prof_setup()
 
     SZ = 2_000_000_000
@@ -283,6 +301,8 @@ class TestHCQ(unittest.TestCase):
 
   def test_timeline_signal_rollover(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
+      if queue_type is None: continue
+
       with self.subTest(name=str(queue_type)):
         TestHCQ.d0.timeline_value = (1 << 32) - 20 # close value to reset
         queue_type().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1).submit(TestHCQ.d0)
@@ -295,6 +315,8 @@ class TestHCQ(unittest.TestCase):
           TestHCQ.d0.synchronize()
 
   def test_small_copies_from_host_buf(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
     buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
 
@@ -310,6 +332,8 @@ class TestHCQ(unittest.TestCase):
       assert buf1.as_buffer()[0] == i
 
   def test_small_copies_from_host_buf_intercopy(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
     buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf3 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(host=True, nolru=True)).ensure_allocated()
@@ -327,6 +351,8 @@ class TestHCQ(unittest.TestCase):
       assert buf2.as_buffer()[0] == i
 
   def test_small_copies_from_host_buf_transfer(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
     _ = Device[f"{Device.DEFAULT}:1"]
 
     buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
@@ -347,6 +373,31 @@ class TestHCQ(unittest.TestCase):
       assert buf2.as_buffer()[0] == i
 
   def test_memory_barrier(self):
+    a = Tensor([0, 1], device=Device.DEFAULT, dtype=dtypes.int8).realize()
+    b = a + 1
+    runner = get_runner(TestHCQ.d0.dname, create_schedule([b.lazydata])[-1].ast)
+
+    buf1 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
+
+    kernargs_ptr = runner.clprg.fill_kernargs([buf1._buf, buf2._buf])
+
+    for i in range(255):
+      ctypes.memset(buf2._buf.va_addr, i, 2)
+
+      # Need memory_barrier after direct write to vram
+      TestHCQ.d0.hw_compute_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                     .memory_barrier() \
+                                     .exec(runner.clprg, kernargs_ptr, runner.p.global_size, runner.p.local_size) \
+                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+      TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+      TestHCQ.d0.timeline_value += 1
+
+      assert buf1.as_buffer()[0] == (i + 1), f"has {buf1.as_buffer()[0]}, need {i + 1}"
+
+  def test_memory_barrier_before_copy(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
     buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf3 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
