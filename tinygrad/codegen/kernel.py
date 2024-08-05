@@ -677,7 +677,7 @@ class Kernel:
             fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
               ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
           elif self.opts.device == "INTEL":
-            reduce_axes, upcast_axis = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
+            reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
             fix_st1 = functools.partial(fix_st, (8,), (16,8), (8,2,8), ((1,0),), ((1,2), (1,1), (0,0)))
             fix_st2 = None
           else:

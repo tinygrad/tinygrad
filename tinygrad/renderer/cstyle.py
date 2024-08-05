@@ -225,7 +225,7 @@ class IntelRenderer(OpenCLRenderer):
     return f"intel_convert_bfloat16_as_ushort({x[0]})" if (var_dtype, from_dtype) == (dtypes.bfloat16, dtypes.float) else \
       (f"intel_convert_as_bfloat16_float({x[0]})" if (var_dtype, from_dtype) == (dtypes.float, dtypes.bfloat16) else \
       super().render_cast(x, var_dtype, bitcast))
-  
+
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = []
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
