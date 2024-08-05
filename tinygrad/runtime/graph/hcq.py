@@ -11,6 +11,7 @@ class HCQGraph(MultiGraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
+    self.bufs_stirde, self.vars_stride = (2, 4) if self.devices[0].dname.startswith('QCOM') else (1, 1)
 
     # Allocate kernel args.
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
@@ -30,8 +31,9 @@ class HCQGraph(MultiGraphRunner):
       kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
 
       ji.prg.clprg.fill_kernargs([cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], self.kargs_addrs[j])
-      self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset, len(ji.bufs) * 8).cast('Q')
-      self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset + len(ji.bufs) * 8, len(ji.prg.p.vars) * 4).cast('I')
+      self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset, len(ji.bufs) * 8 * self.bufs_stirde).cast('Q')
+      self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset + len(ji.bufs) * 8 * self.bufs_stirde,
+                                   len(ji.prg.p.vars) * 4 * self.vars_stride).cast('I')
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any
@@ -154,11 +156,11 @@ class HCQGraph(MultiGraphRunner):
 
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items():
-      if j in self.ji_args_bufs: self.ji_args_bufs[j][i] = input_rawbuffers[input_idx]._buf.va_addr
+      if j in self.ji_args_bufs: self.ji_args_bufs[j][i * self.bufs_stride] = input_rawbuffers[input_idx]._buf.va_addr
       else: self.op_cmd_idx[j][0].update_copy(self.op_cmd_idx[j][1], **{('dest' if i == 0 else 'src'): input_rawbuffers[input_idx]._buf.va_addr})
 
     # Update var_vals
-    for j, i, v in self.updated_vars(var_vals): self.ji_args_vars[j][i] = v
+    for j, i, v in self.updated_vars(var_vals): self.ji_args_vars[j][i * self.vars_stride] = v
 
     # Update launch dims
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):

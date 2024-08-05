@@ -496,7 +496,7 @@ class HCQCompiled(Compiled):
     if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, allocator, renderer, compiler, runtime)
+    super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferOptions(cpu_access=True))
     self.kernargs_ptr:int = self.kernargs_page.va_addr
