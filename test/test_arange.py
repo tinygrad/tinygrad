@@ -4,11 +4,13 @@ from tinygrad import Tensor, GlobalCounters, dtypes
 from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import run_schedule
 from tinygrad.codegen.kernel import Opt, OptOps, Kernel
+from tinygrad.engine.realize import CompiledRunner, ExecItem
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):
     GlobalCounters.reset()
-    sched = Tensor.arange(N).schedule()
+    tt = Tensor.arange(N)
+    sched = tt.schedule()
     self.assertEqual(len(sched), 1)
     k = Kernel(sched[-1].ast)
     if opts is not None:
@@ -16,6 +18,8 @@ class TestArange(unittest.TestCase):
     p = k.to_program()
     print(p.name)
     print(p.src)
+    ExecItem(CompiledRunner(p), [tt.lazydata.buffer]).run()
+    np.testing.assert_equal(tt.numpy(), np.arange(N))
     return p.op_estimate
 
   def test_complexity(self, opts=None):
