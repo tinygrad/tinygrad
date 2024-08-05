@@ -8,7 +8,7 @@ export DEFAULT_FLOAT="HALF" GPUS=6 BS=84 EVAL_BS=6
 export BEAM=4
 export BASEDIR="/raid/datasets/wiki"
 
-echo "NOTE: Disabling dropout. Unset for real submission run."
+echo "NOTE: DISABLING DROPOUT - UNSET FOR REAL SUBMISSION RUN"
 export DISABLE_DROPOUT=1 # NOTE: Unset flag for real submission run.
 
 # pip install -e ".[mlperf]"

@@ -399,6 +399,7 @@ def train_bert():
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
+  BENCHMARK = getenv("BENCHMARK")
   if getenv("LOGMLPERF"):
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
@@ -515,8 +516,6 @@ def train_bert():
     import wandb
     wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
     wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
-
-  BENCHMARK = getenv("BENCHMARK")
 
   if not INITMLPERF:
     eval_it = iter(batch_load_val_bert(EVAL_BS))
