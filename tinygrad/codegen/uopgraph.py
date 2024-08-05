@@ -523,7 +523,6 @@ class UOpGraph:
       sink = graph_rewrite(sink, self.folder+expander+reducer)
 
     # for PTX only
-    
     if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
 
     # filter nodes that don't link to a sink
@@ -546,7 +545,7 @@ class UOpGraph:
       priority = 0
       # prefer uops that are loop children
       for l, ss in scope_children.items():
-        if l.op is UOps.RANGE and u in ss: priority -= (l.arg[0]+1)*1000 + 100000*l.arg[1] # TODO: cleanup
+        if l.op is UOps.RANGE and u in ss: priority -= (l.arg[0]+1) + 1000*l.arg[1] # TODO: cleanup
       heapq.heappush(queue, (priority, u))
 
     for u in children:
@@ -558,28 +557,30 @@ class UOpGraph:
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x.op,x.arg)
-      if x in scope_children: 
-        scope_end[x] = x
-        if x.op is UOps.RANGE and x.arg[1]:
-          scopes[range_phi[x]] = scopes[range_phi[x]] + [x] if (range_phi[x] in scopes) else [x]
-      elif x.op is UOps.DEFINE_ACC:
-        assert all(s in scopes[range_phi[s]] for s in x.src if s.op is UOps.RANGE), "not all ranges in stack!!"
-        scopes[p:=range_phi[x.src[1]]].insert(min(scopes[p].index(s) for s in x.src if s.op is UOps.RANGE),x)
-      child_of_scopes = []
-      for u, ss in scope_children.items():
-        if x in ss:
-          ss.remove(x)
-          if u.op is UOps.RANGE and u.arg[1]: child_of_scopes.append(u)
-          if len(ss) == 0: scope_end[u] = x
-      if len(child_of_scopes) > 0 and x.op is not UOps.RANGE and x.op is not UOps.DEFINE_ACC:
-        assert all(len(range_phi[s]) == len(range_phi[child_of_scopes[0]]) and all(v in range_phi[child_of_scopes[0]] for v in range_phi[s]) for s in child_of_scopes), "scopes don't map to the same phi"
-        scopes[range_phi[child_of_scopes[0]]].append(x)
-        if all(len(scope_children[s]) == 0 for s in child_of_scopes):
-          for u in child_of_scopes:
+      
+      child_of_scopes=[u for u,ss in scope_children.items() if x in ss]
+      child_of_reduces=[u for u in child_of_scopes if u.op is UOps.RANGE and u.arg[1]]
+      if len(child_of_reduces) > 0: assert all(len(range_phi[s]) == len(range_phi[child_of_reduces[0]]) and all(v in range_phi[child_of_reduces[0]] for v in range_phi[s]) for s in child_of_reduces), "scopes don't map to the same phi"
+      if x in scope_children: scope_end[x] = x
+      elif x.op is UOps.DEFINE_ACC: assert all(s in scopes[range_phi[s]] for s in x.src if s.op is UOps.RANGE), "not all ranges in stack!!"
+      elif any(s not in self._uops for s in x.src) and len(child_of_reduces) == 0:
+        heapq.heappush(queue, (p+1, x))
+        continue
+
+      if x.op is UOps.RANGE and x.arg[1]: scopes[range_phi[x]] = scopes[range_phi[x]] + [x] if (range_phi[x] in scopes) else [x]
+      elif x.op is UOps.DEFINE_ACC: scopes[p:=range_phi[x.src[1]]].insert(min(scopes[p].index(s) for s in x.src if s.op is UOps.RANGE),x)
+      elif len(child_of_reduces) > 0: scopes[range_phi[child_of_reduces[0]]].append(x)
+      else: self._uops.append(x)
+
+      for u in child_of_scopes:
+        scope_children[u].remove(x)
+        if len(scope_children[u]) == 0: scope_end[u] = x
+      if len(child_of_reduces) > 0:
+        if all(len(scope_children[s]) == 0 for s in child_of_reduces):
+          for u in child_of_reduces:
             scope_end[u] = x
             self._uops = self._uops + scopes[range_phi[u]]
             scopes[range_phi[u]] = []
-      elif not (x.op is UOps.RANGE and x.arg[1]) and x.op is not UOps.DEFINE_ACC: self._uops.append(x)
 
       for u in reversed(children[x]):
         in_degree[u] -= 1

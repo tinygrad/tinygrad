@@ -127,7 +127,6 @@ class IndependentLowerer:
     local_loads = [x for x in ast.lazyops if x.op is BufferOps.LOAD and x.arg.idx < 0]
     # NOTE: this is taking the first one...there may be subtlelies here with multireduces
     group_for_reduces = sum([any(j!=y for j in x) for x,y in zip([[l.arg.st.shape[i] for l in local_loads] for i in range(first_reduce,first_upcasted)], ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
-    first_group_for_reduce = max([len(r.arg) for r in self.reduceops if r.src[0] in local_loads and len(r.arg) > 0] + [0])
     self.group_for_reduces = group_for_reduces # TODO: cleanup
     global_dims = first_reduce-ki.local_dims
 
@@ -201,10 +200,12 @@ class IndependentLowerer:
         if load_back:
           zero = UOp(op=UOps.CONST, dtype=dtypes.bigint, src=(), arg=0)
           idx, _ = st_to_uops(x.arg.st, [zero if i in x.src[0].src[0].arg else u for i,u in enumerate(self.ridxs)], x.arg.dtype)
-          return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + (valid, UOp.const(x.arg.dtype.scalar(), 0)) + barrier)
+          return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
         return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread
       store_back = x.src[0].op in [ReduceOps.SUM, ReduceOps.MAX] and len(x.src[0].arg) > 0 and all(i-self.first_reduce < self.group_for_reduces for i in x.src[0].arg) and x.src[0] is not self.reduceops[-1]
+      zero = UOp(op=UOps.CONST, dtype=dtypes.bigint, src=(), arg=0)
+      if store_back: idx, _ = st_to_uops(x.arg.st, [zero if i in x.src[0].arg else u for i,u in enumerate(self.idxs)], x.arg.dtype)
       if x.arg.idx >= 0 or store_back:
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
