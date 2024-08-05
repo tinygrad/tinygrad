@@ -12,7 +12,7 @@ python3 -m pip install -e .
 
 After you have installed tinygrad, try the [MNIST tutorial](mnist.md)
 
-We also have [developer docs](developer/developer.md), and Di Zhu has created a [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) to help understand how tinygrad works. Additionally, if you are new to tensor libraries, learn how they work by solving puzzles from [tinygrad-tensor-puzzles](https://github.com/obadakhalili/tinygrad-tensor-puzzles), adapted by Obada Khalili from [Sasha's Tensor Puzzles](https://github.com/srush/Tensor-Puzzles).
+We also have [developer docs](developer/developer.md), and Di Zhu has created a [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) to help understand how tinygrad works. Additionally, if you are new to tensor libraries, learn how to use them by solving puzzles from [tinygrad-tensor-puzzles](https://github.com/obadakhalili/tinygrad-tensor-puzzles), adapted by Obada Khalili from [Sasha's Tensor Puzzles](https://github.com/srush/Tensor-Puzzles).
 
 ## tinygrad Usage
 
