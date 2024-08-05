@@ -27,6 +27,7 @@ class TestArange(unittest.TestCase):
 
   def test_complexity_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)])
   def test_complexity_w_unroll(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)])
+  def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)])
 
 class TestIndexing(unittest.TestCase):
   def test_arange_2_reduce(self):
