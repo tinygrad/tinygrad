@@ -242,10 +242,10 @@ def load_file_waveform(filename):
   waveform, _ = librosa.load(filename, sr=RATE)
   return waveform
 
-def transcribe_file(model, enc, filename, stream=False):
-  return transcribe_waveform(model, enc, [load_file_waveform(filename)], stream = stream)
+def transcribe_file(model, enc, filename):
+  return transcribe_waveform(model, enc, [load_file_waveform(filename)])
 
-def transcribe_waveform(model:Whisper, enc, waveforms, truncate=False, stream = False):
+def transcribe_waveform(model:Whisper, enc, waveforms, truncate=False):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
@@ -286,7 +286,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms, truncate=False, stream = 
         if frame_reset or curr_frame == 0 or N_audio > 1: raise RuntimeError("Token overflow")
         frame_reset = True
         transcription_tokens[0] = np.concatenate((transcription_tokens[0], curr_segment_tokens[0][transcription_start_index:]))
-        if stream: yield enc.decode(curr_segment_tokens[0][transcription_start_index:-1])
         prompt = np.concatenate((start_tokens, transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:]))
         curr_segment_tokens = np.tile(prompt, (log_spec.shape[0], 1))
 
@@ -306,8 +305,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms, truncate=False, stream = 
       eot_index = np.where(t == eot)[0]
       eot_index = None if len(eot_index) == 0 else eot_index[0]
       transcription_tokens[i] = np.concatenate((transcription_tokens[i], t[transcription_start_index:eot_index]))
-
-    if stream: yield enc.decode(curr_segment_tokens[0][transcription_start_index:-1])
 
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip(), transcription_tokens))
   return transcriptions[:N_audio] if N_audio > 1 else transcriptions[0]
@@ -330,7 +327,7 @@ if __name__ == "__main__":
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
 
   if len(sys.argv) > 1:
-    for chunk in transcribe_file(model, enc, sys.argv[1], stream=True): print(chunk)
+    for chunk in transcribe_file(model, enc, sys.argv[1]): print(chunk)
   else:
     # online
     q = multiprocessing.Queue()
