@@ -97,5 +97,17 @@ class TestIndexing(unittest.TestCase):
       assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
     np.testing.assert_allclose(real_index, X.numpy())
 
+  def test_index_mnist(self):
+    from tinygrad.nn.datasets import mnist
+    X_train, Y_train, _, _ = mnist()
+    with Context(NOOPT=1, FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+      GlobalCounters.reset()
+      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
+      x = X_train[samples].numpy()
+      y = Y_train[samples].numpy()
+      assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
+    np.testing.assert_allclose(X_train.numpy()[samples.numpy()], x)
+    np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
+
 if __name__ == "__main__":
   unittest.main()
