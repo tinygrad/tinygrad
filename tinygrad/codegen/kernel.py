@@ -138,8 +138,8 @@ class Kernel:
 
     return ret
 
-  @staticmethod
-  def split(ast:LazyOp, opts:Optional[Renderer]=None) -> Tuple[Kernel, ...]:
+  def split(self) -> Tuple[Kernel, ...]:
+    ast = self.get_optimized_ast()
     parent, op = ast, ast.src[0] or None
     trees = [ast]
     while(op.src):
@@ -148,7 +148,7 @@ class Kernel:
         trees.append(op)
       parent = op
       op = op.src[0]
-    return tuple(Kernel(a, opts=opts) for a in trees)
+    return tuple(Kernel(a, opts=self.opts) for a in trees)
 
   @property
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
@@ -463,11 +463,11 @@ class Kernel:
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.SPLIT:
+      check(self.full_shape[axis] % amt == 0 and self.sts[self.full_buf_index].real_strides()[axis] != 0, "bad split candidate") 
       check(not self.vars, "can't split with symbolic shape")
       check(axis >= self.first_reduce and axis < self.shape_len-self.upcasted, "must be reduce axis to split")
       check(len(self.reduceops) == 1, "can't split with multiple reduces") # not yet
       self.shift_to(axis, amt, top=True, insert_before=self.first_reduce)
-      if DEBUG >= 3:print(f"split {amt}: {self.full_shape} -> {(1,)+self.full_shape[::-1]} -> {(1,)*self.shape_len}")
       self.reduce_split = True
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.shape_len-self.upcasted, "can't upcasted already upcasted")
@@ -680,8 +680,8 @@ class Kernel:
         idx = self.bufs.index(op.arg)
         arg = replace(op.arg, st=self.sts[idx] if apply_to_st is None else apply_to_st(self.sts[idx]))
         # fix store of a splitted reduce (globals changed)
-        if op.src and op.src[0] is LazyOp and op.src[0] == self.reduceop and self.reduce_split:
-          arg = MemBuffer(0, op.dtype, ShapeTracker.from_shape((self.full_shape[0], 1)))
+        if op.src and op.src[0] == self.reduceop and self.reduce_split:
+          arg = MemBuffer(0, op.dtype, ShapeTracker.from_shape((self.full_shape[0],) + (1,)*(self.shape_len-1)))
       elif op.op in ReduceOps:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
         arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
@@ -740,12 +740,11 @@ class Kernel:
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
           return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces))) 
         if self.reduce_split:
-          buf_shapes = ((1,), (self.full_shape[0],))
-          store_buf, load_buf = tuple(MemBuffer(i%2, op.dtype, ShapeTracker.from_shape(s)) for i,s in enumerate(buf_shapes))
-          reduce2 = LazyOp(op.op, (LazyOp(BufferOps.LOAD, (), load_buf),), (0,))
-          kernel2 = LazyOp(MetaOps.KERNEL, (LazyOp(BufferOps.STORE, (reduce2,), store_buf),))
-          op.src[0].src = (kernel2,) # insert kernel 2 after first reduce load
-          return LazyOp(op.op, op.src, (1,))
+          buf_shapes = (self.full_shape, (1,), (self.full_shape[0],))
+          load1, store2, load2 = tuple(MemBuffer(not i%2, op.dtype, ShapeTracker.from_shape(s)) for i,s in enumerate(buf_shapes))
+          reduce2 = LazyOp(op.op, (LazyOp(BufferOps.LOAD, (), load2),), (0,))
+          kernel2 = LazyOp(MetaOps.KERNEL, (LazyOp(BufferOps.STORE, (reduce2,), store2),))
+          return LazyOp(op.op, (LazyOp(BufferOps.LOAD, (kernel2,), load1),), (1,))
       elif op.op is MetaOps.KERNEL:
         arg = KernelInfo(self.local_dims, self.upcasted)
       else:
