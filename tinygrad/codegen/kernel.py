@@ -1,6 +1,6 @@
 from __future__ import annotations
 import itertools, functools
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict, Any
 
@@ -13,10 +13,8 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DE
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.uops import UOps, flops_mem
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.codegen.lowerer import lazyop_to_uop
-from dataclasses import dataclass
 from enum import Enum, auto
 
 class OptOps(Enum):
@@ -69,10 +67,8 @@ class Kernel:
       for op in ast: print(op)
       raise e
 
-    cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
-    def ordered_lazyops(op):
-      if op not in cached_ordered_lazyops: cached_ordered_lazyops[op] = dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
-      return cached_ordered_lazyops[op]
+    @functools.lru_cache(None)
+    def ordered_lazyops(op): return dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
     self.reduceops = dedup([x for x in ordered_lazyops(self.ast) if x.op in ReduceOps])
 
     self.vars = self.ast.vars()
@@ -329,24 +325,21 @@ class Kernel:
         if self.opts.device in {"AMD", "HIP"}:
           # NOTE: AMD requires locals first
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads:
-            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
           for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
             if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
         elif self.opts.device in {"METAL", "INTEL"}:
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
           for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
             if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads:
-            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
         elif self.opts.device in {"CUDA", "NV"}:
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
           # NOTE: LOCALS and UPCAST can be swapped here. it doesn't seem faster
           self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[0], 2), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads:
-            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
@@ -668,16 +661,16 @@ class Kernel:
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           if self.opts.device in {"AMD", "HIP"}:
-            reduce_axes, upcast_axis = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
+            reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
             # https://gpuopen.com/learn/wmma_on_rdna3/
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
             fix_st2 = None
           elif self.opts.device == "METAL":
-            reduce_axes, upcast_axis = [0], [[(1, 2)], [(1, 2)], [(1, 2)]]
+            reduce_axes, upcast_axes = [0], [[(1, 2)], [(1, 2)], [(1, 2)]]
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device in {"CUDA", "NV"}:
-            reduce_axes, upcast_axis = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
+            reduce_axes, upcast_axes = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
             fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
               ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
@@ -692,7 +685,7 @@ class Kernel:
 
           assert apply_to_st is None, "double tensor core? not supported"
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device,
-                      tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axis),
+                      tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axes),
                       tuple(self.first_upcast+ax for ax in reduce_axes))
           if self.use_tensor_cores >= 2:
             if self.use_tensor_cores == 3:
@@ -747,34 +740,17 @@ class Kernel:
 
   def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
-    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
+    self.uops.linearize(self.opts.extra_matcher)
+    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops.uops)
 
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{getenv('GITHUB_RUN_ATTEMPT')}"
       diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
 
-    # extract global/local sizes
-    if self.opts.has_local:
-      global_size: Optional[List[int]] = [1,1,1]
-      local_size: Optional[List[int]] = [1,1,1]
-      for u in self.uops.uops:
-        if u.op is UOps.SPECIAL:
-          if u.arg[0][0] == 'i': local_size = None
-          if u.arg[0][0] == 'l':
-            assert local_size is not None
-            local_size[int(u.arg[0][-1])] = u.arg[1]
-          else:
-            assert global_size is not None
-            global_size[int(u.arg[0][-1])] = u.arg[1]
-    else:
-      global_size, local_size = None, None
-
-    ops, mem = flops_mem(self.uops.uops, ignore_indexing=True)
-    run_count = prod((global_size or []) + (local_size or []))
     # group non-local MemBuffers by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
-    return Program(ansiname, src, self.opts.device, global_size, local_size, self.uops,
-                   ops * run_count, min(mem * run_count, mem_bytes), mem * run_count)
+    return Program(ansiname, src, self.opts.device, self.uops.uops, mem_estimate=mem_bytes,
+                   global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)

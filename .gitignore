@@ -1,5 +1,6 @@
 __pycache__
 .venv/
+.venv-*/
 .vscode
 .DS_Store
 notebooks

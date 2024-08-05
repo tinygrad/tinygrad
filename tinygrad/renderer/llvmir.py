@@ -3,7 +3,6 @@ from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Renderer
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
@@ -73,7 +72,7 @@ class LLVMRenderer(Renderer):
   has_shared = False
   global_max = None
 
-  def render(self, name:str, uops:UOpGraph) -> str:
+  def render(self, name:str, uops:List[UOp]) -> str:
     # all llvm stuff goes into a module
     module = ir.Module(name=__file__)
 
@@ -133,9 +132,9 @@ class LLVMRenderer(Renderer):
           reduce_phis.append(u)
         elif uop is UOps.LOAD:
           if len(src) > 2:
-            aug_idx = bb[-1].select(lvars[src[2]], lvars[src[1]], ir.Constant(ir.IntType(32), 0))
+            aug_idx = bb[-1].select(lvars[src[3]], lvars[src[1]], ir.Constant(ir.IntType(32), 0))
             val = bb[-1].load(bb[-1].gep(lvars[src[0]], [aug_idx], inbounds=True))
-            val = bb[-1].select(lvars[src[2]], val, lvars[src[3]])
+            val = bb[-1].select(lvars[src[3]], val, lvars[src[2]])
           else:
             val = bb[-1].load(bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
           lvars[u] = val
