@@ -675,7 +675,7 @@ def train_bert():
         os.remove(os.path.join(ckpt_dir, last))
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.end(key="checkpoint_stop", value=None, metadata={"step_num": i})
-        MLLOGGER.start(key=mllog_constants.BLOCK_START, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "epoch_count": 1, "samples_count": config["EVAL_BS"] * config["MAX_EVAL_STEPS"], "step_num": i, "first_step_num": i+1})
+        MLLOGGER.start(key=mllog_constants.BLOCK_START, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "epoch_count": 1, "samples_count": i * BS, "step_num": i, "first_step_num": i+1})
         previous_step = i
 
 def train_maskrcnn():
