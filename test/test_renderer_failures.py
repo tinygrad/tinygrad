@@ -36,7 +36,9 @@ class TestCStyleFailures(unittest.TestCase):
     alu = ld.alu(BinaryOps.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)))
     store = UOp.store(a, idx, alu)
     # CLANG doesn't use the max function
-    if Device.DEFAULT in ["CLANG"]: _test_uop_result([Tensor([1])], [store])
+    if Device.DEFAULT in ["CLANG"]:
+      ret = _test_uop_result([Tensor([1])], [store])[0]
+      assert ret[0] == 1
     # call to 'max' is ambiguous
     else:
       with self.assertRaises(CompileError): _test_uop_result([Tensor([1])], [store])
