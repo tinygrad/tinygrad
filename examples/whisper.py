@@ -1,7 +1,7 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys, base64, multiprocessing, itertools
-from typing import Optional, Union, Literal, List
+from typing import Optional, Union, Literal, List, Iterator
 
 from tinygrad import Tensor, TinyJit, Variable, nn
 from tinygrad.nn.state import torch_load, load_state_dict
@@ -171,7 +171,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
   log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
 
-  return log_spec
+  return Tensor(log_spec)
 
 LANGUAGES = {
   "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
@@ -236,53 +236,55 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   return model, enc
 
 def load_file_waveform(filename):
-  waveform, _ = librosa.load(filename, sr=RATE, duration=60*20)
-  return waveform
+  print(f'doing {int(librosa.get_duration(path=filename)+1)//SEGMENT_SECONDS + 1} segments')
+  for i in range(0, int(librosa.get_duration(path=filename)+1), SEGMENT_SECONDS):
+    waveform, _ = librosa.load(filename, sr=RATE, offset=i, duration=SEGMENT_SECONDS)
+    yield waveform
 
 def transcribe_file(model, enc, filename):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)])
 
-def transcribe_waveform(model:Whisper, enc, waveforms, truncate=False):
+def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=False, callback=None):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
   """
   N_audio = len(waveforms)
-  log_spec = prep_audio(waveforms, model.batch_size, truncate)
-
-  if log_spec.shape[-1] > FRAMES_PER_SEGMENT and N_audio > 1:
-    # we don't support multi-segment batching because the size of the prompt tokens would be different for each item in the batch
-    # if we really want this feature, we can consider padding or trimming prompt tokens of varying lengths to make them consistent
-    raise Exception("Multi-segment transcription not supported with batch audio input")
+  # log_spec = prep_audio(waveforms, model.batch_size, truncate)
 
   # TODO detect language
   start_tokens = ["<|startoftranscript|>", *(["<|en|>", "<|transcribe|>"] if model.is_multilingual else []), "<|notimestamps|>"]
   start_tokens = [enc._special_tokens[x] for x in start_tokens]
   transcription_start_index = len(start_tokens)
   eot = enc._special_tokens["<|endoftext|>"]
-  transcription_tokens = [np.array([], dtype=np.int32)] * log_spec.shape[0]
-
-  for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
+  transcription_tokens = [np.array([], dtype=np.int32)] * model.batch_size
+  # for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
+  for curr_frame, chunks in enumerate(zip(*waveforms, strict=True)):
+    print(f'{curr_frame=}')
+    if curr_frame > 0 and N_audio > 1: raise Exception("Multi segment streaming not supported for batch")
+    print(chunks)
     frame_reset = False
-    encoded_audio = model.encoder.encode(Tensor(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
+    log_spec = prep_audio(chunks, model.batch_size, truncate)
+    encoded_audio = model.encoder.encode(log_spec)
     pos = 0
-    curr_segment_tokens = np.tile(start_tokens, (log_spec.shape[0], 1))
+    curr_segment_tokens = np.tile(start_tokens, (model.batch_size, 1))
     if curr_frame > 0:
       # pass the previously inferred tokens as 'prompt' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
       prompt = np.concatenate((
         [enc._special_tokens["<|startofprev|>"]],
         transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:],
         start_tokens))
-      curr_segment_tokens = np.tile(prompt, (log_spec.shape[0], 1))
+      curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
       transcription_start_index = len(curr_segment_tokens[0])
 
     for i in range(model.decoder.max_tokens_to_sample):
       if pos >= model.decoder.max_tokens_to_sample * 2:
         if frame_reset or curr_frame == 0 or N_audio > 1: raise RuntimeError("Token overflow")
         frame_reset = True
+        if callback: callback(enc.decode(curr_segment_tokens[0][transcription_start_index:]))
         transcription_tokens[0] = np.concatenate((transcription_tokens[0], curr_segment_tokens[0][transcription_start_index:]))
         prompt = np.concatenate((start_tokens, transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:]))
-        curr_segment_tokens = np.tile(prompt, (log_spec.shape[0], 1))
+        curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
 
         transcription_start_index = len(curr_segment_tokens[0])
         out = model.decoder(Tensor(curr_segment_tokens), 0, encoded_audio, streaming=True)
@@ -299,6 +301,7 @@ def transcribe_waveform(model:Whisper, enc, waveforms, truncate=False):
     for i, t in enumerate(curr_segment_tokens):
       eot_index = np.where(t == eot)[0]
       eot_index = None if len(eot_index) == 0 else eot_index[0]
+      if callback: callback(enc.decode(t[transcription_start_index:eot_index]))
       transcription_tokens[i] = np.concatenate((transcription_tokens[i], t[transcription_start_index:eot_index]))
 
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip(), transcription_tokens))
@@ -322,7 +325,7 @@ if __name__ == "__main__":
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
 
   if len(sys.argv) > 1:
-    print(transcribe_file(model, enc, sys.argv[1]))
+    transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1])], callback=lambda x:print(x,end='',flush=True))
   else:
     # online
     q = multiprocessing.Queue()
