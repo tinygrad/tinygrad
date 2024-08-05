@@ -659,7 +659,7 @@ def train_retinanet():
       if WANDB:
           wandb.log({"eval/acc": eval_acc, "eval/total_time": eval_time, "epoch": epoch})
       if getenv("RESET_STEP", 1): val_step.reset()
-
+      if EVAL_ONLY: break
       if eval_acc>MAP_TARGET:
         print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch, eval_acc)
         break
