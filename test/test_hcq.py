@@ -136,6 +136,8 @@ class TestHCQ(unittest.TestCase):
 
   # Test copy
   def test_copy(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
     TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
                                 .copy(TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr, 8) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
