@@ -70,6 +70,7 @@ class MetalAllocator(LRUAllocator):
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): opaque.buf.release()
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
+    dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer()
     encoder = src_command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src.buf, src.offset, dest.buf, dest.offset, sz)
