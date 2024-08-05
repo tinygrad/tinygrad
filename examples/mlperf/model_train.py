@@ -578,7 +578,7 @@ def train_retinanet():
     if not EVAL_ONLY:
       print(colored(f'EPOCH {epoch} trained in a total of {train_time / 60:4.2f} minutes', 'red'))
       if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-      fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
+      fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_S{SYNCBN}_E{epoch}.safe"
       state_dict = get_state_dict(model)
       safe_save(state_dict, fn)
       print(f" *** Model saved to {fn} ***")
