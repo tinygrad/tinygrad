@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Union, Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, DTypeLike, ConstType, to_dtype
-from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata
+from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP
 from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, reduce_st
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -184,7 +184,7 @@ class LazyBuffer:
       return self.const(self.base.arg * {ReduceOps.SUM: prod(self.shape[i] for i in axis), ReduceOps.MAX: 1}[op], new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
-    if not getenv("SPLIT_REDUCEOP", 1) or not all_int(self.shape) or (0 in self.shape) or \
+    if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
       prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
 

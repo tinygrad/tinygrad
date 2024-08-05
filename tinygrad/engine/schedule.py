@@ -302,6 +302,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is r}
     if DEBUG_ARANGE:=(getenv("DEBUG_ARANGE")): print(f"checking {r} {group=}")
     if any(tr.forced_realize for tr in group) or any(x.base in group for x in outs): continue
+    kernel_children = {c for tr in group for c in children[tr] if c.op not in {MetaOps.COPY, MetaOps.VIEW}}
+    if len(kernel_children) == 0: continue
     if DEBUG_ARANGE: print(colored(f"folding {r}", "green"))
     for tr in group: del realizes[tr]
 
