@@ -10,15 +10,15 @@
 #     Command: python3 pick_eval_samples.py --input_tfrecord=/path/to/eval.tfrecord --output_tfrecord=/path/to/output_eval.tfrecord
 
 # 3.  Run `wikipedia.py` to preprocess the data with tinygrad (Use python > 3.7)
-#     Command: BASEDIR=/path/to/basedir python3 wikipedia.py pre-train XXX (NOTE: part number needs to match part of step 2)
-#     This will output to /path/to/basedir/train/XXX
+#     Command: BASEDIR=/path/to/basedir python3 wikipedia.py pre-train X (NOTE: part number needs to match part of step 2)
+#     This will output to /path/to/basedir/train/X.pkl
 #
 # 3.1 For eval:
 #     Command: BASEDIR=/path/to/basedir python3 wikipedia.py pre-eval
-#     This will output to /path/to/basedir/eval
+#     This will output to /path/to/basedir/eval.pkl
 
 # 4.  Run this script to verify the correctness of the preprocessing script for specific part
-#     Command: python3 external_test_preprocessing_part.py --preprocessed_part_dir=/path/to/basedir/part --tf_records=/path/to/output.tfrecord
+#     Command: python3 external_test_preprocessing_part.py --preprocessed_part=/path/to/basedir/train/X.pkl --tf_records=/path/to/output.tfrecord
 import os, argparse, pickle
 from tqdm import tqdm
 
@@ -51,23 +51,20 @@ def load_dataset(file_path, max_seq_length=512, max_predictions_per_seq=76):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Verify the correctness of the preprocessing script for specific part",
                                    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument("--preprocessed_part_dir", type=str, default=None,
-                      help="Path to dir with preprocessed samples from `wikipedia.py`")
+  parser.add_argument("--preprocessed_part", type=str, default=None,
+                      help="Path to preprocessed samples file from `wikipedia.py`")
   parser.add_argument("--tf_records", type=str, default=None,
                       help="Path to TFRecords file from `create_pretraining_data.py` (Reference implementation)")
-  parser.add_argument("--max_seq_length", type=int, default=512, help="Max sequence length. For MLPerf keep it as 512")
-  parser.add_argument("--max_predictions_per_seq", type=int, default=76, help="Max predictions per sequence. For MLPerf keep it as 76")
+  parser.add_argument("--max_seq_length", type=int, default=512, help="Max sequence length. For MLPerf keep it at 512")
+  parser.add_argument("--max_predictions_per_seq", type=int, default=76, help="Max predictions per sequence. For MLPerf keep it at 76")
   parser.add_argument("--is_eval", type=bool, default=False, help="Whether to run eval or train preprocessing")
   args = parser.parse_args()
 
-  assert os.path.isdir(args.preprocessed_part_dir), f"The specified directory {args.preprocessed_part_dir} does not exist."
+  assert os.path.isfile(args.preprocessed_part), f"The specified file {args.preprocessed_part} does not exist."
   assert os.path.isfile(args.tf_records), f"The specified TFRecords file {args.tf_records} does not exist."
 
-  preprocessed_samples = []
-  for file_name in sorted(os.listdir(args.preprocessed_part_dir), key=lambda x: int(x.split("_")[1]) if not args.is_eval else int(x.split(".")[0])): # 0_3.pkl -> 3 # noqa: E501
-    with open(os.path.join(args.preprocessed_part_dir, file_name), 'rb') as f:
-      samples = pickle.load(f)
-      preprocessed_samples.extend(samples)
+  with open(args.preprocessed_part, 'rb') as f:
+    preprocessed_samples = pickle.load(f)
 
   dataset = load_dataset(args.tf_records, args.max_seq_length, args.max_predictions_per_seq)
   tf_record_count = sum(1 for _ in dataset)
