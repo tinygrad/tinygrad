@@ -82,12 +82,12 @@ class TestIndexing(unittest.TestCase):
       #assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
-  def test_index_fused(self):
+  def test_index_fused(self, noopt=1):
     dataset = Tensor.rand(16384, 256).realize()
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
-    with Context(NOOPT=1, FUSE_ARANGE=1):
+    with Context(NOOPT=noopt, FUSE_ARANGE=1):
       GlobalCounters.reset()
       X = dataset[idxs]
       assert X.shape == (4,256)
@@ -96,6 +96,23 @@ class TestIndexing(unittest.TestCase):
       run_schedule(sched)
       assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
     np.testing.assert_allclose(real_index, X.numpy())
+  @unittest.skip("not ready")
+  def test_index_fused_opt(self): self.test_index_fused(0)
+
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
+  def test_index_mnist(self, noopt=1):
+    from tinygrad.nn.datasets import mnist
+    X_train, Y_train, _, _ = mnist()
+    with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+      GlobalCounters.reset()
+      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
+      x = X_train[samples].numpy()
+      y = Y_train[samples].numpy()
+      assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
+    np.testing.assert_allclose(X_train.numpy()[samples.numpy()], x)
+    np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
+  @unittest.skip("not ready")
+  def test_index_mnist_opt(self): self.test_index_mnist(0)
 
 if __name__ == "__main__":
   unittest.main()
