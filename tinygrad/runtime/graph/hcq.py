@@ -11,7 +11,7 @@ class HCQGraph(MultiGraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
-    self.bufs_stirde, self.vars_stride = (2, 4) if self.devices[0].dname.startswith('QCOM') else (1, 1)
+    self.bufs_stride, self.vars_stride = (2, 4) if self.devices[0].dname.startswith('QCOM') else (1, 1)
 
     # Allocate kernel args.
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
@@ -31,8 +31,8 @@ class HCQGraph(MultiGraphRunner):
       kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
 
       ji.prg.clprg.fill_kernargs([cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], self.kargs_addrs[j])
-      self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset, len(ji.bufs) * 8 * self.bufs_stirde).cast('Q')
-      self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset + len(ji.bufs) * 8 * self.bufs_stirde,
+      self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset, len(ji.bufs) * 8 * self.bufs_stride).cast('Q')
+      self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset + len(ji.bufs) * 8 * self.bufs_stride,
                                    len(ji.prg.p.vars) * 4 * self.vars_stride).cast('I')
 
     # Schedule Dependencies.
