@@ -15,7 +15,6 @@ REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 RUN_ID = os.getenv("GITHUB_RUN_ID", "HEAD")
 TABLE_NAME = f"process_replay_{RUN_ID}_{getenv('GITHUB_RUN_ATTEMPT')}_{VERSION}"
-REF_TABLE_NAME = f"process_replay_master_{VERSION}"
 ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
 if REF == "master": ASSERT_DIFF = False
 COMPARE_SCHEDULE = getenv("COMPARE_SCHEDULE", int((k:="[compare_schedule]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")))
@@ -74,10 +73,10 @@ def diff_kernel(offset:int, ref_schedule:List[LazyOp], kernel_changed):
   conn.commit()
   cur.close()
 
-def get_ref_schedule(offset:int, ref_schedule):
+def get_ref_schedule(offset:int, ref_table_name:str, ref_schedule):
   conn = sqlite3.connect("/tmp/process_replay/process_replay.db")
   cur = conn.cursor()
-  cur.execute(f"SELECT val FROM '{REF_TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
+  cur.execute(f"SELECT val FROM '{ref_table_name}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   for row in cur.fetchall(): ref_schedule.append(pickle.loads(row[0])[0])
   conn.commit()
   cur.close()
@@ -122,12 +121,13 @@ def process_replay():
   if COMPARE_SCHEDULE:
     logging.info("fetching process replay reference")
     # TODO: make this run_id dynamic
-    download_artifact("10093148840", f"process_replay_{Device.DEFAULT.lower()}.db", f"{TEMP_DIR}/schedule")
+    download_artifact("10253655789", f"process_replay_{os.getenv('BACKEND'), Device.DEFAULT}.db", f"{TEMP_DIR}/schedule")
     ref_conn = sqlite3.connect(f"{TEMP_DIR}/schedule/process_replay.db")
-    row_count = ref_conn.execute(f"select count(*) from '{REF_TABLE_NAME}'").fetchone()[0]
+    ref_table_name = ref_conn.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchone()[0]
+    row_count = ref_conn.execute(f"select count(*) from '{ref_table_name}'").fetchone()[0]
     processes = []
     for i in tqdm(range(0, row_count, PAGE_SIZE)):
-      processes.append(p:=multiprocessing.Process(target=get_ref_schedule, args=(i, ref_schedule)))
+      processes.append(p:=multiprocessing.Process(target=get_ref_schedule, args=(i, ref_table_name, ref_schedule)))
       p.start()
     for p in processes: p.join()
     ref_conn.close()

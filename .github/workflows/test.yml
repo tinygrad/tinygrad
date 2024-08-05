@@ -230,6 +230,7 @@ jobs:
         run: |
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+          export BACKEND=${{ matrix.task }}
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
       - name: Create process replay ref
         if: github.ref == 'refs/heads/master'
@@ -336,6 +337,7 @@ jobs:
       run: |
         export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
         export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+        export BACKEND=METAL
         cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
     - name: Create process replay ref
       if: github.ref == 'refs/heads/master'
@@ -537,6 +539,7 @@ jobs:
           fi
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+          export BACKEND=${{ matrix.backend }}
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
       - name: Create process replay ref
         if: github.ref == 'refs/heads/master'
