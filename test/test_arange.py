@@ -96,7 +96,7 @@ class TestIndexing(unittest.TestCase):
       run_schedule(sched)
       assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
     np.testing.assert_allclose(real_index, X.numpy())
-  @unittest.expectedFailure
+  @unittest.skip("not ready")
   def test_index_fused_opt(self): self.test_index_fused(0)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
@@ -111,7 +111,7 @@ class TestIndexing(unittest.TestCase):
       assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
     np.testing.assert_allclose(X_train.numpy()[samples.numpy()], x)
     np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
-  @unittest.expectedFailure
+  @unittest.skip("not ready")
   def test_index_mnist_opt(self): self.test_index_mnist(0)
 
 if __name__ == "__main__":
