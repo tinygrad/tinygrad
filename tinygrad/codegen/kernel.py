@@ -465,8 +465,7 @@ class Kernel:
     elif opt.op is OptOps.SPLIT:
       check(self.full_shape[axis] % amt == 0 and self.sts[self.full_buf_index].real_strides()[axis] != 0, "bad split candidate") 
       check(not self.vars, "can't split with symbolic shape")
-      check(axis >= self.first_reduce and axis < self.shape_len-self.upcasted, "must be reduce axis to split")
-      check(len(self.reduceops) == 1, "can't split with multiple reduces") # not yet
+      check(axis >= self.first_reduce and axis < self.shape_len-self.upcasted and len(self.reduceops) == 1, "must be the only reduce axis to split")
       self.shift_to(axis, amt, top=True, insert_before=self.first_reduce)
       self.reduce_split = True
     elif opt.op is OptOps.UNROLL:                     # purple
@@ -744,7 +743,7 @@ class Kernel:
           load1, store2, load2 = tuple(MemBuffer(not i%2, op.dtype, ShapeTracker.from_shape(s)) for i,s in enumerate(buf_shapes))
           reduce2 = LazyOp(op.op, (LazyOp(BufferOps.LOAD, (), load2),), (0,))
           kernel2 = LazyOp(MetaOps.KERNEL, (LazyOp(BufferOps.STORE, (reduce2,), store2),))
-          return LazyOp(op.op, (LazyOp(BufferOps.LOAD, (kernel2,), load1),), (1,))
+          return LazyOp(op.op, (LazyOp(BufferOps.LOAD, (kernel2,), load1),), tuple(range(1, self.shape_len)))
       elif op.op is MetaOps.KERNEL:
         arg = KernelInfo(self.local_dims, self.upcasted)
       else:
