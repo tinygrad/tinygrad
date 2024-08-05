@@ -296,6 +296,10 @@ class CUDARenderer(CStyleLanguage):
     if any(uop.dtype == dtypes.bfloat16 for uop in uops):
       prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", x, x*2) for x in [4, 8]]
 
+    for uop in uops:
+      if uop.dtype == dtypes.half: prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", x, x*2) for x in [4, 8]]
+      if uop.dtype == dtypes.bfloat16: prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", x, x*2) for x in [4, 8]]
+
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       fn, ti, to, ci, co = arg[0], dt_map[arg[2]][0], dt_map[arg[3]][0], dt_map[arg[2]][1], dt_map[arg[3]][1]
