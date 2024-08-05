@@ -90,7 +90,7 @@ class CStyleLanguage(Renderer):
 
   def render_local(self, name:str, dtype:DType, size:int): return self.smem_align + self.smem_prefix + f"{self.render_dtype(dtype)} {name}[{size}];"
   def render_dtype(self, var_dtype:DType) -> str:
-    return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(count) if (count:=var_dtype.count) > 1 else "")
+    return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(var_dtype.count) if (var_dtype.count) > 1 else "")
 
   def render(self, name:str, uops:List[UOp]) -> str:
     kernel = []
