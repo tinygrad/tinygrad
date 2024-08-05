@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps, verify_lazyop
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -496,7 +496,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
-  @unittest.skipUnless(getenv("SPLIT_REDUCEOP", 1), "Testing split reducop requires SPLIT_REDUCEOP")
+  @unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
     x = Tensor.randn(big_enough).realize()
