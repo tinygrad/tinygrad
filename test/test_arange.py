@@ -15,6 +15,7 @@ class TestArange(unittest.TestCase):
       for o in opts: k.apply_opt(o)
     p = k.to_program()
     print(p.name)
+    print(p.src)
     return p.op_estimate
 
   def test_complexity(self, opts=None):
