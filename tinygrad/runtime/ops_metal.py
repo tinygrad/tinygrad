@@ -76,9 +76,9 @@ class MetalAllocator(LRUAllocator):
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src.buf, src.offset, dest.buf, dest.offset, sz)
     encoder.endEncoding()
     if src_dev != dest_dev:
-      src_command_buffer.encodeSignalEvent(src_dev.timeline_signal, src_dev.timeline_value)
+      src_command_buffer.encodeSignalEvent_value_(src_dev.timeline_signal, src_dev.timeline_value)
       dest_command_buffer = dest_dev.mtl_queue.commandBuffer()
-      dest_command_buffer.encodeWaitForEvent(src_dev.timeline_signal, src_dev.timeline_value)
+      dest_command_buffer.encodeWaitForEvent_value_(src_dev.timeline_signal, src_dev.timeline_value)
       dest_command_buffer.commit()
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
       src_dev.timeline_value += 1
