@@ -381,7 +381,6 @@ def train_retinanet():
 
   from extra.models import retinanet
   from extra.models import resnet
-  from tinygrad.nn import BatchNorm2d
   from examples.hlb_cifar10 import UnsyncedBatchNorm
   from tinygrad.multi import MultiLazyBuffer
   from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
@@ -403,7 +402,14 @@ def train_retinanet():
   resnet.Conv2d = Conv2dHeNormal
   resnet.Linear = Linear
   if SYNCBN:
-    class CustBatchNorm(BatchNorm2d):
+    class CustBatchNorm:
+      def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+        self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
+        if affine: self.weight, self.bias = Tensor.ones(sz, dtype=dtypes.float32), Tensor.zeros(sz, dtype=dtypes.float32)
+        else: self.weight, self.bias = None, None
+
+        self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=dtypes.float32), Tensor.ones(sz, requires_grad=False, dtype=dtypes.float32)
+        self.num_batches_tracked = Tensor.zeros(1, requires_grad=False, dtype=dtypes.int)
       def __call__(self, x:Tensor):
         batch_mean = self.running_mean
         batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
@@ -443,7 +449,7 @@ def train_retinanet():
     else: v.requires_grad = False
     if not SYNCBN and ("running_mean" in k or "running_var" in k): v.realize().shard_(GPUS, axis=0)
     else: v.realize().to_(GPUS)
- 
+
   parameters = get_parameters(model)
   optimizer = Adam(parameters, lr=LR)
 
