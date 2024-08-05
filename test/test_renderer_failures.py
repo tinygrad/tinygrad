@@ -35,10 +35,11 @@ class TestCStyleFailures(unittest.TestCase):
     ld = UOp(UOps.LOAD, dtypes.int, (b, idx))
     alu = ld.alu(BinaryOps.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)))
     store = UOp.store(a, idx, alu)
+    # CLANG doesn't use the max function
+    if Device.DEFAULT in ["CLANG"]: _test_uop_result([Tensor([1])], [store])
     # call to 'max' is ambiguous
-    if Device.DEFAULT in ["METAL", "GPU"]:
+    else:
       with self.assertRaises(CompileError): _test_uop_result([Tensor([1])], [store])
-    else: _test_uop_result([Tensor([1])], [store])
 
 if __name__ == '__main__':
   unittest.main()
