@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
-from typing import List, Set, Any, Tuple, Optional
+from typing import List, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
@@ -70,24 +70,19 @@ class MetalAllocator(LRUAllocator):
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): opaque.buf.release()
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
-    if src_dev != dest_dev:
-      command_buffer = dest_dev.mtl_queue.commandBuffer()
-      command_buffer.encodeSignalEvent(dest_dev.timeline_signal, dest_dev.timeline_value)
-      command_buffer.encodeWaitForEvent(src_dev.timeline_signal, src_dev.timeline_value)
-      command_buffer.commit()
-      dest_dev.mtl_buffers_in_flight.append(command_buffer)
-      dest_dev.timeline_value += 1
-
-    command_buffer = src_dev.mtl_queue.commandBuffer()
-    if src_dev != dest_dev: command_buffer.encodeWaitForEvent(dest_dev.timeline_signal, dest_dev.timeline_value)
-    encoder = command_buffer.blitCommandEncoder()
+    src_command_buffer = src_dev.mtl_queue.commandBuffer()
+    encoder = src_command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src.buf, src.offset, dest.buf, dest.offset, sz)
     encoder.endEncoding()
     if src_dev != dest_dev:
-      command_buffer.encodeSignalEvent(src_dev.timeline_signal, src_dev.timeline_value)
+      src_command_buffer.encodeSignalEvent(src_dev.timeline_signal, src_dev.timeline_value)
+      dest_command_buffer = dest_dev.mtl_queue.commandBuffer()
+      dest_command_buffer.encodeWaitForEvent(src_dev.timeline_signal, src_dev.timeline_value)
+      dest_command_buffer.commit()
+      dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
       src_dev.timeline_value += 1
-    command_buffer.commit()
-    self.device.mtl_buffers_in_flight.append(command_buffer)
+    src_command_buffer.commit()
+    src_dev.mtl_buffers_in_flight.append(src_command_buffer)
   def from_buffer(self, src:memoryview) -> Optional[Any]:
     ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, src.nbytes, Metal.MTLResourceStorageModeShared, None)
     if ret: self.device.mv_in_metal.append(src)
