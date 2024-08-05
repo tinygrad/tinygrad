@@ -5,7 +5,6 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
@@ -50,6 +49,7 @@ class CStyleLanguage(Renderer):
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     elif dtype.scalar() == dtypes.bool: val = "1" if x else "0"
     elif dtype.scalar() == dtypes.float: val = f"{x}f"
+    elif dtype.scalar() == dtypes.uint64: val = f"{x}ULL"
     else: val = str(x)
     if dtype.count > 1: return self.render_vectorize([val] * dtype.count, dtype)
     return (self.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
@@ -65,8 +65,8 @@ class CStyleLanguage(Renderer):
       return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{self.render_dtype(buf_dtype)}{output_dtype.count}*)({buf_name}+{idx}))"  # noqa: E501
     return f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
 
-  def get_kernel_modifier(self, uops:UOpGraph) -> str: return ""
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:UOpGraph, prefix=None) -> str:
+  def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
                 ("" if mutable else "const ")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
@@ -91,9 +91,9 @@ class CStyleLanguage(Renderer):
   def render_local(self, name:str, dtype:DType, size:int): return self.smem_align + self.smem_prefix + f"{self.render_dtype(dtype)} {name}[{size}];"
   def render_dtype(self, var_dtype:DType) -> str: return self.type_map.get(var_dtype, var_dtype.name)
 
-  def render(self, name:str, uops:UOpGraph) -> str:
+  def render(self, name:str, uops:List[UOp]) -> str:
     kernel = []
-    bufs: List[Tuple[str, Tuple[DType, bool]]] = []
+    bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
     depth = 1
     def kk(s): kernel.append("  "*depth+s)
 
@@ -122,6 +122,8 @@ class CStyleLanguage(Renderer):
         kk("}")
       elif uop is UOps.STORE:
         assert src[0].dtype is not None and src[2].dtype is not None
+        # mark DEFINE_GLOBAL buf as writable
+        if src[0].op is UOps.DEFINE_GLOBAL: bufs[src[0]] = (bufs[src[0]][0], (bufs[src[0]][1][0], True))
         rendered_store = self.render_store(r[src[0]], src[0].dtype, r[src[2]], src[2].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
         kk(f"if ({r[src[3]]}) {{ {rendered_store} }}" if len(src) > 3 else rendered_store)
       else:
@@ -144,12 +146,12 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_VAR:
           assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
           seen_vars.add(args.expr)
-          bufs.append((args.expr, (dtype,False)))
+          bufs[u] = (args.expr, (dtype,False))
           r[u] = args.expr
         elif uop is UOps.LOAD:
           val = self.render_load(dtype, r[src[0]], src[0].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
           # NOTE: this relies on the load not happening if it's in the unselected branch
-          if len(src) > 3 and src[2].op is UOps.ALU: val = self.code_for_op[TernaryOps.WHERE](r[src[2]], val, r[src[3]], dtype)
+          if len(src) > 3 and src[3].op is UOps.ALU: val = self.code_for_op[TernaryOps.WHERE](r[src[3]], val, r[src[2]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
           kk(f"{r[src[0]]} = {r[src[1]]};")
@@ -168,7 +170,7 @@ class CStyleLanguage(Renderer):
           kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_GLOBAL:
-          bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
+          bufs[u] = (nm:=f"data{args}", (dtype, False))
           r[u] = nm
         elif uop is UOps.WMMA:
           kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}{'' if self.device == 'CLANG' else f', {r[src[2]]}'});") # noqa:E501
@@ -177,10 +179,12 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
-          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + (f"[{args}]" if src[0].dtype.count > 4 or self.device == 'CLANG' else f".{'xyzw'[args]}") # noqa:E501
+          r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + \
+            (f"[{args}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) or self.device == 'CLANG' else f".{'xyzwabcd'[args]}")
         else: raise RuntimeError(f"failed to render {u}")
 
-    return self.render_kernel(name, kernel, bufs, uops)
+    # NOTE: this relies on bufs dict preserving order
+    return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
 def _make_clang_dtype(dtype):
   return f"typedef {dtype.scalar().name} {dtype.name} __attribute__((vector_size({dtype.count*dtype.scalar().itemsize})));"
@@ -274,9 +278,9 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
 _nms = "xyzwabcdefghijkl"
-def _make_cuda_dtype(base_type, name, cnt):
+def _make_cuda_dtype(base_type, name, cnt, align):
   vec, elems, header = f"{name}{cnt}", ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
-  return f"struct {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
+  return f"struct __align__({align}) {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
@@ -303,10 +307,10 @@ class CUDARenderer(CStyleLanguage):
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     if any(uop.dtype == dtypes.half for uop in uops):
-      prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", "half", x) for x in [4, 8]]
+      prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", "half", x, x*2) for x in [4, 8]]
 
     if any(uop.dtype == dtypes.bfloat16 for uop in uops):
-      prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", "bfloat16", x) for x in [4, 8]]
+      prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", "bfloat16", x, x*2) for x in [4, 8]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
@@ -318,7 +322,7 @@ return c;}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
-  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+  def get_kernel_modifier(self, uops:List[UOp]) -> str:
     maxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
@@ -407,7 +411,7 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+  def get_kernel_modifier(self, uops:List[UOp]) -> str:
     requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == "l")
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters

@@ -295,7 +295,7 @@ class RMSNorm:
   """
   def __init__(self, dim, eps=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
 
-  def _norm(self, x:Tensor): return x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()
+  def _norm(self, x:Tensor): return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
 
   def __call__(self, x:Tensor) -> Tensor: return self._norm(x.float()).cast(x.dtype) * self.weight
 
