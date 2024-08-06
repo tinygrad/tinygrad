@@ -107,9 +107,12 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   quotient, remainder, something_changed, factor = [], [], False, c
   for u in _get_add_chain(x):
     if u.op is UOps.CONST:
-      if u.arg%c == 0:
-        if (q:=u.arg//c): quotient.append(u.const(q))
+      if u.arg%c == 0 or c <= abs(u.arg):
         something_changed = True
+        if (q:=u.arg//c): quotient.append(u.const(q))
+        if (r:=u.arg%c):
+          remainder.append(u.const(r))
+          factor = math.gcd(factor, u.arg)
       else:
         remainder.append(u)
         factor = math.gcd(factor, u.arg)
