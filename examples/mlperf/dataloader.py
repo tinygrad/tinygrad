@@ -585,12 +585,9 @@ if __name__ == "__main__":
         pbar.update(x.shape[0])
   def load_retinanet(val):
     from extra.datasets.openimages import get_retinanet_train_files, get_retinanet_val_files
-    from examples.mlperf.helpers import anchor_generator
-    feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
-    ANCHORS = anchor_generator((10,3,800,800), feature_shapes)
-    ANCHOR_NP = ANCHORS[0].numpy()
+    from extra.models.retinanet import generate_anchors
+    ANCHOR_NP = np.concatenate(generate_anchors((800,800)), axis=0)
     files = get_retinanet_val_files() if val else get_retinanet_train_files()
-    cnt=0
     with tqdm(total=len(files)) as pbar:
       for x in batch_load_retinanet(96, val=val, anchor_np=ANCHOR_NP, pad_first_batch=False):
         pbar.update(x[0].shape[0])

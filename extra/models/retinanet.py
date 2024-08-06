@@ -43,7 +43,10 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
-def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
+def generate_anchors(input_size):
+  grid_sizes = np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
+  scales = tuple((i, int(i*2**(1/3)), int(i*2**(2/3))) for i in [32,  64, 128, 256, 512])
+  aspect_ratios = ((0.5, 1.0, 2.0),) * len(scales)
   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
   anchors = []
   for s, ar, gs in zip(scales, aspect_ratios, grid_sizes):
@@ -71,7 +74,7 @@ class RetinaNet:
 
     self.backbone = ResNetFPN(backbone)
     self.head = RetinaHead(self.backbone.out_channels, num_anchors=num_anchors, num_classes=num_classes)
-    self.anchor_gen = lambda input_size: generate_anchors(input_size, self.backbone.compute_grid_sizes(input_size), scales, aspect_ratios)
+    self.anchors_np = generate_anchors((800,800))
 
   def __call__(self, x, split=False):
     return self.forward(x, split)
@@ -104,7 +107,6 @@ class RetinaNet:
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
   @line_profiler.profile
   def postprocess_detections(self, offsets, scores, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
-    anchors = self.anchor_gen(input_size)
     detections = []
     for i in range(offsets[0].shape[0]):
       h, w = input_size if image_sizes is None else image_sizes[i]
@@ -113,7 +115,7 @@ class RetinaNet:
       scores_per_image = [cl[i] for cl in scores]
 
       image_boxes, image_scores, image_labels = [], [], []
-      for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
+      for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, self.anchors_np):
         # remove low scoring boxes
         topk_idxs = np.where(scores_per_level > score_thresh)[0]
         scores_per_level = scores_per_level[topk_idxs]
