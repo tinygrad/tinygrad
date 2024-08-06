@@ -19,11 +19,18 @@ WAIT_REG_MEM_FUNCTION_ALWAYS = 0
 WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-try:
-  remu = ctypes.CDLL("/usr/local/lib/libremu.so")
-  remu.run_asm.restype = ctypes.c_int32
-  remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
-except Exception: pass
+REMU_PATHS = ["libremu.so", "/usr/local/lib/libremu.so"]
+def _try_dlopen_remu():
+  for path in REMU_PATHS:
+    try:
+      remu = ctypes.CDLL(path)
+      remu.run_asm.restype = ctypes.c_int32
+      remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+    except OSError: pass
+    else: return remu
+  print("Could not find libremu.so")
+  return None
+remu = _try_dlopen_remu()
 
 def create_sdma_packets():
   # TODO: clean up this, if we want to keep it
