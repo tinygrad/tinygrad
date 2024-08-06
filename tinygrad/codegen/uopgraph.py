@@ -60,6 +60,7 @@ def fold_expanded(ex, buf):
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
 def vectorize_reduce(vec:UOp):
+  if all_same(vec.src): return None  # don't REDUCE the same thing multiple times
   if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None
   return UOp(UOps.REDUCE, vec.dtype, (UOp(UOps.VECTORIZE, vec.dtype, tuple(x.src[0] for x in vec.src)),) + vec.src[0].src[1:], vec.src[0].arg)
 
@@ -195,9 +196,6 @@ constant_folder = PatternMatcher([
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
   (NOp(UOps.ALU, dtype=dtypes.uint64, src=(NOp.var("x"), NOp.var("seed")), arg=BinaryOps.THREEFRY), threefry2x32),
-  # don't REDUCE the same thing multiple times
-  (UPat(UOps.REDUCE, name='red', src=(UPat(UOps.VECTORIZE, src=UPat(name='x')),), allow_any_len=True),
-    lambda red, x: UOp(UOps.VECTORIZE, red.dtype, (nr:=UOp(UOps.REDUCE, x.dtype, (x,)+red.src[1:], red.arg),)+(nr,)*(red.dtype.count-1))),
   # extra arange loop folding because we don't fold adds. TODO: fold adds
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2") + NOp.var("idx3"))
