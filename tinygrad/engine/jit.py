@@ -8,8 +8,7 @@ from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint, sym_infer
-from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner
-from tinygrad.engine.schedule import _internal_memory_planner
+from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner, _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from dataclasses import dataclass
 from weakref import WeakKeyDictionary
