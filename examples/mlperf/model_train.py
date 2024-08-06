@@ -379,6 +379,7 @@ def train_retinanet():
   from extra.models import retinanet
   from extra.models import resnet
   from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal, BatchNormRetinanet, UnSyncedBatchNormRetinanet
+  from examples.mlperf.helpers import anchor_generator
   from tinygrad.nn.optim import Adam
   from extra.datasets.openimages import openimages, get_retinanet_train_files, get_retinanet_val_files
   from examples.mlperf.dataloader import batch_load_retinanet
@@ -452,13 +453,16 @@ def train_retinanet():
       scores.append(s[:,:,4:].reshape(BS_EVAL, -1).to(GPUS[0]).realize())
     return *offsets, *scores
 
-  ANCHOR_NP = np.concatenate(model.anchors_np, axis=0)
-  ANCHORS = Tensor(np.broadcast_to(ANCHOR_NP, (BS, 120087, 4))).shard(GPUS, axis=0)
+  feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
+  ANCHORS = anchor_generator((BS,3,800,800), feature_shapes)
+  ANCHORS_STACK = Tensor.stack(*ANCHORS)
+  ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
+  ANCHOR_NP = ANCHORS[0].numpy()
   PAD_MASK_ONES = Tensor.ones(BS).shard(GPUS, axis=0)
   if PART_BATCH:
     pl = round_up(len(train_files), BS) - len(train_files)
     PAD_MASK = Tensor([0]*pl+[1]*(BS-pl)).shard(GPUS, axis=0)
-  mdl_reg_loss = lambda r, m, b, pm: model.head.regression_head.loss(r, ANCHORS, m, b, pm)
+  mdl_reg_loss = lambda r, m, b, pm: model.head.regression_head.loss(r, ANCHORS_STACK, m, b, pm)
   mdl_class_loss = lambda c, m, l, pm: model.head.classification_head.loss(c, m, l, pm)
   out_placeholder_shapes = [(BS_EVAL,90000,4), (BS_EVAL,22500,4), (BS_EVAL,5625,4), (BS_EVAL,1521,4), (BS_EVAL,441,4),
                             (BS_EVAL, 23760000), (BS_EVAL, 5940000), (BS_EVAL, 1485000), (BS_EVAL, 401544), (BS_EVAL, 116424)]
