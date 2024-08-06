@@ -1,26 +1,13 @@
 from __future__ import annotations
-import subprocess, hashlib, tempfile, ctypes, ctypes.util, functools, re
-from pathlib import Path
+import ctypes, ctypes.util, functools
 from typing import Tuple, Optional, List
-import tinygrad.runtime.autogen.cuda as cuda
-import tinygrad.runtime.autogen.nvrtc as nvrtc
-from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, init_c_struct_t, colored
-from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
+from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
+from tinygrad.device import Compiled, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.assembly import PTXRenderer
+from tinygrad.runtime.autogen import cuda
+from tinygrad.runtime.support.compiler_cuda import cuda_disassemble, pretty_ptx, CUDACompiler, PTXCompiler, PTX
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
-
-def pretty_ptx(s):
-  # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
-  s = re.sub(r'([!@<\[\s,\+\-;\n])((?:[_%$][\w%\$_]+(?:\.[xyz])?\:?)|(?:buf\d+))([<>\]\s,\+\-;\n\)])', lambda m:m[1]+colored(m[2], "blue")+m[3], s, flags=re.M) # identifiers  # noqa: E501
-  s = re.sub(r'(.)((?:b|s|u|f)(?:8|16|32|64)|pred)([\.\s])', lambda m:m[1]+colored(m[2], "green")+m[3], s, flags=re.M) # types
-  s = re.sub(r'^(\s*)([\w]+)(.*?;$)', lambda m:m[1]+colored(m[2], "yellow")+m[3], s, flags=re.M) # instructions
-  s = re.sub(r'([<>\[\]\s,\+\-;])((?:0[fF][0-9a-fA-F]{8})|(?:[0-9]+)|(?:0[xX][0-9a-fA-F]+))([<>\[\]\s,\+\-;])', lambda m:m[1]+colored(m[2], "yellow")+m[3], s, flags=re.M) # numbers  # noqa: E501
-  s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
-  s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
-  return s
-
-PTX = getenv("PTX")
 
 def check(status):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()}")  # noqa: E501
@@ -42,39 +29,6 @@ def cu_time_execution(cb, enable=False) -> Optional[float]:
   cuda.cuEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
   for ev in evs: cuda.cuEventDestroy_v2(ev)
   return ret.value * 1e-3
-
-def _get_bytes(arg, get_str, get_sz, check) -> bytes:
-  sz = init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x))))
-  return ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value)
-
-class PTXCompiler(Compiler):
-  def __init__(self, arch:str):
-    self.arch = arch
-    self.version = "7.8" if arch >= "sm_89" else "7.5"
-    super().__init__(f"compile_ptx_{self.arch}")
-  def compile(self, src:str) -> bytes: return src.replace("TARGET", self.arch).replace("VERSION", self.version).encode()
-
-class CUDACompiler(Compiler):
-  def __init__(self, arch:str):
-    self.arch = arch
-    check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
-    self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
-    if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
-    super().__init__(f"compile_cuda_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
-    status = nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
-
-    if status != 0: raise CompileError(f"compile failed: {_get_bytes(prog, nvrtc.nvrtcGetProgramLog, nvrtc.nvrtcGetProgramLogSize, check).decode()}")
-    return _get_bytes(prog, nvrtc.nvrtcGetPTX, nvrtc.nvrtcGetPTXSize, check)
-
-def cuda_disassemble(lib, arch):
-  try:
-    fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
-    with open(fn + ".ptx", "wb") as f: f.write(lib)
-    subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn+".ptx"], check=True)
-    print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
-  except Exception as e: print("failed to generate SASS", str(e))
 
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes):
