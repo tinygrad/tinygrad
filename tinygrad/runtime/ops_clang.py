@@ -12,7 +12,7 @@ class ClangCompiler(Compiler):
                                '-o', str(output_file.name)], input=src.encode('utf-8'))
         return pathlib.Path(output_file.name).read_bytes()
     except FileNotFoundError as e:
-      if shutil.which('clang'): raise Exception('clang not installed')
+      if not shutil.which('clang'): raise Exception('clang not installed')
       else: raise e
 
 class ClangProgram:
