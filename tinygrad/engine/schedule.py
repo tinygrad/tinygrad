@@ -1,16 +1,16 @@
 import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
+from typing import Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, colored, prod, dedup,\
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, Context, GlobalCounters, colored, prod, dedup,\
     all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer
 from tinygrad.shape.view import View, strides_for_shape
 
 # creation can recurse a lot
@@ -125,7 +125,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
     return (buf, st)
   return top_reduce
 
-def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
+def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> Tuple[LazyOp, List[LazyBuffer], Dict[Variable, int], List[Metadata]]:
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
   if (out:=outs[0]).op is MetaOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
     rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((out.arg,))))
@@ -152,17 +152,19 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   for i, out in enumerate(outs):
     output_st = ShapeTracker.from_shape(reduce_st(*deque(reduce_info.values(), 1).pop()) if reduce_info else out.shape)
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
-    output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
-    output_view, vv = output_view.simplify().unbind()
+    if out.op is MetaOps.ASSIGN and out.arg:
+      assert out.arg[0].shape == out.shape, f"ASSIGN must not override output shape {out.arg[0].shape} != {out.shape}"
+      output_st = out.arg[0].reshape(output_st.shape)
+    output_st, vv = output_st.simplify().unbind()
     if vv: var_vals.update(vv)
-    ast.append(LazyOp(BufferOps.STORE, (lop,), MemBuffer(i, out.dtype, output_view)))
+    ast.append(LazyOp(BufferOps.STORE, (lop,), MemBuffer(i, out.dtype, output_st)))
   return LazyOp(MetaOps.KERNEL, tuple(ast)), list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None],\
     children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer],\
-    double_reduces:Dict[LazyBuffer, None], scheduled=False):
+    double_reduces:Dict[LazyBuffer, None], scheduled=False) -> None:
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.realized is not None: return
   if GRAPH: log_lazybuffer(buf, scheduled)
@@ -233,7 +235,11 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
+SCHEDULES: List = []
+def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
+  Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # this is the graph
+        DefaultDict[LazyBuffer, int],               # this is the in-degree of the graph
+        Dict[LazyBuffer, Tuple[List[LazyBuffer], LazyOp, List[LazyBuffer], Dict[Variable, int], List[Metadata]]]]:  # this is ???
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
@@ -342,14 +348,25 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
       graph[key].append(assign)
       in_degree[assign] += 1
 
+  if SAVE_SCHEDULE:
+    def _save():
+      if getenv("ARANGE_DIFF"):
+        from test.external.process_replay.diff_schedule import diff_schedule
+        return diff_schedule(SCHEDULES)
+      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
+      with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
+    if len(SCHEDULES) == 0: atexit.register(_save)
+    SCHEDULES.append((graph, prescheduled))
   return graph, in_degree, prescheduled
 
 # *** DAG ordering: breadth first search ***
 
-SCHEDULES: List = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
-  graph, in_degree, prescheduled = _graph_schedule(outs, seen)
+  if getenv("ARANGE_DIFF"):
+    with Context(FUSE_ARANGE=0, SAVE_SCHEDULE=1): _graph_schedule(outs, set())
+    with Context(FUSE_ARANGE=1, SAVE_SCHEDULE=1): graph, in_degree, prescheduled = _graph_schedule(outs, seen)
+  else: graph, in_degree, prescheduled = _graph_schedule(outs, seen)
   queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
   schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
@@ -368,13 +385,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(prescheduled[x])
 
-  if SAVE_SCHEDULE:
-    def _save():
-      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
-      with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
-    if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.append((graph, prescheduled))
-    if SAVE_SCHEDULE.value > 1 and SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
   # confirm everything was scheduled correctly
   if any(degree != 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
@@ -385,48 +395,3 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   schedule, var_vals = create_schedule_with_vars(outs, seen)
   assert len(var_vals) == 0
   return schedule
-
-# *** memory planning ***
-
-def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], noopt_buffers=None, debug_prefix="") -> Dict[Buffer, Buffer]:
-  if getenv("NO_MEMORY_PLANNER"): return {}
-  first_appearance, last_appearance = {}, {}
-  for i,u in enumerate(buffers):
-    for buf in u:
-      if buf.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers): continue
-      if buf.base not in first_appearance: first_appearance[buf.base] = i
-      last_appearance[buf.base] = i
-
-  # Sort buffers by size in descending order, prioritizing largest buffers for allocation first.
-  # Track free segments, each containing (start, stop, and buffer that could be reused on this segment).
-  free_segs: Dict[Tuple, List[Tuple[int, int, Buffer]]] = defaultdict(list) # Dict[buffer key, Tuple[start, end, buffer to reuse on the seg]]
-  def find_replace_buffer(buf, st, en):
-    key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())
-
-    default_buf = (0, len(buffers) - 1, buf) # will return the buffer itself if the replace one is not found.
-    seg_st, seg_en, seg_buf = next((free_segs[key].pop(i) for i,(sst,sen,_) in enumerate(free_segs[key]) if sst <= st and en <= sen), default_buf)
-
-    free_segs[key] += [(seg_st, st - 1, seg_buf)] if st - 1 >= seg_st else []
-    free_segs[key] += [(en + 1, seg_en, seg_buf)] if seg_en >= en + 1 else []
-
-    return seg_buf if seg_buf.nbytes == buf.nbytes else Buffer(buf.device, buf.size, buf.dtype, base=seg_buf)
-
-  buffer_requests = sorted([(first_appearance[buf], last_appearance[buf], buf) for buf in first_appearance.keys()], key=lambda x: -x[2].nbytes)
-  assigned = {buf:find_replace_buffer(buf, st, en) for st, en, buf in buffer_requests}
-
-  for i,u in enumerate(buffers):
-    for buf in u:
-      if buf.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers): continue
-      if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base).base, offset=buf.offset)
-      else: assigned[buf] = assigned.get(buf, buf)
-
-  if DEBUG >= 1 and len(ak:=dedup(x for x in assigned.keys() if x._base is None)) != len(av:=dedup(x for x in assigned.values() if x._base is None)):
-    print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
-          f"{len(ak)} -> {len(av)} bufs")
-  return assigned
-
-def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
-  # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
-  assigned = _internal_memory_planner([si.bufs for si in schedule],
-                                      noopt_buffers={b for si in schedule if si.ast.op is not MetaOps.KERNEL for b in si.bufs})
-  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs), si.metadata) for si in schedule]
