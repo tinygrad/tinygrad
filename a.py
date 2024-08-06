@@ -12,9 +12,7 @@ t3 = t @ t2
 print(t3.cast(dtypes.float32).numpy())
 """
 
-import numpy as np
 from tinygrad.helpers import getenv
-from tinygrad import dtypes, Tensor
 dtype_in = dtypes.f8e5m2
 acc_dtype = dtypes.float32
 N = getenv("N", 1000)

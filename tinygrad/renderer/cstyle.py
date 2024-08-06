@@ -266,11 +266,10 @@ def _make_cuda_dtype(base_type, cnt, align):
   return f"struct __align__({align}) {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
 
-
 def get_fp8_header(format_type: str):
-    assert format_type in ['e4m3', 'e5m2'], "Invalid format type. Use 'e4m3' or 'e5m2'."
-    
-    return f"""
+  assert format_type in ['e4m3', 'e5m2'], "Invalid format type. Use 'e4m3' or 'e5m2'."
+
+  return f"""
 #define DEFINE_FP8_BINARY_OP_{format_type.upper()}(op) \\
     __device__ __forceinline__ __nv_fp8_{format_type} operator op (const __nv_fp8_{format_type}& a, const __nv_fp8_{format_type}& b) {{ \\
         __half ha = static_cast<__half>(a); \\
@@ -332,11 +331,13 @@ class CUDARenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     if any(uop.dtype == dtypes.f8e5m2 for uop in uops):
       # need to include fp16 since there is no arithmetic intrinsics for fp8 in CUDA, so we cast to fp16, do the op and cast back if result is float.
-      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e5m2", x, x*2) for x in [4, 8]] + [get_fp8_header("e5m2")]
+      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e5m2", x, x*2) for x in [4, 8]] + \
+        [get_fp8_header("e5m2")]
     if any(uop.dtype == dtypes.f8e4m3 for uop in uops):
       # need to include fp16 since there is no arithmetic intrinsics for fp8 in CUDA, so we cast to fp16, do the op and cast back if result is float.
-      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e4m3", x, x*2) for x in [4, 8]] + [get_fp8_header("e4m3")]
-    
+      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e4m3", x, x*2) for x in [4, 8]] + \
+        [get_fp8_header("e4m3")]
+
     if any(uop.dtype == dtypes.half for uop in uops):
       prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", x, x*2) for x in [4, 8]]
 
