@@ -120,8 +120,8 @@ def process_replay():
   ref_schedule = multiprocessing.Manager().list()
   if COMPARE_SCHEDULE:
     logging.info("fetching process replay reference")
-    # TODO: make this run_id dynamic
-    download_artifact("10253655789", f"process_replay_{os.getenv('BACKEND'), Device.DEFAULT}.db", f"{TEMP_DIR}/schedule")
+    ref_runs = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master&status=success", headers=GH_HEADERS).json()
+    download_artifact(ref_runs['workflow_runs'][0]['id'], f"process_replay_{os.getenv('BACKEND'), Device.DEFAULT}.db", f"{TEMP_DIR}/schedule")
     ref_conn = sqlite3.connect(f"{TEMP_DIR}/schedule/process_replay.db")
     ref_table_name = ref_conn.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchone()[0]
     row_count = ref_conn.execute(f"select count(*) from '{ref_table_name}'").fetchone()[0]
