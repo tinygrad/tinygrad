@@ -6,6 +6,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.codegen.kernel import Opt, OptOps, Kernel
 from tinygrad.engine.realize import CompiledRunner, ExecItem
 from tinygrad.engine.search import get_kernel_actions
+from tinygrad.device import Device
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):
@@ -51,6 +52,7 @@ class TestArange(unittest.TestCase):
       if exclude is not None and opts[-1] in exclude: continue
       print(opts)
       self.test_complexity(opts)
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_all_opts_w_local(self): return self.test_all_opts([Opt(OptOps.LOCAL, 0, 16)], [Opt(op=OptOps.PADTO, axis=1, amt=32)])
   def test_all_opts_w_upcast(self): return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4)])
   def test_all_opts_w_unroll(self): return self.test_all_opts([Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, amt=0)])
