@@ -269,8 +269,9 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
 
 _nms = "xyzwabcdefghijkl"
 def _make_cuda_dtype(self, dtype):
-  vec, elems, header = self.render_dtype(dtype), ', '.join(_nms[:dtype.count()]), ', '.join([f"{self.render_dtype(dtype.scalar())} {x}" for x in _nms[:dtype.count()]]) # noqa:E501
-  return f"struct __align__({dtype.size()}) {vec} {{ {self.render_dtype(dtype.scalar())} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}" # noqa:E501
+  vec, scalar = self.render_dtype(dtype), self.render_dtype(dtype.scalar()),
+  elems, header = ', '.join(_nms[:dtype.count()]), ', '.join([f"{scalar} {x}" for x in _nms[:dtype.count()]])
+  return f"struct __align__({dtype.size()}) {vec} {{ {scalar} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
