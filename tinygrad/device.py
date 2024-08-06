@@ -68,14 +68,15 @@ class Buffer:
       assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
       self._base = base
-    if preallocate: self.allocate()
+    # if the base is allocated, allocate the view right away (it's free)
+    if preallocate or (self._base is not None and self._base.is_allocated()): self.allocate()
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
   def lb_refcount(self): return self.base._lb_refcount
   def ref(self, cnt): self.base._lb_refcount += cnt
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
-  def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
+  def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None) -> Buffer:
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
