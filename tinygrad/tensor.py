@@ -41,6 +41,7 @@ class Function:
 
 import tinygrad.function as F
 
+
 def _metaop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str, ...]], arg=None, src:Tuple[LazyBuffer, ...]=()):
   if isinstance(device, str): return LazyBuffer.metaop(op, shape, dtype, device, arg, src)
   return MultiLazyBuffer([LazyBuffer.metaop(op, shape, dtype, d, arg, src) for d in device], None)
@@ -2952,7 +2953,7 @@ class Tensor:
   # ***** convenience stuff *****
 
   @property
-  def ndim(self) -> int: 
+  def ndim(self) -> int:
     """
     Returns the number of dimensions in the tensor.
 
@@ -2977,7 +2978,7 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([9])
-    print(t.numel)
+    print(t.numel())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 2], [3, 4]])
@@ -2990,20 +2991,20 @@ class Tensor:
     """
     return prod(self.shape)
 
-  def element_size(self) -> int: 
+  def element_size(self) -> int:
     """
     Returns the size in bytes of an individual element in the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([9], dtype=dtypes.bool)
+    t = Tensor([True], dtype=dtypes.bool)
     print(t.element_size())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([9], dtype=dtypes.int8)
+    t = Tensor([5], dtype=dtypes.int16)
     print(t.element_size())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([9], dtype=dtypes.float64)
+    t = Tensor([5.5], dtype=dtypes.float64)
     print(t.element_size())
     ```
     """
@@ -3014,11 +3015,11 @@ class Tensor:
     Returns the total number of bytes of all elements in the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.int8)
+    t = Tensor([8, 9], dtype=dtypes.int16)
     print(t.nbytes())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9, 10, 11], dtype=dtypes.int8)
+    t = Tensor([8, 9, 10, 11], dtype=dtypes.int16)
     print(t.nbytes())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3030,14 +3031,19 @@ class Tensor:
 
   def is_floating_point(self) -> bool:
     """
-    Returns True if the data type of input is a floating point data type i.e., one of dtype.half, dtype.float, dtype.double, dtype.default_float, dtype.float16, dtype.float32, dtype.float64, dtype.bfloat16.
+    Returns `True` if the tensor contains floating point types, i.e. is one of `dtype.half`, `dtype.float`,
+    `dtype.double`, `dtype.default_float`, `dtype.float16`, `dtype.float32`, `dtype.float64`, `dtype.bfloat16`.
 
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([8.0, 9.0], dtype=dtypes.float)
+    print(t.is_floating_point())
+    ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9], dtype=dtypes.float)
     print(t.is_floating_point())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9, 10, 11], dtype=dtypes.int8)
+    t = Tensor([8, 9], dtype=dtypes.int)
     print(t.is_floating_point())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3049,7 +3055,7 @@ class Tensor:
 
   def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]:
     """
-    If `fim` is not specified, return the shape of the tensor. Otherwise return the length along dimension `dim`.
+    Return the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[4, 5, 6], [7, 8, 9]])
