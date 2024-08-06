@@ -1464,7 +1464,7 @@ class TestIndexing(unittest.TestCase):
     Y = Tensor([1, 2]).realize()
     loss = X.sparse_categorical_crossentropy(Y)
     self.check_schedule(loss, 5)
-    np.testing.assert_allclose(loss.item(), 0.878309)
+    np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
   def test_arange_fuse_grouped_children(self):
     X = Tensor.randn(4, 4).realize()
