@@ -171,7 +171,7 @@ class ClassificationHead:
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     return out[0].cat(*out[1:], dim=1)
 
-  def loss(self, logits_class, matched_idxs, labels):
+  def loss(self, logits_class, matched_idxs, labels, pad_mask):
     batch_size = logits_class.shape[0]
     foreground_idxs = matched_idxs >= 0
     num_foreground = foreground_idxs.sum(-1)
@@ -179,7 +179,7 @@ class ClassificationHead:
     labels = (labels + 1) * foreground_idxs - 1
     gt_classes_target = labels.one_hot(logits_class.shape[-1])
     valid_idxs = matched_idxs != -2
-    return (sigmoid_focal_loss(logits_class, gt_classes_target, valid_idxs.reshape(batch_size, -1, 1)) / num_foreground).mean()
+    return (sigmoid_focal_loss(logits_class,gt_classes_target,valid_idxs.reshape(batch_size,-1,1)) * pad_mask / num_foreground).sum() /pad_mask.sum()
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
@@ -190,7 +190,7 @@ class RegressionHead:
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     return out[0].cat(*out[1:], dim=1)
 
-  def loss(self, logits_reg, anchors, matched_idxs, boxes):
+  def loss(self, logits_reg, anchors, matched_idxs, boxes, pad_mask):
     foreground_idxs = matched_idxs >= 0
     num_foreground = foreground_idxs.sum(-1)
     mask = foreground_idxs.reshape(logits_reg.shape[0], -1, 1)
@@ -201,7 +201,7 @@ class RegressionHead:
     target_regression = encode_boxes(matched_gt_boxes, anchors)
     target_regression = target_regression * mask
     target_regression = (target_regression>-1000).where(target_regression, 0) #nan replace with 0
-    return (l1_loss(bbox_reg, target_regression) / num_foreground).mean()
+    return (l1_loss(bbox_reg, target_regression) * pad_mask / num_foreground).sum() / pad_mask.sum()
 
 class RetinaHead:
   def __init__(self, in_channels, num_anchors, num_classes):

@@ -459,12 +459,12 @@ def train_retinanet():
     return (((x.permute((0,3,1,2)) / 255.0) - image_mean)/image_std).cast(dtypes.default_float)
 
   @TinyJit
-  def train_step(X, boxes, labels, matched_idxs):
+  def train_step(X, boxes, labels, matched_idxs, pad_batch):
     Tensor.training = True
     optimizer.zero_grad()
     _,r,c = model(normalize(X), True)
-    loss_reg = mdl_reg_loss(r.cast(dtypes.float32), matched_idxs, boxes)
-    loss_class = mdl_class_loss(c.cast(dtypes.float32), matched_idxs, labels)
+    loss_reg = mdl_reg_loss(r.cast(dtypes.float32), matched_idxs, boxes, pad_batch)
+    loss_class = mdl_class_loss(c.cast(dtypes.float32), matched_idxs, labels, pad_batch)
     loss = loss_reg+loss_class
     (loss*LOSS_SCALAR).backward()
     for t in optimizer.params: t.grad = t.grad.contiguous() / LOSS_SCALAR
@@ -489,8 +489,12 @@ def train_retinanet():
   ANCHORS_STACK = Tensor.stack(*ANCHORS)
   ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
   ANCHOR_NP = ANCHORS[0].numpy()
-  mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,ANCHORS_STACK, m, b_t)
-  mdl_class_loss = lambda c, m, l_t: model.head.classification_head.loss(c,m, l_t)
+  PAD_MASK_ONES = Tensor.ones(BS).shard(GPUS, axis=0)
+  if PART_BATCH:
+    pl = round_up(len(train_files), BS) - len(train_files)
+    PAD_MASK = Tensor([0]*pl+[1]*(BS-pl)).shard(GPUS, axis=0)
+  mdl_reg_loss = lambda r, m, b, pm: model.head.regression_head.loss(r,ANCHORS_STACK, m, b, pm)
+  mdl_class_loss = lambda c, m, l, pm: model.head.classification_head.loss(c,m, l, pm)
   out_placeholder_shapes = [(BS_EVAL,90000,4), (BS_EVAL,22500,4), (BS_EVAL,5625,4), (BS_EVAL,1521,4), (BS_EVAL,441,4),
                             (BS_EVAL, 23760000), (BS_EVAL, 5940000), (BS_EVAL, 1485000), (BS_EVAL, 401544), (BS_EVAL, 116424)]
   out_np = [np.zeros(s, np.float32) for s in out_placeholder_shapes]
@@ -518,37 +522,13 @@ def train_retinanet():
     else:
       batch_loader = batch_load_retinanet(batch_size=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP, pad_first_batch=PART_BATCH)
       it = iter(tqdm(batch_loader, total=len(train_files)//BS, desc=f"epoch {epoch}"))
-      cnt = 0
-      if PART_BATCH:
-        train_step.reset()
-        pl = round_up(len(train_files), BS) - len(train_files)
-        rl = BS - pl
-        sl = round_up(rl, len(GPUS)) - len(GPUS)
-        x, yb, yl, ym, cookie = next(it)
-        proc = x[pl:pl+rl-sl].to(GPUS), yb[pl:pl+rl-sl].to(GPUS), yl[pl:pl+rl-sl].to(GPUS), ym[pl:pl+rl-sl].to(GPUS)
-        mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,Tensor.stack(*ANCHORS[pl:pl+rl-sl]).to(GPUS), m, b_t)
-        loss = train_step(*proc)
-        loss_single = loss.numpy().item()
-        if WANDB: wandb.log({'train/loss':loss_single})
-        print('LOSS_SINGLE', loss_single)
-        train_step.reset()
-        proc = x[pl+rl-sl:].shard(GPUS, axis=0), yb[pl+rl-sl:].shard(GPUS, axis=0), yl[pl+rl-sl:].shard(GPUS, axis=0), ym[pl+rl-sl:].shard(GPUS, axis=0)
-        mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,Tensor.stack(*ANCHORS[pl+rl-sl:]).shard(GPUS, axis=0), m, b_t)
-        loss = train_step(*proc)
-        loss_shard = loss.numpy().item()
-        print('LOSS_SHARD', loss_shard)
-        if WANDB: wandb.log({'train/loss':loss_shard})
-        train_step.reset()
-        
-        mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,ANCHORS_STACK, m, b_t)
-        del cookie
-      proc = data_get(it)
+      cnt, proc = 0, data_get(it)
 
     st = time.perf_counter()
     bt = st
     while not EVAL_ONLY and proc is not None:
       GlobalCounters.reset()
-      loss, proc = train_step(proc[0], proc[1], proc[2], proc[3]), proc[4]
+      loss, proc = train_step(proc[0], proc[1], proc[2], proc[3], PAD_MASK if (PART_BATCH and cnt==0) else PAD_MASK_ONES), proc[4]
 
       pt = time.perf_counter()
       try: 
