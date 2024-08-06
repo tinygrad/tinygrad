@@ -248,7 +248,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
   """
   N_audio = len(waveforms)
-  # log_spec = prep_audio(waveforms, model.batch_size, truncate)
 
   # TODO detect language
   start_tokens = ["<|startoftranscript|>", *(["<|en|>", "<|transcribe|>"] if model.is_multilingual else []), "<|notimestamps|>"]
@@ -256,11 +255,8 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
   transcription_start_index = len(start_tokens)
   eot = enc._special_tokens["<|endoftext|>"]
   transcription_tokens = [np.array([], dtype=np.int32)] * model.batch_size
-  # for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
   for curr_frame, chunks in enumerate(zip(*waveforms, strict=True)):
-    print(f'{curr_frame=}')
     if curr_frame > 0 and N_audio > 1: raise Exception("Multi segment streaming not supported for batch")
-    print(chunks)
     frame_reset = False
     log_spec = prep_audio(chunks, model.batch_size, truncate)
     encoded_audio = model.encoder.encode(log_spec)
