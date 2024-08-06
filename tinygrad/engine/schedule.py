@@ -220,10 +220,10 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
                      realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, None],
-                     cache:Set[Tuple[LazyBuffer, ShapeTracker]]) -> None:
+                     cache:Dict[Tuple[LazyBuffer, ShapeTracker], None]) -> None:
   """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
   if (tr, st) in cache: return
-  cache.add((tr, st))
+  cache.setdefault((tr, st))
   if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
@@ -247,7 +247,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[LazyBuffer, None] = {}
-  for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
+  for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
 SCHEDULES: List = []
@@ -277,7 +277,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
     if r.op not in ReduceOps or r in realizes: continue
 
     group: Dict[LazyBuffer, None] = {}
-    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache=set())
+    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
