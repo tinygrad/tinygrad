@@ -4,7 +4,8 @@ start = time.perf_counter()
 
 # *** ioctl lib ***
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
-processor = platform.processor()
+# platform.processor calls `uname -p` which can return `unknown` on some systems
+processor = os.getenv("IOCTL_PROCESSOR") or platform.processor()
 IOCTL_SYSCALL = {"aarch64": 0x1d, "x86_64":16}[processor]
 
 def get_struct(argp, stype):
@@ -46,7 +47,7 @@ def install_hook(c_function, python_function):
 
 import tinygrad.runtime.autogen.kfd as kfd_ioctl
 def ioctls_from_header():
-  hdr = pathlib.Path("/usr/include/linux/kfd_ioctl.h").read_text().replace("\\\n", "")
+  hdr = (pathlib.Path(__file__).parent / "kfd_ioctl.h").read_text().replace("\\\n", "")
   pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_IOW?R?\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
   matches = re.findall(pattern, hdr, re.MULTILINE)
   return {int(nr, 0x10):(name, getattr(kfd_ioctl, "struct_"+sname)) for name, nr, sname in matches}
