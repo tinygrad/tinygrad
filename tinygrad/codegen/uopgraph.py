@@ -87,17 +87,9 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   # None means no change
   remainder, something_changed = [], False
   for u in _get_add_chain(x):
-    if u.op is UOps.CONST and (r:=u.arg%c) != u.arg:
-      if r: remainder.append(u.const(r))
+    if (factor:=u.const_factor())%c != factor:
+      remainder.append(u.divides(factor)*(factor%c))
       something_changed = True
-    elif u.op is UOps.ALU and u.arg is BinaryOps.MUL:
-      if (u0:=u.src[0]).op is UOps.CONST and (r:=u0.arg%c) != u0.arg:
-        if r: remainder.append(u.src[1] if r==1 else u.const(r)*u.src[1])
-        something_changed = True
-      elif (u1:=u.src[1]).op is UOps.CONST and (r:=u1.arg%c) != u1.arg:
-        if r: remainder.append(u.src[0] if r==1 else u.src[0]*u.const(r))
-        something_changed = True
-      else: remainder.append(u)
     else: remainder.append(u)
   if not something_changed: return None
   return functools.reduce(operator.add, remainder) if remainder else x.const(0)
@@ -106,17 +98,9 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
   quotient, remainder, something_changed = [], [], False
   for u in _get_add_chain(x):
-    if u.op is UOps.CONST and u.arg%c == 0:
-      if (q:=u.arg//c): quotient.append(u.const(q))
+    if (factor:=u.const_factor())%c == 0:
+      if factor: quotient.append(u.divides(c))
       something_changed = True
-    elif u.op is UOps.ALU and u.arg is BinaryOps.MUL:
-      if (u0:=u.src[0]).op is UOps.CONST and u0.arg%c == 0:
-        if (q:=u0.arg//c): quotient.append(u.src[1] if q==1 else -u.src[1] if q==-1 else u.const(q)*u.src[1])
-        something_changed = True
-      elif (u1:=u.src[1]).op is UOps.CONST and u1.arg%c == 0:
-        if (q:=u1.arg//c): quotient.append(u.src[0] if q==1 else -u.src[0] if q==-1 else u.src[0]*u.const(q))
-        something_changed = True
-      else: remainder.append(u)
     else: remainder.append(u)
   if not something_changed: return None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
