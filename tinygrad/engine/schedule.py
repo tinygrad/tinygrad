@@ -344,6 +344,13 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
       graph[key].append(assign)
       in_degree[assign] += 1
 
+  if SAVE_SCHEDULE:
+    def _save():
+      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
+      with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
+    if len(SCHEDULES) == 0: atexit.register(_save)
+    SCHEDULES.append((graph, prescheduled))
+    if SAVE_SCHEDULE.value > 1 and SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
   return graph, in_degree, prescheduled
 
 # *** DAG ordering: breadth first search ***
@@ -370,13 +377,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(prescheduled[x])
 
-  if SAVE_SCHEDULE:
-    def _save():
-      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
-      with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
-    if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.append((graph, prescheduled))
-    if SAVE_SCHEDULE.value > 1 and SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
   # confirm everything was scheduled correctly
   if any(degree != 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
