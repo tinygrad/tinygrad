@@ -271,16 +271,23 @@ def get_fp8_header(format_type: str):
     assert format_type in ['e4m3', 'e5m2'], "Invalid format type. Use 'e4m3' or 'e5m2'."
     
     return f"""
-#define DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(op) \\
+#define DEFINE_FP8_BINARY_OP_{format_type.upper()}(op) \\
     __device__ __forceinline__ __nv_fp8_{format_type} operator op (const __nv_fp8_{format_type}& a, const __nv_fp8_{format_type}& b) {{ \\
         __half ha = static_cast<__half>(a); \\
         __half hb = static_cast<__half>(b); \\
         return static_cast<__nv_fp8_{format_type}>(ha op hb); \\
     }}
-DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(+)
-DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(-)
-DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(*)
-DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(/)
+DEFINE_FP8_BINARY_OP_{format_type.upper()}(+)
+DEFINE_FP8_BINARY_OP_{format_type.upper()}(-)
+DEFINE_FP8_BINARY_OP_{format_type.upper()}(*)
+DEFINE_FP8_BINARY_OP_{format_type.upper()}(/)
+
+#define DEFINE_FP8_UNARY_OP_{format_type.upper()}(op, opname) \\
+    __device__ __forceinline__ __nv_fp8_{format_type} operator opname (const __nv_fp8_{format_type}& a) {{ \\
+        __half x = static_cast<__half>(a); \\
+        return static_cast<__nv_fp8_{format_type}>(op); \\
+    }}
+DEFINE_FP8_UNARY_OP_{format_type.upper()}(-x, -)
 
 #define DEFINE_FP8_COMPARISON_OP_{format_type.upper()}(op) \\
     __device__ __forceinline__ bool operator op (const __nv_fp8_{format_type}& a, const __nv_fp8_{format_type}& b) {{ \\

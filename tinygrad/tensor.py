@@ -1334,7 +1334,7 @@ class Tensor:
     ```
     """
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
-    return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
+    return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16, dtypes.f8e4m3, dtypes.f8e5m2) else ret
 
   def max(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """

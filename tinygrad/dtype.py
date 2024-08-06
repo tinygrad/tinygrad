@@ -77,8 +77,8 @@ class dtypes:
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None, 1)
   float32: Final[DType] = DType(11, 4, "float", 'f', 1)
   float64: Final[DType] = DType(12, 8, "double", 'd', 1)
-  f8e5m2: Final[DType] = DType(13, 1, "f8e5m2", 'e', 1)
-  f8e4m3: Final[DType] = DType(13, 1, "f8e4m3", 'e', 1)
+  f8e5m2: Final[DType] = DType(8, 1, "f8e5m2", 'e', 1)
+  f8e4m3: Final[DType] = DType(8, 1, "f8e4m3", 'e', 1)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
