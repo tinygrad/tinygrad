@@ -104,26 +104,42 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
-  quotient, remainder, something_changed = [], [], False
+  quotient, remainder, something_changed, factor = [], [], False, c
   for u in _get_add_chain(x):
-    if u.op is UOps.CONST and u.arg%c == 0:
-      if (q:=u.arg//c): quotient.append(u.const(q))
-      something_changed = True
+    if u.op is UOps.CONST:
+      if u.arg%c == 0:
+        if (q:=u.arg//c): quotient.append(u.const(q))
+        something_changed = True
+      else:
+        remainder.append(u)
+        factor = math.gcd(factor, u.arg)
     elif u.op is UOps.ALU and u.arg is BinaryOps.MUL:
-      if (u0:=u.src[0]).op is UOps.CONST and u0.arg%c == 0:
-        if (q:=u0.arg//c): quotient.append(u.src[1] if q==1 else -u.src[1] if q==-1 else u.const(q)*u.src[1])
-        something_changed = True
-      elif (u1:=u.src[1]).op is UOps.CONST and u1.arg%c == 0:
-        if (q:=u1.arg//c): quotient.append(u.src[0] if q==1 else -u.src[0] if q==-1 else u.src[0]*u.const(q))
-        something_changed = True
-      else: remainder.append(u)
-    else: remainder.append(u)
-  if not something_changed: return None
+      if (u0:=u.src[0]).op is UOps.CONST:
+        if u0.arg%c == 0:
+          if (q:=u0.arg//c): quotient.append(u.src[1] if q==1 else -u.src[1] if q==-1 else u.const(q)*u.src[1])
+          something_changed = True
+        else:
+          remainder.append(u)
+          factor = math.gcd(factor, u0.arg)
+      elif (u1:=u.src[1]).op is UOps.CONST:
+        if u1.arg%c == 0:
+          if (q:=u1.arg//c): quotient.append(u.src[0] if q==1 else -u.src[0] if q==-1 else u.src[0]*u.const(q))
+          something_changed = True
+        else:
+          remainder.append(u)
+          factor = math.gcd(factor, u1.arg)
+      else:
+        remainder.append(u)
+        factor = 1
+    else:
+      remainder.append(u)
+      factor = 1
+  if not something_changed: return cast(UOp, x.divides(factor))//(c//factor) if factor != c and factor != 1 else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
   if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const(0) if rem is None else rem//c
-  return quo if rem is None else quo+rem//c
+  if quo is None: return x.const(0) if rem is None else cast(UOp, rem.divides(factor) if factor > 1 else rem)//(c//factor)
+  return quo if rem is None else quo+cast(UOp, rem.divides(factor) if factor > 1 else rem)//(c//factor)
 
 # ***** transcendental *****
 
