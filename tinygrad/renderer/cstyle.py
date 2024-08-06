@@ -187,7 +187,7 @@ class CStyleLanguage(Renderer):
     return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
 def _make_clang_dtype(self, dtype):
-  return f"typedef {self.render_dtype(dtype.scalar())} {self.render_dtype(dtype)} __attribute__((vector_size({dtype.itemsize})));"
+  return f"typedef {self.render_dtype(dtype.scalar())} {self.render_dtype(dtype)} __attribute__((aligned({(sz:=dtype.itemsize)}),vector_size({sz})));"
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
