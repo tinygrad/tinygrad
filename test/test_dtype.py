@@ -191,6 +191,26 @@ class TestBFloat16DTypeCast(unittest.TestCase):
     converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
 
+@unittest.skipUnless(is_dtype_supported(dtypes.f8e4m3), "f8e4m3 not supported")
+class TestF8e4m3(unittest.TestCase):
+  def test_f8e4m3_creation_numpy(self):
+    data = [-1, 1, 2]
+    t = Tensor(data, dtype=dtypes.f8e4m3)
+    assert t.dtype == dtypes.f8e4m3
+    tnp = t.numpy()
+    assert tnp.dtype == np.float32
+    np.testing.assert_allclose(tnp, np.array(data))
+
+  def test_f8e4m3_ones(self):
+    t = Tensor.ones(3, 5, dtype=dtypes.f8e4m3)
+    assert t.dtype == dtypes.f8e4m3
+    np.testing.assert_allclose(t.numpy(), np.ones((3, 5)))
+
+  def test_f8e4m3_eye(self):
+    t = Tensor.eye(3, dtype=dtypes.f8e4m3)
+    assert t.dtype == dtypes.f8e4m3
+    np.testing.assert_allclose(t.numpy(), np.eye(3))
+
 class TestHalfDType(TestDType): DTYPE = dtypes.half
 
 class TestFloatDType(TestDType):
