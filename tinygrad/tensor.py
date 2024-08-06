@@ -3015,15 +3015,15 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9], dtype=dtypes.int8)
-    print(t.numel)
+    print(t.nbytes())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9, 10, 11], dtype=dtypes.int8)
-    print(t.numel)
+    print(t.nbytes())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9], dtype=dtypes.float64)
-    print(t.numel)
+    print(t.nbytes())
     ```
     """
     return self.numel() * self.element_size()
@@ -3034,19 +3034,35 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9], dtype=dtypes.float)
-    print(t.numel)
+    print(t.is_floating_point())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9, 10, 11], dtype=dtypes.int8)
-    print(t.numel)
+    print(t.is_floating_point())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9], dtype=dtypes.float64)
-    print(t.numel)
+    print(t.is_floating_point())
     ```
     """
     return dtypes.is_float(self.dtype)
-  def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]: return self.shape if dim is None else self.shape[dim]
+
+  def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]:
+    """
+    If `fim` is not specified, return the shape of the tensor. Otherwise return the length along dimension `dim`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[4, 5, 6], [7, 8, 9]])
+    print(t.size())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.size(0))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.size(1))
+    ```
+    """
+    return self.shape if dim is None else self.shape[dim]
 
   # ***** cast ops *****
 
