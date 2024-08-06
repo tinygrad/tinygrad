@@ -64,7 +64,7 @@ class AMDSignal(HCQSignal):
 
 class AMDComputeQueue(HWComputeQueue):
   def __init__(self):
-    self.cmd_idx_to_exec_info, self.cmd_idx_to_dispatch_packet = {}, {}
+    self.cmd_idx_to_exec_info, self.cmd_idx_to_local_offset, self.cmd_idx_to_global_offset = {}, {}, {}
     super().__init__()
 
   def __del__(self):
@@ -112,7 +112,6 @@ class AMDComputeQueue(HWComputeQueue):
       dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, kernargs
       user_regs = [*data64_le(dp_addr)] + user_regs
       self.cmd_idx_to_dispatch_packet[len(self) - 1] = dp
-    self.cmd_idx_to_exec_info[len(self) - 1] = len(user_regs)
 
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8),
                *data64_le(0), *data64_le(prg.device.scratch.va_addr >> 8)]
@@ -123,14 +122,18 @@ class AMDComputeQueue(HWComputeQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4)] + [0xFFFFFFFF] * 4
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, len(user_regs)), gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0)] + user_regs
+
+    self.cmd_idx_to_local_offset[(cmd_idx:=len(self) - 1)] = len(self.q) - self.cmds_offset[cmd_idx] + 4 # +1 to skip PACKET3_SET_SH_REG + 3 zeros.
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), gfxreg(amd_gpu.regCOMPUTE_START_X), 0, 0, 0, *local_size, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_RESOURCE_LIMITS), 0]
+
+    self.cmd_idx_to_global_offset[cmd_idx] = len(self.q) - self.cmds_offset[cmd_idx] + 1 # +1 to skip PACKET3_DISPATCH_DIRECT.
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
   def _update_exec(self, cmd_idx, global_size, local_size):
-    if local_size is not None: self._patch(cmd_idx, offset=50 + self.cmd_idx_to_exec_info[cmd_idx], data=local_size)
-    if global_size is not None: self._patch(cmd_idx, offset=59 + self.cmd_idx_to_exec_info[cmd_idx], data=global_size)
+    if local_size is not None: self._patch(cmd_idx, offset=self.cmd_idx_to_local_offset[cmd_idx], data=local_size)
+    if global_size is not None: self._patch(cmd_idx, offset=self.cmd_idx_to_global_offset[cmd_idx], data=global_size)
 
     if (dp:=self.cmd_idx_to_dispatch_packet.get(cmd_idx)) is not None:
       if local_size is not None: dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
