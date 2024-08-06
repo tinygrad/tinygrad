@@ -195,6 +195,9 @@ constant_folder = PatternMatcher([
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
   (NOp(UOps.ALU, dtype=dtypes.uint64, src=(NOp.var("x"), NOp.var("seed")), arg=BinaryOps.THREEFRY), threefry2x32),
+  # don't REDUCE the same thing multiple times
+  (UPat(UOps.REDUCE, name='red', src=(UPat(UOps.VECTORIZE, src=UPat(name='x')),), allow_any_len=True),
+    lambda red, x: UOp(UOps.VECTORIZE, red.dtype, (nr:=UOp(UOps.REDUCE, x.dtype, (x,)+red.src[1:], red.arg),)+(nr,)*(red.dtype.count-1))),
   # extra arange loop folding because we don't fold adds. TODO: fold adds
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2") + NOp.var("idx3"))
@@ -529,7 +532,6 @@ class UOpGraph:
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
       sink = graph_rewrite(sink, self.folder+expander+float4_folding if self.opts is not None and self.opts.supports_float4 else self.folder+expander)
-    if UOpGraph.cnt != getenv("DEBUG_REDUCE", 0):
       sink = graph_rewrite(sink, self.folder+expander+reducer)
 
     # for PTX only
