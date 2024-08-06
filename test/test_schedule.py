@@ -1481,16 +1481,20 @@ class TestIndexing(unittest.TestCase):
 
   def test_arange_fuse_grouped_children(self):
     X = Tensor.randn(4, 4).realize()
-    r = (X + Tensor.arange(16).reshape(4, 4)).sum()
+    r = (X+Tensor.arange(16).reshape(4, 4)).sum()
     out0 = r+2
     out1 = r+3
     self.check_schedule([out0, out1], 1)
+    r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
+    np.testing.assert_allclose(out0.numpy(), r_ref+2)
+    np.testing.assert_allclose(out1.numpy(), r_ref+3)
 
   @unittest.expectedFailure
   def test_fold_arange_view(self):
     X = Tensor.randn(4, 4).realize()
-    r = (X + Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
+    r = (X+Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
     self.check_schedule([r], 1)
+    np.testing.assert_allclose(r.numpy(), (X.numpy()+np.arange(16).reshape(4, 4)).sum(1, keepdims=True))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
