@@ -5,7 +5,7 @@ from typing import Optional, Union, Literal, List, Iterator
 
 from tinygrad import Tensor, TinyJit, Variable, nn
 from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import getenv, DEBUG, fetch
+from tinygrad.helpers import getenv, DEBUG, fetch, colored
 
 import numpy as np
 import librosa
@@ -136,9 +136,10 @@ SAMPLES_PER_SEGMENT = RATE * SEGMENT_SECONDS # 480000
 N_FFT = 400
 HOP_LENGTH = 160
 N_MELS = 80
+FRAMES_PER_SECOND = RATE // HOP_LENGTH # 100
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> Tensor:
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
@@ -226,6 +227,7 @@ MODEL_URLS = {
   "large": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
 }
 def init_whisper(model_name="tiny.en", batch_size=1):
+  print(model_name)
   assert MODEL_URLS[model_name] is not None
 
   filename = fetch(MODEL_URLS[model_name])
@@ -237,7 +239,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
 
 def load_file_waveform(filename):
   for i in range(0, int(librosa.get_duration(path=filename)+1), SEGMENT_SECONDS):
-    yield librosa.load(filename, sr=RATE, offset=i, duration=SEGMENT_SECONDS)[0]
+    yield librosa.load(filename, sr=RATE, offset=max(0,i-1), duration=SEGMENT_SECONDS+2)[0]
 
 def transcribe_file(model, enc, filename):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)])
@@ -259,18 +261,21 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
     if curr_frame > 0 and N_audio > 1: raise Exception("Multi segment streaming not supported for batch")
     frame_reset = False
     log_spec = prep_audio(chunks, model.batch_size, truncate)
-    encoded_audio = model.encoder.encode(log_spec)
     pos = 0
     curr_segment_tokens = np.tile(start_tokens, (model.batch_size, 1))
     if curr_frame > 0:
+      # remove 1s pre padding
+      log_spec = log_spec[:,:,FRAMES_PER_SECOND:]
       # pass the previously inferred tokens as 'prompt' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
       prompt = np.concatenate((
         [enc._special_tokens["<|startofprev|>"]],
         transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:],
         start_tokens))
+      if DEBUG >= 1: print(colored(f"Prompt: {enc.decode(prompt)}", "yellow"))
       curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
       transcription_start_index = len(curr_segment_tokens[0])
 
+    encoded_audio = model.encoder.encode(log_spec[:,:,:FRAMES_PER_SEGMENT].contiguous())
     for i in range(model.decoder.max_tokens_to_sample):
       if pos >= model.decoder.max_tokens_to_sample * 2:
         if frame_reset or curr_frame == 0 or N_audio > 1: raise RuntimeError("Token overflow")
@@ -316,10 +321,12 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
-  model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
+  # model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny", batch_size=1)
+  model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=1)
+
 
   if len(sys.argv) > 1:
-    transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1])], callback=lambda x:print(x,end='',flush=True))
+    transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1])], callback=lambda x:print(x,flush=True))
   else:
     # online
     q = multiprocessing.Queue()

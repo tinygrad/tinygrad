@@ -56,6 +56,7 @@ class TestWhisper(unittest.TestCase):
   def test_transcribe_long(self):
     waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
     transcription = transcribe_waveform(self.model, self.enc, waveform)
+    print(transcription)
     self.assertEqual(TRANSCRIPTION_3, transcription)
 
   @unittest.skipIf(CI, "too long for CI")
