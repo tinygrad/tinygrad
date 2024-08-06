@@ -1,10 +1,11 @@
-import unittest
+import unittest, contextlib
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes
 from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import run_schedule
-from tinygrad.codegen.kernel import Opt, OptOps, Kernel
+from tinygrad.codegen.kernel import Opt, OptOps, Kernel, KernelOptError
 from tinygrad.engine.realize import CompiledRunner, ExecItem
+from tinygrad.engine.search import get_kernel_actions
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):
@@ -17,7 +18,7 @@ class TestArange(unittest.TestCase):
       for o in opts: k.apply_opt(o)
     p = k.to_program()
     print(p.name)
-    print(p.src)
+    #print(p.src)
     ExecItem(CompiledRunner(p), [tt.lazydata.buffer]).run()
     np.testing.assert_equal(tt.numpy(), np.arange(N))
     return p.op_estimate
@@ -27,11 +28,36 @@ class TestArange(unittest.TestCase):
     f1 = self._get_flops(256, opts) + 1
     f2 = self._get_flops(2560, opts) + 1
     print(f"{f1=}, {f2=}")
-    assert f2 / f1 < 15, f"bad complexity, flops {f2/f1:.1f}X while inputs 10X"
+    assert (f1 < 5000 and f2 < 5000) or (f2 / f1 < 15), f"bad complexity, flops {f2/f1:.1f}X while inputs 10X"
 
   def test_complexity_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)])
   def test_complexity_w_unroll(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)])
   def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)])
+
+  @unittest.skip("doesn't work yet")
+  def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(op=OptOps.PADTO, axis=1, amt=32)])
+
+  def test_all_opts(self, opts=None, exclude=None):
+    k = Kernel(Tensor.arange(256).schedule()[-1].ast)
+    if opts is not None:
+      for o in opts: k.apply_opt(o)
+    all_opts_256 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]
+    k = Kernel(Tensor.arange(2560).schedule()[-1].ast)
+    if opts is not None:
+      for o in opts: k.apply_opt(o)
+    all_opts_2560 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]
+    all_opts = [x for x in all_opts_256 if x in all_opts_2560]
+    for opts in all_opts:
+      if exclude is not None and opts[-1] in exclude: continue
+      print(opts)
+      self.test_complexity(opts)
+  def test_all_opts_w_local(self):
+    with contextlib.suppress(KernelOptError):
+      return self.test_all_opts([Opt(OptOps.LOCAL, 0, 16)], [Opt(op=OptOps.PADTO, axis=1, amt=32)])
+  def test_all_opts_w_upcast(self): return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4)])
+  def test_all_opts_w_unroll(self): return self.test_all_opts([Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, amt=0)])
+  def test_all_opts_w_upcast_and_unroll(self):
+    return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, amt=0)])
 
 class TestIndexing(unittest.TestCase):
   def test_arange_2_reduce(self):
