@@ -183,8 +183,7 @@ class AMDComputeQueue(HWComputeQueue):
   def _submit(self, device):
     cmds = self.indirect_cmd if device == self.binded_device else self.q
 
-    for i, value in enumerate(cmds):
-      device.compute_queue.ring[(device.compute_queue.put_value + i) % len(device.compute_queue.ring)] = value
+    for i, value in enumerate(cmds): device.compute_queue.ring[(device.compute_queue.put_value + i) % len(device.compute_queue.ring)] = value
 
     device.compute_queue.put_value += len(cmds)
     device.compute_queue.write_ptr[0] = device.compute_queue.put_value
