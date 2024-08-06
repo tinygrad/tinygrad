@@ -9,9 +9,9 @@ Install tinygrad and mlperf-logging from master.
 git clone https://github.com/tinygrad/tinygrad.git
 python3 -m pip install -e ".[mlperf]"
 ```
-Also install tqdm, tensorflow and pillow.
+Also install tqdm and tensorflow.
 ```
-pip install tqdm tensorflow pillow
+pip install tqdm tensorflow
 ```
 
 ### tinybox_green
