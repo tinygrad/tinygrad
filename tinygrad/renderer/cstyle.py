@@ -221,7 +221,7 @@ class IntelRenderer(OpenCLRenderer):
   tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]]  # noqa: E501
   def render_dtype(self, var_dtype:DType) -> str:
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
-  def render_cast(self, x, var_dtype, from_dtype=None, bitcast=False) -> str:
+  def render_cast(self, x, var_dtype, bitcast=False, from_dtype=None) -> str:
     return f"intel_convert_bfloat16_as_ushort({x[0]})" if (var_dtype, from_dtype) == (dtypes.bfloat16, dtypes.float) else \
       (f"intel_convert_as_bfloat16_float({x[0]})" if (var_dtype, from_dtype) == (dtypes.float, dtypes.bfloat16) else \
       super().render_cast(x, var_dtype, bitcast))
