@@ -28,7 +28,8 @@ def _try_dlopen_remu():
       remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
     except OSError: pass
     else: return remu
-  raise RuntimeError("libremu not found")
+  print("Could not find libremu.so")
+  return None
 remu = _try_dlopen_remu()
 
 def create_sdma_packets():
