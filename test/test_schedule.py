@@ -1466,19 +1466,18 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(loss, 5)
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
-  def test_sparse_categorical_crossentropy_alt(self):
+  def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
-    import torch
-    with Context(DEBUG=0):
-      X_train, Y_train, _, _ = mnist()
-      yt = Tensor.randn(512, 100).realize()
-      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0]).realize()
-    y = Y_train[samples]
-    loss = yt.sparse_categorical_crossentropy(y)
-    self.check_schedule(loss, 8)
-    y_ref = torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())]
-    loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), y_ref)
-    np.testing.assert_allclose(loss.numpy(), loss_ref.numpy(), atol=1e-5, rtol=1e-6)
+    _, Y_train, _, _ = mnist()
+    samples = Tensor.randint(getenv("BS", 512), high=6000)
+    yt = Tensor.randn(512, 10)
+    with Context(SPLIT_REDUCEOP=0):
+      loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+      self.check_schedule(loss, 6)
+      loss_fused = loss.numpy()
+    loss_ref = yt.sparse_categorical_crossentropy(Y_train[samples])
+    run_schedule(check_schedule(loss_ref, 9))
+    np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_arange_fuse_grouped_children(self):
     X = Tensor.randn(4, 4).realize()
