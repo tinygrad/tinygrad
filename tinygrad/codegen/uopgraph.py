@@ -102,14 +102,20 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
       if factor: quotient.append(u.divides(c))
       something_changed = True
     else:
+      # (5*a+5)//2 -> (5*a+1)//2+2, only factor out const
+      if u.op is UOps.CONST and c <= abs(u.arg):
+        quotient.append(u.const(u.arg//c))
+        remainder.append(u.const(u.arg%c))
+        something_changed = True
+      else: remainder.append(u)
       gcd = math.gcd(gcd, factor)
-      remainder.append(u)
+
   if not something_changed: return cast(UOp, x.divides(gcd))//(c//gcd) if gcd != c and gcd != 1 else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
   if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
   if quo is None: return x.const(0) if rem is None else cast(UOp, rem.divides(gcd) if gcd > 1 else rem)//(c//gcd)
-  return quo if rem is None else quo+cast(UOp, rem.divides(gcd) if factor > 1 else rem)//(c//gcd)
+  return quo if rem is None else quo+cast(UOp, rem.divides(gcd) if gcd > 1 else rem)//(c//gcd)
 
 # ***** transcendental *****
 
