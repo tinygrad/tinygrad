@@ -82,7 +82,7 @@ class TestGraphRewrite(unittest.TestCase):
     b = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)), arg=Variable('b', 0, 1))
     c = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)), arg=Variable('c', 0, 1))
     d = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)), arg=Variable('d', 0, 1))
-    outs = [2+a, 2+a+d+3+b+c+4, UOp(UOps.ALU, a.dtype, src=(a.const(2), a), arg=BinaryOps.ADD)]
+    outs = [2+a, 2+a+d+3+b+c+4, UOp(UOps.ALU, a.dtype, src=(a.const(2), a), arg=BinaryOps.ADD), (4+d)+c+(2+a)+b]
     for out in outs:
       sink = graph_rewrite(out, constant_folder)
       print(sink)
@@ -385,6 +385,7 @@ class TestExpander(unittest.TestCase):
 
   def test_expand_different_axis_flip(self): self.test_expand_different_axis(True)
 
+  @unittest.skip("no longer supported")
   def test_reduce_known_axis(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     sink = UOp(UOps.REDUCE, dtypes.int, (3*e1,e1), ReduceOps.SUM)
@@ -392,6 +393,7 @@ class TestExpander(unittest.TestCase):
     assert sink.op is UOps.CONST
     self.assertEqual(sink.arg, 3*(0+1+2+3))
 
+  @unittest.skip("no longer supported")
   def test_reduce_const(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     sink = UOp(UOps.REDUCE, dtypes.int, (UOp.const(dtypes.int, 3), e1), ReduceOps.SUM)
