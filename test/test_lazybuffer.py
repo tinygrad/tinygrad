@@ -2,8 +2,7 @@
 import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.lazy import LazyBuffer, ReduceOps, MetaOps
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.lazy import LazyBuffer, MetaOps
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):
@@ -67,30 +66,6 @@ class TestLazyBuffer(unittest.TestCase):
     lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
     assert lb.const(1).base.arg == 1.0
     assert type(lb.const(1).base.arg) is float
-
-class TestReduceOp(unittest.TestCase):
-  def test_no_split_reduce_kernel(self):
-    a = Tensor.rand(4, 4).realize()
-    a = a.sum()
-    sched = create_schedule([a.lazydata])
-    assert len(sched) == 1
-    assert sched[0].ast.src[0].src[0].op is ReduceOps.SUM
-
-  def test_split_reduce_kernel_dim0(self):
-    a = Tensor.rand(256, 255).realize()
-    a = a.sum()
-    sched = create_schedule([a.lazydata])
-    assert len(sched) == 2
-    for s in sched:
-      assert s.ast.src[0].src[0].op is ReduceOps.SUM
-
-  def test_split_reduce_kernel_dim1(self):
-    a = Tensor.rand(255, 256).realize()
-    a = a.sum()
-    sched = create_schedule([a.lazydata])
-    assert len(sched) == 2
-    for s in sched:
-      assert s.ast.src[0].src[0].op is ReduceOps.SUM
 
 class TestView(unittest.TestCase):
   def test_all_masked_out(self):

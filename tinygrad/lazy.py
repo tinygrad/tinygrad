@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Union, Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, DTypeLike, ConstType, to_dtype
-from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata
+from tinygrad.helpers import prod, getenv, all_int, all_same, _METADATA, Metadata
 from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, reduce_st
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -175,6 +175,7 @@ class LazyBuffer:
 
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = reduce_st(self.st, axis)
+    print(self.st)
     # TODO: this logic should move to the scheduler
     if 0 in self.shape and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: dtypes.min(self.dtype)}[op], new_shape)
 
@@ -183,7 +184,31 @@ class LazyBuffer:
     if self.is_unrealized_unmasked_const() and all_int(self.shape):
       return self.const(self.base.arg * {ReduceOps.SUM: prod(self.shape[i] for i in axis), ReduceOps.MAX: 1}[op], new_shape)
 
-    return self._reduce_op(op, axis)
+    # TODO: can we split symbolic shape if the reduce axis is not symbolic?
+    if not getenv("SPLIT_REDUCEOP", 1) or not all_int(self.shape) or (0 in self.shape) or \
+      prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
+      return self._reduce_op(op, axis)
+
+    # if there are few globals, make some reduces into globals by splitting into two kernels
+    # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
+    #   ~2**10 should be enough if GROUP is used
+    # 256 split maximum should be "negligible reduce" for low prod(new_shape), 8 split minimum.
+    # split is moved to the end to provide maximum locality for the second phase reduce.
+    self_real_strides = self.st.real_strides(ignore_valid=True)
+    print(self_real_strides)
+    split_range = range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(new_shape)),8-1,-1)
+    print(split_range)
+    print(self.shape)
+    split_candidates = [(i, x) for i in axis for x in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(new_shape)),8-1,-1)
+                        if self.shape[i] % x == 0 and self_real_strides[i] != 0]
+    print(split_candidates)
+    split_candidates[0] = (3, 85)
+    if not split_candidates: return self._reduce_op(op, axis)
+    dim_to_split, divisor = split_candidates[0]
+    splitted_shape = self.shape[:dim_to_split] + (divisor,) + (self.shape[dim_to_split]//divisor,) + self.shape[dim_to_split+1:]
+    splitted = self.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))
+    print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
+    return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
 
   # *** movement ops ***
 

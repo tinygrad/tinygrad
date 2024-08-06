@@ -131,7 +131,7 @@ class Kernel:
 
   def split(self) -> Tuple[Kernel, ...]:
     ast = self.get_optimized_ast()
-    parent, op = ast, ast.src[0] or None
+    parent, op = ast, ast.src[0]
     trees = [ast]
     while(op.src):
       if op.op is MetaOps.KERNEL:
@@ -439,7 +439,7 @@ class Kernel:
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.SPLIT:
-      check(self.full_shape[axis] % amt == 0 and self.sts[self.full_buf_index].real_strides()[axis] != 0, "bad split candidate") 
+      check(self.full_shape[axis] % amt == 0 and self.sts[self.full_buf_index].real_strides()[axis] != 0, "bad split candidate")
       check(not self.vars, "can't split with symbolic shape")
       check(axis >= self.first_reduce and axis < self.shape_len-self.upcasted and len(self.reduceops) == 1, "must be the only reduce axis to split")
       self.shift_to(axis, amt, top=True, insert_before=self.first_reduce)
@@ -730,7 +730,7 @@ class Kernel:
           local_buffer = MemBuffer(-1, start.dtype, ShapeTracker.from_shape(local_shape))
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
-          return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces))) 
+          return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
         if self.reduce_split:
           buf_shapes = (self.full_shape, (1,), (self.full_shape[0],))
           load1, store2, load2 = tuple(MemBuffer(not i%2, op.dtype, ShapeTracker.from_shape(s)) for i,s in enumerate(buf_shapes))

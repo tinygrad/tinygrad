@@ -13,7 +13,7 @@ from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 
 def get_stats(x:Tensor):
   si = create_schedule([x.lazydata])[-1]
-  ei = lower_schedule_item(si)
+  ei = lower_schedule_item(si)[-1]
   return ei.prg.op_estimate, ei.prg.mem_estimate
 
 class TestMemoryCount(unittest.TestCase):

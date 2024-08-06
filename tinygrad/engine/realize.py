@@ -145,7 +145,7 @@ class BufferXfer(BufferCopy):
 # **************** method cache ****************
 
 method_cache: Dict[Tuple[str, LazyOp, int, bool], CompiledRunner] = {}
-def get_runners(dname:str, ast:LazyOp) -> Tuple[CompiledRunner, ...]:
+def get_runners(dname:str, ast:LazyOp) -> Tuple:
   ckey = (dname, ast, BEAM.value, False)
   if cret:=method_cache.get(ckey): return (cret,)
   bkey = (dname.split(":")[0], ast, BEAM.value, True)
@@ -154,13 +154,14 @@ def get_runners(dname:str, ast:LazyOp) -> Tuple[CompiledRunner, ...]:
     return (run,)
   else:
     programs: Tuple[Program, ...] = tuple(k.to_program() for k in get_kernels(Device[dname].renderer, ast))
-    runners = []
+    runners: List = []
     for prg in programs:
       if getenv("FUZZ_UOPS"):
         from test.external.fuzz_uops import UOpsFuzzerRunner
-        return UOpsFuzzerRunner(replace(prg, dname=dname))
-      method_cache[ckey] = method_cache[bkey] = run = CompiledRunner(replace(prg, dname=dname))
-      runners.append(run)
+        runners.append(UOpsFuzzerRunner(replace(prg, dname=dname)))
+      else:
+        method_cache[ckey] = method_cache[bkey] = run = CompiledRunner(replace(prg, dname=dname))
+        runners.append(run)
   return tuple(runners)
 
 # **************** lowering functions ****************
@@ -209,14 +210,14 @@ def lower_schedule_item(si:ScheduleItem) -> Tuple[ExecItem, ...]:
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule):
     si = schedule.pop(0)
-    for ei in lower_schedule_item(si):
-      try: yield ei
-      except Exception as e:
-        if DEBUG >= 2:
-          print(f"error lowering {si.ast.op}")
-          print("tensor operations:")
-          pprint.pprint(si.metadata, indent=2)
-        raise e
+    try:
+      for ei in lower_schedule_item(si): yield ei
+    except Exception as e:
+      if DEBUG >= 2:
+        print(f"error lowering {si.ast.op}")
+        print("tensor operations:")
+        pprint.pprint(si.metadata, indent=2)
+      raise e
 
 # **************** main run function ****************
 
