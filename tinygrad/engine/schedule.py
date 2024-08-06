@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, colored, prod, dedup,\
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, Context, GlobalCounters, colored, prod, dedup,\
     all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -152,10 +152,12 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
   for i, out in enumerate(outs):
     output_st = ShapeTracker.from_shape(reduce_st(*deque(reduce_info.values(), 1).pop()) if reduce_info else out.shape)
     lop = _recursive_lazyop(out, inputs, tuple(outs), var_vals, output_st, realizes, assign_targets, reduce_info, cache=cache)
-    output_view = out.arg[0] if out.op is MetaOps.ASSIGN and out.arg else output_st
-    output_view, vv = output_view.simplify().unbind()
+    if out.op is MetaOps.ASSIGN and out.arg:
+      assert out.arg[0].shape == out.shape, f"ASSIGN must not override output shape {out.arg[0].shape} != {out.shape}"
+      output_st = out.arg[0].reshape(output_st.shape)
+    output_st, vv = output_st.simplify().unbind()
     if vv: var_vals.update(vv)
-    ast.append(LazyOp(BufferOps.STORE, (lop,), MemBuffer(i, out.dtype, output_view)))
+    ast.append(LazyOp(BufferOps.STORE, (lop,), MemBuffer(i, out.dtype, output_st)))
   return LazyOp(MetaOps.KERNEL, tuple(ast)), list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])
 
 # *** DAG creation: decide which LazyBuffers should realize ***
@@ -233,6 +235,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
+SCHEDULES: List = []
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
@@ -342,14 +345,25 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
       graph[key].append(assign)
       in_degree[assign] += 1
 
+  if SAVE_SCHEDULE:
+    def _save():
+      if getenv("ARANGE_DIFF"):
+        from test.external.process_replay.diff_schedule import diff_schedule
+        return diff_schedule(SCHEDULES)
+      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
+      with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
+    if len(SCHEDULES) == 0: atexit.register(_save)
+    SCHEDULES.append((graph, prescheduled))
   return graph, in_degree, prescheduled
 
 # *** DAG ordering: breadth first search ***
 
-SCHEDULES: List = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
-  graph, in_degree, prescheduled = _graph_schedule(outs, seen)
+  if getenv("ARANGE_DIFF"):
+    with Context(FUSE_ARANGE=0, SAVE_SCHEDULE=1): _graph_schedule(outs, set())
+    with Context(FUSE_ARANGE=1, SAVE_SCHEDULE=1): graph, in_degree, prescheduled = _graph_schedule(outs, seen)
+  else: graph, in_degree, prescheduled = _graph_schedule(outs, seen)
   queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
   schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
@@ -368,13 +382,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(prescheduled[x])
 
-  if SAVE_SCHEDULE:
-    def _save():
-      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
-      with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
-    if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.append((graph, prescheduled))
-    if SAVE_SCHEDULE.value > 1 and SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
   # confirm everything was scheduled correctly
   if any(degree != 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
