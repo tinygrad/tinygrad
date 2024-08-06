@@ -3,7 +3,7 @@ import difflib #, ocdiff
 from collections import defaultdict
 from typing import DefaultDict, List, Set, Tuple
 from tinygrad.engine.schedule import ScheduleItem
-from tinygrad.helpers import colored
+from tinygrad.helpers import Context, colored
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LazyOp
 from tinygrad.engine.realize import lower_schedule_item
@@ -27,8 +27,9 @@ def diff_schedule(s):
     diff = list(difflib.unified_diff(ei0.prg.p.src.splitlines(), ei1.prg.p.src.splitlines()))
     unified_diff = "\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in diff)
     print(unified_diff)
-    tm0 = ei0.run(wait=True)
-    tm1 = ei1.run(wait=True)
+    with Context(DEBUG=2):
+      tm0 = ei0.run(wait=True)
+      tm1 = ei1.run(wait=True)
     assert tm0 is not None and tm1 is not None
     tm_diff = ((tm0 - tm1) / tm0) * 100
     if tm_diff > 0: print(colored(f"{tm_diff:.2f}% faster", "green"))
