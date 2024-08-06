@@ -1268,9 +1268,10 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
 class TestIndexing(unittest.TestCase):
-  def check_schedule(self, xt:Tensor, cnt:int):
+  def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
-      s = xt.schedule()
+      lst = [xt] if isinstance(xt, Tensor) else xt
+      s = Tensor.schedule(*lst)
       kernels = [si for si in s if si.ast.op is MetaOps.KERNEL]
       for si in kernels: verify_lazyop(si.ast)
       run_schedule(s)
@@ -1457,6 +1458,39 @@ class TestIndexing(unittest.TestCase):
     xref = np.zeros((4, 4), dtype=int)
     xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
     np.testing.assert_equal(x.numpy(), xref)
+
+  def test_sparse_categorical_crossentropy_simple(self):
+    X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
+    Y = Tensor([1, 2]).realize()
+    loss = X.sparse_categorical_crossentropy(Y)
+    self.check_schedule(loss, 5)
+    np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
+
+  def test_mnist_val(self):
+    from tinygrad.nn.datasets import mnist
+    _, Y_train, _, _ = mnist()
+    samples = Tensor.randint(getenv("BS", 512), high=6000)
+    yt = Tensor.randn(512, 10)
+    with Context(SPLIT_REDUCEOP=0):
+      loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+      self.check_schedule(loss, 6)
+      loss_fused = loss.numpy()
+    loss_ref = yt.sparse_categorical_crossentropy(Y_train[samples])
+    run_schedule(check_schedule(loss_ref, 9))
+    np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
+
+  def test_arange_fuse_grouped_children(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X + Tensor.arange(16).reshape(4, 4)).sum()
+    out0 = r+2
+    out1 = r+3
+    self.check_schedule([out0, out1], 1)
+
+  @unittest.expectedFailure
+  def test_fold_arange_view(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X + Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
+    self.check_schedule([r], 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
