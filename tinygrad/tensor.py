@@ -3049,7 +3049,7 @@ class Tensor:
 
   def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]:
     """
-    If `fim` is not specified, return the shape of the tensor. Otherwise return the length along dimension `dim`.
+    If `dim` is not specified, return the shape of the tensor. Otherwise return the length along dimension `dim`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[4, 5, 6], [7, 8, 9]])
