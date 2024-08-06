@@ -528,6 +528,8 @@ def train_retinanet():
       safe_save(state_dict, fn)
       print(f" *** Model saved to {fn} ***")
 
+    train_step.reset()
+
     # ***********EVAL******************
     if not TRAIN_ONLY:
       bt = time.perf_counter()
