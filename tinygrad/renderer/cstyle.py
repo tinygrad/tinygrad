@@ -206,8 +206,8 @@ class ClangRenderer(CStyleLanguage):
     tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types]
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix, macros = [_make_clang_dtype(self, dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)], []
-    for name, (N, M, K), dtype_in, _, _, _, _ in set([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+    prefix, macros = [_make_clang_dtype(self, dtype) for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)], []
+    for name, (N, M, K), dtype_in, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       macros = ['#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")', '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")'] # noqa: E501
       prefix += [f"""{dtype_in.vec(K*K).name} __{name}({dtype_in.vec(N).name} data1, {dtype_in.vec(M).name} data2){{
   AMX_SET(0);\n  AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull); {dtype_in.vec(K*K).name} data = {{0}};
