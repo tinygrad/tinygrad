@@ -511,8 +511,6 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
   procs = []
 
   try:
-    # disk:shm is slower
-    #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
     X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X")
     if not val:
       YB = Tensor.empty(*bsz, dtype=dtypes.float32, device=f"disk:/dev/shm/retinanet_YB")
@@ -562,7 +560,6 @@ def batch_load_retinanet(batch_size=64, val=False, shuffle=False, seed=42, pad_f
         lshm.unlink()
         mshm.unlink()
     except FileNotFoundError:
-      # happens with BENCHMARK set
       pass
 if __name__ == "__main__":
   def load_unet3d(val):
