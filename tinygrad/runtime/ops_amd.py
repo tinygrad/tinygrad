@@ -104,7 +104,7 @@ class AMDComputeQueue(HWComputeQueue):
   def _exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
     self._acquire_mem(gli=0, gl2=0)
 
-    user_regs = [*data64_le(kernargs)]
+    user_regs = [*data64_le(prg.device.scratch.va_addr), 0xffffffff, 0xc00000] if prg.enable_private_segment_sgpr else []
     if prg.enable_dispatch_ptr:
       dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=kernargs + prg.kernargs_segment_size)
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
@@ -112,18 +112,18 @@ class AMDComputeQueue(HWComputeQueue):
       dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, kernargs
       user_regs = [*data64_le(dp_addr)] + user_regs
       self.cmd_idx_to_dispatch_packet[len(self) - 1] = dp
+    user_regs += [*data64_le(kernargs)]
     self.cmd_idx_to_exec_info[len(self) - 1] = len(user_regs)
 
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8),
-               *data64_le(0), *data64_le(prg.device.scratch.va_addr >> 8)]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_TMPRING_SIZE), prg.device.tmpring_size]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO), *data64_le(prg.device.scratch.va_addr >> 8)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4)] + [0xFFFFFFFF] * 4
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, len(user_regs)), gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0)] + user_regs
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), gfxreg(amd_gpu.regCOMPUTE_START_X), 0, 0, 0, *local_size, 0, 0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 3), gfxreg(amd_gpu.regCOMPUTE_NUM_THREAD_X), *local_size]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_RESOURCE_LIMITS), 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
@@ -176,7 +176,8 @@ class AMDComputeQueue(HWComputeQueue):
   def _submit(self, device):
     cmds = self.indirect_cmd if device == self.binded_device else self.q
 
-    for i, value in enumerate(cmds): device.compute_queue.ring[(device.compute_queue.put_value + i) % len(device.compute_queue.ring)] = value
+    for i, value in enumerate(cmds):
+      device.compute_queue.ring[(device.compute_queue.put_value + i) % len(device.compute_queue.ring)] = value
 
     device.compute_queue.put_value += len(cmds)
     device.compute_queue.write_ptr[0] = device.compute_queue.put_value
@@ -282,7 +283,9 @@ class AMDProgram(HCQProgram):
     # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
     # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
     self.enable_dispatch_ptr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+    self.enable_private_segment_sgpr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
+    if self.enable_private_segment_sgpr: additional_alloc_sz += 16
 
     super().__init__(self.device, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
 
