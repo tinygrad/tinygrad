@@ -91,8 +91,8 @@ def _permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeT
 
 def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer],\
     reduce_info:Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]], cache) -> Optional[Tuple[LazyBuffer, ShapeTracker]]:
-  if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs) or (buf, st) in cache: return None
-  cache.setdefault((buf, st))
+  if (buf, st) in cache: return cache[(buf, st)]
+  if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs): return None
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   input_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
   reduce_srcs = [r for x in buf.srcs if (r:=_recurse_reduceops(x, input_st, realizes, outs, reduce_info, cache)) is not None]
@@ -123,7 +123,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
     st = st.reshape(reduce_st(input_st, axis))
     reduce_info[(buf, st)] = (input_st, axis)
     return (buf, st)
-  return top_reduce
+  return cache.setdefault((buf, st), top_reduce)
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> Tuple[LazyOp, List[LazyBuffer], Dict[Variable, int], List[Metadata]]:
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
