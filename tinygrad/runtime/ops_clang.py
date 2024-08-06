@@ -6,10 +6,14 @@ from tinygrad.renderer.cstyle import ClangRenderer
 class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
-    with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(['clang', '-include', 'tgmath.h', '-shared', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-',
+    try:
+      with tempfile.NamedTemporaryFile(delete=True) as output_file:
+        subprocess.check_output(['clang', '-include', 'tgmath.h', '-shared', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-',
                                '-o', str(output_file.name)], input=src.encode('utf-8'))
-      return pathlib.Path(output_file.name).read_bytes()
+        return pathlib.Path(output_file.name).read_bytes()
+    except FileNotFoundError as e:
+      if shutil.which('clang'): raise Exception('clang not installed')
+      else: raise e
 
 class ClangProgram:
   def __init__(self, name:str, lib:bytes):
@@ -24,6 +28,5 @@ class ClangProgram:
 
 class ClangDevice(Compiled):
   def __init__(self, device:str):
-    assert shutil.which('clang') is not None, 'clang not installed'
     from tinygrad.runtime.graph.clang import ClangGraph
     super().__init__(device, MallocAllocator, ClangRenderer(), ClangCompiler("compile_clang"), ClangProgram, ClangGraph)
