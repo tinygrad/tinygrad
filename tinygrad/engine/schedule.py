@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_AS_ONE_KERNEL, GlobalCounters, colored, prod, dedup,\
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, colored, prod, dedup,\
     all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -131,10 +131,18 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]):
     rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((out.arg,))))
     return LazyOp(MetaOps.KERNEL, (LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st)), )), [x.base for x in out.srcs], {}, []
   if out.op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}: return LazyOp(out.op, (), out.arg), [x.base for x in out.srcs], {}, []
-  # unify the kernel dims
+  # push through all movementops between reduceops
   reduce_info: Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]] = {}
   seen_ops: Dict[Tuple[LazyBuffer, ShapeTracker], None] = {}
   for out in outs: _recurse_reduceops(out, out.st, realizes, outs, reduce_info, seen_ops)
+  # pad all reduceops to the max of each dimension
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[input_st.shape for input_st,_ in reduce_info.values()])]
+  for i,dims in enumerate(shape_dims):
+    if len(dims) == 1 or (len(dims) == 2 and dims[0] == 1): continue
+    for (r,view),(input_st,axis) in reduce_info.items():
+      if (dim:=input_st.shape[i]) > 1 and dim != max(dims):
+        input_st = input_st.pad(((0, 0),)*i+((0, max(dims)-dim),))
+        reduce_info[(r, view)] = (input_st, axis)
   # create the stores
   var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
   assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
@@ -169,7 +177,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       # this was causing "test_lil_model" to fail
       if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         simple_pads[buf.base] = None # don't realize image to image casts. this is part of a larger problem
-      elif not FUSE_AS_ONE_KERNEL: realizes[buf.base] = None
+      else: realizes[buf.base] = None
     # check all other pads for safe fusion
     elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
@@ -243,6 +251,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
+  reduce_of_const: List[LazyBuffer] = []
   for r in allbufs:
     if r.op not in ReduceOps or r in realizes: continue
 
@@ -279,14 +288,24 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
-      if not FUSE_AS_ONE_KERNEL: realizes[tr] = None
+      realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in group)
+    if FUSE_ARANGE and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: reduce_of_const.append(r)
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
     for reduceop in double_reduces:
       top_reduce = reduceop.base.srcs[0].base
       if len(children[top_reduce]) == 1: del realizes[top_reduce]
+
+  for r in reduce_of_const:
+    group = {tr:None for tr,rop in reduce_for_op.items() if rop is r}
+    if DEBUG_ARANGE:=(getenv("DEBUG_ARANGE")): print(f"checking {r} {group=}")
+    if any(tr.forced_realize for tr in group) or any(x.base in group for x in outs): continue
+    kernel_children = {c for tr in group for c in children[tr] if c.op not in {MetaOps.COPY, MetaOps.VIEW}}
+    if len(kernel_children) == 0: continue
+    if DEBUG_ARANGE: print(colored(f"folding {r}", "green"))
+    for tr in group: del realizes[tr]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:

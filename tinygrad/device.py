@@ -486,13 +486,13 @@ class HCQCompiled(Compiled):
   gpu2cpu_compute_time_diff: decimal.Decimal = decimal.Decimal('nan')
 
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
-               comp_queue_t:Type[HWComputeQueue], copy_queue_t:Type[HWCopyQueue], timeline_signals:Tuple[HCQSignal, HCQSignal]):
+               comp_queue_t:Type[HWComputeQueue], copy_queue_t:Optional[Type[HWCopyQueue]], timeline_signals:Tuple[HCQSignal, HCQSignal]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool]] = []
-    self.dep_prof_records:List[Tuple[int, int, HCQCompiled, bool, int, int, HCQCompiled, bool]] = []
+    self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
     if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -530,7 +530,8 @@ class HCQCompiled(Compiled):
       return (decimal.Decimal(et+st) / 2000) - d.timeline_signal.timestamp
 
     # randomly sample the timing from GPU to CPU
-    choices: List = [(d, d.hw_compute_queue_t, []) for d in self.devices] + [(d, d.hw_copy_queue_t, []) for d in self.devices]
+    choices: List = [(d, d.hw_compute_queue_t, []) for d in self.devices]
+    choices += [(d, d.hw_copy_queue_t, []) for d in self.devices if d.hw_copy_queue_t is not None]
     for _ in range(100*len(self.devices)):
       d,q,l = random.choice(choices)
       l.append(_sync_cpu_queue(d,q))
@@ -572,7 +573,6 @@ class HCQCompiled(Compiled):
     self.profile_logger = ProfileLogger()
 
   def _prof_finalize(self):
-    self._ensure_shared_time_base()
     qname = ["COMPUTE", "DMA"]
 
     for st, en, name, is_cp in self.raw_prof_records:

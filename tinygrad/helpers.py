@@ -107,7 +107,8 @@ WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEF
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
 MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("TRANSCENDENTAL", 1)
-FUSE_AS_ONE_KERNEL, FUSE_CONV_BW = ContextVar("FUSE_AS_ONE_KERNEL", 0), ContextVar("FUSE_CONV_BW", 0)
+FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
+SPLIT_REDUCEOP = ContextVar("SPLIT_REDUCEOP", 1)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -208,7 +209,7 @@ def db_connection():
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
-    _db_connection.execute("PRAGMA journal_mode=WAL")
+    _db_connection.execute("PRAGMA journal_mode=WAL").fetchone()
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
 
