@@ -1,4 +1,4 @@
-import ctypes, subprocess, pathlib, tempfile
+import ctypes, subprocess, pathlib, tempfile, shutil
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -24,5 +24,6 @@ class ClangProgram:
 
 class ClangDevice(Compiled):
   def __init__(self, device:str):
+    assert shutil.which('clang') is not None, 'clang not installed'
     from tinygrad.runtime.graph.clang import ClangGraph
     super().__init__(device, MallocAllocator, ClangRenderer(), ClangCompiler("compile_clang"), ClangProgram, ClangGraph)
