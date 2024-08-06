@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same, partition
-from tinygrad.codegen.uops import UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify
+from tinygrad.codegen.uops import UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify, print_uops
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -102,6 +102,29 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   if not something_changed: return None
   return functools.reduce(operator.add, remainder) if remainder else x.const(0)
 
+def div_folding(x:UOp, c:int) -> Optional[UOp]:
+  # simplify x // c, None means no change
+  quotient, remainder, something_changed = [], [], False
+  for u in _get_add_chain(x):
+    if u.op is UOps.CONST and u.arg%c == 0:
+      if (q:=u.arg//c): quotient.append(u.const(q))
+      something_changed = True
+    elif u.op is UOps.ALU and u.arg is BinaryOps.MUL:
+      if (u0:=u.src[0]).op is UOps.CONST and u0.arg%c == 0:
+        if (q:=u0.arg//c): quotient.append(u.src[1] if q==1 else -u.src[1] if q==-1 else u.const(q)*u.src[1])
+        something_changed = True
+      elif (u1:=u.src[1]).op is UOps.CONST and u1.arg%c == 0:
+        if (q:=u1.arg//c): quotient.append(u.src[0] if q==1 else -u.src[0] if q==-1 else u.src[0]*u.const(q))
+        something_changed = True
+      else: remainder.append(u)
+    else: remainder.append(u)
+  if not something_changed: return None
+  rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
+  if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
+  quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
+  if quo is None: return x.const(0) if rem is None else rem//c
+  return quo if rem is None else quo+rem//c
+
 # ***** transcendental *****
 
 transcendental_folding = PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=k), cast(Callable, v))
@@ -132,7 +155,7 @@ def reduce_before_expand(reduce, expand, x):
   red = UOp(UOps.REDUCE, x.dtype, (x,)+reduce.src[1:], reduce.arg)
   return UOp(expand.op, expand.dtype, tuple(UOp(UOps.GEP, reduce.dtype, (red,), i) for i in range(x.dtype.count)), expand.arg)
 
-def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce, idx2=None, idx3=None):
+def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce, idx2=None, idx3=None, extra=None):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in reduce.src: return None  # must be the right REDUCE
   if mval.arg >= 0 or loop_start.arg != 0:
     # TODO: support and test this with other mvals and loop_starts
@@ -141,8 +164,10 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
   if idx2 is not None: idx = idx + idx2
   if idx3 is not None: idx = idx + idx3
   comprange = UOp.min(loop_end, UOp.max((idx-compval-mval)//mval + (loop_end-loop_start), loop_start))
-  return UOp(UOps.REDUCE, reduce.dtype, (comprange.cast(multconst.dtype) * multconst,) +
-             tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
+  new_reduce_op = comprange.cast(multconst.dtype) * multconst
+  ret = UOp(UOps.REDUCE, reduce.dtype, (new_reduce_op,) + tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
+  if extra is not None: ret = ret + UOp(UOps.REDUCE, reduce.dtype, (extra,) + reduce.src[1:], reduce.arg)
+  return ret
 
 def index_collapse(idx,rng,buf,add,mul,ld,reduce):
   if rng not in reduce.src: return None
@@ -181,17 +206,26 @@ constant_folder = PatternMatcher([
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   (NOp(UOps.REDUCE, src=((NOp.var("idx") - NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
-    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
-    lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
+   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
+   lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
+  # arange loop folding (unrolled)
+  (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
+   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)) + NOp.var("extra"),),
+   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   # indexing (with a multiply offset)!
   (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).cast()*
     NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
+  (NOp(UOps.REDUCE, src=(NOp.var('idx').ne(NOp(UOps.RANGE, name="rng")).__neg__().cast()*
+    NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.RANGE, name="rng")), name="ld"),),
+    arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
+    lambda **kwargs: index_collapse(add=UOp.const(dtypes.int, 0), mul=UOp.const(dtypes.int, 1), **kwargs)),
   (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).where(
     NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"), NOp.const(None, 0.0)),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
   # other arange folders
   (NOp.cvar("c1") - (NOp.var("x") + NOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
+  (-(NOp.var("x") * NOp.cvar("c1")), lambda x, c1: x*-c1),
   # max folding
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # const rules
@@ -240,9 +274,8 @@ constant_folder = PatternMatcher([
   # neg lt -> lt
   (NOp.lt(-NOp.var('x'), NOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(c.const(-c.arg), x)),
   # ** div **
-  # div folding
-  (NOp.var('x') // NOp.cvar('c'), lambda x,c: x.const(x.vmin.arg//c.arg) if c.arg > 0 and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
-  (NOp.var('x') // NOp.cvar('c'), lambda x,c: d if c.arg > 0 and (d:=x.divides(c.arg)) is not None else None),
+  # # div folding
+  (NOp.var('x') // NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=div_folding(x,c.arg)) is not None else None),
   # mul div
   ((NOp.var("x") * NOp.cvar("c0")) // NOp.cvar("c1"),
    lambda x,c0,c1: x*(c0.arg//gcd)//(c1.arg//gcd) if c1.arg!=0 and (gcd:=math.gcd(c0.arg,c1.arg))> 1 else None),
@@ -304,7 +337,7 @@ constant_folder = PatternMatcher([
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(UOps.CONST, name='c1'), UPat(name='x'))), lambda c1,x: x+c1 if x.op is not UOps.CONST else None),
-  (UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name='x'), UPat(UOps.CONST, name='c1'))), UPat(name='y'))),
+  (UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name='x'), UPat(UOps.CONST, name='c1'))), UPat(name='y')]),
     lambda x,c1,y: (x+y)+c1),
 ])
 
@@ -479,10 +512,7 @@ class UOpGraph:
     from tinygrad.engine.graph import graph_uops
     graph_uops(self.uops)
 
-  def print(self):
-    for i,u in enumerate(self):
-      formatted_parents = [self.uops.index(x) if x.op is not UOps.CONST else f"{x.arg}" for x in u.src]
-      print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str(formatted_parents):32s} {u.arg}")
+  def print(self): print_uops(self.uops)
 
   cnt = 0
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, skip_check=False) -> UOpGraph:
@@ -499,6 +529,7 @@ class UOpGraph:
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
       sink = graph_rewrite(sink, self.folder+expander+float4_folding if self.opts is not None and self.opts.supports_float4 else self.folder+expander)
+    if UOpGraph.cnt != getenv("DEBUG_REDUCE", 0):
       sink = graph_rewrite(sink, self.folder+expander+reducer)
 
     # for PTX only

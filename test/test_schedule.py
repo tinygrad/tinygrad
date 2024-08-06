@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps, verify_lazyop
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -496,7 +496,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
-  @unittest.skipUnless(getenv("SPLIT_REDUCEOP", 1), "Testing split reducop requires SPLIT_REDUCEOP")
+  @unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
     x = Tensor.randn(big_enough).realize()
@@ -1442,6 +1442,21 @@ class TestIndexing(unittest.TestCase):
     ref = precompute_freqs_cis(**args)
     run_schedule(check_schedule(ref, 3))
     np.testing.assert_equal(fused.numpy(), ref.numpy())
+
+  def test_fuse_assign_contiguous(self):
+    x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
+    a = Tensor.arange(8).reshape(4, 2)
+    self.check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2)
+    np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
+
+  def test_assign_non_contiguous(self):
+    x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
+    y = Tensor.randint(4, 2)
+    a = Tensor.arange(8).reshape(4, 2)+y
+    x.shrink((None, (0, 2))).assign(a).realize()
+    xref = np.zeros((4, 4), dtype=int)
+    xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
+    np.testing.assert_equal(x.numpy(), xref)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
