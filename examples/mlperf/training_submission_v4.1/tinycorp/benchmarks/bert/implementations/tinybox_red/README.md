@@ -67,7 +67,7 @@ BASEDIR="/raid/datasets/wiki" python3 extra/datasets/wikipedia.py pre-eval
 
 #### Steps to run benchmark
 ```
-examples/mlperf/training_submission_v4.0/tinycorp/benchmarks/bert/implementations/tinybox_green/run_and_time.sh
+examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_green/run_and_time.sh
 ```
 
 ### tinybox_red
@@ -75,10 +75,10 @@ examples/mlperf/training_submission_v4.0/tinycorp/benchmarks/bert/implementation
 #### One time setup
 
 ```
-examples/mlperf/training_submission_v4.0/tinycorp/benchmarks/bert/implementations/tinybox_red/setup.sh
+examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/setup.sh
 ```
 
 #### Steps to run benchmark
 ```
-examples/mlperf/training_submission_v4.0/tinycorp/benchmarks/bert/implementations/tinybox_red/run_and_time.sh
+examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/run_and_time.sh
 ```
