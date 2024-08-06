@@ -60,6 +60,7 @@ def fold_expanded(ex, buf):
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
 def vectorize_reduce(vec:UOp):
+  if all_same(vec.src): return None  # don't REDUCE the same thing multiple times
   if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None
   return UOp(UOps.REDUCE, vec.dtype, (UOp(UOps.VECTORIZE, vec.dtype, tuple(x.src[0] for x in vec.src)),) + vec.src[0].src[1:], vec.src[0].arg)
 
@@ -513,7 +514,6 @@ class UOpGraph:
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
       sink = graph_rewrite(sink, self.folder+expander+float4_folding if self.opts is not None and self.opts.supports_float4 else self.folder+expander)
-    if UOpGraph.cnt != getenv("DEBUG_REDUCE", 0):
       sink = graph_rewrite(sink, self.folder+expander+reducer)
 
     # for PTX only
