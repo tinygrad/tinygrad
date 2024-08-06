@@ -1,4 +1,4 @@
-import sys, pickle, atexit
+import sys, pickle, atexit, functools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
@@ -43,15 +43,24 @@ class LBScheduleItem:
   var_vals: Dict[Variable, int] = field(default_factory=dict)
   metadata: List[Metadata] = field(default_factory=list)
 
+# *** Generic utils ***
+
+def lb_cache(func):
+  @functools.wraps(func)
+  def __wrapper(buf:LazyBuffer, st:ShapeTracker, *args, **kwargs):
+    if (buf, st) in (cache:=kwargs.get("cache", args[-1])): return cache[(buf, st)]
+    return cache.setdefault((buf, st), func(buf, st, *args, **kwargs))
+  return __wrapper
+
 # *** DAG transformation: List[LazyBuffer] -> ScheduleItem ***
 
+@lb_cache
 def _recursive_lazyop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], inputs:Dict[LazyBuffer, int],
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer],
                       reduce_info:Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]],
                       cache:Dict[Tuple[LazyBuffer, ShapeTracker], LazyOp]) -> LazyOp:
   """recursively create a lazyop"""
   if buf is not buf.base: st, buf = buf.st+st, buf.base
-  if (buf, st) in cache: return cache[(buf, st)]
   arg = buf.arg
 
   # consts are always fused and generated
@@ -90,19 +99,19 @@ def _recursive_lazyop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer,
     st, arg = reduce_info[(buf, st)]
 
   # otherwise we fuse it like normal
-  return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, st, outputs, var_vals, inputs, realizes, assign_targets, \
-      reduce_info, cache) for x in buf.srcs), arg))
+  return LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, st, outputs, var_vals, inputs, realizes, assign_targets, \
+      reduce_info, cache) for x in buf.srcs), arg)
 
 def _permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
   permute_axis = tuple(i for i in range(len(input_st.shape)) if i not in axis) + axis
   tmp = input_st.permute(permute_axis)
   return tmp, tmp.shape[-len(axis):]
 
+@lb_cache
 def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer, None], outs:List[LazyBuffer],
                        reduce_info:Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]],
                        cache:Dict[Tuple[LazyBuffer, ShapeTracker], Optional[Tuple[LazyBuffer, ShapeTracker]]]) -> \
                          Optional[Tuple[LazyBuffer, ShapeTracker]]:
-  if (buf, st) in cache: return cache[(buf, st)]
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs): return None
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   input_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
@@ -134,7 +143,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
     st = st.reshape(reduce_st(input_st, axis))
     reduce_info[(buf, st)] = (input_st, axis)
     return (buf, st)
-  return cache.setdefault((buf, st), top_reduce)
+  return top_reduce
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> LBScheduleItem:
   """describe the computation for a LazyBuffer with LazyOp + inputs + var_vals"""
@@ -218,12 +227,11 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
+@lb_cache
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
                      realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, None],
                      cache:Dict[Tuple[LazyBuffer, ShapeTracker], None]) -> None:
   """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
-  if (tr, st) in cache: return
-  cache.setdefault((tr, st))
   if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
