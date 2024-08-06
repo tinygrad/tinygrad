@@ -261,9 +261,9 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
 _nms = "xyzwabcdefghijkl"
-def _make_cuda_dtype(base_type, cnt, align):
-  vec, elems, header = f"{base_type}{cnt}", ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
-  return f"struct __align__({align}) {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
+def _make_cuda_dtype(self, dtype):
+  vec, elems, header = self.render_dtype(dtype), ', '.join(_nms[:dtype.count()]), ', '.join([f"{self.render_dtype(dtype.scalar())} {x}" for x in _nms[:dtype.count()]]) # noqa:E501
+  return f"struct __align__({dtype.size()}) {vec} {{ {self.render_dtype(dtype.scalar())} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}" # noqa:E501
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
@@ -290,15 +290,15 @@ class CUDARenderer(CStyleLanguage):
     dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"), }
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
-    if any(uop.dtype == dtypes.half for uop in uops):
-      prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", x, x*2) for x in [4, 8]]
 
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops):
-      prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", x, x*2) for x in [4, 8]]
+    # if any(uop.dtype == dtypes.half for uop in uops):
+    #   prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", x, x*2) for x in [4, 8]]
 
-    for uop in uops:
-      if uop.dtype == dtypes.half: prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", x, x*2) for x in [4, 8]]
-      if uop.dtype == dtypes.bfloat16: prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", x, x*2) for x in [4, 8]]
+    # if any(uop.dtype == dtypes.bfloat16 for uop in uops):
+    #   prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", x, x*2) for x in [4, 8]]
+
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype in (dtypes.half, dtypes.bfloat16) and uop.dtype.count>1):
+      prefix += [f"#include <cuda_{dt_map[dtype]}>.h"] + [_make_cuda_dtype(self, dtype)]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
