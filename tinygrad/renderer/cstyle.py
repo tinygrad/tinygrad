@@ -41,7 +41,7 @@ class CStyleLanguage(Renderer):
   def render_vectorize(self, x:List[str], var_dtype:DType) -> str:
     assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
-    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}" + (f"{{{','.join(x)}}}" if self.device == "CLANG" else f"({','.join(x)})")
+    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
 
   # returns a str expression of the const with the given type
   def render_const(self, x:ConstType, dtype:DType) -> str:
@@ -180,18 +180,15 @@ class CStyleLanguage(Renderer):
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
           r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + \
-            (f"[{args}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) or self.device == 'CLANG' else f".{'xyzwabcd'[args]}")
+            (f"[{args}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) else f".{'xyzwabcd'[args]}")
         else: raise RuntimeError(f"failed to render {u}")
 
     # NOTE: this relies on bufs dict preserving order
     return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
-def _make_clang_dtype(self, dtype):
-  return f"typedef {self.render_dtype(dtype.scalar())} {self.render_dtype(dtype)} __attribute__((aligned({(sz:=dtype.itemsize)}),vector_size({sz})));"
-
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
-  float4 = "(float4)"
+  supports_float4 = False
   has_local = False
   global_max = None
 
@@ -199,10 +196,6 @@ class ClangRenderer(CStyleLanguage):
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
-
-  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix = [_make_clang_dtype(self, dtype) for dtype in set(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
@@ -272,6 +265,39 @@ def _make_cuda_dtype(base_type, cnt, align):
   vec, elems, header = f"{base_type}{cnt}", ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
   return f"struct __align__({align}) {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
+
+
+def get_fp8_header(format_type: str):
+    assert format_type in ['e4m3', 'e5m2'], "Invalid format type. Use 'e4m3' or 'e5m2'."
+    
+    return f"""
+#define DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(op) \\
+    __device__ __forceinline__ __nv_fp8_{format_type} operator op (const __nv_fp8_{format_type}& a, const __nv_fp8_{format_type}& b) {{ \\
+        __half ha = static_cast<__half>(a); \\
+        __half hb = static_cast<__half>(b); \\
+        return static_cast<__nv_fp8_{format_type}>(ha op hb); \\
+    }}
+DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(+)
+DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(-)
+DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(*)
+DEFINE_FP8_ARITHMETIC_OP_{format_type.upper()}(/)
+
+#define DEFINE_FP8_COMPARISON_OP_{format_type.upper()}(op) \\
+    __device__ __forceinline__ bool operator op (const __nv_fp8_{format_type}& a, const __nv_fp8_{format_type}& b) {{ \\
+        __half ha = static_cast<__half>(a); \\
+        __half hb = static_cast<__half>(b); \\
+        return ha op hb; \\
+    }}
+
+DEFINE_FP8_COMPARISON_OP_{format_type.upper()}(==)
+DEFINE_FP8_COMPARISON_OP_{format_type.upper()}(!=)
+DEFINE_FP8_COMPARISON_OP_{format_type.upper()}(<)
+DEFINE_FP8_COMPARISON_OP_{format_type.upper()}(>)
+DEFINE_FP8_COMPARISON_OP_{format_type.upper()}(<=)
+DEFINE_FP8_COMPARISON_OP_{format_type.upper()}(>=)
+"""
+
+
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
   global_max = (2147483647, 65535, 65535)
@@ -289,7 +315,7 @@ class CUDARenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+x)}+threadIdx.{chr(120+int(x))})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
-  type_map = {dtypes.bfloat16: "nv_bfloat16"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.f8e5m2: "__nv_fp8_e5m2", dtypes.f8e4m3: "__nv_fp8_e4m3"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
@@ -297,6 +323,13 @@ class CUDARenderer(CStyleLanguage):
     dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"), }
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
+    if any(uop.dtype == dtypes.f8e5m2 for uop in uops):
+      # need to include fp16 since there is no arithmetic intrinsics for fp8 in CUDA, so we cast to fp16, do the op and cast back if result is float.
+      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e5m2", x, x*2) for x in [4, 8]] + [get_fp8_header("e5m2")]
+    if any(uop.dtype == dtypes.f8e4m3 for uop in uops):
+      # need to include fp16 since there is no arithmetic intrinsics for fp8 in CUDA, so we cast to fp16, do the op and cast back if result is float.
+      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e4m3", x, x*2) for x in [4, 8]] + [get_fp8_header("e4m3")]
+    
     if any(uop.dtype == dtypes.half for uop in uops):
       prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", x, x*2) for x in [4, 8]]
 

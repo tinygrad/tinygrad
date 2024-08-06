@@ -37,7 +37,7 @@ class PtrDType(DType):
 
 class dtypes:
   @staticmethod
-  def is_float(x: DType) -> bool: return x.scalar() in (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
+  def is_float(x: DType) -> bool: return x.scalar() in (dtypes.f8e4m3, dtypes.f8e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.bigint) or dtypes.is_unsigned(x)
   @staticmethod
@@ -77,6 +77,8 @@ class dtypes:
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None, 1)
   float32: Final[DType] = DType(11, 4, "float", 'f', 1)
   float64: Final[DType] = DType(12, 8, "double", 'd', 1)
+  f8e5m2: Final[DType] = DType(13, 1, "f8e5m2", 'e', 1)
+  f8e4m3: Final[DType] = DType(13, 1, "f8e4m3", 'e', 1)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -104,7 +106,8 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
   dtypes.int64: [dtypes.float16, dtypes.bfloat16], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
   dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float16, dtypes.bfloat16],
-  dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
+  dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], dtypes.f8e5m2 : [dtypes.float16],
+  dtypes.f8e4m3: [dtypes.float16] }
 
 @functools.lru_cache(None)
 def _get_recursive_parents(dtype:DType) -> Set[DType]:

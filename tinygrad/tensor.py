@@ -295,7 +295,7 @@ class Tensor:
     print(repr(t.numpy()))
     ```
     """
-    if self.dtype == dtypes.bfloat16: return self.float().numpy()
+    if self.dtype in [dtypes.bfloat16, dtypes.f8e4m3, dtypes.f8e5m2]: return self.float().numpy()
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
@@ -420,8 +420,8 @@ class Tensor:
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     if not THREEFRY.value:
       # for bfloat16, numpy rand passes buffer in float
-      if to_dtype(dtype or dtypes.default_float) == dtypes.bfloat16:
-        return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dtypes.bfloat16)
+      if (dt:=to_dtype(dtype or dtypes.default_float)) in [dtypes.bfloat16, dtypes.f8e4m3, dtypes.f8e5m2]:
+        return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dt)
       return Tensor._metaop(MetaOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
 
     # threefry
