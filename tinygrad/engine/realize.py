@@ -141,11 +141,7 @@ class BufferCopy(Runner):
       return time.perf_counter() - st
 
 class BufferXfer(BufferCopy):
-  def copy(self, dest, src):
-    if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
-      dest.allocator.device.track_cross_buffer.append(src)
-      src.allocator.track_cross_device.add(dest.allocator.device)
-    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
+  def copy(self, dest, src): dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
 
 # **************** method cache ****************
 
