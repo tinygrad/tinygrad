@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, colored, prod, dedup,\
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, Context, GlobalCounters, colored, prod, dedup,\
     all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -235,6 +235,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache=set())
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
+SCHEDULES: List = []
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
@@ -346,19 +347,23 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]):
 
   if SAVE_SCHEDULE:
     def _save():
+      if getenv("ARANGE_DIFF"):
+        from test.external.process_replay.diff_schedule import diff_schedule
+        return diff_schedule(SCHEDULES)
       print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
       with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
     if len(SCHEDULES) == 0: atexit.register(_save)
     SCHEDULES.append((graph, prescheduled))
-    if SAVE_SCHEDULE.value > 1 and SAVE_SCHEDULE.value == len(SCHEDULES): exit(0)
   return graph, in_degree, prescheduled
 
 # *** DAG ordering: breadth first search ***
 
-SCHEDULES: List = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
-  graph, in_degree, prescheduled = _graph_schedule(outs, seen)
+  if getenv("ARANGE_DIFF"):
+    with Context(FUSE_ARANGE=0, SAVE_SCHEDULE=1): _graph_schedule(outs, set())
+    with Context(FUSE_ARANGE=1, SAVE_SCHEDULE=1): graph, in_degree, prescheduled = _graph_schedule(outs, seen)
+  else: graph, in_degree, prescheduled = _graph_schedule(outs, seen)
   queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
   schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
