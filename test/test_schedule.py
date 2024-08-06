@@ -1468,6 +1468,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
+    import torch
     _, Y_train, _, _ = mnist()
     samples = Tensor.randint(getenv("BS", 512), high=6000)
     yt = Tensor.randn(512, 10)
@@ -1475,8 +1476,7 @@ class TestIndexing(unittest.TestCase):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
       self.check_schedule(loss, 6)
       loss_fused = loss.numpy()
-    loss_ref = yt.sparse_categorical_crossentropy(Y_train[samples])
-    run_schedule(check_schedule(loss_ref, 9))
+    loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_arange_fuse_grouped_children(self):
