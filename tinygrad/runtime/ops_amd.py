@@ -64,7 +64,7 @@ class AMDSignal(HCQSignal):
 
 class AMDComputeQueue(HWComputeQueue):
   def __init__(self):
-    self.cmd_idx_to_exec_info, self.cmd_idx_to_local_offset, self.cmd_idx_to_global_offset = {}, {}, {}
+    self.cmd_idx_to_local_offset, self.cmd_idx_to_global_offset, self.cmd_idx_to_dispatch_packet = {}, {}, {}
     super().__init__()
 
   def __del__(self):
