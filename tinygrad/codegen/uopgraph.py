@@ -60,6 +60,7 @@ def fold_expanded(ex, buf):
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
 def vectorize_reduce(vec:UOp):
+  if all_same(vec.src): return None  # don't REDUCE the same thing multiple times
   if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None
   return UOp(UOps.REDUCE, vec.dtype, (UOp(UOps.VECTORIZE, vec.dtype, tuple(x.src[0] for x in vec.src)),) + vec.src[0].src[1:], vec.src[0].arg)
 
@@ -96,18 +97,37 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
-  quotient, remainder, something_changed = [], [], False
+  quotient, remainder, rem_const, something_changed, gcd = [], [], 0, False, c
   for u in _get_add_chain(x):
-    if (factor:=u.const_factor())%c == 0:
+    if u.op is UOps.CONST:
+      # add all const together first
+      if rem_const != 0: something_changed = True
+      rem_const += u.arg
+    elif (factor:=u.const_factor())%c == 0:
       if factor: quotient.append(u.divides(c))
       something_changed = True
-    else: remainder.append(u)
-  if not something_changed: return None
+    else:
+      remainder.append(u)
+      gcd = math.gcd(gcd, factor)
+
+  # handle the const
+  if rem_const%c != rem_const:
+    something_changed = True
+    quotient.append(x.const(rem_const//c))
+    rem_const = rem_const%c
+  if rem_const != 0:
+    if 0 < rem_const < gcd: something_changed = True  # cancel the const
+    else:
+      # only include rem_const in remainder if it's not cancelled
+      gcd = math.gcd(gcd, rem_const)
+      remainder.append(x.const(rem_const))
+
+  if not something_changed: return cast(UOp, x.divides(gcd))//(c//gcd) if gcd != c and gcd != 1 else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
   if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const(0) if rem is None else rem//c
-  return quo if rem is None else quo+rem//c
+  if quo is None: return x.const(0) if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)
+  return quo if rem is None else quo+cast(UOp, rem.divides(gcd))//(c//gcd)
 
 # ***** transcendental *****
 
@@ -255,11 +275,10 @@ constant_folder = PatternMatcher([
   # mul add lt
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
    lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
-  # neg lt -> lt
-  (NOp.lt(-NOp.var('x'), NOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(c.const(-c.arg), x)),
   # ** div **
   # # div folding
-  (NOp.var('x') // NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=div_folding(x,c.arg)) is not None else None),
+  (NOp.var('x') // NOp.cvar('c'), lambda x,c:
+   newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
   # mul div
   ((NOp.var("x") * NOp.cvar("c0")) // NOp.cvar("c1"),
    lambda x,c0,c1: x*(c0.arg//gcd)//(c1.arg//gcd) if c1.arg!=0 and (gcd:=math.gcd(c0.arg,c1.arg))> 1 else None),
@@ -278,7 +297,7 @@ constant_folder = PatternMatcher([
   ((NOp.var('x') % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c1 if c0.arg % c1.arg == 0 else None),
   # ** combine terms **
   # -(x+y) -> -x + -y
-  #(-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
+  (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
   # (x*c0)+(x*c1) -> x*(c0+c1)
   (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
   # (x*c0)+(y*c0) -> (x+y)*c0
@@ -513,7 +532,6 @@ class UOpGraph:
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
       sink = graph_rewrite(sink, self.folder+expander+float4_folding if self.opts is not None and self.opts.supports_float4 else self.folder+expander)
-    if UOpGraph.cnt != getenv("DEBUG_REDUCE", 0):
       sink = graph_rewrite(sink, self.folder+expander+reducer)
 
     # for PTX only
@@ -548,7 +566,7 @@ class UOpGraph:
     self._uops = []
     while queue:
       p,x = heapq.heappop(queue)
-      if DEBUG >= 7: print(p,x)
+      if DEBUG >= 7: print(f"{p:5d}",x)
       if x in scope_children: scope_end[x] = x
       if x.op is UOps.DEFINE_ACC:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])

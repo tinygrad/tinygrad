@@ -9,8 +9,9 @@ from tinygrad.device import BufferOptions, LRUAllocator, Compiled, Compiler, Com
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
 
+cl_errors = {getattr(cl, k): k for k in filter(lambda e: e.startswith("CL_"), dir(cl)) if getattr(cl, k) <= 0}
 def check(status):
-  if status != 0: raise RuntimeError(f"OpenCL Error {status}")
+  if status != 0: raise RuntimeError(f"OpenCL Error {status}: {cl_errors.get(status, 'Unknown error')}")
 def checked(ret, status): return (check(status.value), ret)[1]
 
 class CLCompiler(Compiler):

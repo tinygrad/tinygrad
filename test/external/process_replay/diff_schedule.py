@@ -2,17 +2,18 @@
 import difflib #, ocdiff
 from collections import defaultdict
 from typing import DefaultDict, List, Set, Tuple
-from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
 from tinygrad.helpers import Context, colored
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LazyOp
-from tinygrad.engine.realize import lower_schedule_item
+from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 
-def diff_schedule(s):
+def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]]) -> int:
   si_for_buf: DefaultDict[LazyBuffer, List[ScheduleItem]] = defaultdict(list)
-  for _,prescheduled in s:
-    for ps in prescheduled.values():
-      for buf in ps[0]: si_for_buf[buf].append(ScheduleItem(ps[1], tuple(x.buffer for x in ps[0]+ps[2] if x.size != 0), ps[4]))
+  for _,in_degree in s:
+    for lsi in in_degree:
+      for buf in lsi.outputs:
+        si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
   changed = 0
   seen_diff: Set[Tuple[LazyOp, LazyOp]] = set()
   for buf, si in si_for_buf.items():
@@ -24,6 +25,7 @@ def diff_schedule(s):
     #print(ocdiff.console_diff(render(ast[0]), render(ast[1])))
     ei0 = lower_schedule_item(si[0])
     ei1 = lower_schedule_item(si[1])
+    assert isinstance(ei0.prg, CompiledRunner) and isinstance(ei1.prg, CompiledRunner)
     diff = list(difflib.unified_diff(ei0.prg.p.src.splitlines(), ei1.prg.p.src.splitlines()))
     unified_diff = "\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in diff)
     print(unified_diff)
@@ -35,3 +37,4 @@ def diff_schedule(s):
     if tm_diff > 0: print(colored(f"{tm_diff:.2f}% faster", "green"))
     else: print(colored(f"{tm_diff:,.2f}% slower", "red"))
   print(f"{changed} unique kernel{'s' if changed>1 else ''} changed")
+  return changed
