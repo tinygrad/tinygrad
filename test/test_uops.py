@@ -2,7 +2,7 @@ from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv
+from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu # noqa F401
@@ -19,7 +19,8 @@ def _uops_to_prg(uops_list, print_uops=False):
   src = Device[Device.DEFAULT].renderer.render("test", uops.uops)
   if print_uops: uops.print()
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops.uops))
+  return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops.uops,
+                                global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
@@ -363,7 +364,8 @@ class TestUOpStr(TestEqUOps):
     t = Tensor.arange(10)
     t = t + t * Tensor.rand(10)
     # nice big complicated uop
-    sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
+    with Context(NOOPT=1):
+      sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
     self.assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):

@@ -8,13 +8,14 @@ from typing import List, Optional, Union, cast
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps
-from tinygrad.helpers import DEBUG, flatten, getenv
+from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps, verify_lazyop
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported, Context
 from tinygrad.lazy import LazyBuffer, view_supported_devices
+from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
@@ -495,7 +496,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
-  @unittest.skipUnless(getenv("SPLIT_REDUCEOP", 1), "Testing split reducop requires SPLIT_REDUCEOP")
+  @unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
     x = Tensor.randn(big_enough).realize()
@@ -1265,6 +1266,235 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.randn(10, 20).realize()
     out = x.argmax(1)
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
+
+class TestIndexing(unittest.TestCase):
+  def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
+    with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
+      lst = [xt] if isinstance(xt, Tensor) else xt
+      s = Tensor.schedule(*lst)
+      kernels = [si for si in s if si.ast.op is MetaOps.KERNEL]
+      for si in kernels: verify_lazyop(si.ast)
+      run_schedule(s)
+      if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
+
+  def test_simple_indexing(self):
+    X = Tensor.randn(10, 10).realize()
+    idxs = Tensor([0, 2]).realize()
+    xt = X[idxs]
+    self.check_schedule(xt, 2)
+    np.testing.assert_equal(xt.numpy(), X.numpy()[idxs.numpy()])
+
+  def test_simple_indexing_alt(self):
+    X = Tensor.arange(16).reshape(4, 4)
+    xt = X[[1, 2], [1, 2]]
+    self.check_schedule(xt, 3)
+    np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
+
+  @unittest.expectedFailure
+  def test_advanced_indexing(self):
+    X = Tensor.arange(10)+1
+    xt = X[[0]]
+    self.check_schedule(xt, 3)
+    np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0]])
+
+  @unittest.expectedFailure
+  def test_advanced_indexing_alt(self):
+    X = Tensor.arange(6).reshape(3, 2)+1
+    xt = X[[Tensor([2]), Tensor([1])]]
+    self.check_schedule(xt, 6)
+    np.testing.assert_equal(xt.numpy(), 6)
+
+  def test_advanced_simple_indexing_combined(self):
+    X = Tensor.arange(16).reshape(4, 4)
+    xt = X[1:2, [1, 2]]
+    self.check_schedule(xt, 2)
+
+  def test_push_through_reshape(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(10, 20).realize()
+    out = x.argmax(1)
+    self.check_schedule(out, 2)
+    np.testing.assert_allclose(out.numpy(), np.argmax(x.numpy(), 1))
+
+  def test_arange_push_through_expand(self):
+    Tensor.manual_seed(0)
+    a = Tensor.arange(4,)
+    b = Tensor.randn(4, 4).realize()
+    out = a+b
+    self.check_schedule(out, 1)
+    np.testing.assert_allclose(out.numpy(), np.arange(4)+b.numpy())
+
+  def test_argmin(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 32).realize()
+    out = x.argmin(-1)
+    self.check_schedule(out, 2)
+    np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
+
+  def test_argmax(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 32).realize()
+    out = x.argmax(-1)
+    self.check_schedule(out, 2)
+    np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
+
+  def test_arange_transposed(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randint(4, 1)
+    a = (Tensor.arange(4,)*x).T
+    self.check_schedule(a, 2)
+    np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T)
+
+  def test_arange_transposed_descendants(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randint(4, 1)
+    a = (Tensor.arange(4,)*x).T
+    b = Tensor.randint(4, 4).realize()
+    out = a+b
+    self.check_schedule(out, 2)
+    np.testing.assert_equal(out.numpy(), (np.arange(4)*x.numpy()).T+b.numpy())
+
+  def test_arange_index(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(5, 2).realize()
+    a = Tensor.arange(10)
+    out = (x + a[2]).sum()
+    self.check_schedule(out, 1)
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum())
+
+  def test_arange_index_contiguous(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(5, 2).realize()
+    a = Tensor.arange(10).contiguous()
+    out = (x + a[2]).sum()
+    self.check_schedule(out, 2)
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum())
+
+  def test_arange_index_child(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(5, 2).realize()
+    a = Tensor.arange(10)+1
+    out = (x + a[2]).sum()
+    self.check_schedule(out, 1)
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum())
+
+  def test_arange_index_contiguous_child(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(5, 2).realize()
+    a = (Tensor.arange(10)+1).contiguous()
+    out = (x + a[2]).sum()
+    self.check_schedule(out, 2)
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum())
+
+  def test_arange_childless_base(self):
+    a = Tensor.arange(4)
+    self.check_schedule(a, 1)
+    np.testing.assert_equal(a.numpy(), np.arange(4))
+
+  def test_arange_childless_view(self):
+    a = Tensor.arange(4).reshape(2, 2)
+    a[0] = 4
+    np.testing.assert_equal(a.numpy(), [[4, 4], [2, 3]])
+
+  def test_arange_group_childless_base(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randint(4)
+    a = Tensor.arange(4)+x
+    self.check_schedule(a, 1)
+    np.testing.assert_equal(a.numpy(), np.arange(4)+x.numpy())
+
+  def test_arange_group_childless_view(self):
+    Tensor.manual_seed(0)
+    x = Tensor.ones(4).contiguous().realize()
+    a = Tensor.arange(4)+x
+    a[0] = 6
+    np.testing.assert_equal(a.numpy(), [6., 2., 3., 4.])
+
+  @unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  def test_arange_view_op(self):
+    a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
+    assert isinstance(a.lazydata, LazyBuffer)
+    self.assertIs(a.lazydata.base.op, MetaOps.VIEW)
+    self.check_schedule(a, 1)
+    np.testing.assert_equal(a.numpy(), [[4, 5]])
+
+  @unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from ext device")
+  def test_arange_shrink_copy(self):
+    a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CLANG")
+    assert isinstance(a.lazydata, LazyBuffer)
+    self.assertIs(a.lazydata.base.op, MetaOps.COPY)
+    self.check_schedule(a, 1)
+    np.testing.assert_equal(a.numpy(), [[4, 5]])
+
+  @unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from ext device")
+  def test_arange_expand_copy(self):
+    a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).to("CLANG")
+    assert isinstance(a.lazydata, LazyBuffer)
+    self.assertIs(a.lazydata.base.op, MetaOps.COPY)
+    self.assertIs(a.lazydata.base.srcs[0].base.op, BinaryOps.ADD)
+    self.check_schedule(a, 1)
+    np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_precompute_freqs_cis(self):
+    args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000, "dtype":dtypes.half}
+    fused = precompute_freqs_cis(**args)
+    self.check_schedule(fused, 1)
+    ref = precompute_freqs_cis(**args)
+    run_schedule(check_schedule(ref, 3))
+    np.testing.assert_equal(fused.numpy(), ref.numpy())
+
+  def test_fuse_assign_contiguous(self):
+    x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
+    a = Tensor.arange(8).reshape(4, 2)
+    self.check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2)
+    np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
+
+  def test_assign_non_contiguous(self):
+    x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
+    y = Tensor.randint(4, 2)
+    a = Tensor.arange(8).reshape(4, 2)+y
+    x.shrink((None, (0, 2))).assign(a).realize()
+    xref = np.zeros((4, 4), dtype=int)
+    xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
+    np.testing.assert_equal(x.numpy(), xref)
+
+  def test_sparse_categorical_crossentropy_simple(self):
+    X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
+    Y = Tensor([1, 2]).realize()
+    loss = X.sparse_categorical_crossentropy(Y)
+    self.check_schedule(loss, 5)
+    np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
+
+  def test_mnist_val(self):
+    from tinygrad.nn.datasets import mnist
+    import torch
+    _, Y_train, _, _ = mnist()
+    samples = Tensor.randint(getenv("BS", 512), high=6000)
+    yt = Tensor.randn(512, 10)
+    with Context(SPLIT_REDUCEOP=0):
+      loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+      self.check_schedule(loss, 6)
+      loss_fused = loss.numpy()
+    loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
+    np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
+
+  def test_arange_fuse_grouped_children(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X+Tensor.arange(16).reshape(4, 4)).sum()
+    out0 = r+2
+    out1 = r+3
+    self.check_schedule([out0, out1], 1)
+    r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
+    np.testing.assert_allclose(out0.numpy(), r_ref+2)
+    np.testing.assert_allclose(out1.numpy(), r_ref+3)
+
+  @unittest.expectedFailure
+  def test_fold_arange_view(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X+Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
+    self.check_schedule([r], 1)
+    np.testing.assert_allclose(r.numpy(), (X.numpy()+np.arange(16).reshape(4, 4)).sum(1, keepdims=True))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

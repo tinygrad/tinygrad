@@ -39,8 +39,8 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 # TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
-# TODO: CUDACPU segfaults on sin
-if getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV"): unary_operations.remove((Tensor.sin, np.sin))
+# TODO: CI CUDA segfaults on sin
+if getenv("MOCKGPU") and Device.DEFAULT == "NV": unary_operations.remove((Tensor.sin, np.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
@@ -144,8 +144,8 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
-  # Metal and CUDACPU and HIP behave differently than numpy in CI for overflows
-  skip_overflow = CI and (Device.DEFAULT in {"AMD", "NV"} or getenv("CUDACPU"))
+  # Metal and CUDA and HIP behave differently than numpy in CI for overflows
+  skip_overflow = CI and Device.DEFAULT in {"AMD", "NV"}
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))
@@ -165,8 +165,8 @@ class TestFromFuzzer(unittest.TestCase):
   def test_sin(self, dtype):
     if not is_dtype_supported(dtype): return
     if dtype == dtypes.float64:
-      # crashes in CUDACPU
-      if (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")): return
+      # crashes in CI CUDA
+      if getenv("MOCKGPU") and Device.DEFAULT == "NV": return
     def _test_value(n: float, unit: float=1.0):
       next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
       ulp = next_float - 1.0
@@ -185,8 +185,8 @@ class TestFromFuzzer(unittest.TestCase):
   def test_log2(self, dtype):
     if not is_dtype_supported(dtype): return
     if dtype == dtypes.float64:
-      # crashes in CUDACPU
-      if (getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV")): return
+      # crashes in CI CUDA
+      if getenv("MOCKGPU") and Device.DEFAULT == "NV": return
     def _test_value(n: float, unit: float=1.0):
       next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
       ulp = next_float - 1.0

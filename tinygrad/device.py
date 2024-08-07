@@ -1,5 +1,5 @@
 from __future__ import annotations
-import multiprocessing, decimal
+import multiprocessing, decimal, statistics, random
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
@@ -481,14 +481,18 @@ class HCQCompiled(Compiled):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
   """
+  devices: List[HCQCompiled] = []
+  gpu2cpu_copy_time_diff: decimal.Decimal = decimal.Decimal('nan')
+  gpu2cpu_compute_time_diff: decimal.Decimal = decimal.Decimal('nan')
 
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
-               comp_queue_t:Type[HWComputeQueue], copy_queue_t:Type[HWCopyQueue], timeline_signals:Tuple[HCQSignal, HCQSignal]):
+               comp_queue_t:Type[HWComputeQueue], copy_queue_t:Optional[Type[HWCopyQueue]], timeline_signals:Tuple[HCQSignal, HCQSignal]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool]] = []
+    self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
     if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -496,18 +500,15 @@ class HCQCompiled(Compiled):
 
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferOptions(cpu_access=True))
     self.kernargs_ptr:int = self.kernargs_page.va_addr
+    self.devices.append(self)
 
   def synchronize(self):
     self.timeline_signal.wait(self.timeline_value - 1)
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
-    if PROFILE: self._prof_process_events()
-
-  def _gpu2cpu_time(self, gpu_time:decimal.Decimal, is_copy:bool) -> float:
-    """
-    Translates local gpu time (timestamp) into global cpu time.
-    """
-    return float(gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff))
+    if PROFILE:
+      self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
+      self.sig_prof_records = []
 
   def _alloc_kernargs(self, alloc_size:int) -> int:
     """
@@ -517,26 +518,72 @@ class HCQCompiled(Compiled):
     self.kernargs_ptr = (res:=self.kernargs_ptr) + alloc_size
     return res
 
+  def _ensure_shared_time_base(self):
+    if not self.gpu2cpu_compute_time_diff.is_nan(): return
+
+    def _sync_cpu_queue(d, q_t):
+      q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.timeline_value).submit(d)
+      d.timeline_value += 1
+      st = time.perf_counter_ns()
+      d.timeline_signal.wait(d.timeline_value - 1)  # average of the two
+      et = time.perf_counter_ns()
+      return (decimal.Decimal(et+st) / 2000) - d.timeline_signal.timestamp
+
+    # randomly sample the timing from GPU to CPU
+    choices: List = [(d, d.hw_compute_queue_t, []) for d in self.devices]
+    choices += [(d, d.hw_copy_queue_t, []) for d in self.devices if d.hw_copy_queue_t is not None]
+    for _ in range(100*len(self.devices)):
+      d,q,l = random.choice(choices)
+      l.append(_sync_cpu_queue(d,q))
+    for d,q,l in choices:
+      if q == d.hw_compute_queue_t: d.gpu2cpu_compute_time_diff = statistics.median(l)
+      if q == d.hw_copy_queue_t: d.gpu2cpu_copy_time_diff = statistics.median(l)
+
+    def _sync_gpu_to_gpu_queue(d1, d2, q1_t, q2_t):
+      q1_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
+            .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
+      q2_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
+            .timestamp(d2.timeline_signal).signal(d2.timeline_signal, d2.timeline_value+1).submit(d2)
+      d1.timeline_value += 2
+      d2.timeline_value += 2
+      d1.timeline_signal.wait(d1.timeline_value - 1)
+      d2.timeline_signal.wait(d2.timeline_value - 1)
+      return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
+
+    # then test it by timing the GPU to GPU times
+    jitter_matrix = [[float('nan')]*len(self.devices) for _ in range(len(self.devices))]
+    for i1, d1 in enumerate(self.devices):
+      for i2, d2 in enumerate(self.devices):
+        if d1 == d2: continue
+        d1_to_d2 = statistics.median(_sync_gpu_to_gpu_queue(d1, d2, d1.hw_compute_queue_t, d2.hw_compute_queue_t) - \
+                                     _sync_gpu_to_gpu_queue(d2, d1, d2.hw_compute_queue_t, d1.hw_compute_queue_t) for _ in range(20)) / 2
+        jitter_matrix[i1][i2] = d1_to_d2 - (d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff)
+    print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
+
+  def _gpu2cpu_time(self, gpu_time:decimal.Decimal, is_copy:bool) -> float:
+    """
+    Translates local gpu time (timestamp) into global cpu time.
+    """
+    self._ensure_shared_time_base()
+    return float(gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff))
+
   def _prof_setup(self):
-    if not hasattr(self, 'profile_logger'): atexit.register(self._prof_finalize)
+    if hasattr(self, 'profile_logger'): return
+    atexit.register(self._prof_finalize)
     self.profile_logger = ProfileLogger()
 
-    def _sync_queue(q_t):
-      q_t().timestamp(self.timeline_signal).signal(self.timeline_signal, self.timeline_value).submit(self)
-      self.timeline_value += 1
-      cpu_start_time = decimal.Decimal(time.perf_counter_ns()) / decimal.Decimal(1000)
-      self.timeline_signal.wait(self.timeline_value - 1)
-      return cpu_start_time - self.timeline_signal.timestamp
-    self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff = _sync_queue(self.hw_compute_queue_t), _sync_queue(self.hw_copy_queue_t)
-
-  def _prof_process_events(self):
-    self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
-    self.sig_prof_records = []
-
   def _prof_finalize(self):
+    qname = ["COMPUTE", "DMA"]
+
     for st, en, name, is_cp in self.raw_prof_records:
-      self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
-    self.raw_prof_records = []
+      self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, qname[is_cp])]
+    for a_st, a_en, a_dev, a_is_copy, b_st, b_en, b_dev, b_is_copy in self.dep_prof_records:
+      # Perfetto connects nodes based on timing data, ensuring every choice is valid by averaging times to a midpoint.
+      a_tm, b_tm = a_dev._gpu2cpu_time((a_st+a_en)/decimal.Decimal(2), a_is_copy), b_dev._gpu2cpu_time((b_st+b_en)/decimal.Decimal(2), b_is_copy)
+      self.profile_logger.deps += [(a_tm, b_tm, a_dev.dname, qname[a_is_copy], b_dev.dname, qname[b_is_copy])]
+    self.raw_prof_records, self.dep_prof_records = [], []
+
+    # Remove the logger, this flushes all data written by the device.
     del self.profile_logger
 
   def _wrap_timeline_signal(self):
