@@ -296,9 +296,6 @@ class CUDARenderer(CStyleLanguage):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
-    # for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.scalar() in (dtypes.half, dtypes.bfloat16)):
-    #   prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] if dtype.count == 1 else [_make_cuda_dtype(self, dtype)]
-
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.half, dtypes.bfloat16)):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
 
