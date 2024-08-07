@@ -518,8 +518,8 @@ class TestSchedule(unittest.TestCase):
 
   # multireduce spec
   def test_example_matmul(self):
-    x = Tensor.eye(64, requires_grad=True).contiguous().realize()
-    y = Tensor.eye(64, requires_grad=True).contiguous().realize()
+    x = Tensor.eye(64, requires_grad=True)
+    y = Tensor.eye(64, requires_grad=True)
     z = y.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
