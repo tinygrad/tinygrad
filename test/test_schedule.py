@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps, verify_lazyop
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -496,7 +496,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
-  @unittest.skipUnless(getenv("SPLIT_REDUCEOP", 1), "Testing split reducop requires SPLIT_REDUCEOP")
+  @unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
     x = Tensor.randn(big_enough).realize()
@@ -1268,9 +1268,10 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
 class TestIndexing(unittest.TestCase):
-  def check_schedule(self, xt:Tensor, cnt:int):
+  def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
-      s = xt.schedule()
+      lst = [xt] if isinstance(xt, Tensor) else xt
+      s = Tensor.schedule(*lst)
       kernels = [si for si in s if si.ast.op is MetaOps.KERNEL]
       for si in kernels: verify_lazyop(si.ast)
       run_schedule(s)
@@ -1442,6 +1443,58 @@ class TestIndexing(unittest.TestCase):
     ref = precompute_freqs_cis(**args)
     run_schedule(check_schedule(ref, 3))
     np.testing.assert_equal(fused.numpy(), ref.numpy())
+
+  def test_fuse_assign_contiguous(self):
+    x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
+    a = Tensor.arange(8).reshape(4, 2)
+    self.check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2)
+    np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
+
+  def test_assign_non_contiguous(self):
+    x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
+    y = Tensor.randint(4, 2)
+    a = Tensor.arange(8).reshape(4, 2)+y
+    x.shrink((None, (0, 2))).assign(a).realize()
+    xref = np.zeros((4, 4), dtype=int)
+    xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
+    np.testing.assert_equal(x.numpy(), xref)
+
+  def test_sparse_categorical_crossentropy_simple(self):
+    X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
+    Y = Tensor([1, 2]).realize()
+    loss = X.sparse_categorical_crossentropy(Y)
+    self.check_schedule(loss, 5)
+    np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
+
+  def test_mnist_val(self):
+    from tinygrad.nn.datasets import mnist
+    import torch
+    _, Y_train, _, _ = mnist()
+    samples = Tensor.randint(getenv("BS", 512), high=6000)
+    yt = Tensor.randn(512, 10)
+    with Context(SPLIT_REDUCEOP=0):
+      loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+      self.check_schedule(loss, 6)
+      loss_fused = loss.numpy()
+    loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
+    np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
+
+  def test_arange_fuse_grouped_children(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X+Tensor.arange(16).reshape(4, 4)).sum()
+    out0 = r+2
+    out1 = r+3
+    self.check_schedule([out0, out1], 1)
+    r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
+    np.testing.assert_allclose(out0.numpy(), r_ref+2)
+    np.testing.assert_allclose(out1.numpy(), r_ref+3)
+
+  @unittest.expectedFailure
+  def test_fold_arange_view(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X+Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
+    self.check_schedule([r], 1)
+    np.testing.assert_allclose(r.numpy(), (X.numpy()+np.arange(16).reshape(4, 4)).sum(1, keepdims=True))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
