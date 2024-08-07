@@ -48,6 +48,7 @@ class LBScheduleItem:
 def lb_cache(func):
   @functools.wraps(func)
   def __wrapper(buf:LazyBuffer, st:ShapeTracker, *args, **kwargs):
+    if buf is not buf.base: st, buf = buf.st+st, buf.base
     if (buf, st) in (cache:=kwargs.get("cache", args[-1])): return cache[(buf, st)]
     return cache.setdefault((buf, st), func(buf, st, *args, **kwargs))
   return __wrapper
@@ -60,7 +61,6 @@ def _recursive_lazyop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer,
                       reduce_info:Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]],
                       cache:Dict[Tuple[LazyBuffer, ShapeTracker], LazyOp]) -> LazyOp:
   """recursively create a lazyop"""
-  if buf is not buf.base: st, buf = buf.st+st, buf.base
   arg = buf.arg
 
   # consts are always fused and generated
@@ -113,7 +113,6 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
                        cache:Dict[Tuple[LazyBuffer, ShapeTracker], Optional[Tuple[LazyBuffer, ShapeTracker]]]) -> \
                          Optional[Tuple[LazyBuffer, ShapeTracker]]:
   if buf.base.realized is not None or (buf.base in realizes and buf.base not in outs): return None
-  if buf is not buf.base: st, buf = buf.st+st, buf.base
   input_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
   reduce_srcs = [r for x in buf.srcs if (r:=_recurse_reduceops(x, input_st, realizes, outs, reduce_info, cache)) is not None]
   top_reduce = reduce_srcs[-1] if len(reduce_srcs) != 0 else None
