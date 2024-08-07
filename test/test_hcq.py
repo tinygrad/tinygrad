@@ -3,7 +3,8 @@ from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context
 from tinygrad.device import Buffer, BufferOptions, HCQCompiled
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import get_runner
+from tinygrad.engine.realize import get_runner, CompiledRunner
+from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
 MOCKGPU = getenv("MOCKGPU")
 
@@ -133,6 +134,38 @@ class TestHCQ(unittest.TestCase):
 
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 0.0, f"got val {val}, should not be updated"
+
+  def test_exec_update_fuzz(self):
+    a = Tensor.rand((3, 3, 3), dtype=dtypes.int, device=Device.DEFAULT).realize()
+    b = a + 1
+    si = create_schedule([b.lazydata])[-1]
+    k = Kernel(si.ast, opts=TestHCQ.d0.renderer)
+    for i in range(3): k.apply_opt(Opt(op=OptOps.LOCAL, axis=0, amt=3))
+
+    runner = CompiledRunner(k.to_program())
+
+    zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
+    zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
+    ctypes.memset(zb._buf.va_addr, 0, zb.nbytes)
+    kernargs = runner.clprg.fill_kernargs([zt._buf, zb._buf])
+
+    q = TestHCQ.d0.hw_compute_queue_t()
+    q.memory_barrier() \
+     .exec(runner.clprg, kernargs, (1,1,1), (1,1,1)) \
+     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+
+    for x in range(1, 4):
+      for y in range(1, 4):
+        for z in range(1, 4):
+          ctypes.memset(zt._buf.va_addr, 0, zb.nbytes)
+
+          q.update_exec(1, local_size=(x,y,z)) \
+           .update_signal(2, value=TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+          TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+          TestHCQ.d0.timeline_value += 1
+
+          res_sum = sum(x for x in zt.as_buffer().cast("I"))
+          assert x * y * z == res_sum, f"want {x * y * z}, got {res_sum}"
 
   # Test copy
   def test_copy(self):
