@@ -2,23 +2,25 @@ from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv
+from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, exec_alu # noqa F401
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
-from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uops import UOps, NOp, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
 from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
 def _uops_to_prg(uops_list, print_uops=False):
   uops = UOpGraph(uops_list)
-  src = Device[Device.DEFAULT].renderer.render("test", uops)
+  uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
+  src = Device[Device.DEFAULT].renderer.render("test", uops.uops)
   if print_uops: uops.print()
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops))
+  return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops.uops,
+                                global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
@@ -27,8 +29,8 @@ def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], ar
 def _test_single_value(vals, op, dts):
   uops = []
   output_dtype = dts[-1] if op is TernaryOps.WHERE else dtypes.bool if op is BinaryOps.CMPLT else dts[0]
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
-  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), (i+1, False)) for i,dtype in enumerate(dts)]
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
+  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
@@ -43,7 +45,7 @@ def _test_single_value(vals, op, dts):
 def _test_single_value_const(vals, op, dts):
   uops = []
   output_dtype = dts[-1] if op is TernaryOps.WHERE else dtypes.bool if op is BinaryOps.CMPLT else dts[0]
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
@@ -56,7 +58,7 @@ def _test_single_value_const(vals, op, dts):
 
 def _test_uops_result(output_dtype, uops, res):
   # uops = []
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   # res = output_fn(uops)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
@@ -237,43 +239,60 @@ class TestConstantFolding(unittest.TestCase):
     assert any(uop.op is UOps.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
 
 class TestGatedStoreRewrite(unittest.TestCase):
-  @unittest.skip("not yet implemented")
-  def test_wrap_store_parents(self):
-    # wraps all store parents in the valid branch
-    gmem = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
-    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), (0, 'gidx0', 4))
+  @unittest.expectedFailure
+  def test_tiny_gate_store(self):
+    gmem = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0 * UOp.const(dtypes.int, 2)
-    value = UOp(UOps.CONST, dtypes.float, (), 42.0)
-
-    gate = UOp(UOps.ALU, dtypes.bool, (gidx0, UOp.const(dtypes.int, 1)), arg=BinaryOps.CMPLT)
-    uops = UOpGraph([UOp(UOps.STORE, None, (gmem, idx, value, gate))])
+    val = UOp.const(dtypes.float, 42.0)
+    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    store = UOp(UOps.STORE, None, (gmem, idx, val, gate))
+    uops = UOpGraph([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
     assert endif.src[0] is if_uop
-    nested_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
-    assert nested_uops == (gmem, gidx0, idx, value)
+    gated_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
+    self.assertEqual(len(gated_uops), 1)
+    self.assertIs(gated_uops[-1].op, UOps.STORE)
 
-  @unittest.skip("not yet implemented")
-  def test_wrap_some_parents(self):
-    # some parents are used outside the branch
-    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
-    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, True))
-    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), (0, 'gidx0', 4))
-    idx = gidx0 * UOp.const(dtypes.int, 2)
-    value0 = UOp(UOps.CONST, dtypes.float, (), 42.0)
-    value1 = UOp(UOps.CONST, dtypes.float, (), 43.0)
-
-    gate = UOp(UOps.ALU, dtypes.bool, (gidx0, UOp.const(dtypes.int, 1)), arg=BinaryOps.CMPLT)
-    outs = [UOp(UOps.STORE, None, (gmem0, idx, value0, gate))]
-    outs.append(UOp(UOps.STORE, None, (gmem1, idx, value1)))
-    uops = UOpGraph(outs)
+  @unittest.expectedFailure
+  def test_gate_some_stores(self):
+    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
+    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
+    idx = gidx0*UOp.const(dtypes.int, 2)
+    val = UOp.const(dtypes.float, 42.0)
+    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    stores = [UOp.store(gmem0, idx, val, gate), UOp.store(gmem1, idx, val)]
+    uops = UOpGraph(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
     assert endif.src[0] is if_uop
-    nested_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
-    assert nested_uops == (gmem0, value0)
+    gated_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
+    self.assertEqual(len(gated_uops), 1)
+    self.assertIs(gated_uops[-1].op, UOps.STORE)
+
+  # scaled down version of TestLinearizerDumb.test_unmerged_ifs
+  @unittest.expectedFailure
+  def test_merge_ifs_alt(self):
+    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
+    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
+    idx = gidx0*UOp.const(dtypes.int, 2)
+    val = UOp.const(dtypes.float, 42.0)
+    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    stores = [UOp.store(gmem0, idx, val, gate), UOp.store(gmem1, idx, val, gate)]
+    uops = UOpGraph(stores)
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    ifs = [u for u in uops if u.op is UOps.IF]
+    endifs = [u for u in uops if u.op is UOps.ENDIF]
+    self.assertEqual(len(ifs), 1)
+    self.assertEqual(len(endifs), 1)
+    gated_uops = tuple(uops.uops[uops.uops.index(ifs[0])+1:uops.uops.index(endifs[0])])
+    self.assertEqual(len(gated_uops), 2)
+    for x in gated_uops: self.assertIs(x.op, UOps.STORE)
 
 class TestLocalAccess(unittest.TestCase):
   # NOTE: this is failing on METAL CI, no idea why. Works locally.
@@ -301,25 +320,27 @@ class TestLocalAccess(unittest.TestCase):
 @unittest.skipUnless(getenv("PTX"), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
-    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
+    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 0)
     c1 = UOp(UOps.CONST, dtypes.int, (), 2)
     c2 = UOp(UOps.CONST, dtypes.int, (), 3)
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
     uops = UOpGraph([a1,a2])
+    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops.uops[-1].arg, BinaryOps.SHL)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.MUL)
 
   def test_bitshift_right(self):
-    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
+    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 0)
     c1 = UOp(UOps.CONST, dtypes.int, (), 2)
     c2 = UOp(UOps.CONST, dtypes.int, (), 3)
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
     uops = UOpGraph([a1,a2])
+    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops.uops[-1].arg, BinaryOps.SHR)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.IDIV)
@@ -343,8 +364,13 @@ class TestUOpStr(TestEqUOps):
     t = Tensor.arange(10)
     t = t + t * Tensor.rand(10)
     # nice big complicated uop
-    sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
+    with Context(NOOPT=1):
+      sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
     self.assert_equiv_uops(sink, eval(str(sink)))
+
+  def test_nop_str(self):
+    a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
+    assert str(eval(str(a))) == str(a)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

@@ -12,12 +12,11 @@ with contextlib.suppress(ImportError): import networkx as nx
 
 # **** debugging and graphing ****
 
-if DEBUG >= 2:
-  def print_globalcounters():
-    if GlobalCounters.time_sum_s == 0: return
-    print(f"avg: {GlobalCounters.global_ops*1e-9/GlobalCounters.time_sum_s:8.2f} GFLOPS {GlobalCounters.global_mem*1e-9/GlobalCounters.time_sum_s:8.2f} GB/s",  # noqa: E501
-          f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")  # noqa: E501
-  atexit.register(print_globalcounters)
+def print_globalcounters():
+  if GlobalCounters.time_sum_s == 0: return
+  print(f"avg: {GlobalCounters.global_ops*1e-9/GlobalCounters.time_sum_s:8.2f} GFLOPS {GlobalCounters.global_mem*1e-9/GlobalCounters.time_sum_s:8.2f} GB/s",  # noqa: E501
+        f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")  # noqa: E501
+if DEBUG >= 2: atexit.register(print_globalcounters)
 
 def save_graph(G, fn, opt=""):
   print("saving", G, f"to {fn}.svg")
@@ -74,7 +73,9 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
       # realized but unseen?
       G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{nm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
 
+graph_uops_cnt = 0
 def graph_uops(uops:List[UOp]):
+  global graph_uops_cnt
   colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
             UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0", UOps.REDUCE: "#C4A484",
             UOps.RANGE: "#c8a0e0", UOps.PHI: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0"}
@@ -83,4 +84,5 @@ def graph_uops(uops:List[UOp]):
     if u.op in {UOps.ENDRANGE, UOps.ENDIF}: continue
     G.add_node(uops.index(u), label=f"{str(u.op)[5:]}{(' '+str(u.arg).replace(':', '')) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.op, "#ffffff"))  # noqa: E501
     for v in u.src: G.add_edge(uops.index(v), uops.index(u))
-  save_graph(G, f'{GRAPHPATH}.uops', '-Grankdir=LR')
+  save_graph(G, f'{GRAPHPATH}.{graph_uops_cnt}.uops', '-Grankdir=LR')
+  graph_uops_cnt += 1

@@ -4,7 +4,7 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 import argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
@@ -227,7 +227,9 @@ class LLaMa:
       if isinstance(device, tuple):
         for k,v in nn.state.get_state_dict(model).items():
           if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-          elif '.attention.' in k: v.shard_(device, axis=-1)
+          elif '.attention.' in k:
+            if getenv("SHARD_KVCACHE") and ('.wq.' in k or '.wk.' in k or '.wv.' in k): v.shard_(device, axis=0)
+            else: v.shard_(device, axis=-1)
           elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
           elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
           elif '.feed_forward.' in k: v.shard_(device, axis=-1)
@@ -464,17 +466,19 @@ After you are done speaking, output [EOS]. You are not Chad.
     toks = new_toks
     assert outputted == llama.tokenizer.decode(toks)
 
+    tok_tensor: Optional[Tensor] = None
     for i in range(args.count):
       GlobalCounters.reset()
 
       if args.timing or args.profile: print("")
       st = GlobalCounters.time_sum_s
+      next_tok = Tensor([toks[start_pos:]], device=device) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
       with Profiling(enabled=args.profile):
         with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
           with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-            tok_tensor = llama.model(Tensor([toks[start_pos:]], device=device), start_pos, args.temperature)
+            tok_tensor = llama.model(next_tok, start_pos, args.temperature)
           tok = tok_tensor.item()
 
       # use the kv cache

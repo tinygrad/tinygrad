@@ -1,10 +1,10 @@
 from typing import List, Any, Dict, cast, Optional
 import Metal
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import dedup, unwrap2, GraphException
+from tinygrad.helpers import dedup, unwrap2
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
-from tinygrad.engine.jit import GraphRunner
+from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_metal import wait_check
 
@@ -35,13 +35,13 @@ class MetalGraph(GraphRunner):
       icb_command.setComputePipelineState_(unwrap2(
         self.device.device.newComputePipelineStateWithDescriptor_options_reflection_error_(descriptor, Metal.MTLPipelineOption(0), None, None)))
       for i,b in enumerate(ji.bufs):
-        if b is not None:
+        if b is not None and b not in input_rawbuffers:
           icb_command.setKernelBuffer_offset_atIndex_(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
       for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex_(self.int_buf.buf, self.vars.index(v)*4, len(ji.bufs)+i)
-      if j not in self.jc_idx_with_updatable_launch_dims:
-        global_size, local_size = prg.p.launch_dims(var_vals)
-        icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
+
+      global_size, local_size = prg.p.launch_dims(var_vals)
+      icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
       icb_command.setBarrier()
 
     self.all_resources = dedup(all_resources)
@@ -55,8 +55,10 @@ class MetalGraph(GraphRunner):
     for (j,i),input_idx in self.input_replace.items():
       self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf.buf,
                                                                                  input_rawbuffers[input_idx]._buf.offset, i)
-    for j in self.jc_idx_with_updatable_launch_dims:
-      global_size, local_size = cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals)
+
+    for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
+      prg = cast(CompiledRunner, self.jit_cache[j].prg)
+      global_size, local_size = global_dims or prg.p.global_size, local_dims or prg.p.local_size
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size),
                                                                                                        Metal.MTLSize(*local_size))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]
