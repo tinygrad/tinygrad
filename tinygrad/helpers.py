@@ -209,7 +209,8 @@ def db_connection():
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
-    _db_connection.execute("PRAGMA journal_mode=WAL").fetchone()
+    try: _db_connection.execute("PRAGMA journal_mode=WAL").fetchone()
+    except sqlite3.OperationalError: pass # another connection has set it already or is in the process of setting it
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
 
