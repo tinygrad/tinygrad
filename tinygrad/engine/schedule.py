@@ -42,6 +42,10 @@ class LBScheduleItem:
   inputs: List[LazyBuffer]
   var_vals: Dict[Variable, int] = field(default_factory=dict)
   metadata: List[Metadata] = field(default_factory=list)
+  @property
+  def key(self) -> LazyBuffer:
+    """The unique identifier of a schedule item in the toposort."""
+    return self.outputs[0]
 
 # *** DAG transformation: List[LazyBuffer] -> ScheduleItem ***
 
@@ -353,12 +357,12 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
   for key, lsi in prescheduled.items():
     if key not in in_degree: in_degree[key] = 0
     # realize outputs after all parents are realized
-    scheduled_parents = set(schedule_targets[x].outputs[0] for x in lsi.inputs if x in schedule_targets)
+    scheduled_parents = set(schedule_targets[x].key for x in lsi.inputs if x in schedule_targets)
     for x in scheduled_parents:
       graph[x].append(key)
       in_degree[key] += 1
     # realize outputs before a parent is assigned to
-    parents_assigns = set(schedule_targets[assign_targets[x]].outputs[0] for x in lsi.inputs if x in assign_targets)
+    parents_assigns = set(schedule_targets[assign_targets[x]].key for x in lsi.inputs if x in assign_targets)
     for assign in parents_assigns:
       graph[key].append(assign)
       in_degree[assign] += 1
@@ -396,7 +400,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
     for out in lsi.outputs: del out.srcs  # can only schedule once
     schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
     if logops and si.ast.op is MetaOps.KERNEL and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
-    for x in graph[lsi.outputs[0]]:
+    for x in graph[lsi.key]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(prescheduled[x])
 
