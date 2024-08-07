@@ -209,7 +209,7 @@ class LLaMa:
     model = Transformer(**params["args"], linear=linear, max_context=MAX_CONTEXT, jit=bool(JIT))
 
     if model_path.is_dir():
-      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
+      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device)
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
