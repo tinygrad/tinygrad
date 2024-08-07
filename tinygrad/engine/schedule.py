@@ -253,7 +253,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-SCHEDULES: List[DefaultDict[LBScheduleItem, List[LBScheduleItem]]] = []
+SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
   Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
         DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
@@ -373,7 +373,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
       print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
       with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
     if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.append(graph)
+    SCHEDULES.append((graph, in_degree))
   return graph, in_degree
 
 # *** DAG ordering: breadth first search ***

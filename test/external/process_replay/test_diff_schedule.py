@@ -11,7 +11,7 @@ class TestDiffSchedule(unittest.TestCase):
     idxs = Tensor([0, 2]).realize()
     xt = X[idxs]
     with Context(ARANGE_DIFF=1): xt.schedule()
-    self.assertEqual(len(SCHEDULES), 2)
+    self.assertEqual(len(SCHEDULES), 4)
     changed = diff_schedule(SCHEDULES)
     self.assertEqual(changed, 1)
     SCHEDULES.clear()
