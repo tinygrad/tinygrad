@@ -12,7 +12,7 @@ def diff_schedule(s):
   si_for_buf: DefaultDict[LazyBuffer, List[ScheduleItem]] = defaultdict(list)
   for _,prescheduled in s:
     for ps in prescheduled.values():
-      for buf in ps[0]: si_for_buf[buf].append(ScheduleItem(ps[1], tuple(x.buffer for x in ps[0]+ps[2] if x.size != 0), ps[4]))
+      for buf in ps.outputs: si_for_buf[buf].append(ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs+ps.inputs if x.size != 0), ps.metadata))
   changed = 0
   seen_diff: Set[Tuple[LazyOp, LazyOp]] = set()
   for buf, si in si_for_buf.items():

@@ -203,7 +203,6 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_some_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*4]) // 2, 0, 23, {"(((a*5)//2)+(b*2))", "((b*2)+((a*5)//2))"})
 
-  @unittest.expectedFailure
   def test_sum_div_some_partial_factor(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 0, 5, "(((a*3)+(b*3))//8)")
     self.helper_test_variable(Node.sum([NumNode(16), Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 1, 6, "((((a*3)+(b*3))//8)+1)")
@@ -337,12 +336,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((((-idx)+200)//(-4))+50)")
     self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, 0, 25, "((((-idx)+201)//(-4))+50)")
 
-  @unittest.expectedFailure
   def test_sum_div_big_const(self):
     gidx0 = Variable("gidx0", 0, 24)
-    self.helper_test_variable((gidx0+19)//20, 0, 2, "((19+gidx0)//20)")
+    self.helper_test_variable((gidx0+19)//20, 0, 2, {"((19+gidx0)//20)", "((gidx0+19)//20)"})
     self.helper_test_variable((gidx0+20)//20, 1, 2, "((gidx0//20)+1)")
-    self.helper_test_variable((gidx0+21)//20, 1, 2, "(((1+gidx0)//20)+1)")
+    self.helper_test_variable((gidx0+21)//20, 1, 2, {"(((1+gidx0)//20)+1)", "(((gidx0+1)//20)+1)"})
 
   @unittest.expectedFailure
   def test_sum_div_complex1(self):

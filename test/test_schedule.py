@@ -1468,6 +1468,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
+    import torch
     _, Y_train, _, _ = mnist()
     samples = Tensor.randint(getenv("BS", 512), high=6000)
     yt = Tensor.randn(512, 10)
@@ -1475,22 +1476,25 @@ class TestIndexing(unittest.TestCase):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
       self.check_schedule(loss, 6)
       loss_fused = loss.numpy()
-    loss_ref = yt.sparse_categorical_crossentropy(Y_train[samples])
-    run_schedule(check_schedule(loss_ref, 9))
+    loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_arange_fuse_grouped_children(self):
     X = Tensor.randn(4, 4).realize()
-    r = (X + Tensor.arange(16).reshape(4, 4)).sum()
+    r = (X+Tensor.arange(16).reshape(4, 4)).sum()
     out0 = r+2
     out1 = r+3
     self.check_schedule([out0, out1], 1)
+    r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
+    np.testing.assert_allclose(out0.numpy(), r_ref+2)
+    np.testing.assert_allclose(out1.numpy(), r_ref+3)
 
   @unittest.expectedFailure
   def test_fold_arange_view(self):
     X = Tensor.randn(4, 4).realize()
-    r = (X + Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
+    r = (X+Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
     self.check_schedule([r], 1)
+    np.testing.assert_allclose(r.numpy(), (X.numpy()+np.arange(16).reshape(4, 4)).sum(1, keepdims=True))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
