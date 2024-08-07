@@ -198,7 +198,6 @@ constant_folder = PatternMatcher([
   # ** self folding **
   (-(-NOp.var('x')), lambda x: x),    # -(-x) -> x
   (NOp.var('x') + 0, lambda x: x),    # x+0 -> x
-  (NOp.var('x') + NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.CONST, arg=0) for _ in range(8))), lambda x: x),    # x + [0,0,...,0] -> x
   (NOp.var('x') * 1, lambda x: x),    # x*1 -> x
   (NOp.var('x') * -1, lambda x: -x),  # x*-1 -> -x
   (NOp.var('x') // NOp.var('x'), lambda x: x.const(1)), # x//x -> 1
