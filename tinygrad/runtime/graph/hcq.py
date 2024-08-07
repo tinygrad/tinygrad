@@ -43,7 +43,7 @@ class HCQGraph(MultiGraphRunner):
     self.comp_queues: Dict[HCQCompiled, HWComputeQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
     self.copy_queues: Dict[HCQCompiled, HWCopyQueue] = {} # lazy allocation
 
-    self.signals: Dict[Any, HCQSignal] = {**{dev.dname: dev.signal_t(value=0) for dev in self.devices}, **{"CPU": self.devices[0].signal_t(value=0)}}
+    self.signals: Dict[Any, HCQSignal] = {**{dev: dev.signal_t(value=0) for dev in self.devices}, **{"CPU": self.devices[0].signal_t(value=0)}}
     self.kickoff_value: int = 0
 
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
@@ -75,7 +75,7 @@ class HCQGraph(MultiGraphRunner):
 
       # Ensure device is ready for use in current context: the graph has initialized the device and it's safe to operate on it within this graph.
       for dep_queue, _ in opt_deps: dev_access[enqueue_queue].update(dev_access[dep_queue])
-      sync_signals = [(self.signals[bdev], self.kickoff_value) for b in ji.bufs if (bdev:=cast(Buffer, b).device) not in dev_access[enqueue_queue]]
+      sync_signals = [(self.signals[Device[d]], self.kickoff_value) for b in ji.bufs if (d:=cast(Buffer, b).device) not in dev_access[enqueue_queue]]
       dev_access[enqueue_queue].update(cast(Buffer, b).device for b in ji.bufs)
 
       # Remove self-dependency for compute and copy queues.
@@ -107,7 +107,7 @@ class HCQGraph(MultiGraphRunner):
 
     for dev in self.devices:
       self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1) \
-                           .wait(self.signals['CPU'], self.kickoff_value).signal(self.signals[dev.dname], self.kickoff_value)
+                           .wait(self.signals['CPU'], self.kickoff_value).signal(self.signals[dev], self.kickoff_value)
 
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
