@@ -266,6 +266,47 @@ class TestJit(unittest.TestCase):
     assert len(res3) == 5, "All values should be different, rand works in jit."
     assert res3 != res2, "Jit rand is diff with diff seeds"
 
+  def test_jit_multiple_random_regen(self):
+    def f(a, b):
+      rn = Tensor.randn(*a.shape)
+      rn = rn * a
+      rn2 = Tensor.randn(*a.shape)
+      rn2 = rn2 * b
+      rn = rn + rn2
+      rn2 = rn2 + Tensor.randn(*a.shape)
+      return ((a+b)*rn).realize(), ((a+b)*rn2).realize()
+    a = Tensor.randn(10, 10).realize()  # realize these before resetting the random seed
+    b = Tensor.randn(10, 10).realize()
+
+    Tensor.manual_seed(1234)
+    jf = TinyJit(f)
+    res = set()
+    for _ in range(5):
+      o1, o2 = jf(a, b)
+      res.add(o1.numpy()[0][0])
+      res.add(o2.numpy()[0][0])
+    assert len(res) == 10, "All values should be different, rand works in jit."
+
+    Tensor.manual_seed(1234)
+    jf2 = TinyJit(f)
+    res2 = set()
+    for _ in range(5):
+      o1, o2 = jf2(a, b)
+      res2.add(o1.numpy()[0][0])
+      res2.add(o2.numpy()[0][0])
+    assert len(res2) == 10, "All values should be different, rand works in jit."
+    assert res == res2, "Jit rand is not reproducible with the same seed"
+
+    Tensor.manual_seed(3421)
+    jf3 = TinyJit(f)
+    res3 = set()
+    for _ in range(5):
+      o1, o2 = jf3(a, b)
+      res3.add(o1.numpy()[0][0])
+      res3.add(o2.numpy()[0][0])
+    assert len(res3) == 10, "All values should be different, rand works in jit."
+    assert res3 != res2, "Jit rand is diff with diff seeds"
+
   def test_jit_realization_and_sampling(self):
     w = Tensor.eye(5)
 

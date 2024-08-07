@@ -401,7 +401,7 @@ class Tensor:
     print(Tensor.rand(5).numpy())
     ```
     """
-    Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    Tensor._seed, Tensor._rng_counter = seed, None
 
   @staticmethod
   def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DTypeLike]=None, **kwargs):
@@ -417,7 +417,8 @@ class Tensor:
     print(t.numpy())
     ```
     """
-    if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    if (had_counter := Tensor._rng_counter is None): Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    if not all(s >= 0 for s in argfix(*shape)): raise ValueError(f"cannot create tensor with negative dimension in {shape=}")
     if not THREEFRY.value:
       # for bfloat16, numpy rand passes buffer in float
       if to_dtype(dtype or dtypes.default_float) == dtypes.bfloat16:
@@ -426,9 +427,9 @@ class Tensor:
 
     # threefry
     if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize()
+    if not had_counter: Tensor._rng_counter.assign(Tensor._rng_counter + num)
+    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device))
     counts2 = counts1 + math.ceil(num / 2)
-    Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
     x = counts2.cast(dtypes.uint64) << 32 | counts1.cast(dtypes.uint64)
     x = F.Threefry.apply(*x._broadcasted(Tensor._seed))
