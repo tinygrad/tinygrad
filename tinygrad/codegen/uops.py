@@ -64,7 +64,7 @@ class UOp:
   def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
   def eq(self, x): return -self.ne(x)
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
-  def ge(self, x): return -self.lt(x)
+  def ge(self, x): return (-self).lt(-x+1)
   def max(self, x): return self.alu(BinaryOps.MAX, x)
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
