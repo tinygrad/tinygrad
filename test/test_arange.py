@@ -144,7 +144,6 @@ class TestIndexing(unittest.TestCase):
   def test_llama_embedding(self, noopt=1, op_limit=0):
     # llama3 is 128256
     emb = nn.Embedding(32000, 4096)
-    emb.weight.replace(emb.weight.half())
     emb.weight.realize()
     with Context(NOOPT=noopt, FUSE_ARANGE=1):
       GlobalCounters.reset()
