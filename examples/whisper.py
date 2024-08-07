@@ -1,6 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
-import sys, base64, multiprocessing, itertools
+import sys, base64, multiprocessing, itertools, collections
 from typing import Optional, Union, Literal, List, Iterator
 
 from tinygrad import Tensor, TinyJit, Variable, nn
@@ -8,7 +8,7 @@ from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, DEBUG, fetch, colored
 
 import numpy as np
-import librosa
+import librosa, functools
 
 class MultiHeadAttention:
   def __init__(self, n_state, n_head, kv_caching: Literal['cross', 'self']=None, max_self_attn_cache_len=None):
@@ -100,21 +100,18 @@ class TextDecoder:
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, is_decoder_block=True, max_self_attn_cache_len=self.max_self_attn_cache_len) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
-    self.blocks_after_start_tok = [TinyJit(block.__call__) for block in self.blocks]
-    self.start_output_tok = TinyJit(self.output_tok)
+    self.getjitted = collections.defaultdict((lambda: print(colored("getjit",'blue')) or ([TinyJit(block.__call__) for block in self.blocks], TinyJit(self.output_tok))))
 
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
+
     seqlen = x.shape[-1]
     x = self.token_embedding(x) + self.positional_embedding[pos:pos+seqlen]
-    if pos == 0:
-      for block in self.blocks:
-        x = block(x, xa=encoded_audio, mask=self.mask, len=0)  # pass xa for cross attn kv caching
-      return self.output_tok(x)
-    else:
-      for block in self.blocks_after_start_tok:
-        len_v = Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos)
-        x = block(x, mask=self.mask, len=len_v)
-      return self.start_output_tok(x)
+
+    jitblocks, jitoutput = self.getjitted[seqlen]
+    for block in jitblocks:
+      if pos == 0: x = block(x, xa=encoded_audio, mask=self.mask, len=0)  # pass xa for cross attn kv caching
+      else: x = block(x, mask=self.mask, len=Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos))
+    return jitoutput(x)
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
@@ -252,15 +249,17 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
     log_spec = prep_audio(chunks, model.batch_size, truncate)
     pos = 0
     curr_segment_tokens = np.tile(start_tokens, (model.batch_size, 1))
-    if curr_frame > 0:
+    # if curr_frame > 0:
+    if True:
       # remove 1s pre padding
       log_spec = log_spec[:,:,FRAMES_PER_SECOND:]
       # pass the previously inferred tokens as 'prompt' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
       prompt = np.concatenate((
-        [enc._special_tokens["<|startofprev|>"]],
+        [enc._special_tokens["<|startofprev|>"]]+
+        [enc._special_tokens["<|nospeech|>"]] * (10-len(transcription_tokens[0])),
         transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:],
         start_tokens))
-      if DEBUG >= 1: print(colored(f"Prompt: {enc.decode(prompt)}", "yellow"))
+      if DEBUG >= 0: print(colored(f"Prompt: {enc.decode(prompt)}", "yellow"))
       curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
       transcription_start_index = len(curr_segment_tokens[0])
 
