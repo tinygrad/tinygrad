@@ -1,14 +1,14 @@
 # create a diff of two schedule graphs
 import difflib #, ocdiff
 from collections import defaultdict
-from typing import DefaultDict, List, Set, Tuple
-from tinygrad.engine.schedule import ScheduleItem
+from typing import DefaultDict, Dict, List, Set, Tuple
+from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
 from tinygrad.helpers import Context, colored
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LazyOp
-from tinygrad.engine.realize import lower_schedule_item
+from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 
-def diff_schedule(s):
+def diff_schedule(s:List[Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], Dict[LazyBuffer, LBScheduleItem]]]) -> int:
   si_for_buf: DefaultDict[LazyBuffer, List[ScheduleItem]] = defaultdict(list)
   for _,prescheduled in s:
     for ps in prescheduled.values():
@@ -24,6 +24,7 @@ def diff_schedule(s):
     #print(ocdiff.console_diff(render(ast[0]), render(ast[1])))
     ei0 = lower_schedule_item(si[0])
     ei1 = lower_schedule_item(si[1])
+    assert isinstance(ei0.prg, CompiledRunner) and isinstance(ei1.prg, CompiledRunner)
     diff = list(difflib.unified_diff(ei0.prg.p.src.splitlines(), ei1.prg.p.src.splitlines()))
     unified_diff = "\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in diff)
     print(unified_diff)
@@ -35,3 +36,4 @@ def diff_schedule(s):
     if tm_diff > 0: print(colored(f"{tm_diff:.2f}% faster", "green"))
     else: print(colored(f"{tm_diff:,.2f}% slower", "red"))
   print(f"{changed} unique kernel{'s' if changed>1 else ''} changed")
+  return changed
