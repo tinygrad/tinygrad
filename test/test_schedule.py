@@ -518,8 +518,8 @@ class TestSchedule(unittest.TestCase):
 
   # multireduce spec
   def test_example_matmul(self):
-    x = Tensor.eye(64, requires_grad=True).contiguous()
-    y = Tensor.eye(64, requires_grad=True).contiguous()
+    x = Tensor.eye(64, requires_grad=True).contiguous().realize()
+    y = Tensor.eye(64, requires_grad=True).contiguous().realize()
     z = y.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
@@ -1501,7 +1501,7 @@ class TestIndexing(unittest.TestCase):
     X = Tensor.randn(2,3,4,4).numpy()
     with Context(FUSE_ARANGE=1):
       compare = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
-    with Context(FUSE_ARANGE=0, GRAPH=1, SAVE_SCHEDULE=1):
+    with Context(FUSE_ARANGE=0, GRAPH=0, SAVE_SCHEDULE=1):
       ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
