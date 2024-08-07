@@ -112,7 +112,7 @@
 ::: tinygrad.Tensor.int
 ::: tinygrad.Tensor.bool
 
-## Convenience Ops
+## Tensor Properties
 
 ::: tinygrad.Tensor.ndim
 ::: tinygrad.Tensor.numel

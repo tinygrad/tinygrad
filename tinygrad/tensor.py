@@ -2949,7 +2949,7 @@ class Tensor:
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask).sum()
     return -((1 - label_smoothing) * (log_probs * y).sum() + smoothing) / loss_mask.sum()
 
-  # ***** convenience stuff *****
+  # ***** Tensor Properties *****
 
   @property
   def ndim(self) -> int:
