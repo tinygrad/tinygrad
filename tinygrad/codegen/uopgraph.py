@@ -264,8 +264,6 @@ constant_folder = PatternMatcher([
   # mul add lt
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
    lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
-  # neg lt -> lt
-  (NOp.lt(-NOp.var('x'), NOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(c.const(-c.arg), x)),
   # ** div **
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
@@ -288,7 +286,7 @@ constant_folder = PatternMatcher([
   ((NOp.var('x') % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c1 if c0.arg % c1.arg == 0 else None),
   # ** combine terms **
   # -(x+y) -> -x + -y
-  #(-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
+  (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
   # (x*c0)+(x*c1) -> x*(c0+c1)
   (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
   # (x*c0)+(y*c0) -> (x+y)*c0
