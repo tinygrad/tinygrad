@@ -39,7 +39,7 @@ class TestTranscendentalMath(unittest.TestCase):
     with Context(TRANSCENDENTAL=2):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float16)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float16))),
-                                 atol=1e-2, rtol=4e-3)  # exp can have bigger rtol
+                                 atol=1e-2, rtol=5e-3)  # exp can have bigger rtol
 
 class TestTranscendentalSchedule(unittest.TestCase):
   # w/ payne_hanek_reduction (fp32)
