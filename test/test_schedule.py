@@ -1496,5 +1496,14 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule([r], 1)
     np.testing.assert_allclose(r.numpy(), (X.numpy()+np.arange(16).reshape(4, 4)).sum(1, keepdims=True))
 
+  @unittest.expectedFailure
+  def test_multiview_arange_children(self):
+    X = Tensor.randn(2,3,4,4).numpy()
+    with Context(FUSE_ARANGE=1):
+      compare = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
+    with Context(FUSE_ARANGE=0, GRAPH=0, SAVE_SCHEDULE=1):
+      ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
+    np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
