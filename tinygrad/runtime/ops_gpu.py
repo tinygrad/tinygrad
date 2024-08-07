@@ -77,9 +77,10 @@ class CLAllocator(LRUAllocator):
     self.device.synchronize()
   def offset(self, buf, size:int, offset:int):
     buf_info = cl.cl_buffer_region(origin=offset, size=size)
-    print('offset_CL', type(buf), type(buf_info), size, offset)
-    return checked(type(buf)(cl.clCreateSubBuffer(buf, cl.CL_MEM_READ_WRITE,
-                        cl.CL_BUFFER_CREATE_TYPE_REGION, ctypes.byref(buf_info), status := ctypes.c_int32())), status)
+    info = cl.clGetDeviceInfo(self.device.device_id, cl.CL_DEVICE_MEM_BASE_ADDR_ALIGN, ctypes.c_size_t(), None, None)
+    print('offset_CL', type(buf), type(buf_info), size, offset, info)
+    return checked(cl.clCreateSubBuffer(buf, cl.CL_MEM_READ_WRITE,
+                        cl.CL_BUFFER_CREATE_TYPE_REGION, ctypes.byref(buf_info), status := ctypes.c_int32()), status)
 
 class CLDevice(Compiled):
   device_ids = None                 # this is global and only initted once
