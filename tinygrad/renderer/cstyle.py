@@ -271,7 +271,7 @@ _nms = "xyzwabcdefghijkl"
 def _make_cuda_dtype(self, dtype):
   vec, scalar = self.render_dtype(dtype), self.render_dtype(dtype.scalar()),
   elems, header = ', '.join(_nms[:dtype.count]), ', '.join([f"{scalar} {x}" for x in _nms[:dtype.count]])
-  return f"struct __align__({dtype.itemsize}) {vec} {{ {scalar} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
+  return f"struct __align__({dtype.itemsize}) {vec} {{ {scalar} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}" # noqa:E501
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
