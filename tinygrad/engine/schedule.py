@@ -256,7 +256,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
 SCHEDULES: List[DefaultDict[LBScheduleItem, List[LBScheduleItem]]] = []
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
   Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
-        DefaultDict[LBScheduleItem, int]]:               # this is the in-degree of the graph
+        DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
