@@ -97,19 +97,30 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
-  quotient, remainder, something_changed, gcd = [], [], False, c
+  quotient, remainder, rem_const, something_changed, gcd = [], [], 0, False, c
   for u in _get_add_chain(x):
-    if (factor:=u.const_factor())%c == 0:
+    if u.op is UOps.CONST:
+      # add all const together first
+      if rem_const != 0: something_changed = True
+      rem_const += u.arg
+    elif (factor:=u.const_factor())%c == 0:
       if factor: quotient.append(u.divides(c))
       something_changed = True
     else:
-      # (5*a+5)//2 -> (5*a+1)//2+2, only factor out const
-      if u.op is UOps.CONST and c <= abs(u.arg):
-        quotient.append(u.const(u.arg//c))
-        remainder.append(u.const(u.arg%c))
-        something_changed = True
-      else: remainder.append(u)
+      remainder.append(u)
       gcd = math.gcd(gcd, factor)
+
+  # handle the const
+  if rem_const%c != rem_const:
+    something_changed = True
+    quotient.append(x.const(rem_const//c))
+    rem_const = rem_const%c
+  if rem_const != 0:
+    if 0 < rem_const < gcd: something_changed = True  # cancel the const
+    else:
+      # only include rem_const in remainder if it's not cancelled
+      gcd = math.gcd(gcd, rem_const)
+      remainder.append(x.const(rem_const))
 
   if not something_changed: return cast(UOp, x.divides(gcd))//(c//gcd) if gcd != c and gcd != 1 else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
