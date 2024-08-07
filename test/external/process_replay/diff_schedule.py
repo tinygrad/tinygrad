@@ -1,18 +1,19 @@
 # create a diff of two schedule graphs
 import difflib #, ocdiff
 from collections import defaultdict
-from typing import DefaultDict, Dict, List, Set, Tuple
+from typing import DefaultDict, List, Set, Tuple
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
 from tinygrad.helpers import Context, colored
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LazyOp
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 
-def diff_schedule(s:List[Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], Dict[LazyBuffer, LBScheduleItem]]]) -> int:
+def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]]) -> int:
   si_for_buf: DefaultDict[LazyBuffer, List[ScheduleItem]] = defaultdict(list)
-  for _,prescheduled in s:
-    for ps in prescheduled.values():
-      for buf in ps.outputs: si_for_buf[buf].append(ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs+ps.inputs if x.size != 0), ps.metadata))
+  for _,in_degree in s:
+    for lsi in in_degree:
+      for buf in lsi.outputs:
+        si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
   changed = 0
   seen_diff: Set[Tuple[LazyOp, LazyOp]] = set()
   for buf, si in si_for_buf.items():

@@ -42,6 +42,9 @@ class LBScheduleItem:
   inputs: List[LazyBuffer]
   var_vals: Dict[Variable, int] = field(default_factory=dict)
   metadata: List[Metadata] = field(default_factory=list)
+  def __hash__(self):
+    """The unique identifier of a schedule item in the toposort."""
+    return hash(self.outputs[0])
 
 # *** DAG transformation: List[LazyBuffer] -> ScheduleItem ***
 
@@ -250,11 +253,10 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-SCHEDULES: List[Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], Dict[LazyBuffer, LBScheduleItem]]] = []
+SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
-  Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # this is the graph
-        DefaultDict[LazyBuffer, int],               # this is the in-degree of the graph
-        Dict[LazyBuffer, LBScheduleItem]]:          # this is the schedule item, but still in LazyBuffer
+  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
+        DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
@@ -345,22 +347,22 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
         buf.buffer.options = None
 
   # preschedule all buffers in realizes
-  prescheduled = {group[0]:_lower_lazybuffer(group, realizes) for group in output_groups.values()}
-  schedule_targets = {out:lsi for lsi in prescheduled.values() for out in lsi.outputs}
+  prescheduled = [_lower_lazybuffer(group, realizes) for group in output_groups.values()]
+  schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
-  graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
-  in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
-  for key, lsi in prescheduled.items():
-    if key not in in_degree: in_degree[key] = 0
+  graph: DefaultDict[LBScheduleItem, List[LBScheduleItem]] = defaultdict(list)
+  in_degree: DefaultDict[LBScheduleItem, int] = defaultdict(int)
+  for lsi in prescheduled:
+    if lsi not in in_degree: in_degree[lsi] = 0
     # realize outputs after all parents are realized
-    scheduled_parents = set(schedule_targets[x].outputs[0] for x in lsi.inputs if x in schedule_targets)
+    scheduled_parents = dedup(schedule_targets[x] for x in lsi.inputs if x in schedule_targets)
     for x in scheduled_parents:
-      graph[x].append(key)
-      in_degree[key] += 1
+      graph[x].append(lsi)
+      in_degree[lsi] += 1
     # realize outputs before a parent is assigned to
-    parents_assigns = set(schedule_targets[assign_targets[x]].outputs[0] for x in lsi.inputs if x in assign_targets)
+    parents_assigns = dedup(schedule_targets[assign_targets[x]] for x in lsi.inputs if x in assign_targets)
     for assign in parents_assigns:
-      graph[key].append(assign)
+      graph[lsi].append(assign)
       in_degree[assign] += 1
 
   if SAVE_SCHEDULE:
@@ -371,8 +373,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
       print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
       with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
     if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.append((graph, prescheduled))
-  return graph, in_degree, prescheduled
+    SCHEDULES.append((graph, in_degree))
+  return graph, in_degree
 
 # *** DAG ordering: breadth first search ***
 
@@ -380,9 +382,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   if seen is None: seen = set()
   if ARANGE_DIFF:
     with Context(FUSE_ARANGE=0, SAVE_SCHEDULE=1): _graph_schedule(outs, set())
-    with Context(FUSE_ARANGE=1, SAVE_SCHEDULE=1): graph, in_degree, prescheduled = _graph_schedule(outs, seen)
-  else: graph, in_degree, prescheduled = _graph_schedule(outs, seen)
-  queue = deque(lsi for key, lsi in prescheduled.items() if in_degree[key] == 0)
+    with Context(FUSE_ARANGE=1, SAVE_SCHEDULE=1): graph, in_degree = _graph_schedule(outs, seen)
+  else: graph, in_degree = _graph_schedule(outs, seen)
+  queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
   kernel_number = GlobalCounters.kernel_count
@@ -396,13 +398,13 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
     for out in lsi.outputs: del out.srcs  # can only schedule once
     schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
     if logops and si.ast.op is MetaOps.KERNEL and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
-    for x in graph[lsi.outputs[0]]:
+    for x in graph[lsi]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(prescheduled[x])
+      if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled correctly
-  if any(degree != 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
-    raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
+  if any(degree != 0 for degree in in_degree.values()) or len(in_degree) != len(schedule):
+    raise RuntimeError(f"cycle detected in graph, prescheduled {len(in_degree)} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, var_vals
 
