@@ -5,7 +5,7 @@ from tinygrad.device import Buffer
 from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.engine.schedule import _graph_schedule, ScheduleItem
+from tinygrad.engine.schedule import LBScheduleItem, _graph_schedule, ScheduleItem
 from tinygrad.ops import MetaOps
 from tinygrad.tensor import Tensor, _to_np_dtype
 
@@ -14,11 +14,12 @@ FUZZ_SCHEDULE_MAX_PATHS = getenv("FUZZ_SCHEDULE_MAX_PATHS", 10)
 
 def fuzz_schedule(outs:List[LazyBuffer]):
   # find toposorts across all tunable params
-  unique_ts: Dict[Tuple[LazyBuffer, ...], Tuple[Dict, Dict[LazyBuffer, Tuple]]] = {}
+  unique_ts: Dict[Tuple[LazyBuffer, ...], Tuple[Dict[str, int], Dict[LazyBuffer, LBScheduleItem]]] = {}
   for combination in itertools.product(*ctx_vars.values()):
     for var, val in zip(ctx_vars, combination): var.value = val
+    ctx_var_values = dict(zip([v.key for v in ctx_vars], combination))
     graph, in_degree, prescheduled = _graph_schedule(outs, set())
-    for ts in find_all_toposorts(graph, in_degree): unique_ts[ts] = (dict(zip([v.key for v in ctx_vars], combination)), prescheduled)
+    for ts in find_all_toposorts(graph, in_degree): unique_ts[ts] = (ctx_var_values, prescheduled)
   toposorts = list(unique_ts.items())
   if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
 
