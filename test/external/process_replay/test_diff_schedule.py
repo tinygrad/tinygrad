@@ -6,6 +6,7 @@ from tinygrad.engine.schedule import SCHEDULES
 
 class TestDiffSchedule(unittest.TestCase):
   def test_diff_arange(self):
+    # diff a single arange kernel
     X = Tensor.randn(10, 10).realize()
     idxs = Tensor([0, 2]).realize()
     xt = X[idxs]
@@ -13,15 +14,17 @@ class TestDiffSchedule(unittest.TestCase):
     self.assertEqual(len(SCHEDULES), 2)
     changed = diff_schedule(SCHEDULES)
     self.assertEqual(changed, 1)
+    SCHEDULES.clear()
 
-  def test_no_diff(self):
+    # no diff
     a = Tensor([1])+Tensor([2])
     with Context(ARANGE_DIFF=1): a.schedule()
     self.assertEqual(len(SCHEDULES), 2)
     changed = diff_schedule(SCHEDULES)
     self.assertEqual(changed, 0)
+    SCHEDULES.clear()
 
-  def test_save_two_schedules(self):
+    # no diff with two schedule creation calls
     a = Tensor([1])+Tensor([2])
     with Context(ARANGE_DIFF=1): a.schedule()
     b = Tensor([3])+Tensor([4])
