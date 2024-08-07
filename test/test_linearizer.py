@@ -144,11 +144,11 @@ class TestLinearizer(unittest.TestCase):
     store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
     opts = [
       # locals
-      [Opt(OptOps.LOCAL, 0, 3)], 
+      [Opt(OptOps.LOCAL, 0, 3)],
       [Opt(OptOps.LOCAL, 0, 9)],
       [Opt(OptOps.LOCAL, 0, 27)],
       # grouping
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], 
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
       [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
       [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
       [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
@@ -180,12 +180,12 @@ class TestLinearizer(unittest.TestCase):
       [Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
       [Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
       # locals + grouping + unrolling + upcasting
-      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), 
+      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2),
         Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
     ]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
-  
+
   def test_triple_multireduce(self):
     Tensor.manual_seed(0)
     x0 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
@@ -231,14 +231,14 @@ class TestLinearizer(unittest.TestCase):
       [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
         Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
       # Checking how it works with 2 grouped reduces + locals.
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 0, 4), 
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 0, 4),
        Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
       # Checking how it works with 2 grouped reduces + locals + unroll.
-      [Opt(OptOps.LOCAL, 0, 2), 
+      [Opt(OptOps.LOCAL, 0, 2),
        Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
        Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
       # Checking how it works with 2 grouped reduces + locals + upcast.
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2), 
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
        Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
       # Checking how it works with 2 grouped reduces + locals + upcast + unroll.
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
@@ -286,7 +286,7 @@ class TestLinearizer(unittest.TestCase):
     second_out = LazyOp(BinaryOps.MUL, (second_reduce, LazyOp(BufferOps.CONST, (), ConstBuffer(1/15, dtypes.float, ShapeTracker.from_shape((27,1,1,5))))))
     store1 = LazyOp(BufferOps.STORE, (second_out,), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
-    
+
     helper_linearizer_ast((store0, store1, ), [x], wanna_output=[wanna_output, wanna_output/15])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
@@ -294,7 +294,7 @@ class TestLinearizer(unittest.TestCase):
   def test_multiout_intermediate_multireduce(self):
     # check how it outputing at different stages of the multireduce works
     # TODO: Fails because the stores shapes do not match: store1.shape = (27,15,1,5) != store0.shape = (27,1,1,5)
-    #       so the output shapes are different (FAIL!), 
+    #       so the output shapes are different (FAIL!),
     #       if we change the shape of store1 to be contiguous, it will match store0 but not the value it's storing (FAIL!)
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 15, 5, dtype=dtypes.float).realize()
@@ -349,7 +349,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skip("can't group with multiple reduces yet")
   def test_early_endif(self):
-    # make sure the if block of a grouped reduce can be closed early and the result loaded back in 
+    # make sure the if block of a grouped reduce can be closed early and the result loaded back in
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 12, 5, dtype=dtypes.float).realize()
     first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 1, 12, 5)).expand((27, 12, 12, 5))))
@@ -597,7 +597,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_padto_where_multireduce(self):
-    # ternary operators try to use both ridxs 
+    # ternary operators try to use both ridxs
 
     # we need to make sure the ternary operators nest properly
     N = 17
