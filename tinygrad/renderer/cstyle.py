@@ -268,7 +268,7 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
 _nms = "xyzwabcdefghijkl"
-def _make_cuda_dtype(renderer: CStyleLanguage, dtype: DType) -> str:
+def _make_cuda_dtype(renderer:CStyleLanguage, dtype:DType) -> str:
   vec, scal = renderer.render_dtype(dtype), renderer.render_dtype(dtype.scalar()),
   elems, header = ', '.join(_nms[:dtype.count]), ', '.join([f"{scal} {x}" for x in _nms[:dtype.count]])
   return f"struct __align__({dtype.itemsize}) {vec} {{ {scal} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
