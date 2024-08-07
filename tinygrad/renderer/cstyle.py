@@ -268,10 +268,10 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
 _nms = "xyzwabcdefghijkl"
-def _make_cuda_dtype(self, dtype):
-  vec, scalar = self.render_dtype(dtype), self.render_dtype(dtype.scalar()),
-  elems, header = ', '.join(_nms[:dtype.count]), ', '.join([f"{scalar} {x}" for x in _nms[:dtype.count]])
-  return f"struct __align__({dtype.itemsize}) {vec} {{ {scalar} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}" # noqa:E501
+def _make_cuda_dtype(renderer: CStyleLanguage, dtype: DType) -> str:
+  vec, scal = renderer.render_dtype(dtype), renderer.render_dtype(dtype.scalar()),
+  elems, header = ', '.join(_nms[:dtype.count]), ', '.join([f"{scal} {x}" for x in _nms[:dtype.count]])
+  return f"struct __align__({dtype.itemsize}) {vec} {{ {scal} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
@@ -296,12 +296,15 @@ class CUDARenderer(CStyleLanguage):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
-    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.scalar() in (dtypes.half, dtypes.bfloat16)):
-      prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] if dtype.count == 1 else [_make_cuda_dtype(self, dtype)]
+    # for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.scalar() in (dtypes.half, dtypes.bfloat16)):
+    #   prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] if dtype.count == 1 else [_make_cuda_dtype(self, dtype)]
+
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.half, dtypes.bfloat16)):
+      prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
+    dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
       fn, ti, to, ci, co = arg[0], self.render_dtype(arg[2]), self.render_dtype(arg[3]), dt_map[arg[2]], dt_map[arg[3]]
       prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
 asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
