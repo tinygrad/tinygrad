@@ -295,7 +295,7 @@ class CUDARenderer(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     # TODO: refactor to render_dtype here
-    dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"), }
+    dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
@@ -305,12 +305,12 @@ class CUDARenderer(CStyleLanguage):
     # if any(uop.dtype == dtypes.bfloat16 for uop in uops):
     #   prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", x, x*2) for x in [4, 8]]
 
-    for dtype in dedup(uop.dtype for uop in uops if uop.dtype in (dtypes.half, dtypes.bfloat16) and uop.dtype.count>1):
-      prefix += [f"#include <cuda_{dt_map[dtype]}>.h"] + [_make_cuda_dtype(self, dtype)]
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype.scalar() in (dtypes.half, dtypes.bfloat16) and uop.dtype.count>1):
+      prefix += [f"#include <cuda_{dt_map[dtype.scalar()]}>.h"] + [_make_cuda_dtype(self, dtype)]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      fn, ti, to, ci, co = arg[0], dt_map[arg[2]][0], dt_map[arg[3]][0], dt_map[arg[2]][1], dt_map[arg[3]][1]
+      fn, ti, to, ci, co = arg[0], self.render_dtype(arg[2]), self.render_dtype(arg[3]), dt_map[arg[2]], dt_map[arg[3]]
       prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
 asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
   : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
