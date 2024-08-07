@@ -247,49 +247,54 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
     if curr_frame > 0 and N_audio > 1: raise Exception("Multi segment streaming not supported for batch")
     frame_reset = False
     log_spec = prep_audio(chunks, model.batch_size, truncate)
-    pos = 0
+
     curr_segment_tokens = np.tile(start_tokens, (model.batch_size, 1))
-    # if curr_frame > 0:
-    if True:
+    if curr_frame > 0:
       # remove 1s pre padding
       log_spec = log_spec[:,:,FRAMES_PER_SECOND:]
       # pass the previously inferred tokens as 'prompt' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
       prompt = np.concatenate((
-        [enc._special_tokens["<|startofprev|>"]]+
-        [enc._special_tokens["<|nospeech|>"]] * (10-len(transcription_tokens[0])),
+        [enc._special_tokens["<|startofprev|>"]],
         transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:],
         start_tokens))
-      if DEBUG >= 0: print(colored(f"Prompt: {enc.decode(prompt)}", "yellow"))
       curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
       transcription_start_index = len(curr_segment_tokens[0])
 
     encoded_audio = model.encoder.encode(log_spec[:,:,:FRAMES_PER_SEGMENT].contiguous())
-    for curr_tok in range(model.decoder.max_tokens_to_sample*2):
-      if pos >= model.decoder.max_tokens_to_sample * 2:
-        if frame_reset or curr_frame == 0 or N_audio > 1: raise RuntimeError("Token overflow")
-        frame_reset = True
-        if callback: callback(enc.decode(curr_segment_tokens[0][transcription_start_index:]))
-        transcription_tokens[0] = np.concatenate((transcription_tokens[0], curr_segment_tokens[0][transcription_start_index:]))
-        prompt = np.concatenate((start_tokens, transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:]))
-        curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
 
-        transcription_start_index = len(curr_segment_tokens[0])
+    def inferloop(curr_segment_tokens):
+      pos = 0
+      if DEBUG >= 0: print(colored(f"Prompt: {enc.decode(curr_segment_tokens[0])}", "yellow"))
+      for curr_tok in range(100):
+        intoks = Tensor(curr_segment_tokens if curr_tok == 0 else curr_segment_tokens[:, -1:])
+        out = model.decoder(intoks, pos, encoded_audio)
+        next_tokens = out[:, -1].argmax(axis=-1).numpy().astype(np.int32)
+        next_tokens[curr_segment_tokens[:, -1] == eot] = eot
+        curr_segment_tokens = np.concatenate((curr_segment_tokens, next_tokens.reshape(-1, 1)), axis=1)
+        pos = curr_segment_tokens.shape[-1] - 1
 
-        out = model.decoder(Tensor(curr_segment_tokens), 0, encoded_audio)
-      else:
-        out = model.decoder(Tensor(curr_segment_tokens if curr_tok == 0 else curr_segment_tokens[:, -1:]), pos, encoded_audio)
-      next_tokens = out[:, -1].argmax(axis=-1).numpy().astype(np.int32)
-      next_tokens[curr_segment_tokens[:, -1] == eot] = eot
-      curr_segment_tokens = np.concatenate((curr_segment_tokens, next_tokens.reshape(-1, 1)), axis=1)
-      pos = curr_segment_tokens.shape[-1] - 1
+        if DEBUG >= 1: print(curr_tok, list(map(lambda tokens: enc.decode(tokens), curr_segment_tokens)))
+        if (curr_segment_tokens[:, -1] == eot).all(): break
+      if callback: callback(enc.decode(curr_segment_tokens[0][transcription_start_index:]))
+      return curr_segment_tokens
+    
+    curr_segment_tokens = inferloop(curr_segment_tokens)
 
-      if DEBUG >= 1: print(curr_tok, list(map(lambda tokens: enc.decode(tokens), curr_segment_tokens)))
-      if (curr_segment_tokens[:, -1] == eot).all(): break
+    if not (curr_segment_tokens[:, -1] == eot).all():
+      if frame_reset or curr_frame == 0 or N_audio > 1: raise RuntimeError("Token overflow")
+      frame_reset = True
+      print(colored("REFRAME", "red"))
+      transcription_tokens[0] = np.concatenate((transcription_tokens[0], curr_segment_tokens[0][transcription_start_index:]))
+      prompt = np.concatenate((start_tokens, transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:]))
+      curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
+
+      transcription_start_index = len(curr_segment_tokens[0])
+      curr_segment_tokens = inferloop(curr_segment_tokens)
+
 
     for curr_tok, t in enumerate(curr_segment_tokens):
       eot_index = np.where(t == eot)[0]
       eot_index = None if len(eot_index) == 0 else eot_index[0]
-      if callback: callback(enc.decode(t[transcription_start_index:eot_index]))
       transcription_tokens[curr_tok] = np.concatenate((transcription_tokens[curr_tok], t[transcription_start_index:eot_index]))
 
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip(), transcription_tokens))
