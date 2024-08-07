@@ -111,3 +111,12 @@
 ::: tinygrad.Tensor.half
 ::: tinygrad.Tensor.int
 ::: tinygrad.Tensor.bool
+
+## Tensor Properties
+
+::: tinygrad.Tensor.ndim
+::: tinygrad.Tensor.numel
+::: tinygrad.Tensor.element_size
+::: tinygrad.Tensor.nbytes
+::: tinygrad.Tensor.is_floating_point
+::: tinygrad.Tensor.size
