@@ -418,7 +418,7 @@ class Tensor:
     ```
     """
     if (had_counter := Tensor._rng_counter is None): Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
-    if not all(s >= 0 for s in shape): raise ValueError(f"cannot create tensor with negative dimension in {shape=}")
+    if not all(s >= 0 for s in argfix(*shape)): raise ValueError(f"cannot create tensor with negative dimension in {shape=}")
     if not THREEFRY.value:
       # for bfloat16, numpy rand passes buffer in float
       if to_dtype(dtype or dtypes.default_float) == dtypes.bfloat16:
