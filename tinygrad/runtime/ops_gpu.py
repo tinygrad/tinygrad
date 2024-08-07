@@ -76,8 +76,8 @@ class CLAllocator(LRUAllocator):
     check(cl.clEnqueueReadBuffer(self.device.queue, src, False, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
     self.device.synchronize()
   def offset(self, buf, size:int, offset:int):
-    print('offset_CL', type(buf), size, offset)
     buf_info = cl.cl_buffer_region(origin=offset, size=size)
+    print('offset_CL', type(buf), type(buf_info), size, offset)
     return checked(cl.clCreateSubBuffer(buf, cl.CL_MEM_READ_WRITE,
                         cl.CL_BUFFER_CREATE_TYPE_REGION, ctypes.byref(buf_info), status := ctypes.c_int32()), status)
 
