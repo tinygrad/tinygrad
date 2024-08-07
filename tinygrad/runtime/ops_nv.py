@@ -287,8 +287,7 @@ class NVAllocator(HCQAllocator):
 
   def _free(self, opaque, options:BufferOptions):
     self.device.synchronize()
-    if options.host: self.device._gpu_host_free(opaque)
-    else: self.device._gpu_free(opaque)
+    self.device._gpu_free(opaque)
 
   def map(self, buf:HCQBuffer): self.device._gpu_map(buf._base if hasattr(buf, '_base') else buf)
 
@@ -339,7 +338,7 @@ class NVDevice(HCQCompiled):
 
     if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, alignment=align)
     if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
-    return self._gpu_uvm_map(va_addr, size, mem_handle)
+    return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=map_to_cpu)
 
   def _gpu_system_alloc(self, size:int, va_addr=None, map_to_cpu=False, map_flags=0):
     alloc_params = nv_gpu.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root, type=13,
@@ -352,41 +351,39 @@ class NVDevice(HCQCompiled):
     if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
     if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags, system=True)
 
-    return self._gpu_uvm_map(va_addr, size, mem_handle)
+    return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=map_to_cpu)
 
   def _gpu_host_alloc(self, size):
     va_base = self._alloc_gpu_vaddr(sz:=round_up(size, 4 << 10))
     libc.mmap(va_base, sz, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
-    return self._map_to_gpu(va_base, sz)
 
-  def _gpu_free(self, mem):
-    made = nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectOld=mem.hMemory)
-    nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
-    if made.status != 0: raise RuntimeError(f"_gpu_free returned {made.status}")
-    uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
-
-  def _gpu_host_free(self, mem):
-    uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
-    libc.munmap(mem.va_addr, mem.size)
-
-  def _map_to_gpu(self, va_base, size):
     NVDevice.host_object_enumerator += 1
     flags = ((nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) |
              (nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30))
     made = nv_gpu.nv_ioctl_nvos02_parameters_with_fd(params=nv_gpu.NVOS02_PARAMETERS(hRoot=self.root, hObjectParent=self.device, flags=flags,
       hObjectNew=NVDevice.host_object_enumerator, hClass=nv_gpu.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR, pMemory=va_base, limit=size-1), fd=-1)
     nv_iowr(self.fd_dev, nv_gpu.NV_ESC_RM_ALLOC_MEMORY, made)
-    if made.params.status != 0: raise RuntimeError(f"_map_to_gpu returned {made.params.status}")
-    return self._gpu_uvm_map(va_base, size, made.params.hObjectNew)
 
-  def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True) -> nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS:
+    if made.params.status != 0: raise RuntimeError(f"_map_to_gpu returned {made.params.status}")
+    return self._gpu_uvm_map(va_base, size, made.params.hObjectNew, has_cpu_mapping=True)
+
+  def _gpu_free(self, mem):
+    if mem.hMemory > NVDevice.host_object_enumerator: # not a host object, clear phys mem.
+      made = nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectOld=mem.hMemory)
+      nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
+      if made.status != 0: raise RuntimeError(f"_gpu_free returned {made.status}")
+
+    uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
+    if mem.has_cpu_mapping: libc.munmap(mem.va_addr, mem.size)
+
+  def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False) -> nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS:
     if create_range: uvm.create_external_range(self.fd_uvm, base=va_base, length=size)
     gpu_attrs = (nv_gpu.struct_c__SA_UvmGpuMappingAttributes*256)(
       nv_gpu.struct_c__SA_UvmGpuMappingAttributes(gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuMappingType = 1))
 
-    # NOTE: va_addr is set to make rawbufs compatable with AMD.
+    # NOTE: va_addr is set to make rawbufs compatable with HCQBuffer protocol.
     return uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
-                                       gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size, mapped_gpu_ids=[self.gpu_uuid])
+      gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size, mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping)
 
   def _gpu_map(self, mem):
     if self.gpu_uuid in mem.mapped_gpu_ids: return
