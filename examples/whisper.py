@@ -100,24 +100,21 @@ class TextDecoder:
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, is_decoder_block=True, max_self_attn_cache_len=self.max_self_attn_cache_len) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
-    self.blocks_start_tok = [TinyJit(block.__call__) for block in self.blocks]
     self.blocks_after_start_tok = [TinyJit(block.__call__) for block in self.blocks]
     self.start_output_tok = TinyJit(self.output_tok)
-    self.after_start_output_tok = TinyJit(self.output_tok)
 
-  # if layernorm supported symbolic shapes, we wouldn't need this hacky 'streaming' param (which should be called something more descriptive like 'x_is_start_toks_only')
-  def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor, streaming=False):
+  def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
     seqlen = x.shape[-1]
     x = self.token_embedding(x) + self.positional_embedding[pos:pos+seqlen]
     if pos == 0:
-      for block in (self.blocks if streaming else self.blocks_start_tok):
+      for block in self.blocks:
         x = block(x, xa=encoded_audio, mask=self.mask, len=0)  # pass xa for cross attn kv caching
-      return self.output_tok(x) if streaming else self.start_output_tok(x)
+      return self.output_tok(x)
     else:
       for block in self.blocks_after_start_tok:
         len_v = Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos)
         x = block(x, mask=self.mask, len=len_v)
-      return self.after_start_output_tok(x)
+      return self.start_output_tok(x)
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
@@ -174,18 +171,11 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
 
   return Tensor(log_spec)
 
-LANGUAGES = {
-  "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
-  "pl": "polish", "ca": "catalan", "nl": "dutch", "ar": "arabic", "sv": "swedish", "it": "italian", "id": "indonesian", "hi": "hindi", "fi": "finnish", "vi": "vietnamese",
-  "he": "hebrew", "uk": "ukrainian", "el": "greek", "ms": "malay", "cs": "czech", "ro": "romanian", "da": "danish", "hu": "hungarian", "ta": "tamil", "no": "norwegian",
-  "th": "thai", "ur": "urdu", "hr": "croatian", "bg": "bulgarian", "lt": "lithuanian", "la": "latin", "mi": "maori", "ml": "malayalam", "cy": "welsh", "sk": "slovak", "te": "telugu",
-  "fa": "persian", "lv": "latvian", "bn": "bengali", "sr": "serbian", "az": "azerbaijani", "sl": "slovenian", "kn": "kannada", "et": "estonian", "mk": "macedonian",
-  "br": "breton", "eu": "basque", "is": "icelandic", "hy": "armenian", "ne": "nepali", "mn": "mongolian", "bs": "bosnian", "kk": "kazakh", "sq": "albanian", "sw": "swahili",
-  "gl": "galician", "mr": "marathi", "pa": "punjabi", "si": "sinhala", "km": "khmer", "sn": "shona", "yo": "yoruba", "so": "somali", "af": "afrikaans", "oc": "occitan", "ka": "georgian",
-  "be": "belarusian", "tg": "tajik", "sd": "sindhi", "gu": "gujarati", "am": "amharic", "yi": "yiddish", "lo": "lao", "uz": "uzbek", "fo": "faroese", "ht": "haitian creole",
-  "ps": "pashto", "tk": "turkmen", "nn": "nynorsk", "mt": "maltese", "sa": "sanskrit", "lb": "luxembourgish", "my": "myanmar", "bo": "tibetan", "tl": "tagalog", "mg": "malagasy",
-  "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
-}
+LANGUAGES=['en', 'zh', 'de', 'es', 'ru', 'ko', 'fr', 'ja', 'pt', 'tr', 'pl', 'ca', 'nl', 'ar', 'sv', 'it', 'id', 'hi', 'fi', 'vi', 'he', 'uk', 'el', 'ms', 'cs', 'ro', 'da', 'hu', 'ta', 'no',
+           'th', 'ur', 'hr', 'bg', 'lt', 'la', 'mi', 'ml', 'cy', 'sk', 'te', 'fa', 'lv', 'bn', 'sr', 'az', 'sl', 'kn', 'et', 'mk', 'br', 'eu', 'is', 'hy', 'ne', 'mn', 'bs', 'kk', 'sq', 'sw',
+           'gl', 'mr', 'pa', 'si', 'km', 'sn', 'yo', 'so', 'af', 'oc', 'ka', 'be', 'tg', 'sd', 'gu', 'am', 'yi', 'lo', 'uz', 'fo', 'ht', 'ps', 'tk', 'nn', 'mt', 'sa', 'lb', 'my', 'bo', 'tl',
+           'mg', 'as', 'tt', 'haw', 'ln', 'ha', 'ba', 'jw', 'su']
+
 
 def get_encoding(encoding_name):
   with fetch(f"https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/{encoding_name}.tiktoken").open() as f:
@@ -194,7 +184,7 @@ def get_encoding(encoding_name):
   specials = [
     "<|endoftext|>",
     "<|startoftranscript|>",
-    *[f"<|{lang}|>" for lang in LANGUAGES.keys()],
+    *[f"<|{lang}|>" for lang in LANGUAGES],
     "<|translate|>",
     "<|transcribe|>",
     "<|startoflm|>",
@@ -227,7 +217,6 @@ MODEL_URLS = {
   "large": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
 }
 def init_whisper(model_name="tiny.en", batch_size=1):
-  print(model_name)
   assert MODEL_URLS[model_name] is not None
 
   filename = fetch(MODEL_URLS[model_name])
@@ -276,7 +265,7 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
       transcription_start_index = len(curr_segment_tokens[0])
 
     encoded_audio = model.encoder.encode(log_spec[:,:,:FRAMES_PER_SEGMENT].contiguous())
-    for i in range(model.decoder.max_tokens_to_sample):
+    for curr_tok in range(model.decoder.max_tokens_to_sample*2):
       if pos >= model.decoder.max_tokens_to_sample * 2:
         if frame_reset or curr_frame == 0 or N_audio > 1: raise RuntimeError("Token overflow")
         frame_reset = True
@@ -286,22 +275,23 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
         curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
 
         transcription_start_index = len(curr_segment_tokens[0])
-        out = model.decoder(Tensor(curr_segment_tokens), 0, encoded_audio, streaming=True)
+
+        out = model.decoder(Tensor(curr_segment_tokens), 0, encoded_audio)
       else:
-        out = model.decoder(Tensor(curr_segment_tokens if i == 0 else curr_segment_tokens[:, -1:]), pos, encoded_audio, streaming=curr_frame > 0)
+        out = model.decoder(Tensor(curr_segment_tokens if curr_tok == 0 else curr_segment_tokens[:, -1:]), pos, encoded_audio)
       next_tokens = out[:, -1].argmax(axis=-1).numpy().astype(np.int32)
       next_tokens[curr_segment_tokens[:, -1] == eot] = eot
       curr_segment_tokens = np.concatenate((curr_segment_tokens, next_tokens.reshape(-1, 1)), axis=1)
       pos = curr_segment_tokens.shape[-1] - 1
 
-      if DEBUG >= 1: print(i, list(map(lambda tokens: enc.decode(tokens), curr_segment_tokens)))
+      if DEBUG >= 1: print(curr_tok, list(map(lambda tokens: enc.decode(tokens), curr_segment_tokens)))
       if (curr_segment_tokens[:, -1] == eot).all(): break
 
-    for i, t in enumerate(curr_segment_tokens):
+    for curr_tok, t in enumerate(curr_segment_tokens):
       eot_index = np.where(t == eot)[0]
       eot_index = None if len(eot_index) == 0 else eot_index[0]
       if callback: callback(enc.decode(t[transcription_start_index:eot_index]))
-      transcription_tokens[i] = np.concatenate((transcription_tokens[i], t[transcription_start_index:eot_index]))
+      transcription_tokens[curr_tok] = np.concatenate((transcription_tokens[curr_tok], t[transcription_start_index:eot_index]))
 
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip(), transcription_tokens))
   return transcriptions[:N_audio] if N_audio > 1 else transcriptions[0]
@@ -321,9 +311,7 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
-  # model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny", batch_size=1)
   model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=1)
-
 
   if len(sys.argv) > 1:
     transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1])], callback=lambda x:print(x,flush=True))
