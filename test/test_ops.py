@@ -556,6 +556,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
 
+  @unittest.skipIf(Device.DEFAULT in ['PYTHON'], 'PYTHON Bitcast not supported')
   def test_bitcast(self):
     from test.helpers import is_dtype_supported
     dtype_pairs = [(torch.int8, dtypes.int8), (torch.uint8, dtypes.uint8), (torch.int16, dtypes.int16), (torch.uint16, dtypes.uint16),
