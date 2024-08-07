@@ -2957,15 +2957,7 @@ class Tensor:
     Returns the number of dimensions in the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([9])
-    print(t.ndim)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 2], [3, 4]])
-    print(t.ndim)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
     print(t.ndim)
     ```
     """
@@ -2975,14 +2967,6 @@ class Tensor:
     """
     Returns the total number of elements in the tensor.
 
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([9])
-    print(t.numel())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2], [3, 4]])
-    print(t.numel())
-    ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
     print(t.numel())
@@ -2995,15 +2979,7 @@ class Tensor:
     Returns the size in bytes of an individual element in the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([True], dtype=dtypes.bool)
-    print(t.element_size())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([5], dtype=dtypes.int16)
-    print(t.element_size())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([5.5], dtype=dtypes.float64)
     print(t.element_size())
     ```
     """
@@ -3014,15 +2990,7 @@ class Tensor:
     Returns the total number of bytes of all elements in the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.int16)
-    print(t.nbytes())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9, 10, 11], dtype=dtypes.int16)
-    print(t.nbytes())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.float64)
+    t = Tensor([8, 9], dtype=dtypes.float)
     print(t.nbytes())
     ```
     """
@@ -3034,19 +3002,7 @@ class Tensor:
     `dtype.double`, `dtype.default_float`, `dtype.float16`, `dtype.float32`, `dtype.float64`, `dtype.bfloat16`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8.0, 9.0], dtype=dtypes.float)
-    print(t.is_floating_point())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9], dtype=dtypes.float)
-    print(t.is_floating_point())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.int)
-    print(t.is_floating_point())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.float64)
     print(t.is_floating_point())
     ```
     """
@@ -3061,10 +3017,7 @@ class Tensor:
     print(t.size())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.size(0))
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.size(1))
+    print(t.size(dim=1))
     ```
     """
     return self.shape if dim is None else self.shape[dim]
