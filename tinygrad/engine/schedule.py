@@ -346,7 +346,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
 
   # preschedule all buffers in realizes
   prescheduled = {group[0]:_lower_lazybuffer(group, realizes) for group in output_groups.values()}
-  schedule_targets = {out:ps for ps in prescheduled.values() for out in ps.outputs}
+  schedule_targets = {out:lsi for lsi in prescheduled.values() for out in lsi.outputs}
 
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
@@ -382,21 +382,21 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
     with Context(FUSE_ARANGE=0, SAVE_SCHEDULE=1): _graph_schedule(outs, set())
     with Context(FUSE_ARANGE=1, SAVE_SCHEDULE=1): graph, in_degree, prescheduled = _graph_schedule(outs, seen)
   else: graph, in_degree, prescheduled = _graph_schedule(outs, seen)
-  queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
+  queue = deque(lsi for key, lsi in prescheduled.items() if in_degree[key] == 0)
   schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
   kernel_number = GlobalCounters.kernel_count
   while queue:
-    ps = queue.popleft()
-    for buf in ps.outputs: seen.add(buf)
+    lsi = queue.popleft()
+    for buf in lsi.outputs: seen.add(buf)
     if GRAPH:
       kernel_number += 1
-      for out in ps.outputs: realized_lazybuffer(out, kernel_number)
-    var_vals = merge_dicts([var_vals, ps.var_vals])
-    for out in ps.outputs: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs+ps.inputs if x.size != 0), ps.metadata))
+      for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
+    var_vals = merge_dicts([var_vals, lsi.var_vals])
+    for out in lsi.outputs: del out.srcs  # can only schedule once
+    schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
     if logops and si.ast.op is MetaOps.KERNEL and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
-    for x in graph[ps.outputs[0]]:
+    for x in graph[lsi.outputs[0]]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(prescheduled[x])
 
