@@ -1440,9 +1440,10 @@ class TestIndexing(unittest.TestCase):
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000, "dtype":dtypes.half}
     fused = precompute_freqs_cis(**args)
     self.check_schedule(fused, 1)
-    ref = precompute_freqs_cis(**args)
-    run_schedule(check_schedule(ref, 3))
-    np.testing.assert_equal(fused.numpy(), ref.numpy())
+    if getenv("CHECK", 1):
+      ref = precompute_freqs_cis(**args)
+      run_schedule(check_schedule(ref, 3))
+      np.testing.assert_equal(fused.numpy(), ref.numpy())
 
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
