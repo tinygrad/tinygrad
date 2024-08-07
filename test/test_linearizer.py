@@ -282,7 +282,7 @@ class TestLinearizer(unittest.TestCase):
     diff = (second_x-first_reduce)
     second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
     store0 = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
-    second_out = LazyOp(BinaryOps.MUL, (second_reduce, 
+    second_out = LazyOp(BinaryOps.MUL, (second_reduce,
                   LazyOp(BufferOps.CONST, (), ConstBuffer(1/15, dtypes.float, ShapeTracker.from_shape((27,1,1,5))))))
     store1 = LazyOp(BufferOps.STORE, (second_out,), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
