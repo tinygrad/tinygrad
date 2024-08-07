@@ -270,8 +270,8 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
 _nms = "xyzwabcdefghijkl"
 def _make_cuda_dtype(self, dtype):
   vec, scalar = self.render_dtype(dtype), self.render_dtype(dtype.scalar()),
-  elems, header = ', '.join(_nms[:dtype.count()]), ', '.join([f"{scalar} {x}" for x in _nms[:dtype.count()]])
-  return f"struct __align__({dtype.size()}) {vec} {{ {scalar} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
+  elems, header = ', '.join(_nms[:dtype.count]), ', '.join([f"{scalar} {x}" for x in _nms[:dtype.count]])
+  return f"struct __align__({dtype.itemsize}) {vec} {{ {scalar} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
@@ -299,16 +299,8 @@ class CUDARenderer(CStyleLanguage):
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
-    # if any(uop.dtype == dtypes.half for uop in uops):
-    #   prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", x, x*2) for x in [4, 8]]
-
-    # if any(uop.dtype == dtypes.bfloat16 for uop in uops):
-    #   prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", x, x*2) for x in [4, 8]]
-
-    prefix += [f"#include <cuda_{dt_map[dtype]}>.h" for dtype in dedup(uop.dtype for uop in uops if uop.dtype in (dtypes.half, dtypes.bfloat16))]
-
-    for dtype in dedup(uop.dtype for uop in uops if uop.dtype.scalar() in (dtypes.half, dtypes.bfloat16) and uop.dtype.count>1):
-      prefix += [_make_cuda_dtype(self, dtype)]
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.scalar() in (dtypes.half, dtypes.bfloat16)):
+      prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] if dtype.count == 1 else [_make_cuda_dtype(self, dtype)]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
