@@ -64,7 +64,7 @@ class UOp:
   def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
   def eq(self, x): return -self.ne(x)
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
-  def ge(self, x): return -self.lt(x)
+  def ge(self, x): return (-self).lt(-x+1)
   def max(self, x): return self.alu(BinaryOps.MAX, x)
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
@@ -87,7 +87,15 @@ class UOp:
   @property  # parents with self
   def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
+  def const_factor(self) -> int:
+    """largest known int that divides self"""
+    if self.op is UOps.CONST: return self.arg
+    if self.op is UOps.ALU:
+      if self.arg is BinaryOps.ADD: return math.gcd(self.src[0].const_factor(), self.src[0].const_factor())
+      if self.arg is BinaryOps.MUL: return self.src[0].arg if self.src[0].op is UOps.CONST else self.src[1].arg if self.src[1].op is UOps.CONST else 1
+    return 1
   def divides(self, v) -> Optional[UOp]:
+    if v==1: return self
     if self.op is UOps.CONST: return self.const(self.arg//v) if self.arg%v == 0 else None
     if self.op is UOps.ALU:
       if self.arg is BinaryOps.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None

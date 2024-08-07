@@ -1,12 +1,11 @@
 import os, random, pickle, queue
 from typing import List
 from pathlib import Path
-import numpy as np
-from PIL import Image
-from tqdm import tqdm
-from tinygrad import dtypes, Tensor
-from tinygrad.helpers import getenv, prod, Context, round_up
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
+
+import numpy as np
+from tinygrad import dtypes, Tensor
+from tinygrad.helpers import getenv, prod, Context, round_up, tqdm
 
 ### ResNet
 
@@ -41,6 +40,7 @@ def loader_process(q_in, q_out, X:Tensor, seed):
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
   from extra.datasets.imagenet import center_crop, preprocess_train
+  from PIL import Image
 
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:

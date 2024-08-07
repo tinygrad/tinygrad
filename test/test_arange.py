@@ -1,6 +1,6 @@
 import unittest, contextlib
 import numpy as np
-from tinygrad import Tensor, GlobalCounters, dtypes
+from tinygrad import Tensor, GlobalCounters, dtypes, nn
 from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import run_schedule
 from tinygrad.codegen.kernel import Opt, OptOps, Kernel, KernelOptError
@@ -139,6 +139,18 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
   @unittest.skip("not ready")
   def test_index_mnist_opt(self): self.test_index_mnist(0)
+
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
+  def test_llama_embedding(self, noopt=1, op_limit=0):
+    # llama3 is 128256
+    emb = nn.Embedding(32000, 4096)
+    emb.weight.realize()
+    with Context(NOOPT=noopt, FUSE_ARANGE=1):
+      GlobalCounters.reset()
+      emb(Tensor([1,2,3,4])).realize()
+      self.assertLessEqual(GlobalCounters.global_ops, op_limit)
+  # at least the arange is being fused
+  def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1736704000)
 
 if __name__ == "__main__":
   unittest.main()

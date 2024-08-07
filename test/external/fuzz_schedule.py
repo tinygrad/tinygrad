@@ -30,16 +30,16 @@ def fuzz_schedule(outs:List[LazyBuffer]):
   seed = Tensor._seed
   ts, (_, prescheduled) = toposorts[0]
   for key in ts:
-    for out in (ps:=prescheduled[key])[0]:
+    for out in (ps:=prescheduled[key]).outputs:
       # freeze assign state before exec
       if out.op is MetaOps.ASSIGN:
         prerealized[out] = out.buffer.as_buffer()
         assign_targets[out.srcs[1]] = out
-    for x in ps[2]:
+    for x in ps.inputs:
       if x not in ground_truth and x.device != "NPY": prerealized[x] = x.buffer.as_buffer()
-    si = ScheduleItem(ps[1], tuple(x.buffer for x in ps[0]+ps[2] if x.size != 0))
+    si = ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs+ps.inputs if x.size != 0))
     _exec_si(si, seed)
-    for out in ps[0]:
+    for out in ps.outputs:
       ground_truth[out] = out.buffer.as_buffer()
       del out.srcs # only schedule the LazyBuffer in this fuzz run
 
@@ -48,19 +48,19 @@ def fuzz_schedule(outs:List[LazyBuffer]):
     if DEBUG >= 1: print(colored(f"testing permutation {i} {ctx}", "yellow"))
     rawbufs: Dict[LazyBuffer, Buffer] = {}
     for key in ts:
-      for out in (ps:=prescheduled[key])[0]:
+      for out in (ps:=prescheduled[key]).outputs:
         rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype)
         if out.op is MetaOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
-      for x in ps[2]:
+      for x in ps.inputs:
         if x not in rawbufs:
           # override the assign_target after ASSIGN
           if x in assign_targets and assign_targets[x] in rawbufs: rawbufs[x] = rawbufs[assign_targets[x]]
           elif x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
           else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
-      si = ScheduleItem(ps[1], tuple(rawbufs[x] for x in ps[0]+ps[2] if x.size != 0))
+      si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs+ps.inputs if x.size != 0))
       _exec_si(si, seed)
-      for out in ps[0]:
+      for out in ps.outputs:
         outbuf = np.frombuffer(rawbufs[out].as_buffer(), _to_np_dtype(out.dtype))
         try: np.testing.assert_allclose(outbuf, np.frombuffer(ground_truth[out], _to_np_dtype(out.dtype)), atol=1e-2, rtol=1e-2)
         except Exception as e:
