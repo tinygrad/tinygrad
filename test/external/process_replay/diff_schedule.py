@@ -8,7 +8,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LazyOp
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 
-def diff_schedule(s:List[Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], Dict[LazyBuffer, LBScheduleItem]]]) -> int:
+def diff_schedule(s:List[DefaultDict[LBScheduleItem, List[LBScheduleItem]]]) -> int:
   si_for_buf: DefaultDict[LazyBuffer, List[ScheduleItem]] = defaultdict(list)
   for _,prescheduled in s:
     for ps in prescheduled.values():
