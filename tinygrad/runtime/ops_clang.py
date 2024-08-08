@@ -23,13 +23,11 @@ class ClangJITCompiler(Compiler):
     args = ('clang', '-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-Wall',
             '-Wno-unused-function', '-Wno-unused-command-line-argument', '-Werror', '-include', f'{os.path.dirname(__file__)}/support/tinymath.h',
             '-ffreestanding', '-nostdlib', '-ffixed-x18' if platform.machine() == "arm64" else '-Xclang=-fnative-half-type', '-', '-o', '-')
-    image, _, relocs = elf_loader(subprocess.check_output(args, input=src.encode('utf-8')), force_section={'kernel': 0})
+    image, _, relocs, exports = elf_loader(subprocess.check_output(args, input=src.encode('utf-8')), reserve=4)
     for ploc,tgt,r_type in [(a,b+d,c) for a,b,c,d in relocs]:
-      rel = tgt - ploc
-      tgt_pg, ploc_pg = tgt >> 12, ploc >> 12
-      lo, hi = (tgt_pg-ploc_pg)&0b11,(tgt_pg-ploc_pg)>>2
+      tgt_pg, ploc_pg, rel = tgt >> 12, ploc >> 12, tgt - ploc
       if r_type in {libc.R_X86_64_PC32, libc.R_X86_64_PLT32}: patchuint32(image, ploc, 2**32+rel if rel < 0 else rel)
-      elif r_type == libc.R_AARCH64_ADR_PREL_PG_HI21: patchuint32(image, ploc, lo<<29 | hi<<5)
+      elif r_type == libc.R_AARCH64_ADR_PREL_PG_HI21: patchuint32(image, ploc, ((tgt_pg-ploc_pg)&0b11)<<29 | ((tgt_pg-ploc_pg)>>2)<<5)
       elif r_type == libc.R_AARCH64_ADD_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<10)
       elif r_type in {libc.R_AARCH64_CALL26, libc.R_AARCH64_JUMP26}: patchuint32(image, ploc, 2**26+(rel>>2) if rel < 0 else (rel>>2))
       elif r_type == libc.R_AARCH64_LDST16_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<9)
@@ -37,6 +35,12 @@ class ClangJITCompiler(Compiler):
       elif r_type == libc.R_AARCH64_LDST64_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<7)
       elif r_type == libc.R_AARCH64_LDST128_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<6)
       else: raise NotImplementedError(f"Encountered unknown relocation type {r_type:#x}")
+    del exports['__truncdfhf2']
+    assert len(exports) == 1, str(exports)
+    _, entry = exports.popitem()
+    if platform.machine() == 'arm64': image[:4] = struct.pack('<I', 0x14 << 24 | entry>>2)
+    # elif platform.machine() == 'x86_64': raise NotImplementedError()
+    else: raise RuntimeError(f"Clang JIT doesn't support {platform.machine()}")
     return bytes(image)
 
 class ClangProgram:

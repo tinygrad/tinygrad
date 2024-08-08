@@ -13,10 +13,10 @@ class ClangGraph(GraphRunner):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
-    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src.replace(ClangRenderer.kernel_prefix, '') for ji in jit_cache]))
+    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src.replace('void', 'static void') for ji in jit_cache]))
     args = [f"{render_dtype(x.dtype)}* arg{i}" for i,x in enumerate(input_rawbuffers)]
     args += sorted([f"int {v.expr}" for v in var_vals])
-    code = [f"{ClangRenderer.kernel_prefix}void batched("+','.join(args)+") {"]
+    code = [f"void batched("+','.join(args)+") {"]
     for ji in jit_cache:
       args = []
       for buf in ji.bufs:
