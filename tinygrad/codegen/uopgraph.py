@@ -397,7 +397,7 @@ def do_expand(root:UOp):
 acc_number = 0
 def do_reduce(root):
   global acc_number
-  reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].parents)
+  reduce_parented, reduce_unparented = partition(list(root.src[1:]), lambda x: x in root.src[0].parents)
   ret = root.src[0]
   if len(reduce_parented):
     const = UOp.const(root.dtype.scalar(), 0 if root.arg is BinaryOps.ADD else dtypes.min(root.dtype))
