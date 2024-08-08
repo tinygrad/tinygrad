@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uops import UOps, UOp, NOp, PatternMatcher
 from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
@@ -194,6 +194,7 @@ class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
   has_local = False
   global_max = None
+  extra_matcher = PatternMatcher([(NOp.var('x', dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float64))])
 
   # language options
   kernel_prefix = '''
@@ -201,12 +202,6 @@ class ClangRenderer(CStyleLanguage):
 #define TINYMATH_H
 #define NAN __builtin_nanf("")
 #define INFINITY __builtin_inff()
-
-uint16_t __truncdfhf2(double a) {
-  volatile float b = (float)a;
-  __fp16 c = (__fp16)b;
-  return *(uint16_t *)&c;
-}
 #endif
 '''
   buffer_suffix = " restrict"

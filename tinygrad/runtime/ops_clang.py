@@ -1,4 +1,4 @@
-import os, platform, tempfile, pathlib, subprocess, struct, ctypes, tinygrad.runtime.autogen.libc as libc
+import platform, tempfile, pathlib, subprocess, struct, ctypes, tinygrad.runtime.autogen.libc as libc
 from mmap import PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.runtime.support.elf import elf_loader
