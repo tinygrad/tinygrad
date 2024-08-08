@@ -23,7 +23,7 @@ class ClangJITCompiler(Compiler):
     args = ('clang', '-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-Wall',
             '-Wno-unused-function', '-Wno-unused-command-line-argument', '-Werror', '-include', f'{os.path.dirname(__file__)}/support/tinymath.h',
             '-ffreestanding', '-nostdlib', '-ffixed-x18' if platform.machine() == "arm64" else '-Xclang=-fnative-half-type', '-', '-o', '-')
-    image, _, relocs, exports = elf_loader(subprocess.check_output(args, input=src.encode('utf-8')), reserve=4)
+    image, _, relocs, exports = elf_loader(subprocess.check_output(args, input=src.encode('utf-8')), reserve=8)
     for ploc,tgt,r_type in [(a,b+d,c) for a,b,c,d in relocs]:
       tgt_pg, ploc_pg, rel = tgt >> 12, ploc >> 12, tgt - ploc
       if r_type in {libc.R_X86_64_PC32, libc.R_X86_64_PLT32}: patchuint32(image, ploc, 2**32+rel if rel < 0 else rel)
