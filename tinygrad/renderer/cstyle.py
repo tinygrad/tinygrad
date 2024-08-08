@@ -196,9 +196,23 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
 
   # language options
+  kernel_prefix = '''
+#ifndef TINYMATH_H
+#define TINYMATH_H
+#define NAN __builtin_nanf("")
+#define INFINITY __builtin_inff()
+
+uint16_t __truncdfhf2(double a) {
+  volatile float b = (float)a;
+  __fp16 c = (__fp16)b;
+  return *(uint16_t *)&c;
+}
+#endif
+'''
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16", dtypes.int8: "int8_t"}
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})",
+                    UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype is dtypes.double else f"__builtin_sqrtf({x})",}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = [_make_clang_dtype(self, dtype) for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
