@@ -14,6 +14,9 @@
 #ifndef ADSPRPC_SHARED_H
 #define ADSPRPC_SHARED_H
 
+#include <stdint.h>
+#include <stddef.h>
+#include <sys/types.h>
 #include <linux/types.h>
 
 #define FASTRPC_IOCTL_INVOKE	_IOWR('R', 1, struct fastrpc_ioctl_invoke)
