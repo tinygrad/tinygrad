@@ -21,7 +21,8 @@ class ClangCompiler(Compiler):
 class ClangJITCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     args = ('clang', '-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-Wall', '-Werror',
-            '-fno-math-errno', '-include', 'stdint.h', '-ffreestanding', '-nostdlib', '-', '-o', '-') + (('-ffixed-x18',) if platform.machine() == "arm64" else ())
+            '-fno-math-errno', '-include', 'stdint.h', '-ffreestanding', '-nostdlib', '-', '-o', '-') + \
+            (('-ffixed-x18',) if platform.machine() == "arm64" else ())
     image, _, relocs, exports = elf_loader(subprocess.check_output(args, input=src.encode('utf-8')), reserve=8)
     for ploc,tgt,r_type in [(a,b+d,c) for a,b,c,d in relocs]:
       tgt_pg, ploc_pg, rel = tgt >> 12, ploc >> 12, tgt - ploc
