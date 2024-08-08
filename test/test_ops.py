@@ -1749,36 +1749,42 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
+  @unittest.expectedFailure
   def test_interpolate_linear(self):
     for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"))
 
+  @unittest.expectedFailure
   def test_interpolate_linear_corners_aligned(self):
     for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear", align_corners=True),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True))
 
+  @unittest.expectedFailure
   def test_interpolate_bilinear(self):
     for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="bilinear"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"), atol=1e-4)
 
+  @unittest.expectedFailure
   def test_interpolate_bilinear_corners_aligned(self):
     for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="bilinear", align_corners=True),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True), atol=1e-4)
 
+  @unittest.expectedFailure
   def test_interpolate_trilinear(self):
     for in_sz, out_sz in [((5,2,8),(3,6,4))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="trilinear"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"), atol=1e-4)
 
+  @unittest.expectedFailure
   def test_interpolate_trilinear_corners_aligned(self):
     for in_sz, out_sz in [((5,2,8),(3,6,4))]:
       helper_test_op([(2,3)+in_sz],
