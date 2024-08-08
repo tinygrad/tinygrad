@@ -180,7 +180,8 @@ class QcomComputeQueue(HWComputeQueue):
     self.obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(cmdbytes) * 4, flags=0x1)
     self.submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(self.obj), cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object),
                                                    numcmds=1, context_id=device.ctx)
-    self.q = to_mv(hw_page_addr, len(self.q) * 4).cast("I")
+    # From now on, the queue is on the device for faster submission.
+    self.q = to_mv(hw_page_addr, len(self.q) * 4).cast("I") # type: ignore
 
   def _submit(self, device):
     if self.binded_device == device:
