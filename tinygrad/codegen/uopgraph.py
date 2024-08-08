@@ -568,13 +568,47 @@ class UOpGraph:
     # scope children impact the toposort and END* insertion
     scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
     range_phi = {r:tuple(sorted([p for p in scope_children[r] if p.op is UOps.PHI])) for r in scope_children if r.op is UOps.RANGE and r.arg[1]}
+    range_srcs = {}
+    def _range_dfs(x:UOp):
+      if x not in range_srcs: range_srcs[x] = [u for s in x.src for u in _range_dfs(s)]
+      return [x] + range_srcs[x]
+
+    _range_dfs(sink)
+    range_srcs = {p:[s for s in range_srcs[p] if s.op is UOps.RANGE] for p in range_srcs if p.op is UOps.PHI}
+
+    # queue:List[Tuple[int, UOp]] = []
+    # def push(u:UOp):
+    #   priority = 0
+    #   # prefer uops that are loop children
+    #   for l, ss in scope_children.items():
+    #     if l.op is UOps.RANGE and u in ss: priority -= (l.arg[0]+1) + 1000*l.arg[1] # TODO: cleanup
+    #   heapq.heappush(queue, (priority, u))
+
+  # _global float* data0, const __global float* data1, const __global int* data2, const __global int* data3) {
+  # int gidx0 = get_group_id(0); /* 6 */
+  # int val0 = data2[0];
+  # int val1 = data3[gidx0];
+  # float acc0 = 0.0f;
+  # for (int ridx0 = 0; ridx0 < 2; ridx0++) {
+  #   for (int ridx1 = 0; ridx1 < 3; ridx1++) {
+  #     float val2 = data1[(ridx0*3)+ridx1];
+  #     int acc1 = 0;
+  #     for (int ridx2 = 0; ridx2 < 3; ridx2++) {
+  #       acc1 = (acc1+(((ridx2<2)*(0<((ridx0+ridx2)%3)))?1:0));
+  #     }
+  #     acc0 = (acc0+(val2*(float)(((!(val0!=(acc1+(-1))))*(!(val1!=ridx1))))));
+  #   }
+  # }
+  # data0[gidx0] = acc0;
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
       priority = 0
       # prefer uops that are loop children
-      for l, ss in scope_children.items():
-        if l.op is UOps.RANGE and u in ss: priority -= (l.arg[0]+1) + 1000*l.arg[1] # TODO: cleanup
+      if u.op is UOps.RANGE and u.arg:
+        priority += 10000*(len(set([j for i in range_phi[u] for j in range_srcs[i] if not any(k in scope_children[u] for k in range_phi[j])]))+1)+u.arg[0]
+      else: 
+        priority -= len(set([j for l, ss in scope_children.items() if l.op is UOps.RANGE and u in ss for i in range_phi[l] for j in range_srcs[i]]))
       heapq.heappush(queue, (priority, u))
 
     for u in children:
@@ -582,38 +616,56 @@ class UOpGraph:
 
     scope_end: Dict[UOp, UOp] = {}
     self._uops = []
-    scopes: Dict[UOps, List[UOp]] = {}
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x.op,x.arg)
-      
-      child_of_scopes=[u for u,ss in scope_children.items() if x in ss]
-      child_of_reduces=[u for u in child_of_scopes if u.op is UOps.RANGE and u.arg[1]]
-      if len(child_of_reduces) > 0: assert all(len(range_phi[s]) == len(range_phi[child_of_reduces[0]]) and all(v in range_phi[child_of_reduces[0]] for v in range_phi[s]) for s in child_of_reduces), "scopes don't map to the same phi"
       if x in scope_children: scope_end[x] = x
-      elif x.op is UOps.DEFINE_ACC: assert all(s in scopes[range_phi[s]] for s in x.src if s.op is UOps.RANGE), "not all ranges in stack!!"
-      elif any(s not in self._uops for s in x.src) and len(child_of_reduces) == 0:
-        heapq.heappush(queue, (p+1, x))
-        continue
-
-      if x.op is UOps.RANGE and x.arg[1]: scopes[range_phi[x]] = scopes[range_phi[x]] + [x] if (range_phi[x] in scopes) else [x]
-      elif x.op is UOps.DEFINE_ACC: scopes[p:=range_phi[x.src[1]]].insert(min(scopes[p].index(s) for s in x.src if s.op is UOps.RANGE),x)
-      elif len(child_of_reduces) > 0: scopes[range_phi[child_of_reduces[0]]].append(x)
+      if x.op is UOps.DEFINE_ACC:
+        idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
+        self._uops.insert(idx, x)
       else: self._uops.append(x)
-
-      for u in child_of_scopes:
-        scope_children[u].remove(x)
-        if len(scope_children[u]) == 0: scope_end[u] = x
-      if len(child_of_reduces) > 0:
-        if all(len(scope_children[s]) == 0 for s in child_of_reduces):
-          for u in child_of_reduces:
-            scope_end[u] = x
-            self._uops = self._uops + scopes[range_phi[u]]
-            scopes[range_phi[u]] = []
-
-      for u in reversed(children[x]):
+      for u, ss in scope_children.items():
+        if x in ss:
+          ss.remove(x)
+          if len(ss) == 0: scope_end[u] = x
+      for u in children[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
+
+    # scope_end: Dict[UOp, UOp] = {}
+    # self._uops = []
+    # scopes: Dict[UOps, List[UOp]] = {}
+    # while queue:
+    #   p,x = heapq.heappop(queue)
+    #   if DEBUG >= 7: print(p,x.op,x.arg)
+      
+    #   child_of_scopes=[u for u,ss in scope_children.items() if x in ss]
+    #   child_of_reduces=[u for u in child_of_scopes if u.op is UOps.RANGE and u.arg[1]]
+    #   if len(child_of_reduces) > 0: assert all(len(range_phi[s]) == len(range_phi[child_of_reduces[0]]) and all(v in range_phi[child_of_reduces[0]] for v in range_phi[s]) for s in child_of_reduces), "scopes don't map to the same phi"
+    #   if x in scope_children: scope_end[x] = x
+    #   elif x.op is UOps.DEFINE_ACC: assert all(s in scopes[range_phi[s]] for s in x.src if s.op is UOps.RANGE), "not all ranges in stack!!"
+    #   elif any(s not in self._uops for s in x.src) and len(child_of_reduces) == 0:
+    #     heapq.heappush(queue, (p+1, x))
+    #     continue
+
+    #   if x.op is UOps.RANGE and x.arg[1]: scopes[range_phi[x]] = scopes[range_phi[x]] + [x] if (range_phi[x] in scopes) else [x]
+    #   elif x.op is UOps.DEFINE_ACC: scopes[p:=range_phi[x.src[1]]].insert(min(scopes[p].index(s) for s in x.src if s.op is UOps.RANGE),x)
+    #   elif len(child_of_reduces) > 0: scopes[range_phi[child_of_reduces[0]]].append(x)
+    #   else: self._uops.append(x)
+
+    #   for u in child_of_scopes:
+    #     scope_children[u].remove(x)
+    #     if len(scope_children[u]) == 0: scope_end[u] = x
+    #   if len(child_of_reduces) > 0:
+    #     if all(len(scope_children[s]) == 0 for s in child_of_reduces):
+    #       for u in child_of_reduces:
+    #         scope_end[u] = x
+    #         self._uops = self._uops + scopes[range_phi[u]]
+    #         scopes[range_phi[u]] = []
+
+    #   for u in reversed(children[x]):
+    #     in_degree[u] -= 1
+    #     if in_degree[u] == 0: push(u)
 
     # end scopes in toposort order
     for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
