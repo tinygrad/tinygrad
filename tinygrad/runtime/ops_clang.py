@@ -34,7 +34,6 @@ class ClangJITCompiler(Compiler):
       elif r_type == libc.R_AARCH64_LDST64_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<7)
       elif r_type == libc.R_AARCH64_LDST128_ABS_LO12_NC: patchuint32(image, ploc, (tgt&0xFFF)<<6)
       else: raise NotImplementedError(f"Encountered unknown relocation type {r_type:#x}")
-    del exports['__truncdfhf2']
     assert len(exports) == 1, str(exports)
     _, entry = exports.popitem()
     if platform.machine() == 'arm64': image[:4] = struct.pack('<I', 0x14 << 24 | entry>>2)
