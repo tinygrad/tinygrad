@@ -115,12 +115,13 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
     something_changed = True
     quotient.append(x.const(rem_const//c))
     rem_const = rem_const%c
+  # make const a multiple of gcd
+  if c > 0 and rem_const > 0 and rem_const % gcd != 0:
+    something_changed = True
+    rem_const = (rem_const//gcd)*gcd
   if rem_const != 0:
-    if 0 < rem_const < gcd: something_changed = True  # cancel the const
-    else:
-      # only include rem_const in remainder if it's not cancelled
-      gcd = math.gcd(gcd, rem_const)
-      remainder.append(x.const(rem_const))
+    gcd = math.gcd(gcd, rem_const)
+    remainder.append(x.const(rem_const))
 
   if not something_changed: return cast(UOp, x.divides(gcd))//(c//gcd) if gcd != c and gcd != 1 else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
