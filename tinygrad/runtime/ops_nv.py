@@ -13,6 +13,8 @@ from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 if MOCKGPU:=getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
+def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
+
 def nv_iowr(fd, nr, args):
   ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
@@ -21,14 +23,14 @@ def rm_alloc(fd, clss, root, parant, params):
   made = nv_gpu.NVOS21_PARAMETERS(hRoot=root, hObjectParent=parant, hClass=clss,
                                   pAllocParms=ctypes.cast(ctypes.byref(params), ctypes.c_void_p) if params is not None else None)
   nv_iowr(fd, nv_gpu.NV_ESC_RM_ALLOC, made)
-  if made.status != 0: raise RuntimeError(f"rm_alloc returned {made.status}: {nv_gpu.nv_status_codes.get(made.status, 'Unknown error')}")
+  if made.status != 0: raise RuntimeError(f"rm_alloc returned {get_error_str(made.status)}")
   return made
 
 def rm_control(cmd, sttyp, fd, client, obj, **kwargs):
   made = nv_gpu.NVOS54_PARAMETERS(hClient=client, hObject=obj, cmd=cmd, paramsSize=ctypes.sizeof(params:=sttyp(**kwargs)),
                                   params=ctypes.cast(ctypes.byref(params), ctypes.c_void_p) if params is not None else None)
   nv_iowr(fd, nv_gpu.NV_ESC_RM_CONTROL, made)
-  if made.status != 0: raise RuntimeError(f"rm_control returned {made.status}: {nv_gpu.nv_status_codes.get(made.status, 'Unknown error')}")
+  if made.status != 0: raise RuntimeError(f"rm_control returned {get_error_str(made.status)}")
   return params
 
 def make_rmctrl_type():
@@ -40,7 +42,7 @@ rmctrl = make_rmctrl_type()
 def uvm_ioctl(cmd, sttyp, fd, **kwargs):
   ret = fcntl.ioctl(fd, cmd, made:=sttyp(**kwargs))
   if ret != 0: raise RuntimeError(f"ioctl(uvm) returned {ret}")
-  if made.rmStatus != 0: raise RuntimeError(f"uvm_ioctl returned {made.rmStatus}: {nv_gpu.nv_status_codes.get(made.rmStatus, 'Unknown error')}")
+  if made.rmStatus != 0: raise RuntimeError(f"uvm_ioctl returned {get_error_str(made.rmStatus)}")
   return made
 
 def make_uvm_type():
@@ -98,11 +100,11 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(mv_address(signal._signal)), *data64_le(value),
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
 
-  def _timestamp(self, signal): return self._signal(signal, 0)
-
   def _update_wait(self, cmd_idx, signal=None, value=None):
     if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', data64_le(mv_address(signal._signal)))
     if value is not None: self.q[(valoff:=self.cmds_offset[cmd_idx]+3):valoff+2] = array.array('I', data64_le(value))
+
+  def _timestamp(self, signal): return self._signal(signal, 0)
 
   def bind(self, device):
     self.binded_device = device
@@ -281,16 +283,13 @@ class NVProgram(HCQProgram):
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
 class NVAllocator(HCQAllocator):
-  def __init__(self, device:NVDevice): super().__init__(device)
-
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.host: return self.device._gpu_host_alloc(size)
     return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)))
 
   def _free(self, opaque, options:BufferOptions):
     self.device.synchronize()
-    if options.host: self.device._gpu_host_free(opaque)
-    else: self.device._gpu_free(opaque)
+    self.device._gpu_free(opaque)
 
   def map(self, buf:HCQBuffer): self.device._gpu_map(buf._base if hasattr(buf, '_base') else buf)
 
@@ -323,7 +322,7 @@ class NVDevice(HCQCompiled):
     made = nv_gpu.nv_ioctl_nvos33_parameters_with_fd(fd=fd_dev,
       params=nv_gpu.NVOS33_PARAMETERS(hClient=self.root, hDevice=self.device, hMemory=memory_handle, length=size, flags=flags))
     nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_MAP_MEMORY, made)
-    if made.params.status != 0: raise RuntimeError(f"_gpu_map_to_cpu returned {made.params.status}")
+    if made.params.status != 0: raise RuntimeError(f"_gpu_map_to_cpu returned {get_error_str(made.params.status)}")
     res = libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev, 0)
     os.close(fd_dev)
     return res
@@ -341,7 +340,7 @@ class NVDevice(HCQCompiled):
 
     if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, alignment=align)
     if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
-    return self._gpu_uvm_map(va_addr, size, mem_handle)
+    return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=map_to_cpu)
 
   def _gpu_system_alloc(self, size:int, va_addr=None, map_to_cpu=False, map_flags=0):
     alloc_params = nv_gpu.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root, type=13,
@@ -354,41 +353,40 @@ class NVDevice(HCQCompiled):
     if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
     if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags, system=True)
 
-    return self._gpu_uvm_map(va_addr, size, mem_handle)
+    return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=map_to_cpu)
 
   def _gpu_host_alloc(self, size):
-    va_base = self._alloc_gpu_vaddr(sz:=round_up(size, 4 << 10))
-    libc.mmap(va_base, sz, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
-    return self._map_to_gpu(va_base, sz)
+    va_base = self._alloc_gpu_vaddr(aligned_sz:=round_up(size, 4 << 10))
+    mapped_addr = libc.mmap(va_base, aligned_sz, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
+    assert mapped_addr == va_base, f"Not mmaped at correct address {va_base=} != {mapped_addr=}"
 
-  def _gpu_free(self, mem):
-    made = nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectOld=mem.hMemory)
-    nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
-    if made.status != 0: raise RuntimeError(f"_gpu_free returned {made.status}")
-    uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
-
-  def _gpu_host_free(self, mem):
-    uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
-    libc.munmap(mem.va_addr, mem.size)
-
-  def _map_to_gpu(self, va_base, size):
     NVDevice.host_object_enumerator += 1
     flags = ((nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) |
              (nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30))
     made = nv_gpu.nv_ioctl_nvos02_parameters_with_fd(params=nv_gpu.NVOS02_PARAMETERS(hRoot=self.root, hObjectParent=self.device, flags=flags,
-      hObjectNew=NVDevice.host_object_enumerator, hClass=nv_gpu.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR, pMemory=va_base, limit=size-1), fd=-1)
+      hObjectNew=NVDevice.host_object_enumerator, hClass=nv_gpu.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR, pMemory=va_base, limit=aligned_sz-1), fd=-1)
     nv_iowr(self.fd_dev, nv_gpu.NV_ESC_RM_ALLOC_MEMORY, made)
-    if made.params.status != 0: raise RuntimeError(f"_map_to_gpu returned {made.params.status}")
-    return self._gpu_uvm_map(va_base, size, made.params.hObjectNew)
 
-  def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True) -> nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS:
+    if made.params.status != 0: raise RuntimeError(f"_map_to_gpu returned {get_error_str(made.params.status)}")
+    return self._gpu_uvm_map(va_base, aligned_sz, made.params.hObjectNew, has_cpu_mapping=True)
+
+  def _gpu_free(self, mem):
+    if mem.hMemory > NVDevice.host_object_enumerator: # not a host object, clear phys mem.
+      made = nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectOld=mem.hMemory)
+      nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
+      if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
+
+    uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
+    if mem.has_cpu_mapping: libc.munmap(mem.va_addr, mem.size)
+
+  def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False) -> nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS:
     if create_range: uvm.create_external_range(self.fd_uvm, base=va_base, length=size)
     gpu_attrs = (nv_gpu.struct_c__SA_UvmGpuMappingAttributes*256)(
       nv_gpu.struct_c__SA_UvmGpuMappingAttributes(gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuMappingType = 1))
 
-    # NOTE: va_addr is set to make rawbufs compatable with AMD.
+    # NOTE: va_addr is set to make rawbufs compatable with HCQBuffer protocol.
     return uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
-                                       gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size, mapped_gpu_ids=[self.gpu_uuid])
+      gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size, mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping)
 
   def _gpu_map(self, mem):
     if self.gpu_uuid in mem.mapped_gpu_ids: return

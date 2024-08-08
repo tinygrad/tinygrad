@@ -15,8 +15,8 @@ from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import MetaOps, truncate
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
-from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, memory_planner
+from tinygrad.engine.realize import run_schedule, memory_planner
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -401,7 +401,7 @@ class Tensor:
     print(Tensor.rand(5).numpy())
     ```
     """
-    Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    Tensor._seed, Tensor._rng_counter = seed, None
 
   @staticmethod
   def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DTypeLike]=None, **kwargs):
@@ -417,7 +417,8 @@ class Tensor:
     print(t.numpy())
     ```
     """
-    if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    if (had_counter := Tensor._rng_counter is None): Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    if not all(s >= 0 for s in argfix(*shape)): raise ValueError(f"cannot create tensor with negative dimension in {shape=}")
     if not THREEFRY.value:
       # for bfloat16, numpy rand passes buffer in float
       if to_dtype(dtype or dtypes.default_float) == dtypes.bfloat16:
@@ -426,9 +427,9 @@ class Tensor:
 
     # threefry
     if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize()
+    if not had_counter: Tensor._rng_counter.assign(Tensor._rng_counter + num)
+    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device))
     counts2 = counts1 + math.ceil(num / 2)
-    Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
     x = counts2.cast(dtypes.uint64) << 32 | counts1.cast(dtypes.uint64)
     x = F.Threefry.apply(*x._broadcasted(Tensor._seed))
@@ -2949,15 +2950,78 @@ class Tensor:
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask).sum()
     return -((1 - label_smoothing) * (log_probs * y).sum() + smoothing) / loss_mask.sum()
 
-  # ***** convenience stuff *****
+  # ***** Tensor Properties *****
 
   @property
-  def ndim(self) -> int: return len(self.shape)
-  def numel(self) -> sint: return prod(self.shape)
-  def element_size(self) -> int: return self.dtype.itemsize
-  def nbytes(self) -> int: return self.numel() * self.element_size()
-  def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
-  def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]: return self.shape if dim is None else self.shape[dim]
+  def ndim(self) -> int:
+    """
+    Returns the number of dimensions in the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2], [3, 4]])
+    print(t.ndim)
+    ```
+    """
+    return len(self.shape)
+
+  def numel(self) -> sint:
+    """
+    Returns the total number of elements in the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+    print(t.numel())
+    ```
+    """
+    return prod(self.shape)
+
+  def element_size(self) -> int:
+    """
+    Returns the size in bytes of an individual element in the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([5], dtype=dtypes.int16)
+    print(t.element_size())
+    ```
+    """
+    return self.dtype.itemsize
+
+  def nbytes(self) -> int:
+    """
+    Returns the total number of bytes of all elements in the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([8, 9], dtype=dtypes.float)
+    print(t.nbytes())
+    ```
+    """
+    return self.numel() * self.element_size()
+
+  def is_floating_point(self) -> bool:
+    """
+    Returns `True` if the tensor contains floating point types, i.e. is one of `dtype.half`, `dtype.float`,
+    `dtype.double`, `dtype.default_float`, `dtype.float16`, `dtype.float32`, `dtype.float64`, `dtype.bfloat16`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([8, 9], dtype=dtypes.float)
+    print(t.is_floating_point())
+    ```
+    """
+    return dtypes.is_float(self.dtype)
+
+  def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]:
+    """
+    Return the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[4, 5, 6], [7, 8, 9]])
+    print(t.size())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.size(dim=1))
+    ```
+    """
+    return self.shape if dim is None else self.shape[dim]
 
   # ***** cast ops *****
 
