@@ -120,8 +120,11 @@ class Whisper:
   def __init__(self, dims, batch_size=1):
     self.encoder = AudioEncoder(**dims)
     self.decoder = TextDecoder(**dims)
-    self.is_multilingual = dims["n_vocab"] == 51865
+    self.is_multilingual = dims["n_vocab"] >= 51865
+    self.num_languages = dims["n_vocab"] - 51765 - int(self.is_multilingual)
+    print(f'{dims["n_vocab"]},{self.num_languages=}')
     self.batch_size = batch_size
+    self.n_mels = dims["n_mels"]
 
 
 RATE = 16000
@@ -129,11 +132,10 @@ SEGMENT_SECONDS=30
 SAMPLES_PER_SEGMENT = RATE * SEGMENT_SECONDS # 480000
 N_FFT = 400
 HOP_LENGTH = 160
-N_MELS = 80
 FRAMES_PER_SECOND = RATE // HOP_LENGTH # 100
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> Tensor:
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, n_mels: int = 80, truncate=False) -> Tensor:
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
@@ -160,7 +162,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
 
   stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
   magnitudes = np.absolute(stft[..., :-1]) ** 2
-  mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
+  mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=n_mels) @ magnitudes
 
   log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
   log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
@@ -171,17 +173,16 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
 LANGUAGES=['en', 'zh', 'de', 'es', 'ru', 'ko', 'fr', 'ja', 'pt', 'tr', 'pl', 'ca', 'nl', 'ar', 'sv', 'it', 'id', 'hi', 'fi', 'vi', 'he', 'uk', 'el', 'ms', 'cs', 'ro', 'da', 'hu', 'ta', 'no',
            'th', 'ur', 'hr', 'bg', 'lt', 'la', 'mi', 'ml', 'cy', 'sk', 'te', 'fa', 'lv', 'bn', 'sr', 'az', 'sl', 'kn', 'et', 'mk', 'br', 'eu', 'is', 'hy', 'ne', 'mn', 'bs', 'kk', 'sq', 'sw',
            'gl', 'mr', 'pa', 'si', 'km', 'sn', 'yo', 'so', 'af', 'oc', 'ka', 'be', 'tg', 'sd', 'gu', 'am', 'yi', 'lo', 'uz', 'fo', 'ht', 'ps', 'tk', 'nn', 'mt', 'sa', 'lb', 'my', 'bo', 'tl',
-           'mg', 'as', 'tt', 'haw', 'ln', 'ha', 'ba', 'jw', 'su']
+           'mg', 'as', 'tt', 'haw', 'ln', 'ha', 'ba', 'jw', 'su', 'yue']
 
-
-def get_encoding(encoding_name):
+def get_encoding(encoding_name, num_languages):
   with fetch(f"https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/{encoding_name}.tiktoken").open() as f:
     ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in f if line)}
   n_vocab = len(ranks)
   specials = [
     "<|endoftext|>",
     "<|startoftranscript|>",
-    *[f"<|{lang}|>" for lang in LANGUAGES],
+    *[f"<|{lang}|>" for lang in LANGUAGES[:num_languages]],
     "<|translate|>",
     "<|transcribe|>",
     "<|startoflm|>",
@@ -211,6 +212,7 @@ MODEL_URLS = {
   "medium": "https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt",
   "large-v1": "https://openaipublic.azureedge.net/main/whisper/models/e4b87e7e0bf463eb8e6956e646f1e277e901512310def2c24bf0e11bd3c28e9a/large-v1.pt",
   "large-v2": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
+  "large-v3": "https://openaipublic.azureedge.net/main/whisper/models/e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb/large-v3.pt",
   "large": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
 }
 def init_whisper(model_name="tiny.en", batch_size=1):
@@ -220,7 +222,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   state = torch_load(filename)
   model = Whisper(state['dims'], batch_size)
   load_state_dict(model, state['model_state_dict'], strict=False)
-  enc = get_encoding("multilingual" if model.is_multilingual else "gpt2")
+  enc = get_encoding("multilingual" if model.is_multilingual else "gpt2", model.num_languages)
   return model, enc
 
 def load_file_waveform(filename):
@@ -237,6 +239,22 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
   """
   N_audio = len(waveforms)
 
+  def inferloop(curr_segment_tokens):
+    pos = 0
+    if DEBUG >= 0: print(colored(f"Prompt: {enc.decode(curr_segment_tokens[0])}", "yellow"))
+    for curr_tok in range(model.decoder.max_tokens_to_sample):
+      intoks = Tensor(curr_segment_tokens if curr_tok == 0 else curr_segment_tokens[:, -1:])
+      out = model.decoder(intoks, pos, encoded_audio)
+      next_tokens = out[:, -1].argmax(axis=-1).numpy().astype(np.int32)
+      next_tokens[curr_segment_tokens[:, -1] == eot] = eot
+      curr_segment_tokens = np.concatenate((curr_segment_tokens, next_tokens.reshape(-1, 1)), axis=1)
+      pos = curr_segment_tokens.shape[-1] - 1
+
+      if DEBUG >= 1: print(curr_tok, list(map(lambda tokens: enc.decode(tokens), curr_segment_tokens)))
+      if (curr_segment_tokens[:, -1] == eot).all(): break
+    if callback: callback(enc.decode(curr_segment_tokens[0][transcription_start_index:]))
+    return curr_segment_tokens
+
   # TODO detect language
   start_tokens = ["<|startoftranscript|>", *(["<|en|>", "<|transcribe|>"] if model.is_multilingual else []), "<|notimestamps|>"]
   start_tokens = [enc._special_tokens[x] for x in start_tokens]
@@ -245,8 +263,7 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
   transcription_tokens = [np.array([], dtype=np.int32)] * model.batch_size
   for curr_frame, chunks in enumerate(zip(*waveforms, strict=True)):
     if curr_frame > 0 and N_audio > 1: raise Exception("Multi segment streaming not supported for batch")
-    frame_reset = False
-    log_spec = prep_audio(chunks, model.batch_size, truncate)
+    log_spec = prep_audio(chunks, model.batch_size, model.n_mels, truncate)
 
     curr_segment_tokens = np.tile(start_tokens, (model.batch_size, 1))
     if curr_frame > 0:
@@ -262,35 +279,18 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], truncate=F
 
     encoded_audio = model.encoder.encode(log_spec[:,:,:FRAMES_PER_SEGMENT].contiguous())
 
-    def inferloop(curr_segment_tokens):
-      pos = 0
-      if DEBUG >= 0: print(colored(f"Prompt: {enc.decode(curr_segment_tokens[0])}", "yellow"))
-      for curr_tok in range(100):
-        intoks = Tensor(curr_segment_tokens if curr_tok == 0 else curr_segment_tokens[:, -1:])
-        out = model.decoder(intoks, pos, encoded_audio)
-        next_tokens = out[:, -1].argmax(axis=-1).numpy().astype(np.int32)
-        next_tokens[curr_segment_tokens[:, -1] == eot] = eot
-        curr_segment_tokens = np.concatenate((curr_segment_tokens, next_tokens.reshape(-1, 1)), axis=1)
-        pos = curr_segment_tokens.shape[-1] - 1
-
-        if DEBUG >= 1: print(curr_tok, list(map(lambda tokens: enc.decode(tokens), curr_segment_tokens)))
-        if (curr_segment_tokens[:, -1] == eot).all(): break
-      if callback: callback(enc.decode(curr_segment_tokens[0][transcription_start_index:]))
-      return curr_segment_tokens
-    
     curr_segment_tokens = inferloop(curr_segment_tokens)
 
     if not (curr_segment_tokens[:, -1] == eot).all():
-      if frame_reset or curr_frame == 0 or N_audio > 1: raise RuntimeError("Token overflow")
-      frame_reset = True
       print(colored("REFRAME", "red"))
       transcription_tokens[0] = np.concatenate((transcription_tokens[0], curr_segment_tokens[0][transcription_start_index:]))
       prompt = np.concatenate((start_tokens, transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:]))
       curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
-
       transcription_start_index = len(curr_segment_tokens[0])
+
       curr_segment_tokens = inferloop(curr_segment_tokens)
 
+    assert (curr_segment_tokens[:, -1] == eot).all(), f"Token overflow. More than {model.decoder.max_tokens_to_sample*2} tokens for 30s segment"
 
     for curr_tok, t in enumerate(curr_segment_tokens):
       eot_index = np.where(t == eot)[0]
@@ -315,7 +315,7 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
-  model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=1)
+  model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=2)
 
   if len(sys.argv) > 1:
     transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1])], callback=lambda x:print(x,flush=True))
@@ -336,7 +336,7 @@ if __name__ == "__main__":
         else: total = np.concatenate([total, waveform])
         did_read = True
       if did_read:
-        log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True)
+        log_spec = prep_audio(total.reshape(1, -1), model.batch_size, model.n_mels, truncate=True)
         encoded_audio = model.encoder.encode(Tensor(log_spec))
       # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
       out = model.decoder(Tensor([lst]), 0, encoded_audio, streaming=True).realize()
