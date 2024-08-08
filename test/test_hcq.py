@@ -1,6 +1,6 @@
-import unittest, ctypes, struct, contextlib, tempfile, pathlib, json, time, atexit, random
-from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import CI, getenv, Context
+import unittest, ctypes, struct
+from tinygrad import Device, Tensor, dtypes
+from tinygrad.helpers import CI, getenv
 from tinygrad.device import Buffer, BufferOptions, HCQCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner, CompiledRunner
