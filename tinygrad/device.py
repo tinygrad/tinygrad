@@ -577,6 +577,9 @@ class HCQCompiled(Compiled):
   def _prof_finalize(self):
     qname = ["COMPUTE", "DMA"]
 
+    # Sync to be sure all events on the device are recorded.
+    self.synchronize()
+
     for st, en, name, is_cp in self.raw_prof_records:
       self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, qname[is_cp])]
     for a_st, a_en, a_dev, a_is_copy, b_st, b_en, b_dev, b_is_copy in self.dep_prof_records:
