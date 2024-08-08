@@ -296,12 +296,9 @@ class CUDARenderer(CStyleLanguage):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
-    typed_uops = [uop for uop in uops if uop.dtype is not None]
-    if any(uop.dtype.scalar() == dtypes.half for uop in typed_uops): prefix += ["#include <cuda_fp16.h>"]
-    if any(uop.dtype.scalar() == dtypes.bfloat16 for uop in typed_uops): prefix += ["#include <cuda_bf16.h>"]
-
-    for dtype in dedup(uop.dtype for uop in typed_uops if uop.dtype.scalar() in (dtypes.half, dtypes.bfloat16)):
-      if dtype.count != 1: prefix += [_make_cuda_dtype(self, dtype)]
+    special_dtypes = [uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.scalar() in (dtypes.half, dtypes.bfloat16)]
+    prefix += [f"#include <cuda_{'fp' if scalar == dtypes.half else 'bf'}16.h>" for scalar in dedup(dtype.scalar() for dtype in special_dtypes)]
+    prefix += [_make_cuda_dtype(self, dtype) for dtype in dedup(special_dtypes) if dtype.count > 1]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
