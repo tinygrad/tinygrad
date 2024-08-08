@@ -9,7 +9,7 @@ import tinygrad.runtime.autogen.libc as libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le
-if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401
+if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 def prt(val: int):
   for i in range(4,1,-1): val ^= val >> (1 << i)
