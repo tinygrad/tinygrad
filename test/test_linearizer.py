@@ -854,9 +854,9 @@ class TestLinearizer(unittest.TestCase):
       lin = Kernel(sched[0].ast)
       assert sum(u.arg is UnaryOps.RECIP for u in lin.linearize().uops) == max_ops, msg
 
-    a = Tensor.rand((4,4))
-    b = Tensor.rand((4,4))
-    d = Tensor.rand((4,4))
+    a = Tensor.empty((4,4))
+    b = Tensor.empty((4,4))
+    d = Tensor.empty((4,4))
 
     c = (a*b)/b
     helper(c, "found UnaryOps.RECIP in (a*b)/b operation")
