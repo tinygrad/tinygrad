@@ -355,6 +355,15 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((alu0+lidx2*2+1)//20, 0, 8192, {"((((((gidx0//5)+lidx2)//5)+lidx1)//2)+(gidx1*8)+(gidx2*32)+(lidx0*16))",
                                                               "((gidx2*32)+(gidx1*8)+(lidx0*16)+(((gidx0//5)+(lidx1*5)+lidx2)//10))"})
 
+  @unittest.expectedFailure
+  def test_sum_div_complex2(self):
+    gidx0 = Variable("gidx0", 0, 7)
+    lidx2 = Variable("lidx2", 0, 1)
+    lidx3 = Variable("lidx3", 0, 1)
+    self.helper_test_variable((gidx0*4+lidx2*2+1)//10, 0, 3, "(((gidx0*2)+lidx2)//5)")
+    self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//10, 0, 3, "(((gidx0*2)+lidx2)//5)")
+    self.helper_test_variable((gidx0*2+lidx2)//10, 0, 1, "(gidx0//5)")
+
   # *** below are uop_symbolic only
 
   # NOTE: tests are not correct in symbolic
