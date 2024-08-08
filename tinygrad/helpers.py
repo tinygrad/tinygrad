@@ -27,6 +27,7 @@ def all_same(items:Union[Tuple[T, ...], List[T]]): return all(x == items[0] for 
 def all_int(t: Sequence[Any]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
+def memsize_to_str(_bytes: int) -> str: return [f"{(_bytes / d):.2f} {pr}" for d,pr in [(1e9,"GB"),(1e6,"MB"),(1e3,"KB"),(1,"B")] if _bytes > d][0]
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
@@ -166,7 +167,7 @@ class ProfileLogger:
 
   def __init__(self): self.events, self.deps, ProfileLogger.writers = [], [], ProfileLogger.writers + 1
 
-  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor)]
+  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None, args=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor, args)]
 
   def _ensure_actor(self, actor_name, subactor_name):
     if actor_name not in self.actors:
@@ -181,15 +182,16 @@ class ProfileLogger:
 
   def __del__(self):
     # perfetto json docs: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
-    for name,st,et,actor_name,subactor_name in self.events:
+    for name, st, et, actor_name, subactor_name, args in self.events:
       pid, tid = self._ensure_actor(actor_name,subactor_name)
-      self.mjson.append({"name": name, "ph": "X", "pid": pid, "tid": tid, "ts":st, "dur":et-st})
+      args = {k: (v if v.__class__ is str else v(et-st)) for k, v in args.items()} if args is not None else None
+      self.mjson.append({"name": name, "ph": "X", "pid": pid, "tid": tid, "ts": st, "dur": et-st, "args": args})
 
     for en,st,dep_actor_name,dep_subactor_name,actor_name,subactor_name in self.deps:
       dep_pid, dep_tid = self._ensure_actor(dep_actor_name,dep_subactor_name)
       pid, tid = self._ensure_actor(actor_name,subactor_name)
-      self.mjson.append({"ph": "s", "pid": dep_pid, "tid": dep_tid, "id": len(self.mjson), "ts":en, "bp": "e"})
-      self.mjson.append({"ph": "f", "pid": pid, "tid": tid, "id": len(self.mjson)-1, "ts":st, "bp": "e"})
+      self.mjson.append({"ph": "s", "pid": dep_pid, "tid": dep_tid, "id": len(self.mjson), "ts": en, "bp": "e"})
+      self.mjson.append({"ph": "f", "pid": pid, "tid": tid, "id": len(self.mjson)-1, "ts": st, "bp": "e"})
 
     ProfileLogger.writers -= 1
     if ProfileLogger.writers == 0 and len(self.mjson) > 0:
