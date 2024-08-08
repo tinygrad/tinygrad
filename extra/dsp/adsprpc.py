@@ -130,7 +130,7 @@ class FunctionFactoryStub:
 
 # libraries['FIXME_STUB'] explanation
 # As you did not list (-l libraryname.so) a library that exports this function
-# This is a non-working stub instead. 
+# This is a non-working stub instead.
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
@@ -170,31 +170,31 @@ FASTRPC_INIT_CREATE = 1 # macro
 FASTRPC_INIT_CREATE_STATIC = 2 # macro
 FASTRPC_INIT_ATTACH_SENSORS = 3 # macro
 # def REMOTE_SCALARS_INBUFS(sc):  # macro
-#    return (((sc)>>16)&0x0ff)  
+#    return (((sc)>>16)&0x0ff)
 # def REMOTE_SCALARS_OUTBUFS(sc):  # macro
-#    return (((sc)>>8)&0x0ff)  
+#    return (((sc)>>8)&0x0ff)
 # def REMOTE_SCALARS_INHANDLES(sc):  # macro
-#    return (((sc)>>4)&0x0f)  
+#    return (((sc)>>4)&0x0f)
 # def REMOTE_SCALARS_OUTHANDLES(sc):  # macro
-#    return ((sc)&0x0f)  
+#    return ((sc)&0x0f)
 # def REMOTE_SCALARS_LENGTH(sc):  # macro
-#    return ((((sc)>>16)&0x0ff)(sc)+(((sc)>>8)&0x0ff)(sc)+(((sc)>>4)&0x0f)(sc)+((sc)&0x0f)(sc))  
+#    return ((((sc)>>16)&0x0ff)(sc)+(((sc)>>8)&0x0ff)(sc)+(((sc)>>4)&0x0f)(sc)+((sc)&0x0f)(sc))
 # def REMOTE_SCALARS_MAKEX(attr, method, in, out, oin, oout):  # macro
-#    return ((((uint32_t)(attr)&0x7)<<29)|(((uint32_t)(method)&0x1f)<<24)|(((uint32_t)(in)&0xff)<<16)|(((uint32_t)(out)&0xff)<<8)|(((uint32_t)(oin)&0x0f)<<4)|((uint32_t)(oout)&0x0f))  
+#    return ((((uint32_t)(attr)&0x7)<<29)|(((uint32_t)(method)&0x1f)<<24)|(((uint32_t)(in)&0xff)<<16)|(((uint32_t)(out)&0xff)<<8)|(((uint32_t)(oin)&0x0f)<<4)|((uint32_t)(oout)&0x0f))
 # def REMOTE_SCALARS_MAKE(method, in, out):  # macro
-#    return ((((uint32_t)(attr)&0x7)<<29)|(((uint32_t)(method)&0x1f)<<24)|(((uint32_t)(in)&0xff)<<16)|(((uint32_t)(out)&0xff)<<8)|(((uint32_t)(oin)&0x0f)<<4)|((uint32_t)(oout)&0x0f))(0,method,in,out,0,0)  
+#    return ((((uint32_t)(attr)&0x7)<<29)|(((uint32_t)(method)&0x1f)<<24)|(((uint32_t)(in)&0xff)<<16)|(((uint32_t)(out)&0xff)<<8)|(((uint32_t)(oin)&0x0f)<<4)|((uint32_t)(oout)&0x0f))(0,method,in,out,0,0)
 # def VERIFY_EPRINTF(format, args):  # macro
-#    return (void)0  
+#    return (void)0
 # def VERIFY_IPRINTF(args):  # macro
-#    return (void)0  
+#    return (void)0
 # def __STR__(x):  # macro
-#    return #x":"  
+#    return #x":"
 # def __TOSTR__(x):  # macro
-#    return #x":"(x)  
+#    return #x":"(x)
 # __FILE_LINE__ = __FILE__ ":" #x":"(x) ( __LINE__ ) # macro
 # def VERIFY(err, val):  # macro
 #    return do{(void)0([UndefinedIdentifier(name=__FILE__), '":"', '#x":"(x)', '(', UndefinedIdentifier(name=__LINE__), ')']"info: calling: "#val"\n");if((val)==0){(err)=(err)==0?-1:(err);(void)0([UndefinedIdentifier(name=__FILE__), '":"', '#x":"(x)', '(', UndefinedIdentifier(name=__LINE__), ')']"error: %d: "#val"\n",(err));}else{(void)0([UndefinedIdentifier(name=__FILE__), '":"', '#x":"(x)', '(', UndefinedIdentifier(name=__LINE__), ')']"info: passed: "#val"\n");}\
-}while(0)  
+#}while(0)
 # remote_arg64_t = union remote_arg64 # macro
 # remote_arg_t = union remote_arg # macro
 FASTRPC_CONTROL_LATENCY = (1) # macro
