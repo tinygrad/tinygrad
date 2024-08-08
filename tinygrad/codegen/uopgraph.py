@@ -93,7 +93,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
       something_changed = True
     else: remainder.append(u)
   if not something_changed: return None
-  return functools.reduce(operator.add, remainder) if remainder else x.const(0)
+  return functools.reduce(operator.add, sorted(remainder)) if remainder else x.const(0)
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
@@ -110,6 +110,8 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
       remainder.append(u)
       gcd = math.gcd(gcd, factor)
 
+  # sort non const terms
+  quotient, remainder = sorted(quotient), sorted(remainder)
   # handle the const
   if rem_const%c != rem_const:
     something_changed = True
@@ -128,7 +130,7 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
   if quo is None: return x.const(0) if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)
-  return quo if rem is None else quo+cast(UOp, rem.divides(gcd))//(c//gcd)
+  return quo if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)+quo
 
 # ***** transcendental *****
 
