@@ -1,6 +1,7 @@
 import unittest
 from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
+from tinygrad.device import Device
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
@@ -520,7 +521,7 @@ class TestIFUOps(TestUOps):
     self.assertEqual(len(if_uops), 1)
     self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
-      self.assertEqual(len(st.src), 3)
+      self.assertEqual(len(st.src), 4)
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
@@ -538,10 +539,10 @@ class TestIFUOps(TestUOps):
     self.assertEqual(len(if_uops), 1)
     self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
-      self.assertEqual(len(st.src), 3)
+      self.assertEqual(len(st.src), 4)
 
   # this will be fixed with the merge gated stores bounty
-  @unittest.expectedFailure
+  # @unittest.expectedFailure
   def test_expand_ifs_dumb(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
@@ -554,7 +555,7 @@ class TestIFUOps(TestUOps):
     self.assertEqual(len(if_uops), 1)
     self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
-      self.assertEqual(len(st.src), 3)
+      self.assertEqual(len(st.src), 4)
 
 class TestDivMod(TestUOps):
   def c(self, c:int): return UOp.const(dtypes.int, c)
