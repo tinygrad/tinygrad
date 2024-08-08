@@ -279,13 +279,13 @@ class QcomProgram(HCQProgram):
     self.private_gpu = self.device._gpu_alloc(0x101, 0xC0F00)
 
     image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.halfreg, self.fullreg = parse_cl_lib(self.lib, self.name)
-    image = memoryview(lib[image_offset:image_offset+self.image_size])
+    image = bytearray(lib[image_offset:image_offset+self.image_size])
 
     # check if buffers are contigious for hcq
     for i in range(1, len(self.buffs_info)): assert(self.buffs_info[i] - self.buffs_info[i-1] == 0x10)
 
     self.lib_gpu = self.device._gpu_alloc(len(image), 0x10C0A00, map_to_cpu=True)
-    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), self.image_size)
+    ctypes.memmove(self.lib_gpu.va_addr, mv_address(memoryview(image)), self.image_size)
 
     super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=self.buffs_info[0] if len(self.buffs_info) else 0)
 
