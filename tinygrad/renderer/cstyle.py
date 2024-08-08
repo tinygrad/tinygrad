@@ -116,7 +116,8 @@ class CStyleLanguage(Renderer):
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       # these four uops don't have output dtypes
       if uop is UOps.IF:
-        kk(f"if ({r[src[0]]}) {{")
+        try: kk(f"if ({r[src[0]]}) {{")
+        except KeyError: kk(f"if ({r[src[0].src[0]]}) {{")
         depth += 1
       elif uop is UOps.BARRIER: kk(self.barrier)
       elif uop in {UOps.ENDRANGE, UOps.ENDIF}:
@@ -127,7 +128,7 @@ class CStyleLanguage(Renderer):
         # mark DEFINE_GLOBAL buf as writable
         if src[0].op is UOps.DEFINE_GLOBAL: bufs[src[0]] = (bufs[src[0]][0], (bufs[src[0]][1][0], True))
         rendered_store = self.render_store(r[src[0]], src[0].dtype, r[src[2]], src[2].dtype, strip_parens(r[src[1]]), src[0].op is UOps.DEFINE_LOCAL)
-        kk(f"if ({r[src[3]]}) {{ {rendered_store} }}" if len(src) > 3 else rendered_store)
+        kk(f"if ({r[src[3]]}) {{ {rendered_store} }}" if len(src) > 3 and src[-1].op is not UOps.IF else rendered_store)
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE:
