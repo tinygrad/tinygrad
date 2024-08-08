@@ -1,7 +1,6 @@
 import unittest
 from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
-from tinygrad.device import Device
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
