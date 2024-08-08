@@ -243,12 +243,16 @@ class TestUint8DType(TestDType):
 class TestBitCast(unittest.TestCase):
   def test_fp32_to_uint8(self):
     _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8)
+    _test_bitcast(Tensor.randn((3,40), dtype=dtypes.float32), dtypes.uint8)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f'Half not supported for {Device.DEFAULT}')
   def test_fp16_to_int32(self):
     _test_bitcast(Tensor([100000, 10], dtype=dtypes.float16), dtypes.int32)
+    _test_bitcast(Tensor.randn((3,40), dtype=dtypes.float16), dtypes.int32)
 
   def test_int16_to_uint32(self):
     _test_bitcast(Tensor([100000, 10], dtype=dtypes.int16), dtypes.uint32)
+    _test_bitcast(Tensor.randn((3,40), dtype=dtypes.int16), dtypes.uint32)
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
