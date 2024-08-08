@@ -82,7 +82,8 @@ class LazyBuffer:
     assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
     return LazyBuffer.metaop(MetaOps.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,), src=(x, self.base))
 
-  def can_view(self, vd=None): return self.st.consecutive and not self.is_unrealized_const() and self.device.split(":")[0] in (vd or view_supported_devices)
+  def can_view(self, vd=None): 
+    return self.st.consecutive and not self.is_unrealized_const() and self.device.split(":")[0] in (vd or view_supported_devices)
 
   def contiguous(self, allow_buffer_view=True):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
