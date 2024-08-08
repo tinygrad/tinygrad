@@ -1,8 +1,9 @@
 import unittest
 from tinygrad import Device
+from tinygrad.helpers import CI
 from tinygrad.runtime.ops_gpu import CLDevice, CLAllocator
 
-@unittest.skipUnless(Device.DEFAULT in ["GPU"], "Runs only on OpenCL (GPU)")
+@unittest.skipUnless(Device.DEFAULT in ["GPU"] and not CI, "Runs only on OpenCL (GPU)")
 class TestOCLOOM(unittest.TestCase):
   def test_opencl_oom(self):
     with self.assertRaises(RuntimeError) as err:

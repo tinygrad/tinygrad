@@ -380,6 +380,8 @@ class AMDDevice(HCQCompiled):
     self.drm_fd = os.open(f"/dev/dri/renderD{self.properties['drm_render_minor']}", os.O_RDWR)
     target = int(self.properties['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (target // 10000, (target // 100) % 100, target % 100)
+    if target < 110000 or target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
+
     kio.acquire_vm(AMDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
     if AMDDevice.event_page is None:

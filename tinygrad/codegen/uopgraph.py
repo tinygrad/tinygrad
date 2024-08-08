@@ -261,7 +261,7 @@ constant_folder = PatternMatcher([
   (NOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # x-x -> 0
   (NOp.var('x') - NOp.var('x'), lambda x: x.const(0)),
-  (UPat(op=UOps.ALU, name='x'), lambda x: x.const(x.vmin.arg) if x.op is not UOps.CONST and x.vmin.arg == x.vmax.arg else None),
+  (UPat(UOps.ALU, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
   # ** load/store folding **
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.load(NOp.var("buf"), NOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
@@ -298,6 +298,9 @@ constant_folder = PatternMatcher([
   # ** combine terms **
   # -(x+y) -> -x + -y
   (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
+  # (x+c0)*c1 -> x*c1+c0*c1. only for signed int, float have inf*0=nan issue
+  ((NOp.var("x", dtype=dtypes.int) + NOp.cvar("c0")) * NOp.cvar("c1"), lambda x,c0,c1:
+   x*c1+c0.arg*c1.arg if not dtypes.is_unsigned(x.dtype) else None),
   # (x*c0)+(x*c1) -> x*(c0+c1)
   (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
   # (x*c0)+(y*c0) -> (x+y)*c0
