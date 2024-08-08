@@ -106,7 +106,7 @@ class LazyBuffer:
     elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       # TODO: applying this makes gpt2 slower
       return self.base.cast(dtype, bitcast)._view(self.st)
-    cast_op: Union[MetaOps, UnaryOps] = (MetaOps.VIEW if self.can_view({*view_supported_devices, "GPU"}) and 
+    cast_op: Union[MetaOps, UnaryOps] = (MetaOps.VIEW if self.can_view({*view_supported_devices, "GPU"}) and
                                          allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
