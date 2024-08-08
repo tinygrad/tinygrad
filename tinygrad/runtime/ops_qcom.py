@@ -145,7 +145,7 @@ class QcomAllocator(HCQAllocator):
 
 class QcomComputeQueue(HWComputeQueue):
   def __init__(self):
-    self.q, self.cmd_idx_to_dims = [], {}
+    self.cmd_idx_to_dims = {}
     super().__init__()
 
   def cmd(self, opcode: int, *vals: int): self.q += [pkt7_hdr(opcode, len(vals)), *vals]
@@ -182,7 +182,7 @@ class QcomComputeQueue(HWComputeQueue):
                                                    numcmds=1, context_id=device.ctx)
     self.q = to_mv(hw_page_addr, len(self.q) * 4).cast("I")
 
-  def _submit(self, device: QcomDevice):
+  def _submit(self, device):
     if self.binded_device == device:
       device._ioctl(kgsl.IOCTL_KGSL_GPU_COMMAND, self.submit_req)
       return
@@ -278,7 +278,7 @@ class QcomProgram(HCQProgram):
     self.private_gpu = self.device._gpu_alloc(0x101, 0xC0F00)
 
     image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.halfreg, self.fullreg = parse_cl_lib(self.lib, self.name)
-    image = bytearray(lib[image_offset:image_offset+self.image_size])
+    image = memoryview(lib[image_offset:image_offset+self.image_size])
 
     # check if buffers are contigious for hcq
     for i in range(1, len(self.buffs_info)): assert(self.buffs_info[i] - self.buffs_info[i-1] == 0x10)
