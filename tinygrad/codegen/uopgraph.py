@@ -395,11 +395,12 @@ def do_expand(root:UOp):
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
 acc_number = 0
-def do_reduce(root):
+def do_reduce(root:UOp):
   global acc_number
   reduce_parented, reduce_unparented = partition(list(root.src[1:]), lambda x: x in root.src[0].parents)
   ret = root.src[0]
   if len(reduce_parented):
+    assert root.dtype is not None
     const = UOp.const(root.dtype.scalar(), 0 if root.arg is BinaryOps.ADD else dtypes.min(root.dtype))
     acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(reduce_parented), (acc_number,))
     acc_number += 1
