@@ -4,7 +4,7 @@ from tinygrad.helpers import getenv
 
 if __name__ == "__main__":
   DEVS = [f"NV:{i}" for i in range(getenv("GPUS", 2))]
-  N = 8192
+  N = getenv("N", 8192)
   A = Tensor.rand(N, N).shard(DEVS, 0).realize()
   B = Tensor.rand(N, N).shard(DEVS, 1).realize()
   print("***** MUL *****")
