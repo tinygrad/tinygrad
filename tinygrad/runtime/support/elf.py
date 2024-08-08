@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, Dict, List, Optional, Any
+from typing import Tuple, Dict, List, Any
 from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc
 

@@ -16,7 +16,7 @@ class ClangGraph(GraphRunner):
     prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src.replace('void', 'static void') for ji in jit_cache]))
     args = [f"{render_dtype(x.dtype)}* arg{i}" for i,x in enumerate(input_rawbuffers)]
     args += sorted([f"int {v.expr}" for v in var_vals])
-    code = [f"void batched("+','.join(args)+") {"]
+    code = ["void batched("+','.join(args)+") {"]
     for ji in jit_cache:
       args = []
       for buf in ji.bufs:
