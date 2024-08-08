@@ -39,7 +39,7 @@ class ClangJITCompiler(Compiler):
     assert len(exports) == 1, str(exports)
     _, entry = exports.popitem()
     if platform.machine() == 'arm64': image[:4] = struct.pack('<I', 0x14 << 24 | entry>>2)
-    elif platform.machine() == 'x86_64': image[:5] = b'\xe9' + struct.pack('<I', entry)
+    elif platform.machine() == 'x86_64': image[:5] = b'\xe9' + struct.pack('<I', entry-5)
     else: raise RuntimeError(f"Clang JIT doesn't support {platform.machine()}")
     return bytes(image)
 
