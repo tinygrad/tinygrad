@@ -9,7 +9,7 @@ import tinygrad.runtime.autogen.libc as libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le
-if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl # noqa: F401
+if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401
 
 def prt(val: int):
   for i in range(4,1,-1): val ^= val >> (1 << i)
@@ -61,7 +61,7 @@ class QcomCompiler(CLCompiler):
 class QcomSignal(HCQSignal):
   def __init__(self, value=0, **kwargs):
     self._signal = QcomDevice.signals_pool.pop()
-    self._signal[0] = value
+    super().__init__(value)
   def __del__(self): QcomDevice.signals_pool.append(self._signal)
   def _get_value(self) -> int: return self._signal[0]
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(1000)
@@ -289,7 +289,7 @@ class QcomProgram(HCQProgram):
     super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=self.buffs_info[0] if len(self.buffs_info) else 0)
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
-    if len(bufs) + len(vals) != len(self.buffs_info): RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
+    if len(bufs) + len(vals) != len(self.buffs_info): raise RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
     for i, b in enumerate(bufs): ctypes.cast(kernargs_ptr + self.buffs_info[i], ctypes.POINTER(ctypes.c_int64))[0] = b.va_addr
     for i, v in enumerate(vals): ctypes.cast(kernargs_ptr + self.buffs_info[i+len(bufs)], ctypes.POINTER(ctypes.c_int32))[0] = v
     for cnst_val, cnst_off, cnst_sz in self.consts_info:
