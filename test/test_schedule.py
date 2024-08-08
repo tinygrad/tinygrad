@@ -1268,9 +1268,10 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
 class TestIndexing(unittest.TestCase):
-  def check_schedule(self, xt:Tensor, cnt:int):
+  def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
-      s = xt.schedule()
+      lst = [xt] if isinstance(xt, Tensor) else xt
+      s = Tensor.schedule(*lst)
       kernels = [si for si in s if si.ast.op is MetaOps.KERNEL]
       for si in kernels: verify_lazyop(si.ast)
       run_schedule(s)
@@ -1439,9 +1440,10 @@ class TestIndexing(unittest.TestCase):
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000, "dtype":dtypes.half}
     fused = precompute_freqs_cis(**args)
     self.check_schedule(fused, 1)
-    ref = precompute_freqs_cis(**args)
-    run_schedule(check_schedule(ref, 3))
-    np.testing.assert_equal(fused.numpy(), ref.numpy())
+    if getenv("CHECK", 1):
+      ref = precompute_freqs_cis(**args)
+      run_schedule(check_schedule(ref, 3))
+      np.testing.assert_equal(fused.numpy(), ref.numpy())
 
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
@@ -1457,6 +1459,52 @@ class TestIndexing(unittest.TestCase):
     xref = np.zeros((4, 4), dtype=int)
     xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
     np.testing.assert_equal(x.numpy(), xref)
+
+  def test_sparse_categorical_crossentropy_simple(self):
+    X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
+    Y = Tensor([1, 2]).realize()
+    loss = X.sparse_categorical_crossentropy(Y)
+    self.check_schedule(loss, 5)
+    np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
+
+  def test_mnist_val(self):
+    from tinygrad.nn.datasets import mnist
+    import torch
+    _, Y_train, _, _ = mnist()
+    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1]))
+    yt = Tensor.randn(BS, 10)
+    with Context(SPLIT_REDUCEOP=0):
+      loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+      self.check_schedule(loss, 6)
+      loss_fused = loss.numpy()
+    loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
+    np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
+
+  def test_arange_fuse_grouped_children(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X+Tensor.arange(16).reshape(4, 4)).sum()
+    out0 = r+2
+    out1 = r+3
+    self.check_schedule([out0, out1], 1)
+    r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
+    np.testing.assert_allclose(out0.numpy(), r_ref+2)
+    np.testing.assert_allclose(out1.numpy(), r_ref+3)
+
+  @unittest.expectedFailure
+  def test_fold_arange_view(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X+Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
+    self.check_schedule([r], 1)
+    np.testing.assert_allclose(r.numpy(), (X.numpy()+np.arange(16).reshape(4, 4)).sum(1, keepdims=True))
+
+  @unittest.expectedFailure
+  def test_multiview_arange_children(self):
+    X = Tensor.randn(2,3,4,4).numpy()
+    with Context(FUSE_ARANGE=1):
+      compare = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
+    with Context(FUSE_ARANGE=0, GRAPH=0, SAVE_SCHEDULE=1):
+      ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
+    np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

@@ -399,6 +399,7 @@ def train_bert():
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
+  BENCHMARK = getenv("BENCHMARK")
   if getenv("LOGMLPERF"):
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
@@ -454,7 +455,7 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  model = get_mlperf_bert_model(init_ckpt)
+  model = get_mlperf_bert_model(init_ckpt if not INITMLPERF else None)
   
   for _, x in get_state_dict(model).items():
     x.realize().to_(GPUS)
@@ -502,7 +503,7 @@ def train_bert():
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=config["GLOBAL_BATCH_SIZE"] * config["TRAIN_STEPS"])
 
   # ** resume from checkpointing **
-  start_step = 1
+  start_step = 0
   previous_step = None
   if ckpt:=getenv("RESUME", ""):
     load_training_state(model, optimizer_group, scheduler_group, safe_load(ckpt))
@@ -515,8 +516,6 @@ def train_bert():
     import wandb
     wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
     wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
-
-  BENCHMARK = getenv("BENCHMARK")
 
   if not INITMLPERF:
     eval_it = iter(batch_load_val_bert(EVAL_BS))
@@ -676,7 +675,7 @@ def train_bert():
         os.remove(os.path.join(ckpt_dir, last))
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.end(key="checkpoint_stop", value=None, metadata={"step_num": i})
-        MLLOGGER.start(key=mllog_constants.BLOCK_START, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "epoch_count": 1, "samples_count": config["EVAL_BS"] * config["MAX_EVAL_STEPS"], "step_num": i, "first_step_num": i+1})
+        MLLOGGER.start(key=mllog_constants.BLOCK_START, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "epoch_count": 1, "samples_count": i * BS, "step_num": i, "first_step_num": i+1})
         previous_step = i
 
 def train_maskrcnn():
