@@ -517,13 +517,22 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
-  def test_example_matmul(self):
+  def test_example_matmul_fused(self):
     x = Tensor.eye(64, requires_grad=True)
     y = Tensor.eye(64, requires_grad=True)
     z = y.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
-    run_schedule(check_schedule(out, 2))
+    run_schedule(check_schedule(out, 1))
+    np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
+
+  def test_example_matmul_contiguous(self):
+    x = Tensor.eye(64, requires_grad=True).contiguous()
+    y = Tensor.eye(64, requires_grad=True).contiguous()
+    z = y.matmul(x).sum()
+    z.backward()
+    out = x.grad.contiguous()
+    run_schedule(check_schedule(out, 3))
     np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
 
   def test_contiguous_add(self):
@@ -715,7 +724,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmin(-1)
-    run_schedule(check_schedule(out, 3))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
 
   # multireduce spec
@@ -723,7 +732,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmax(-1)
-    run_schedule(check_schedule(out, 3))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
 
   # multireduce spec
@@ -1261,12 +1270,6 @@ class TestSchedule(unittest.TestCase):
     b = a.e(BinaryOps.ADD, b)
     check_schedule(b, 1)
 
-  def test_reduceop_reshape_dont_push(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(10, 20).realize()
-    out = x.argmax(1)
-    run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
-
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
@@ -1441,9 +1444,10 @@ class TestIndexing(unittest.TestCase):
     fused = precompute_freqs_cis(**args)
     self.check_schedule(fused, 1)
     if getenv("CHECK", 1):
-      ref = precompute_freqs_cis(**args)
-      run_schedule(check_schedule(ref, 3))
-      np.testing.assert_equal(fused.numpy(), ref.numpy())
+      with Context(FUSE_ARANGE=0):
+        ref = precompute_freqs_cis(**args)
+        run_schedule(check_schedule(ref, 3))
+        np.testing.assert_equal(fused.numpy(), ref.numpy())
 
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
