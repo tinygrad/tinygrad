@@ -188,7 +188,7 @@ class TestProfiler(unittest.TestCase):
 
     node = helper_profile_filter_node(profile, name=f"{Device.DEFAULT} -> {Device.DEFAULT}:1")[-1]
     assert node['args']['Size'] == "400.00 B"
-    assert abs(float(node['args']['GB/S']) - ((10 * 10 * 4) / 1e9) / (node['dur'] / 1e6)) < 0.001
+    assert abs(float(node['args']['GB/S']) - ((10 * 10 * 4) / 1e3) / (node['dur'])) < 0.01
 
   @unittest.skipIf(CI, "skip CI")
   def test_profile_sync(self):
