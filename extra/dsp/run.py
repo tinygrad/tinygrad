@@ -37,11 +37,11 @@ def ioctl(fd, request, argp):
       # 0x000000FF = Number of input and output handles
       in_args = (st.sc>>16) & 0xFF
       out_args = (st.sc>>8) & 0xFF
-      print(in_args, out_args)
-      if st.pra:
+      if in_args or out_args:
         for arg in range(in_args+out_args):
-          print(f"arg len (0x{st.pra[arg].buf.len:X})")
-          hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len))
+          print("input" if arg < in_args else "output", f"arg (0x{st.pra[arg].buf.len:X})")
+          if st.pra[arg].buf.pv:
+            hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:0x40])
       #print(format_struct(st.pra)))
     elif nr == 6:
       print(ret, "FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
@@ -87,9 +87,8 @@ install_hook(libc.ioctl, ioctl)
 adsp = ctypes.CDLL(ctypes.util.find_library("adsprpc"))
 
 if __name__ == "__main__":
-  handle = ctypes.c_int64(-1)
-  result = ctypes.c_int64(-1)
   print("calculator_open")
+  handle = ctypes.c_int64(-1)
   adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp"),
                             ctypes.byref(handle))
   print("handle", hex(handle.value))
@@ -98,7 +97,7 @@ if __name__ == "__main__":
   print("calculator_sum")
   pra = (adsprpc.union_remote_arg64 * 3)()
   arg_0 = ctypes.c_int32(100)
-  arg_2 = ctypes.c_int64(0)
+  arg_2 = ctypes.c_int64(-1)
   pra[0].buf.pv = ctypes.addressof(arg_0)
   pra[0].buf.len = 4
   pra[1].buf.pv = ctypes.addressof(test)
