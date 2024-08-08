@@ -143,13 +143,23 @@ class TestIndexing(unittest.TestCase):
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_llama_embedding(self, noopt=1, op_limit=0):
     # llama3 is 128256
-    emb = nn.Embedding(10, 3) if CI else nn.Embedding(32000, 4096)
-    emb.weight.realize()
+    vocab_size, embed_size = (10, 3) if CI else (32000, 4096)
+    emb = nn.Embedding(vocab_size, embed_size)
+    emb_w = emb.weight.numpy()
+    x = Tensor([1,2,3,4])
     with Context(NOOPT=noopt, FUSE_ARANGE=1):
       GlobalCounters.reset()
-      emb(Tensor([1,2,3,4])).realize()
+      z = emb(x).realize()
       self.assertLessEqual(GlobalCounters.global_ops, op_limit)
       self.assertEqual(GlobalCounters.kernel_count, 2)
+    if getenv("CHECK", 1):
+      import torch
+      with torch.no_grad():
+        torch_emb = torch.nn.Embedding(vocab_size, embed_size).eval()
+        torch_emb.weight[:] = torch.tensor(emb_w, dtype=torch.float32)
+      torch_z = torch_emb(torch.tensor(x.numpy()))
+      # TODO: reshape to match torch, should we do this in nn?
+      np.testing.assert_allclose(z.numpy().reshape(4, 3), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
   # at least the arange is being fused
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1736704000)
 
