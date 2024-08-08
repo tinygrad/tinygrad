@@ -41,10 +41,10 @@ def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"  # noqa: E501
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst:List[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
+def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
   a:List[T] = []
   b:List[T] = []
-  for s in lst: (a if fxn(s) else b).append(s)
+  for s in itr: (a if fxn(s) else b).append(s)
   return a,b
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
