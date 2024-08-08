@@ -22,7 +22,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DTypeLike, op:Optional[
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
-view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "DISK", "GPU"}
+view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DTypeLike,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
@@ -106,7 +106,7 @@ class LazyBuffer:
     elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       # TODO: applying this makes gpt2 slower
       return self.base.cast(dtype, bitcast)._view(self.st)
-    cast_op: Union[MetaOps, UnaryOps] = (MetaOps.VIEW if self.can_view() and allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
+    cast_op: Union[MetaOps, UnaryOps] = (MetaOps.VIEW if (self.st.consecutive and not self.is_unrealized_const() and self.device.split(":")[0] in {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "DISK", "GPU"}) and allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is MetaOps.CONST and not isinstance(self.base.arg, Variable)
