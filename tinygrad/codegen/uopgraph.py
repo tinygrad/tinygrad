@@ -298,6 +298,9 @@ constant_folder = PatternMatcher([
   # ** combine terms **
   # -(x+y) -> -x + -y
   (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
+  # (x+c0)*c1 -> x*c1+c0*c1. only for signed int, float have inf*0=nan issue
+  ((NOp.var("x", dtype=dtypes.int) + NOp.cvar("c0")) * NOp.cvar("c1"), lambda x,c0,c1:
+   x*c1+c0.arg*c1.arg if not dtypes.is_unsigned(x.dtype) else None),
   # (x*c0)+(x*c1) -> x*(c0+c1)
   (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
   # (x*c0)+(y*c0) -> (x+y)*c0
