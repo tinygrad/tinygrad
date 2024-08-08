@@ -243,7 +243,6 @@ class TestConstantFolding(unittest.TestCase):
     assert any(uop.op is UOps.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
 
 class TestGatedStoreRewrite(unittest.TestCase):
-  @unittest.expectedFailure
   def test_tiny_gate_store(self):
     gmem = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
@@ -260,7 +259,6 @@ class TestGatedStoreRewrite(unittest.TestCase):
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, UOps.STORE)
 
-  @unittest.expectedFailure
   def test_gate_some_stores(self):
     gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
@@ -279,7 +277,6 @@ class TestGatedStoreRewrite(unittest.TestCase):
     self.assertIs(gated_uops[-1].op, UOps.STORE)
 
   # scaled down version of TestLinearizerDumb.test_unmerged_ifs
-  @unittest.expectedFailure
   def test_merge_ifs_alt(self):
     gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
