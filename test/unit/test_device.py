@@ -2,6 +2,7 @@
 import unittest
 from unittest.mock import patch
 import os
+from tinygrad import Tensor
 from tinygrad.device import Device, Compiler
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv
 
@@ -36,6 +37,12 @@ class TestCompiler(unittest.TestCase):
     with patch.dict(os.environ, {"DISABLE_COMPILER_CACHE": "1"}, clear=True):
       assert MockCompiler("disabled_key").compile_cached("123") == str.encode("123")
       assert diskcache_get("disabled_key", "123") is None
+
+  def test_device_compile(self):
+    getenv.cache_clear()
+    with patch.dict(os.environ, {"DISABLE_COMPILER_CACHE": "1"}):
+      a = Tensor([0.,1.], device=Device.DEFAULT).realize()
+      (a + 1).realize()
 
 if __name__ == "__main__":
   unittest.main()
