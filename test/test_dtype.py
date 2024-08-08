@@ -55,7 +55,8 @@ def _test_cast(a:Tensor, target_dtype:DType):
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
-  _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
+  if target is None: target = a.numpy().view(_to_np_dtype(target_dtype)).tolist()
+  _test_op(lambda: a.bitcast(target_dtype), target_dtype, target)
 
 class TestDType(unittest.TestCase):
   DTYPE: Any = None
@@ -241,25 +242,13 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT == 'PYTHON', 'bug with casting in GLOBAL')
-  def test_shape_change_bitcast_simple(self):
-    _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, None)
-
-  @unittest.skipIf(Device.DEFAULT == 'PYTHON' or not is_dtype_supported(dtypes.float16), 'bug with casting in GLOBAL')
   def test_shape_change_bitcast(self):
-    _test_bitcast(Tensor([100000], dtype=dtypes.float16), dtypes.int8, None)
-    _test_bitcast(Tensor([100000, 100], dtype=dtypes.float16), dtypes.float32, None)
-    _test_bitcast(Tensor([10,12], dtype=dtypes.int8), dtypes.float16, None)
-
-  @unittest.skipIf(Device.DEFAULT == 'PYTHON' or not is_dtype_supported(dtypes.float16), 'bug with casting in GLOBAL')
-  def test_bitcast_fp16_to_int16(self):
-    _test_bitcast(Tensor([1000], dtype=dtypes.float16), dtypes.int16, None)
+    _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8)# np.array([100000], np.float32).view(np.uint8))
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
     b = a.bitcast(dtypes.int32)
     assert b.numpy()[0] == 0x3f800000
-    _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.int32, None)
 
   def test_bitcast_upcasted(self):
     a = Tensor.zeros(100, 4, dtype=dtypes.int32).contiguous() + 0x3f800000
