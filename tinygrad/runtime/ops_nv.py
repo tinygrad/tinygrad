@@ -216,7 +216,7 @@ class NVProgram(HCQProgram):
     if DEBUG >= 6: nv_disassemble(lib)
 
     if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
-    else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
+    else: image, sections, relocs, _ = elf_loader(self.lib, force_section_align=128)
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, BufferOptions(cpu_access=True))
