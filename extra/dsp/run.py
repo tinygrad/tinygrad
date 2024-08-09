@@ -88,6 +88,7 @@ adsp = ctypes.CDLL(ctypes.util.find_library("adsprpc"))
 
 if __name__ == "__main__":
   print("calculator_open")
+  # /dsp/cdsp/fastrpc_shell_3
   handle = ctypes.c_int64(-1)
   adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp"),
                             ctypes.byref(handle))
@@ -96,6 +97,7 @@ if __name__ == "__main__":
   for i in range(100): test[i] = i
   print("calculator_sum")
   pra = (adsprpc.union_remote_arg64 * 3)()
+  #arg_0 = ctypes.c_int32(100)
   arg_0 = ctypes.c_int32(100)
   arg_2 = ctypes.c_int64(-1)
   pra[0].buf.pv = ctypes.addressof(arg_0)
