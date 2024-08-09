@@ -29,7 +29,8 @@ class _Device:
   def default(self) -> Compiled: return self[self.DEFAULT]
   @functools.cached_property
   def DEFAULT(self) -> str:
-    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
+    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if ele not in ["DISK", "NPY"] \
+      and getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
     for device in ["METAL", "AMD", "NV", "CUDA", "GPU", "CLANG", "LLVM"]:
       try:
