@@ -1,6 +1,6 @@
 import unittest
 import pathlib
-from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
+from examples.whisper import init_whisper, transcribe_file
 from tinygrad.helpers import CI, fetch
 from tinygrad import Device, dtypes
 from test.helpers import is_dtype_supported
@@ -31,39 +31,36 @@ class TestWhisper(unittest.TestCase):
     del cls.enc
 
   def test_transcribe_file1(self):
-    self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
+    self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  [TRANSCRIPTION_1])
 
   @unittest.skipIf(CI, "too many tests for CI")
   def test_transcribe_file2(self):
-    self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_2),  TRANSCRIPTION_2)
+    self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_2),  [TRANSCRIPTION_2])
 
   @unittest.skipIf(CI, "too many tests for CI")
   def test_transcribe_batch12(self):
-    waveforms = [load_file_waveform(TEST_FILE_1), load_file_waveform(TEST_FILE_2)]
-    transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
+    transcriptions = transcribe_file(self.model, self.enc,TEST_FILE_1, TEST_FILE_2 )
     self.assertEqual(2, len(transcriptions))
     self.assertEqual(TRANSCRIPTION_1,  transcriptions[0])
     self.assertEqual(TRANSCRIPTION_2,  transcriptions[1])
 
   def test_transcribe_batch21(self):
-    waveforms = [load_file_waveform(TEST_FILE_2), load_file_waveform(TEST_FILE_1)]
-    transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
+    transcriptions = transcribe_file(self.model, self.enc, TEST_FILE_2, TEST_FILE_1)
     self.assertEqual(2, len(transcriptions))
     self.assertEqual(TRANSCRIPTION_2,  transcriptions[0])
     self.assertEqual(TRANSCRIPTION_1,  transcriptions[1])
 
   @unittest.skipIf(CI, "too long for CI")
   def test_transcribe_long(self):
-    waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
-    transcription = transcribe_waveform(self.model, self.enc, waveform)
+
+    transcription = transcribe_file(self.model, self.enc, fetch(TEST_FILE_3_URL))[0]
     print(transcription)
     self.assertEqual(TRANSCRIPTION_3, transcription)
 
   @unittest.skipIf(CI, "too long for CI")
   def test_transcribe_long_no_batch(self):
-    waveforms = [load_file_waveform(fetch(TEST_FILE_3_URL)), load_file_waveform(TEST_FILE_1)]
     with self.assertRaises(Exception):
-      transcribe_waveform(self.model, self.enc, waveforms)
+      transcribe_file(self.model, self.enc, fetch(TEST_FILE_3_URL), TEST_FILE_1)
 
 if __name__ == '__main__':
   unittest.main()
