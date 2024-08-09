@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List
-import ctypes, fcntl, os, mmap
+import ctypes, fcntl, os, mmap, time
 from tinygrad.device import BufferOptions, LRUAllocator, Compiled
 from tinygrad.runtime.autogen import libc
 from tinygrad.helpers import from_mv, getenv
@@ -24,12 +24,18 @@ class DSPProgram:
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     assert len(vals) == 0
     assert len(bufs) < 16
-    pra = (adsprpc.union_remote_arg64 * len(bufs))()
+    pra = (adsprpc.union_remote_arg64 * (1+len(bufs)))()
+    test = (ctypes.c_int32 * len(bufs))()
+    pra[0].buf.pv = ctypes.addressof(test)
+    pra[0].buf.len = 4 * len(bufs)
     for i,b in enumerate(bufs):
-      pra[i].dma.fd = b[2].fd
-      pra[i].dma.len = b[1]
-    ret = adsp.remote_handle64_invoke(self.handle, (1<<24) | (len(bufs)<<4), pra)
+      test[i] = b[1]
+      pra[i+1].dma.fd = b[2].fd
+      pra[i+1].dma.len = b[1]
+    st = time.perf_counter()
+    ret = adsp.remote_handle64_invoke(self.handle, (1<<24) | (1<<16) | (len(bufs)<<4), pra)
     assert ret == 0, f"invoke returned {ret}"
+    return time.perf_counter() - st
 
 ION_IOC_ALLOC = 0
 ION_IOC_SHARE = 4
@@ -56,10 +62,12 @@ class DSPAllocator(LRUAllocator):
 
 class DSPRenderer(CStyleLanguage):
   device = "DSP"
+  supports_float4 = False
   has_local = False
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
+    prefix = ['#define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })']
     msrc = ['typedef struct { int fd; unsigned int offset; } remote_dma_handle;',
             'typedef struct { void *pv; unsigned int len; } remote_buf;',
             'typedef union { remote_buf buf; remote_dma_handle dma; } remote_arg;',
@@ -69,15 +77,14 @@ class DSPRenderer(CStyleLanguage):
             'if (sc>>24 == 1) {']
 
     for i,b in enumerate(bufs):
-      msrc.append(f'  void *buf_{i} = HAP_mmap(0, 12, 3, 0, pra[{i}].dma.fd, 0);')
+      msrc.append(f'  void *buf_{i} = HAP_mmap(0, ((int*)pra[0].buf.pv)[{i}], 3, 0, pra[{i+1}].dma.fd, 0);')
     msrc.append(f"  {function_name}({', '.join([f'buf_{i}' for i in range(len(bufs))])});")
     for i,b in enumerate(bufs):
-      msrc.append(f'  HAP_munmap(buf_{i}, 12);')
+      msrc.append(f'  HAP_munmap(buf_{i}, ((int*)pra[0].buf.pv)[{i}]);')
     msrc.append("}")
     msrc.append("return 0;")
     msrc.append("}")
-
-    return ret + '\n' + '\n'.join(msrc)
+    return '\n'.join(prefix) + '\n' + ret + '\n' + '\n'.join(msrc)
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
