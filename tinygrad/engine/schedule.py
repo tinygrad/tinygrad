@@ -380,7 +380,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   graph, in_degree = _graph_schedule(outs, seen)
   if getenv("RUN_PROCESS_REPLAY"):
     try: importlib.import_module("test.external.process_replay.diff_schedule").process_replay(outs, graph, in_degree)
-    except ImportError: print("can't access test.external.process_replay.diff_schedule, hint: process relpay needs PYTHONPATH=.")
+    except (ImportError, AttributeError): print("can't access test.external.process_replay.diff_schedule, hint: process relpay needs PYTHONPATH=.")
 
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
