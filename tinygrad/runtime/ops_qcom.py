@@ -64,7 +64,7 @@ class QcomSignal(HCQSignal):
     super().__init__(value)
   def __del__(self): QcomDevice.signals_pool.append(self._signal)
   def _get_value(self) -> int: return self._signal[0]
-  def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(1000)
+  def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1])
   def _set_value(self, new_value:int): self._signal[0] = new_value
   def wait(self, value:int, timeout:int=10000):
     start_time = time.time() * 1000
@@ -76,13 +76,15 @@ MAP_FIXED = 0x10
 class QcomDevice(HCQCompiled):
   signals_page:Any = None
   signals_pool: List[Any] = []
+  gpu_id: int = 0
 
   def __init__(self, device:str=""):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
     QcomDevice.signals_page = self._gpu_alloc(16 * 65536, flags=0xC0A00, map_to_cpu=True, uncached=True)
     QcomDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
     info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx(), self._gpu_alloc(0x100000, 0xC0A00, map_to_cpu=True), 0
-    self.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
+    QcomDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
+    assert(QcomDevice.gpu_id < 700)
 
     super().__init__(device, QcomAllocator(self), QCOMRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
                      QcomSignal, QcomComputeQueue, None, timeline_signals=(QcomSignal(), QcomSignal()))
@@ -98,7 +100,7 @@ class QcomDevice(HCQCompiled):
     self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
     self.context_id = cr.drawctxt_id
     return self.context_id
-  
+
   def _info(self):
     info = kgsl.struct_kgsl_devinfo()
     get_property = kgsl.struct_kgsl_device_getproperty(type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
@@ -159,24 +161,28 @@ class QcomComputeQueue(HWComputeQueue):
 
   def reg(self, reg: int, *vals: int): self.q += [pkt4_hdr(reg, len(vals)), *vals]
 
-  def _signal(self, signal, value=0): self.cmd(adreno.CP_MEM_WRITE, *data64_le(mv_address(signal._signal)), *data64_le(value))
+  def _signal(self, signal, value=0):
+    if QcomDevice.gpu_id < 700:
+      self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_FLUSH_TS | (0 if value else adreno.CP_EVENT_WRITE_0_TIMESTAMP),
+               *data64_le(mv_address(signal._signal) + (0 if value else 8)), value & 0xFFFFFFFF)
+      self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_INVALIDATE)
+    else:
+      # TODO: fails starting with Qualcomm Snapdragon 8 Gen 1. And 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP.
+      raise RuntimeError('CP_EVENT_WRITE7 is not supported')
+
+  def _timestamp(self, signal): return self._signal(signal, 0)
 
   def _wait(self, signal, value=0):
     self.cmd(adreno.CP_WAIT_REG_MEM, adreno.WRITE_GE | (adreno.POLL_MEMORY << adreno.CP_WAIT_REG_MEM_0_POLL__SHIFT),
-             *data64_le(mv_address(signal._signal)), value & 0xffffffff, 0xffffffff, 32) # busy wait for 32 cycles
+             *data64_le(mv_address(signal._signal)), value & 0xFFFFFFFF, 0xFFFFFFFF, 32) # busy wait for 32 cycles
 
   def _update_signal(self, cmd_idx, signal, value):
-    if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(mv_address(signal._signal)))
-    if value is not None: self._patch(cmd_idx, offset=3, data=data64_le(value))
+    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(mv_address(signal._signal)))
+    if value is not None: self._patch(cmd_idx, offset=4, data=[value & 0xFFFFFFFF])
 
   def _update_wait(self, cmd_idx, signal, value):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(mv_address(signal._signal)))
-    if value is not None: self._patch(cmd_idx, offset=4, data=[value & 0xffffffff])
-
-  def _timestamp(self, signal):
-    # doesnt really work right now
-    self.cmd(adreno.CP_REG_TO_MEM, 0x40000980,  *data64_le(mv_address(signal._signal)))
-    self.cmd(adreno.CP_EVENT_WRITE7, adreno.CACHE_INVALIDATE)
+    if value is not None: self._patch(cmd_idx, offset=4, data=[value & 0xFFFFFFFF])
 
   def bind(self, device):
     self.binded_device = device
