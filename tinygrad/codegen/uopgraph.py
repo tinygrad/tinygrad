@@ -475,13 +475,17 @@ reducer = PatternMatcher([
 
 # *** uop graph ***
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
-  if u in children: return
+def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Set[UOp]], in_degree:Dict[UOp, int]):
+  if u in children: return srcs[u]
+  # if u in children: return
+  srcs[u] = set()
   children[u] = []
-  for x in u.src:
-    get_children_dfs(x, children, in_degree)
+  for x in u.src: 
+    srcs[u] = srcs[u].union(get_children_dfs(x, children, srcs, in_degree))
+    if x.op is UOps.RANGE and x.arg[1]: srcs[u].add(x)
     children[x].append(u)
   in_degree[u] = len(u.src)
+  return srcs[u]
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
@@ -543,8 +547,9 @@ class UOpGraph:
     # filter nodes that don't link to a sink
     # BFS toposort
     children: Dict[UOp, List[UOp]] = {}
+    range_srcs: Dict[UOp, List[UOp]] = {}
     in_degree: Dict[UOp, int] = {}
-    get_children_dfs(sink, children, in_degree)
+    get_children_dfs(sink, children, range_srcs, in_degree)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
@@ -553,13 +558,17 @@ class UOpGraph:
 
     # scope children impact the toposort and END* insertion
     scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
+    range_phi = {r:[p for p in scope_children[r] if p.op is UOps.PHI] for r in scope_children if r.op is UOps.RANGE and r.arg[1]}
+    range_srcs = {p:range_srcs[p] for p in range_srcs if p.op is UOps.PHI}
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
       priority = 0
       # prefer uops that are loop children
-      for l, ss in scope_children.items():
-        if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+      if u.op is UOps.RANGE and u.arg:
+        priority += 10000*(len(set([j for i in range_phi[u] for j in range_srcs[i] if not any(k in scope_children[u] for k in range_phi[j])]))+1)+u.arg[0]
+      else: 
+        priority -= len(set([j for l, ss in scope_children.items() if l.op is UOps.RANGE and u in ss for i in range_phi[l] for j in range_srcs[i]]))
       heapq.heappush(queue, (priority, u))
 
     for u in children:
