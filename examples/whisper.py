@@ -268,7 +268,7 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
       if (curr_segment_tokens[:, -1] == eot).all(): break
 
     return curr_segment_tokens
-  
+
   def gettexttoks(line): return [tok for tok in line if tok < eot or tok > enc._special_tokens['<|notimestamps|>']]
 
   # TODO detect language
@@ -335,7 +335,7 @@ if __name__ == "__main__":
     dur, frame = [0], [0]
     try:
       for lines in transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1], offset, offset+(frames//bs)*SEGMENT_SECONDS) for offset in offsets], use_timestamps=getenv("TIMESTAMPS", 0)):
-        for i,line in enumerate(lines): 
+        for i,line in enumerate(lines):
           if isinstance(line, str):print(colored(line, 'green' if i % 2 == 0 else 'blue'))
           else:
             for text, start, end in line: print(f'[{start:.2f} - {end:.2f}] {text}')
