@@ -17,7 +17,7 @@ python3 extra/datasets/openimages.py
 
 TRAIN_ONLY=1 python3 examples/mlperf/model_train.py
 
-EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B96_S${SYNCBN}_E1.safe" python3 examples/mlperf/model_train.py
-EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B96_S${SYNCBN}_E2.safe" python3 examples/mlperf/model_train.py
-EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B96_S${SYNCBN}_E3.safe" python3 examples/mlperf/model_train.py
-EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B96_S${SYNCBN}_E4.safe" python3 examples/mlperf/model_train.py
+EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${SYNCBN}_E1.safe" python3 examples/mlperf/model_train.py
+EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${SYNCBN}_E2.safe" python3 examples/mlperf/model_train.py
+EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${SYNCBN}_E3.safe" python3 examples/mlperf/model_train.py
+EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${SYNCBN}_E4.safe" python3 examples/mlperf/model_train.py
