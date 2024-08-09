@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uops import UOps, UOp, NOp, PatternMatcher
 from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
@@ -194,11 +194,13 @@ class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
   has_local = False
   global_max = None
+  extra_matcher = PatternMatcher([(NOp.var('x', dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float64))])
 
   # language options
   buffer_suffix = " restrict"
-  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16", dtypes.int8: "int8_t"}
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})",
+                    UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype is dtypes.double else f"__builtin_sqrtf({x})",}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = [_make_clang_dtype(self, dtype) for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
