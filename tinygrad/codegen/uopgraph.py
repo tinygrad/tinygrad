@@ -480,7 +480,7 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Set[UO
   # if u in children: return
   srcs[u] = set()
   children[u] = []
-  for x in u.src: 
+  for x in u.src:
     srcs[u] = srcs[u].union(get_children_dfs(x, children, srcs, in_degree))
     if x.op is UOps.RANGE and x.arg[1]: srcs[u].add(x)
     children[x].append(u)
