@@ -109,6 +109,8 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
   # if temperature is very low just use argmax
   if temp < 1e-6: return logits.argmax()
 
+  logits = logits.to(Device.DEFAULT)
+
   # alpha sampling
   if af or ap:
     if not hasattr(sample, "alpha_counter"):
