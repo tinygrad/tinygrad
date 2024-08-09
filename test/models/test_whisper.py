@@ -39,7 +39,7 @@ class TestWhisper(unittest.TestCase):
 
   @unittest.skipIf(CI, "too many tests for CI")
   def test_transcribe_batch12(self):
-    transcriptions = transcribe_file(self.model, self.enc,TEST_FILE_1, TEST_FILE_2 )
+    transcriptions = transcribe_file(self.model, self.enc, TEST_FILE_1, TEST_FILE_2 )
     self.assertEqual(2, len(transcriptions))
     self.assertEqual(TRANSCRIPTION_1,  transcriptions[0])
     self.assertEqual(TRANSCRIPTION_2,  transcriptions[1])
