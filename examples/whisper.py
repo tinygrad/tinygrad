@@ -237,6 +237,7 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
   """
 
   def parse_timestamps(tokens:np.ndarray, enc, timeoffset:float) -> List[Tuple[str, float, float]]:
+    if DEBUG >= 1: print(colored(f'parse: {enc.decode(tokens)}', 'yellow'))
     tokens = tokens[np.where(tokens == start_tokens[-1])[0][0]+1:]
     tokens = tokens[:np.where(tokens == eot)[0][0]]
     if not use_timestamps: return enc.decode(tokens)
@@ -256,7 +257,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
 
   def inferloop(curr_segment_tokens):
     pos = 0
-    if DEBUG >= 1: print(colored(f"Prompt: {enc.decode(curr_segment_tokens[0])}", "yellow"))
     for curr_tok in range(model.decoder.max_tokens_to_sample):
       intoks = Tensor(curr_segment_tokens if curr_tok == 0 else curr_segment_tokens[:, -1:])
       probs = model.decoder(intoks, pos, encoded_audio)[:, -1]
@@ -264,8 +264,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
       next_tokens[curr_segment_tokens[:, -1] == eot] = eot
       curr_segment_tokens = np.concatenate((curr_segment_tokens, next_tokens.reshape(-1, 1)), axis=1)
       pos = curr_segment_tokens.shape[-1] - 1
-
-      if DEBUG >= 1: print(curr_tok, list(map(lambda tokens: enc.decode(tokens), curr_segment_tokens)))
       if (curr_segment_tokens[:, -1] == eot).all(): break
 
     return curr_segment_tokens
@@ -298,7 +296,7 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
     curr_segment_tokens = inferloop(curr_segment_tokens)
 
     if not (curr_segment_tokens[:, -1] == eot).all():
-      print(colored("REFRAME", "red"))
+      if DEBUG>=1: print(colored("REFRAME", "red"))
       transcription_tokens[0] = np.concatenate((transcription_tokens[0], curr_segment_tokens[0][transcription_start_index:]))
       prompt = np.concatenate((start_tokens, transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:]))
       curr_segment_tokens = np.tile(prompt, (model.batch_size, 1))
@@ -330,14 +328,14 @@ def listener(q):
 
 if __name__ == "__main__":
   model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=1)
-
   st = time.perf_counter()
   dur, frame = [0], [0]
   if len(sys.argv) > 1:
     try:
-      for lines in transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1])], use_timestamps=True):
-        for text, start, end in lines[0]:
-          print(f'[{start:.2f} - {end:.2f}] {text}')
+      for lines in transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1])], use_timestamps=getenv("TIMESTAMPS", 1)):
+        if isinstance(lines[0], str): print(lines[0])
+        else:
+          for text, start, end in lines[0]: print(f'[{start:.2f} - {end:.2f}] {text}')
         dur[0] = time.perf_counter() - st
         frame[0] += 1
     except KeyboardInterrupt:pass
