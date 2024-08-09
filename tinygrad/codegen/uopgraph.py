@@ -551,6 +551,7 @@ class UOpGraph:
       # prefer uops that are loop children
       for l, ss in scope_children.items():
         if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+      if u.op is UOps.IF and u in scope_children: priority = 1000
       heapq.heappush(queue, (priority, u))
 
     for u in children:
@@ -565,17 +566,6 @@ class UOpGraph:
       if x.op is UOps.DEFINE_ACC:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
-      elif x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF:
-        if self._uops[-1].op is x.src[-1].op or self._uops[-1].op is UOps.STORE and self._uops[-1].src[-1] is x.src[-1]:
-          self._uops.append(x)
-        else:
-          self._uops.remove(x.src[-1])
-          self._uops.append(x.src[-1])
-          for child in children[x.src[-1]]:
-            if child in self._uops:
-              self._uops.remove(child)
-              self._uops.append(child)
-          self._uops.append(x)
       else: self._uops.append(x)
       for u, ss in scope_children.items():
         if x in ss:
