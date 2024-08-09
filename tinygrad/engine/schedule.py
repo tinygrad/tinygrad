@@ -89,6 +89,7 @@ def _recursive_lazyop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer,
   if buf.op in ReduceOps:
     # if we are merging the reduce, skip it
     if (buf, st) not in reduce_info:
+      assert buf.srcs[0].base.op is buf.op, f"can't merge reduceop {buf.op} with {buf.srcs[0].base.op}\n{st}"
       return _recursive_lazyop(buf.srcs[0], st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
     st, arg = reduce_info[(buf, st)]
 
@@ -128,9 +129,11 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
       axis = tuple(range(len(input_st.shape)-len(new_rshape), len(input_st.shape)))
     elif top_reduce is not None:
       top_reduce_input_st, top_reduce_axes = reduce_info[top_reduce]
-      if buf.srcs[0] is top_reduce[0] and buf.op is top_reduce[0].op:
+      if buf.srcs[0] is not buf.srcs[0].base and buf.srcs[0].base is top_reduce[0] and buf.op is top_reduce[0].op:
         # merge this reduce with its parent
-        reduce_info[top_reduce] = (top_reduce_input_st, top_reduce_axes+axis)
+        new_st = top_reduce[1]+st
+        top_reduce = (top_reduce[0], new_st.reshape(reduce_st(top_reduce_input_st, new_axis:=axis+top_reduce_axes)))
+        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
         return None
       # reshape this reduceop based on the top reduce
       input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
