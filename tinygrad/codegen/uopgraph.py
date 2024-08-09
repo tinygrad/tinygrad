@@ -118,18 +118,13 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
     something_changed = True
     quotient.append(x.const(rem_const//c))
     rem_const = rem_const%c
-  # make const a multiple of gcd
-  if c > 0 and rem_const > 0 and rem_const % gcd != 0:
-    something_changed = True
-    rem_const = (rem_const//gcd)*gcd
   if rem_const != 0: remainder.append(x.const(rem_const))
 
-  if not something_changed: return cast(UOp, x.divides(gcd))//(c//gcd) if gcd != c and gcd != 1 else None
+  if not something_changed: return newx//(c//gcd) if 1 < gcd < c and (newx:=div_folding(x, gcd)) is not None else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
-  if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const(0) if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)
-  return quo if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)+quo
+  if quo is None: return x.const(0) if rem is None else cast(UOp, div_folding(rem, gcd))//(c//gcd)
+  return quo if rem is None else cast(UOp, div_folding(rem, gcd))//(c//gcd)+quo
 
 # ***** transcendental *****
 
