@@ -547,7 +547,7 @@ class UOpGraph:
     # filter nodes that don't link to a sink
     # BFS toposort
     children: Dict[UOp, List[UOp]] = {}
-    range_srcs: Dict[UOp, List[UOp]] = {}
+    range_srcs: Dict[UOp, Set[UOp]] = {}
     in_degree: Dict[UOp, int] = {}
     get_children_dfs(sink, children, range_srcs, in_degree)
 
