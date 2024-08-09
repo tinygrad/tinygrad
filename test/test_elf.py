@@ -4,7 +4,7 @@ from tinygrad.runtime.support.elf import elf_loader
 class TestZeroCopy(unittest.TestCase):
   def test_load_amd_hip(self):
     with open(f'{os.path.dirname(__file__)}/../extra/datasets/hip.elf', 'rb') as fd: blob = fd.read()
-    image, sections, relocs, exports = elf_loader(blob)
+    image, _, relocs, exports = elf_loader(blob)
     with open(f'{os.path.dirname(__file__)}/../extra/datasets/hip.img', 'rb') as fd: image_expected = fd.read()
     relocs_expected = []
     exports_expected = {'r_32_16_8_16_256_4_4_4': 11264}
