@@ -81,7 +81,8 @@ class QcomDevice(HCQCompiled):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
     QcomDevice.signals_page = self._gpu_alloc(16 * 65536, flags=0xC0A00, map_to_cpu=True, uncached=True)
     QcomDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
-    self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._ctx(), self._gpu_alloc(0x100000, 0xC0A00, map_to_cpu=True), 0
+    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx(), self._gpu_alloc(0x100000, 0xC0A00, map_to_cpu=True), 0
+    self.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
 
     super().__init__(device, QcomAllocator(self), QCOMRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
                      QcomSignal, QcomComputeQueue, None, timeline_signals=(QcomSignal(), QcomSignal()))
@@ -97,6 +98,12 @@ class QcomDevice(HCQCompiled):
     self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
     self.context_id = cr.drawctxt_id
     return self.context_id
+  
+  def _info(self):
+    info = kgsl.struct_kgsl_devinfo()
+    get_property = kgsl.struct_kgsl_device_getproperty(type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
+    self._ioctl(kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY, get_property)
+    return info
 
   def _ioctl(self, nr, arg):
     ret = fcntl.ioctl(self.fd, (3 << 30) | (ctypes.sizeof(arg) & 0x1FFF) << 16 | 0x9 << 8 | (nr & 0xFF), arg)
