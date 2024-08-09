@@ -4,6 +4,7 @@ import difflib, pickle, multiprocessing, os, logging, sqlite3, requests, io, zip
 from tabulate import tabulate
 from datetime import datetime
 from typing import Dict, List, cast
+from test.external.process_replay.utils import print_diff
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, temp, tqdm
 
@@ -74,12 +75,9 @@ def print_ast_diff(offset:int):
   for row in cur.fetchall():
     buf, asts = pickle.loads(row[0])
     if len(asts) == 1:
-      print(f"{buf} was folded")
-      print(asts[0])
-    else:
-      diff = list(difflib.unified_diff(str(asts[0]).splitlines(), str(asts[1]).splitlines()))
-      unified_diff = "\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in diff)
-      print(unified_diff)
+      logging.info(f"{buf} was folded")
+      logging.info(asts[0])
+    else: print_diff(asts[0], asts[1])
 
 def download_artifact(run_id:str, name:str, dest:str):
   res = requests.get(f"{BASE_URL}/actions/runs/{run_id}/artifacts?name={name}", headers=GH_HEADERS)

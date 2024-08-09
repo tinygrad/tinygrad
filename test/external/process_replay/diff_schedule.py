@@ -1,5 +1,5 @@
 # create a diff of two schedule graphs
-import shutil, importlib, uuid, os
+import shutil, importlib, uuid, os, logging
 from collections import defaultdict
 from typing import DefaultDict, List, Set, Tuple
 from test.external.process_replay.utils import print_diff
@@ -41,6 +41,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
   return changed
 
 def print_si_diff(si0:ScheduleItem, si1:ScheduleItem):
+  logging.basicConfig(level=logging.INFO)
   ei0 = lower_schedule_item(si0)
   ei1 = lower_schedule_item(si1)
   assert isinstance(ei0.prg, CompiledRunner) and isinstance(ei1.prg, CompiledRunner)
