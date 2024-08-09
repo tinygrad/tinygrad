@@ -47,7 +47,7 @@ def print_si_diff(si0:ScheduleItem, si1:ScheduleItem):
   print_diff(si0.ast, si1.ast)
   print_diff(ei0.prg.p.src, ei1.prg.p.src)
   # TODO: create new Buffers for process replay
-  if not getenv("RUN_PROCESS_REPLAY"):
+  if getenv("TIMING"):
     with Context(DEBUG=2):
       tm0 = ei0.run(wait=True)
       tm1 = ei1.run(wait=True)
