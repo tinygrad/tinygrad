@@ -133,15 +133,6 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
-  def test_const_vectorize_fold(self):
-    c0 = UOp(UOps.CONST, dtypes.half, arg=0.0)
-    out = UOp(UOps.VECTORIZE, dtypes.half.vec(2), (c0, c0))
-    g = UOpGraph([out])
-    self.assertEqual(len(g.uops), 1)
-    out = g.uops[-1]
-    self.assertEqual(out.op, UOps.CONST)
-    self.assertEqual(out.arg, 0.0)
-
   def test_noop_vectorize_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0)
     idx = UOp.const(dtypes.int, 0)
@@ -191,6 +182,73 @@ class TestUOpGraph(TestUOps):
     xy1 = tuple(UOp(UOps.GEP, dtypes.float, (val1, ), i) for i in range(2))
     xy2 = tuple(UOp(UOps.GEP, dtypes.float, (val2, ), i) for i in range(2))
     self.assertIs(_test_vec(xy1+xy2).op, UOps.VECTORIZE)
+
+  def test_gep_vec_const_fold(self):
+    for vec_size in [2, 4, 8]:
+      consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
+      vec = UOp(UOps.VECTORIZE, dtypes.float.vec(vec_size), tuple(consts))
+      geps = [UOp(UOps.GEP, dtypes.float, (vec,), i) for i in range(vec_size)]
+      g = UOpGraph(geps)
+      for uop, const in zip(g.uops, consts):
+        self.assert_equiv_uops(uop, const)
+
+  def test_wmma_vectorize_fold(self):
+    for i in [2, 4, 8]:
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[0], acc)
+      self.assertEqual(len(g.uops), 1)
+
+    for i in [2, 4, 8]:
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i))
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[0], acc)
+      self.assertEqual(len(g.uops), 1)
+
+  def test_wmma_vectorize_no_fold(self):
+    for i in [4, 8]:
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
+                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
+                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=Variable(f'tmp{j}', 0.0, 1.0)) for j in range(i//2)))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[-1], wmma)
+
+    for i in [4, 8]:
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
+                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
+                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=Variable(f'tmp{j}', 0.0, 1.0)) for j in range(i//2)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[-1], wmma)
+
+    for i in [2, 4, 8]:
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
+                tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[-1], wmma)
+
+    for i in [2, 4, 8]:
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
+      vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
+                tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
+      g = UOpGraph([wmma])
+      self.assert_equiv_uops(g.uops[-1], wmma)
 
   def test_cast_alu_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=0)
