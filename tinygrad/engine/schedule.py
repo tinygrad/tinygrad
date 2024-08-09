@@ -1,4 +1,4 @@
-import sys, pickle, atexit
+import sys, pickle, atexit, importlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
@@ -379,8 +379,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   if seen is None: seen = set()
   graph, in_degree = _graph_schedule(outs, seen)
   if getenv("RUN_PROCESS_REPLAY"):
-    from test.external.process_replay.diff_schedule import process_replay
-    process_replay(outs, graph, in_degree)
+    try: importlib.import_module("test.external.process_replay.diff_schedule").process_replay(outs, graph, in_degree)
+    except ImportError: print("can't access test.external.process_replay.diff_schedule, hint: process relpay needs PYTHONPATH=.")
+
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}

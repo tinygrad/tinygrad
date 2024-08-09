@@ -120,19 +120,21 @@ def process_replay():
   if COMPARE_SCHEDULE:
     conn = db_connection()
     cur = conn.cursor()
-    try: row_count = cur.execute(f"select count(*) from 'schedule_diff_{VERSION}'").fetchone()[0]
+    try: has_diff = cur.execute(f"select name from sqlite_master where type='table' and name='schedule_diff_{VERSION}'").fetchone()
     except sqlite3.OperationalError:
       logging.warning(f"schedule_diff_{VERSION} isn't accessible in master, did DB_VERSION change?")
       exit(0)
-    conn.commit()
-    cur.close()
-    processes = []
-    changed = multiprocessing.Manager().Value('b', False)
-    for i in tqdm(range(0, row_count, PAGE_SIZE)):
-      processes.append(p:=multiprocessing.Process(target=print_ast_diff, args=(i,)))
-      p.start()
-    for p in processes: p.join()
-    if row_count != 0 and ASSERT_DIFF: raise Exception("scheduler process replay detected changes")
+    if has_diff:
+      row_count = cur.execute(f"select count(*) from 'schedule_diff_{VERSION}'").fetchone()[0]
+      conn.commit()
+      cur.close()
+      processes = []
+      changed = multiprocessing.Manager().Value('b', False)
+      for i in tqdm(range(0, row_count, PAGE_SIZE)):
+        processes.append(p:=multiprocessing.Process(target=print_ast_diff, args=(i,)))
+        p.start()
+      for p in processes: p.join()
+      if ASSERT_DIFF: raise Exception("scheduler process replay detected changes")
 
   # *** kernel diff
   conn = db_connection()
