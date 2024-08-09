@@ -13,8 +13,7 @@ libc.munmap.restype = ctypes.c_int
 libc.fdopendir.argtypes = [ctypes.c_int]
 libc.fdopendir.restype = ctypes.c_void_p
 
-# platform.processor calls `uname -p` which can return `unknown` on some systems
-processor = os.getenv("IOCTL_PROCESSOR") or platform.processor()
+processor = platform.processor()
 OPEN_SYSCALL = {"aarch64": None, "x86_64": 2}[processor]
 CLOSE_SYSCALL = {"aarch64": 57, "x86_64": 3}[processor]
 READ_SYSCALL = {"aarch64": 63, "x86_64": 0}[processor]
