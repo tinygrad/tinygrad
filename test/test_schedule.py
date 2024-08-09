@@ -1440,9 +1440,10 @@ class TestIndexing(unittest.TestCase):
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000, "dtype":dtypes.half}
     fused = precompute_freqs_cis(**args)
     self.check_schedule(fused, 1)
-    ref = precompute_freqs_cis(**args)
-    run_schedule(check_schedule(ref, 3))
-    np.testing.assert_equal(fused.numpy(), ref.numpy())
+    if getenv("CHECK", 1):
+      ref = precompute_freqs_cis(**args)
+      run_schedule(check_schedule(ref, 3))
+      np.testing.assert_equal(fused.numpy(), ref.numpy())
 
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
@@ -1470,8 +1471,8 @@ class TestIndexing(unittest.TestCase):
     from tinygrad.nn.datasets import mnist
     import torch
     _, Y_train, _, _ = mnist()
-    samples = Tensor.randint(getenv("BS", 512), high=6000)
-    yt = Tensor.randn(512, 10)
+    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1]))
+    yt = Tensor.randn(BS, 10)
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
       self.check_schedule(loss, 6)

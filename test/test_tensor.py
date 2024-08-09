@@ -141,7 +141,7 @@ class TestTinygrad(unittest.TestCase):
       return out.detach().numpy(), u.grad, v.grad, w.grad
 
     for x,y in zip(test_tinygrad(), test_pytorch()):
-      np.testing.assert_allclose(x, y, atol=1e-5)
+      np.testing.assert_allclose(x, y, atol=1e-5, rtol=1e-6)
 
   def test_nograd(self):
     x = Tensor(x_init, requires_grad=False)

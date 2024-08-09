@@ -1,6 +1,6 @@
 import collections, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
-from tinygrad.helpers import round_up, to_mv, PROFILE
+from tinygrad.helpers import round_up, to_mv, PROFILE, memsize_to_str
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, \
                             Buffer, BufferOptions, Compiled, Device
 from tinygrad.shape.symbolic import Variable
@@ -47,7 +47,7 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value: int = 0
 
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
-    self.prof_records: List[Tuple[Tuple[int, bool], Tuple[int, bool], HCQCompiled, str, bool, List[int]]] = []
+    self.prof_records: List[Tuple[Tuple[int, bool], Tuple[int, bool], HCQCompiled, str, bool, List[int], Optional[Dict]]] = []
 
     last_j: Dict[HWCommandQueue, Optional[int]] = collections.defaultdict(lambda: None)
     queue_access: Dict[HWCommandQueue, Dict[HWCommandQueue, Optional[int]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
@@ -96,7 +96,10 @@ class HCQGraph(MultiGraphRunner):
         sig_st, sig_en = (j * 2, True), (j * 2 + 1, True)
         if len(opt_deps) == 0 and (prev_ji:=last_j[enqueue_queue]) is not None: sig_st = (prev_ji * 2 + 1, False)
 
-        self.prof_records.append((sig_st, sig_en, enqueue_dev, prof_ji_desc, not is_exec_prg, [d - 1 for _, d in rdeps]))
+        if is_exec_prg: prof_args = None
+        else: prof_args = {"Size": memsize_to_str(ji.bufs[0].nbytes), "GB/S": lambda dur, b=ji.bufs[0].nbytes: f"{b/1e3/dur:.2f}"} # type: ignore
+
+        self.prof_records.append((sig_st, sig_en, enqueue_dev, prof_ji_desc, not is_exec_prg, [d - 1 for _, d in rdeps], prof_args))
 
       last_j[enqueue_queue] = j
 
@@ -187,11 +190,11 @@ class HCQGraph(MultiGraphRunner):
   def collect_timestamps(self):
     timestamps = [s.timestamp for s in self.prof_signals]
 
-    for (st,_), (en,_), dev, desc, is_cp, deps in self.prof_records:
-      dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp)]
+    for (st,_), (en,_), dev, desc, is_cp, deps, args in self.prof_records:
+      dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp, args)]
 
       for x in deps:
-        (b_st,_), (b_en,_), b_dev, _, b_is_cp, _ = self.prof_records[x]
+        (b_st,_), (b_en,_), b_dev, _, b_is_cp, _, _ = self.prof_records[x]
         dev.dep_prof_records += [(timestamps[b_st], timestamps[b_en], b_dev, b_is_cp, timestamps[st], timestamps[en], dev, is_cp)]
 
   def __del__(self):
