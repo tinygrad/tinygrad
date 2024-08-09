@@ -2,8 +2,6 @@ from typing import List, Tuple, Dict, Union
 import numpy as np
 import unittest
 from dataclasses import replace
-from test.external.fuzz_linearizer import compare_linearizer
-
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.codegen.uops import UOp, UOps
@@ -38,4 +36,4 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
-helper_tc_allclose(128, 128, 128, dtypes.float16, dtypes.float32)
+helper_tc_allclose(128, 128, 128, dtypes.f8e4m3, dtypes.float32)

@@ -309,7 +309,8 @@ class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float), (dtypes.f8e4m3, dtypes.float)])]  # noqa: E501
+  tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.f8e4m3, dtype_out=dtypes.float)]
   def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
@@ -326,16 +327,16 @@ class CUDARenderer(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     # TODO: refactor to render_dtype here
-    dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"), }
+    dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"), dtypes.f8e4m3: ("__nv_fp8_e4m3", "e4m3" ) }
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     if any(uop.dtype == dtypes.f8e5m2 for uop in uops):
       # need to include fp16 since there is no arithmetic intrinsics for fp8 in CUDA, so we cast to fp16, do the op and cast back if result is float.
-      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e5m2", x, x*2) for x in [4, 8]] + \
+      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e5m2", x, x*2) for x in [2, 4, 8]] + \
         [get_fp8_header("e5m2")]
     if any(uop.dtype == dtypes.f8e4m3 for uop in uops):
       # need to include fp16 since there is no arithmetic intrinsics for fp8 in CUDA, so we cast to fp16, do the op and cast back if result is float.
-      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e4m3", x, x*2) for x in [4, 8]] + \
+      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e4m3", x, x*2) for x in [2, 4, 8]] + \
         [get_fp8_header("e4m3")]
 
     if any(uop.dtype == dtypes.half for uop in uops):
