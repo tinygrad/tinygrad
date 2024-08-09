@@ -97,6 +97,9 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
+  # simple cancel div case
+  if 0 <= x.vmin.arg and x.vmax.arg < c: return x.const(0)
+
   quotient, remainder, rem_const, something_changed, gcd = [], [], 0, False, c
   for u in _get_add_chain(x):
     if u.op is UOps.CONST:
@@ -280,9 +283,6 @@ constant_folder = PatternMatcher([
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
    newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
-  # mul div
-  ((NOp.var("x") * NOp.cvar("c0")) // NOp.cvar("c1"),
-   lambda x,c0,c1: x*(c0.arg//gcd)//(c1.arg//gcd) if c1.arg!=0 and (gcd:=math.gcd(c0.arg,c1.arg))> 1 else None),
   # mul add div
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
    x*(c0.arg//g)//(c1.arg//g) if c0.arg > 0 and c1.arg > 0 and (g:=math.gcd(c0.arg,c1.arg)) > 1 and g > x2.vmax.arg and x2.vmin.arg >= 0 else None),
