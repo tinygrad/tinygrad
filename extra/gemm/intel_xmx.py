@@ -26,9 +26,9 @@ __kernel void test(__global float* data0, const __global int* data1, const __glo
 """))
 #with open("/tmp/test.elf", "wb") as f: f.write(prog.lib)
 
-a = Buffer("GPU", 8, dtypes.float32)
-b = Buffer("GPU", 0x10, dtypes.float16)
-c = Buffer("GPU", 8*0x10, dtypes.float16)
+a = Buffer("GPU", 8, dtypes.float32).allocate()
+b = Buffer("GPU", 0x10, dtypes.float16).allocate()
+c = Buffer("GPU", 8*0x10, dtypes.float16).allocate()
 
 row = np.array([1,2,3,4,5,6,7,8,1,2,3,4,5,6,7,8], np.float16)
 mat = np.random.random((8, 0x10)).astype(np.float16)
