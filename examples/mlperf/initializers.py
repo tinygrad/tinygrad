@@ -3,6 +3,8 @@ from typing import Union, Tuple
 
 from tinygrad import Tensor, nn, dtypes
 from tinygrad.helpers import prod, argfix
+from tinygrad.multi import MultiLazyBuffer
+from examples.hlb_cifar10 import UnsyncedBatchNorm
 
 # rejection sampling truncated randn
 def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
@@ -35,6 +37,18 @@ class Linear(nn.Linear):
   def __call__(self, x:Tensor):
     return x.linear(self.weight.cast(dtypes.default_float).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
 
+class Conv2dNormal(Conv2dHeNormal):
+  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, mean=0, std=0.01, b=0.0):
+    super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+    self.weight = Tensor.normal(self.weight.shape, mean=mean, std=std, dtype=dtypes.float32)
+    if bias: self.bias = Tensor.full(self.bias.shape, b, dtype=dtypes.float32)
+
+class Conv2dKaiming(Conv2dHeNormal):
+  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, a=1, b=0.0):
+    super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+    self.weight = Tensor.kaiming_uniform(self.weight.shape, a=a, dtype=dtypes.float32)
+    if bias: self.bias = Tensor.full(self.bias.shape, b, dtype=dtypes.float32)
+
 class LinearBert(nn.Linear):
   def __init__(self, in_features, out_features, bias=True, std=0.02):
     self.weight = std * rand_truncn(out_features, in_features, dtype=dtypes.float32)
@@ -66,3 +80,29 @@ class LayerNormBert:
     xn = x.cast(dtypes.float32).layernorm(eps=self.eps, axis=self.axis).cast(x.dtype)
     if not self.elementwise_affine: return xn
     return (xn * self.weight.cast(dtypes.default_float) + self.bias.cast(dtypes.default_float))
+
+class BatchNormRetinanet:
+  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+    self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
+    if affine: self.weight, self.bias = Tensor.ones(sz, dtype=dtypes.float32), Tensor.zeros(sz, dtype=dtypes.float32)
+    else: self.weight, self.bias = None, None
+
+    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=dtypes.float32), Tensor.ones(sz, requires_grad=False, dtype=dtypes.float32)
+    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False, dtype=dtypes.int)
+  def __call__(self, x:Tensor):
+    batch_mean = self.running_mean
+    batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
+    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(dtypes.default_float)
+
+class UnSyncedBatchNormRetinanet(UnsyncedBatchNorm):
+  def __call__(self, x:Tensor):
+    if isinstance(x.lazydata, MultiLazyBuffer): assert x.lazydata.axis is None or x.lazydata.axis == 0 and len(x.lazydata.lbs) == self.num_devices
+    nd = x.shape[0]%self.num_devices
+    if nd==0: nd = self.num_devices
+    xr = x.reshape(nd, -1, *x.shape[1:]).cast(dtypes.float32)
+    batch_mean, batch_invstd = self.calc_stats(xr)
+    ret = xr.batchnorm(
+      self.weight.reshape(1, -1).expand((nd, -1)),
+      self.bias.reshape(1, -1).expand((nd, -1)),
+      batch_mean, batch_invstd, axis=(0, 2))
+    return ret.reshape(x.shape).cast(x.dtype)

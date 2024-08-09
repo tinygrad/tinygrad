@@ -1,11 +1,20 @@
 import math
+from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
-import tinygrad.nn as nn
+from tinygrad.nn.state import safe_load, load_state_dict
+from tinygrad.nn import Conv2d
 from extra.models.resnet import ResNet
+from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
+from examples.mlperf.helpers import encode_boxes
 import numpy as np
+import line_profiler
+Conv2dNormal = Conv2d
+Conv2dNormal_priorprob = Conv2d
+Conv2dKaiming = Conv2d
 
+@line_profiler.profile
 def nms(boxes, scores, thresh=0.5):
-  x1, y1, x2, y2 = np.rollaxis(boxes, 1)
+  x1, y1, x2, y2 = boxes[:,0],boxes[:,1],boxes[:,2],boxes[:,3]
   areas = (x2 - x1 + 1) * (y2 - y1 + 1)
   to_process, keep = scores.argsort()[::-1], []
   while to_process.size > 0:
@@ -15,13 +24,17 @@ def nms(boxes, scores, thresh=0.5):
     inter_y1 = np.maximum(y1[cur], y1[to_process])
     inter_x2 = np.minimum(x2[cur], x2[to_process])
     inter_y2 = np.minimum(y2[cur], y2[to_process])
-    inter_area = np.maximum(0, inter_x2 - inter_x1 + 1) * np.maximum(0, inter_y2 - inter_y1 + 1)
+    a1a = inter_x2 - inter_x1 + 1
+    a2a = inter_y2 - inter_y1 + 1
+    a1 = np.maximum(0, a1a)
+    a2 = np.maximum(0, a2a)
+    inter_area = a1 * a2
     iou = inter_area / (areas[cur] + areas[to_process] - inter_area)
     to_process = to_process[np.where(iou <= thresh)[0]]
   return keep
 
 def decode_bbox(offsets, anchors):
-  dx, dy, dw, dh = np.rollaxis(offsets, 1)
+  dx, dy, dw, dh = offsets[:,0],offsets[:,1],offsets[:,2],offsets[:,3]
   widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
   cx, cy = anchors[:, 0] + 0.5 * widths, anchors[:, 1] + 0.5 * heights
   pred_cx, pred_cy = dx * widths + cx, dy * heights + cy
@@ -30,7 +43,10 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
-def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
+def generate_anchors(input_size):
+  grid_sizes = np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
+  scales = tuple((i, int(i*2**(1/3)), int(i*2**(2/3))) for i in [32,  64, 128, 256, 512])
+  aspect_ratios = ((0.5, 1.0, 2.0),) * len(scales)
   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
   anchors = []
   for s, ar, gs in zip(scales, aspect_ratios, grid_sizes):
@@ -51,19 +67,19 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
 class RetinaNet:
   def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None):
     assert isinstance(backbone, ResNet)
-    scales = tuple((i, int(i*2**(1/3)), int(i*2**(2/3))) for i in 2**np.arange(5, 10)) if scales is None else scales
-    aspect_ratios = ((0.5, 1.0, 2.0),) * len(scales) if aspect_ratios is None else aspect_ratios
     self.num_anchors, self.num_classes = num_anchors, num_classes
-    assert len(scales) == len(aspect_ratios) and all(self.num_anchors == len(s) * len(ar) for s, ar in zip(scales, aspect_ratios))
-
     self.backbone = ResNetFPN(backbone)
     self.head = RetinaHead(self.backbone.out_channels, num_anchors=num_anchors, num_classes=num_classes)
-    self.anchor_gen = lambda input_size: generate_anchors(input_size, self.backbone.compute_grid_sizes(input_size), scales, aspect_ratios)
+    self.anchors_np = generate_anchors((800,800))
 
-  def __call__(self, x):
-    return self.forward(x)
-  def forward(self, x):
-    return self.head(self.backbone(x))
+  def __call__(self, x, split=False):
+    return self.forward(x, split)
+
+  def forward(self, x, split):
+    b = self.backbone(x)
+    r, c = self.head(b)
+    if split: return b, r, c
+    else: return r.cat(c.sigmoid(), dim=-1)
 
   def load_from_pretrained(self):
     model_urls = {
@@ -80,28 +96,27 @@ class RetinaNet:
       assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat)
 
+  def load_checkpoint(self, fn):
+    d = safe_load(fn)
+    load_state_dict(self, d)
+
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
-  def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
-    anchors = self.anchor_gen(input_size)
-    grid_sizes = self.backbone.compute_grid_sizes(input_size)
-    split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
+  @line_profiler.profile
+  def postprocess_detections(self, offsets, scores, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
     detections = []
-    for i, predictions_per_image in enumerate(predictions):
+    for i in range(offsets[0].shape[0]):
       h, w = input_size if image_sizes is None else image_sizes[i]
 
-      predictions_per_image = np.split(predictions_per_image, split_idx)
-      offsets_per_image = [br[:, :4] for br in predictions_per_image]
-      scores_per_image = [cl[:, 4:] for cl in predictions_per_image]
+      offsets_per_image = [br[i] for br in offsets]
+      scores_per_image = [cl[i] for cl in scores]
 
       image_boxes, image_scores, image_labels = [], [], []
-      for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
+      for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, self.anchors_np):
         # remove low scoring boxes
-        scores_per_level = scores_per_level.flatten()
-        keep_idxs = scores_per_level > score_thresh
-        scores_per_level = scores_per_level[keep_idxs]
+        topk_idxs = np.where(scores_per_level > score_thresh)[0]
+        scores_per_level = scores_per_level[topk_idxs]
 
         # keep topk
-        topk_idxs = np.where(keep_idxs)[0]
         num_topk = min(len(topk_idxs), topk_candidates)
         sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
         topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
@@ -147,28 +162,53 @@ class RetinaNet:
 class ClassificationHead:
   def __init__(self, in_channels, num_anchors, num_classes):
     self.num_classes = num_classes
-    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    self.cls_logits = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
+    self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
+    self.cls_logits = Conv2dNormal_priorprob(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
+
   def __call__(self, x):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
-    return out[0].cat(*out[1:], dim=1).sigmoid()
+    return out[0].cat(*out[1:], dim=1)
+
+  def loss(self, logits_class, matched_idxs, labels, pad_mask):
+    batch_size = logits_class.shape[0]
+    foreground_idxs = matched_idxs >= 0
+    num_foreground = foreground_idxs.sum(-1)
+
+    labels = (labels + 1) * foreground_idxs - 1
+    gt_classes_target = labels.one_hot(logits_class.shape[-1])
+    valid_idxs = matched_idxs != -2
+    return (sigmoid_focal_loss(logits_class,gt_classes_target,valid_idxs.reshape(batch_size,-1,1)) * pad_mask / num_foreground).sum() /pad_mask.sum()
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
-    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    self.bbox_reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, padding=1)
+    self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
+    self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
+
   def __call__(self, x):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     return out[0].cat(*out[1:], dim=1)
+
+  def loss(self, logits_reg, anchors, matched_idxs, boxes, pad_mask):
+    foreground_idxs = matched_idxs >= 0
+    num_foreground = foreground_idxs.sum(-1)
+    mask = foreground_idxs.reshape(logits_reg.shape[0], -1, 1)
+
+    matched_gt_boxes = boxes * mask
+    bbox_reg = logits_reg * mask
+    anchors = anchors * mask
+    target_regression = encode_boxes(matched_gt_boxes, anchors)
+    target_regression = target_regression * mask
+    target_regression = (target_regression>-1000).where(target_regression, 0) #nan replace with 0
+    return (l1_loss(bbox_reg, target_regression) * pad_mask / num_foreground).sum() / pad_mask.sum()
 
 class RetinaHead:
   def __init__(self, in_channels, num_anchors, num_classes):
     self.classification_head = ClassificationHead(in_channels, num_anchors, num_classes)
     self.regression_head = RegressionHead(in_channels, num_anchors)
+
   def __call__(self, x):
     pred_bbox, pred_class = self.regression_head(x), self.classification_head(x)
-    out = pred_bbox.cat(pred_class, dim=-1)
-    return out
+    return pred_bbox, pred_class
 
 class ResNetFPN:
   def __init__(self, resnet, out_channels=256, returned_layers=[2, 3, 4]):
@@ -192,8 +232,8 @@ class ResNetFPN:
 
 class ExtraFPNBlock:
   def __init__(self, in_channels, out_channels):
-    self.p6 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
-    self.p7 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
+    self.p6 = Conv2dKaiming(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
+    self.p7 = Conv2dKaiming(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
     self.use_P5 = in_channels == out_channels
 
   def __call__(self, p, c):
@@ -208,8 +248,8 @@ class FPN:
   def __init__(self, in_channels_list, out_channels, extra_blocks=None):
     self.inner_blocks, self.layer_blocks = [], []
     for in_channels in in_channels_list:
-      self.inner_blocks.append(nn.Conv2d(in_channels, out_channels, kernel_size=1))
-      self.layer_blocks.append(nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1))
+      self.inner_blocks.append(Conv2dKaiming(in_channels, out_channels, kernel_size=1))
+      self.layer_blocks.append(Conv2dKaiming(out_channels, out_channels, kernel_size=3, padding=1))
     self.extra_blocks = ExtraFPNBlock(256, 256) if extra_blocks is None else extra_blocks
 
   def __call__(self, x):
