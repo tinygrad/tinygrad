@@ -1471,8 +1471,8 @@ class TestIndexing(unittest.TestCase):
     from tinygrad.nn.datasets import mnist
     import torch
     _, Y_train, _, _ = mnist()
-    samples = Tensor.randint(getenv("BS", 512), high=6000)
-    yt = Tensor.randn(512, 10)
+    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1]))
+    yt = Tensor.randn(BS, 10)
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
       self.check_schedule(loss, 6)

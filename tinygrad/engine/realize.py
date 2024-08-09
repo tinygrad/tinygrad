@@ -96,10 +96,10 @@ class CompiledRunner(Runner):
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
     lra = {}
     if global_size:
-      lra['global_size'] = global_size
+      lra['global_size'] = tuple(global_size)
       assert len(global_size) == 3, "global size must have len 3"
     if local_size:
-      lra['local_size'] = local_size
+      lra['local_size'] = tuple(local_size)
       assert len(local_size) == 3, "local size must have len 3"
     return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 

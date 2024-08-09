@@ -169,6 +169,27 @@ class TestProfiler(unittest.TestCase):
     assert l['name'].find("->") == -1, "should be kernel"
     assert r['name'] == f"{Device.DEFAULT} -> {Device.DEFAULT}:1", "should be copy"
 
+  @unittest.skipIf(MOCKGPU and Device.DEFAULT == "AMD", "AMD mockgpu with indirect buffers does not support queue wait interrupts")
+  def test_profile_copy_args(self):
+    d1 = Device[f"{Device.DEFAULT}:1"]
+
+    def f(a):
+      x = (a + 1).realize()
+      return x, x.to(d1.dname).realize()
+
+    a = Tensor.randn(10, 10, device=TestProfiler.d0.dname).realize()
+    with helper_collect_profile(TestProfiler.d0, d1) as profile:
+      jf = TinyJit(f)
+      for _ in range(3):
+        TestProfiler.d0.raw_prof_records, TestProfiler.d0.sig_prof_records = [], [] # reset to collect only graph logs
+        d1.raw_prof_records, d1.sig_prof_records = [], []
+        jf(a)
+      del jf
+
+    node = helper_profile_filter_node(profile, name=f"{Device.DEFAULT} -> {Device.DEFAULT}:1")[-1]
+    assert node['args']['Size'] == "400.00 B"
+    assert abs(float(node['args']['GB/S']) - ((10 * 10 * 4) / 1e3) / (node['dur'])) < 0.01
+
   @unittest.skipIf(CI, "skip CI")
   def test_profile_sync(self):
     mv = memoryview(bytearray(struct.pack("ff", 0, 1)))
