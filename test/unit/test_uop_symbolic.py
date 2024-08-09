@@ -353,7 +353,7 @@ class TestSymbolic(unittest.TestCase):
     lidx2 = Variable("lidx2", 0, 3)
     alu0 = gidx2*640+gidx1*160+(gidx0//5)*2+lidx0*320+lidx1*10
     self.helper_test_variable((alu0+lidx2*2+1)//20, 0, 8192, {"((((((gidx0//5)+lidx2)//5)+lidx1)//2)+(gidx1*8)+(gidx2*32)+(lidx0*16))",
-                                                              "((gidx2*32)+(gidx1*8)+(lidx0*16)+(((gidx0//5)+(lidx1*5)+lidx2)//10))"})
+                                                              "((((gidx0//5)+(lidx1*5)+lidx2)//10)+(gidx2*32)+(gidx1*8)+(lidx0*16))"})
 
   @unittest.expectedFailure
   def test_sum_div_complex2(self):
