@@ -27,14 +27,18 @@ def ioctl(fd, request, argp):
   ret = libc.syscall(0x1d, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
   if fn == "/dev/adsprpc-smd":
     assert chr(itype) == 'R'
-    if nr == 1:
+    if nr == 2:
+      st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_mmap)
+      print(ret, "FASTRPC_IOCTL_MMAP", format_struct(st))
+    elif nr == 1:
       # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
       st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
       print(ret, "FASTRPC_IOCTL_INVOKE", format_struct(st))
       # 0xFF000000 = Method index and attribute (the highest byte)
       # 0x00FF0000 = Number of input arguments
       # 0x0000FF00 = Number of output arguments
-      # 0x000000FF = Number of input and output handles
+      # 0x000000F0 = Number of input handles
+      # 0x0000000F = Number of output handles
       in_args = (st.sc>>16) & 0xFF
       out_args = (st.sc>>8) & 0xFF
       if in_args or out_args:
@@ -46,6 +50,8 @@ def ioctl(fd, request, argp):
     elif nr == 6:
       print(ret, "FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
       print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
+    elif nr == 7:
+      print(ret, "FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
     elif nr == 12: print(ret, "FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
     else:
       print(f"{ret} UNPARSED {nr}")
