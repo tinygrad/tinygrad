@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import DefaultDict, List, Set, Tuple
 from test.external.process_replay.utils import print_diff
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
-from tinygrad.helpers import Context, colored, dedup, diskcache_put, fetch, getenv
+from tinygrad.helpers import DEBUG, Context, colored, dedup, diskcache_put, fetch, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LazyOp
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
@@ -37,7 +37,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
     if len(asts) == 1:
       print(f"{buf} folded in the second schedule")
     else: print_si_diff(si[0], si[1])
-  print(f"*** process replay: {changed} unique kernel{'s' if changed>1 else ''} changed")
+  if DEBUG >= 1: print(f"*** process replay: {changed} unique kernel{'s' if changed>1 else ''} changed")
   return changed
 
 def print_si_diff(si0:ScheduleItem, si1:ScheduleItem):

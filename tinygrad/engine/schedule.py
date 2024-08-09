@@ -384,6 +384,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
     with Context(FUSE_ARANGE=0, SAVE_SCHEDULE=1): _graph_schedule(outs, set())
     with Context(FUSE_ARANGE=1, SAVE_SCHEDULE=1): graph, in_degree = _graph_schedule(outs, seen)
   else: graph, in_degree = _graph_schedule(outs, seen)
+  if getenv("RUN_PROCESS_REPLAY"):
+    from test.external.process_replay.diff_schedule import process_replay
+    process_replay(outs, graph, in_degree)
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
