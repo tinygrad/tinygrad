@@ -11,9 +11,10 @@ class TestDiffSchedule(unittest.TestCase):
     idxs = Tensor([0, 2]).realize()
     xt = X[idxs]
     with Context(ARANGE_DIFF=1): xt.schedule()
+    # 1 arange LazyBuffer folds, 1 arange child's kernel changes
     self.assertEqual(len(SCHEDULES), 2)
     changed = diff_schedule(SCHEDULES)
-    self.assertEqual(changed, 1)
+    self.assertEqual(changed, 2)
     SCHEDULES.clear()
 
     # no diff
