@@ -197,13 +197,6 @@ class ClangRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([(NOp.var('x', dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float64))])
 
   # language options
-  kernel_prefix = '''
-#ifndef TINYMATH_H
-#define TINYMATH_H
-#define NAN __builtin_nanf("")
-#define INFINITY __builtin_inff()
-#endif
-'''
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16", dtypes.int8: "int8_t"}
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})",
