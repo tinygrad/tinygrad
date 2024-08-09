@@ -230,7 +230,17 @@ jobs:
         run: |
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+          export BACKEND=${{ matrix.task }}
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      - name: Create process replay ref
+        if: github.ref == 'refs/heads/master'
+        run: python3 test/external/process_replay/create_ref.py
+      - name: Upload process replay artifacts
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: process_replay_${{ matrix.task }}.db
+          path: process_replay.db
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -327,7 +337,17 @@ jobs:
       run: |
         export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
         export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+        export BACKEND=METAL
         cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+    - name: Create process replay ref
+      if: github.ref == 'refs/heads/master'
+      run: python3 test/external/process_replay/create_ref.py
+    - name: Upload process replay artifacts
+      if: github.ref == 'refs/heads/master'
+      uses: actions/upload-artifact@v4
+      with:
+        name: process_replay_${{ matrix.task }}.db
+        path: process_replay.db
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -519,7 +539,17 @@ jobs:
           fi
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+          export BACKEND=${{ matrix.backend }}
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      - name: Create process replay ref
+        if: github.ref == 'refs/heads/master'
+        run: python3 test/external/process_replay/create_ref.py
+      - name: Upload process replay artifacts
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: process_replay_${{ matrix.backend }}.db
+          path: process_replay.db
 
   #testunicorn:
   #  name: ARM64 unicorn Test
