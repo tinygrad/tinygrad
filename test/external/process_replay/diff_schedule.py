@@ -1,5 +1,5 @@
 # create a diff of two schedule graphs
-import shutil, importlib, uuid, os
+import shutil, importlib, uuid, os, logging
 from collections import defaultdict
 from typing import DefaultDict, List, Set, Tuple
 from test.external.process_replay.utils import print_diff
@@ -11,8 +11,10 @@ from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 
 def process_replay(outs:List[LazyBuffer], graph:DefaultDict[LBScheduleItem, List[LBScheduleItem]], in_degree:DefaultDict[LBScheduleItem, int]):
   # copy the reference module
+  ref_schedule = getenv("REF_COMMIT_HASH", "master")
   fp = __file__.replace("diff_schedule", "master_schedule")
-  if not os.path.isfile(fp): shutil.copyfile(fetch("https://raw.githubusercontent.com/tinygrad/tinygrad/master/tinygrad/engine/schedule.py"), fp)
+  if not os.path.isfile(fp):
+    shutil.copyfile(fetch(f"https://raw.githubusercontent.com/tinygrad/tinygrad/{ref_schedule}/tinygrad/engine/schedule.py"), fp)
   # create the reference graph
   ref_graph, ref_in_degree = importlib.import_module("test.external.process_replay.master_schedule")._graph_schedule(outs, set())
   # compare
@@ -41,6 +43,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
   return changed
 
 def print_si_diff(si0:ScheduleItem, si1:ScheduleItem):
+  logging.basicConfig(level=logging.INFO)
   ei0 = lower_schedule_item(si0)
   ei1 = lower_schedule_item(si1)
   assert isinstance(ei0.prg, CompiledRunner) and isinstance(ei1.prg, CompiledRunner)

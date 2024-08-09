@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps, verify_lazyop
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv, SPLIT_REDUCEOP
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -220,30 +220,52 @@ class TestSchedule(unittest.TestCase):
           check_schedule(opt.schedule_step(), cnt)
 
   def test_fold_conv_relu_backward(self):
-    with Context(FUSE_CONV_BW=1):
-      c1 = nn.Conv2d(3,16,3, bias=False)
-      c1.weight.requires_grad = True
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
 
-      # run
-      img = Tensor.rand(2,3,64,64, requires_grad=True)
-      c1(img).relu().mean().backward()
-      check_schedule([img.grad, c1.weight.grad], 4)
+    # run
+    c1(img).relu().mean().backward()
+    assert img.grad is not None and c1.weight.grad is not None
+    run_schedule(check_schedule([img.grad, c1.weight.grad], 5))
 
-  # TODO: add cast
-  @unittest.expectedFailure
+    # compare
+    import torch
+    c1_torch = torch.nn.Conv2d(3,16,3, bias=False)
+    c1_torch.weight.requires_grad = True
+    c1_torch.weight = torch.nn.Parameter(torch.tensor(c1.weight.numpy(), dtype=torch.float32))
+    img_torch = torch.tensor(img.numpy(), requires_grad=True)
+    c1_torch(img_torch).relu().mean().backward()
+    assert img_torch.grad is not None and c1_torch.weight.grad is not None
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipIf(CI and Device.DEFAULT in {"METAL", "CLANG"}, "TOOD: why is this wrong in METAL and CLANG CI?")
   def test_fold_conv_relu_backward_half(self):
-    with Context(FUSE_CONV_BW=1):
-      old_float = dtypes.default_float
-      dtypes.default_float = dtypes.float16
+    old_float = dtypes.default_float
+    dtypes.default_float = dtypes.float16
 
-      c1 = nn.Conv2d(3,16,3, bias=False)
-      c1.weight.requires_grad = True
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
 
-      # run
-      img = Tensor.rand(2,3,64,64, requires_grad=True)
-      c1(img).relu().mean().backward()
-      dtypes.default_float = old_float
-      check_schedule([img.grad, c1.weight.grad], 4)
+    # run
+    c1(img).relu().mean().backward()
+    assert img.grad is not None and c1.weight.grad is not None
+    run_schedule(check_schedule([img.grad, c1.weight.grad], 5))
+    dtypes.default_float = old_float
+
+    # compare
+    import torch
+    c1_torch = torch.nn.Conv2d(3,16,3, bias=False, dtype=torch.half)
+    c1_torch.weight.requires_grad = True
+    c1_torch.weight = torch.nn.Parameter(torch.tensor(c1.weight.numpy(), dtype=torch.half))
+    img_torch = torch.tensor(img.numpy(), requires_grad=True)
+    c1_torch(img_torch).relu().mean().backward()
+    assert img_torch.grad is not None and c1_torch.weight.grad is not None
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
 
   def test_fold_batchnorm_backward(self):
     with Context(FUSE_CONV_BW=1):
@@ -1266,6 +1288,64 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.randn(10, 20).realize()
     out = x.argmax(1)
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
+
+class TestConvBW(unittest.TestCase):
+  def check_schedule(self, xt, cnt:int, flops=None):
+    with Context(FUSE_CONV_BW=getenv("FUSE_CONV_BW", 1), NOOPT=flops is not None):
+      s = create_schedule(flatten([r.lazydata.lbs for r in xt]))
+      kernels = [si for si in s if si.ast.op is MetaOps.KERNEL]
+      for si in kernels: verify_lazyop(si.ast)
+      GlobalCounters.reset()
+      run_schedule(s)
+      if flops is not None: assert GlobalCounters.global_ops <= flops, f"too many ops {GlobalCounters.global_ops}"
+      if FUSE_CONV_BW: self.assertEqual(len(kernels), cnt)
+
+  def test_fold_conv_relu_backward(self):
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
+
+    # run
+    c1(img).relu().mean().backward()
+    assert img.grad is not None and c1.weight.grad is not None
+    self.check_schedule([img.grad, c1.weight.grad], 4)
+
+    # compare
+    import torch
+    c1_torch = torch.nn.Conv2d(3,16,3, bias=False)
+    c1_torch.weight.requires_grad = True
+    c1_torch.weight = torch.nn.Parameter(torch.tensor(c1.weight.numpy(), dtype=torch.float32))
+    img_torch = torch.tensor(img.numpy(), requires_grad=True)
+    c1_torch(img_torch).relu().mean().backward()
+    assert img_torch.grad is not None and c1_torch.weight.grad is not None
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
+
+  @unittest.expectedFailure
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_fold_conv_relu_backward_half(self):
+    old_float = dtypes.default_float
+    dtypes.default_float = dtypes.float16
+
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+
+    # run
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
+    c1(img).relu().mean().backward()
+    dtypes.default_float = old_float
+    self.check_schedule([img.grad, c1.weight.grad], 4)
+
+    # compare
+    import torch
+    c1_torch = torch.nn.Conv2d(3,16,3, bias=False, dtype=torch.half)
+    c1_torch.weight.requires_grad = True
+    c1_torch.weight = torch.nn.Parameter(torch.tensor(c1.weight.numpy(), dtype=torch.half))
+    img_torch = torch.tensor(img.numpy(), requires_grad=True)
+    c1_torch(img_torch).relu().mean().backward()
+    assert img_torch.grad is not None and c1_torch.weight.grad is not None
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):

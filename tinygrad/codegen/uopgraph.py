@@ -119,16 +119,14 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   if c > 0 and rem_const > 0 and rem_const % gcd != 0:
     something_changed = True
     rem_const = (rem_const//gcd)*gcd
-  if rem_const != 0:
-    gcd = math.gcd(gcd, rem_const)
-    remainder.append(x.const(rem_const))
+  if rem_const != 0: remainder.append(x.const(rem_const))
 
   if not something_changed: return cast(UOp, x.divides(gcd))//(c//gcd) if gcd != c and gcd != 1 else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
   if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
   if quo is None: return x.const(0) if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)
-  return quo if rem is None else quo+cast(UOp, rem.divides(gcd))//(c//gcd)
+  return quo if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)+quo
 
 # ***** transcendental *****
 
