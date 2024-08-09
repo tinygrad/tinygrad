@@ -47,7 +47,7 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value: int = 0
 
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
-    self.prof_records: List[Tuple[Tuple[int, bool], Tuple[int, bool], HCQCompiled, str, bool, List[int], Optional[Dict]]] = []
+    self.prof_records: Dict[HCQCompiled, List[Tuple[Tuple[int, bool], Tuple[int, bool], str, bool, List[int], Optional[Dict]]]] = []
 
     last_j: Dict[HWCommandQueue, Optional[int]] = collections.defaultdict(lambda: None)
     queue_access: Dict[HWCommandQueue, Dict[HWCommandQueue, Optional[int]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
@@ -99,7 +99,7 @@ class HCQGraph(MultiGraphRunner):
         if is_exec_prg: prof_args = None
         else: prof_args = {"Size": memsize_to_str(ji.bufs[0].nbytes), "GB/S": lambda dur, b=ji.bufs[0].nbytes: f"{b/1e3/dur:.2f}"} # type: ignore
 
-        self.prof_records.append((sig_st, sig_en, enqueue_dev, prof_ji_desc, not is_exec_prg, [d - 1 for _, d in rdeps], prof_args))
+        self.prof_records.append((sig_st, sig_en, prof_ji_desc, not is_exec_prg, [d - 1 for _, d in rdeps], prof_args))
 
       last_j[enqueue_queue] = j
 
@@ -189,13 +189,16 @@ class HCQGraph(MultiGraphRunner):
 
   def collect_timestamps(self):
     timestamps = [s.timestamp for s in self.prof_signals]
+    # print(timestamps)
 
-    for (st,_), (en,_), dev, desc, is_cp, deps, args in self.prof_records:
-      dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp, args)]
+    # for dev in self.devices: 
+      # dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp, args) for (st,_), (en,_), desc, is_cp, deps, args in self.prof_records]
+    # for (st,_), (en,_), dev, desc, is_cp, deps, args in self.prof_records:
+    #   dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp, args)]
 
-      for x in deps:
-        (b_st,_), (b_en,_), b_dev, _, b_is_cp, _, _ = self.prof_records[x]
-        dev.dep_prof_records += [(timestamps[b_st], timestamps[b_en], b_dev, b_is_cp, timestamps[st], timestamps[en], dev, is_cp)]
+      # for x in deps:
+      #   (b_st,_), (b_en,_), b_dev, _, b_is_cp, _, _ = self.prof_records[x]
+      #   dev.dep_prof_records += [(timestamps[b_st], timestamps[b_en], b_dev, b_is_cp, timestamps[st], timestamps[en], dev, is_cp)]
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
