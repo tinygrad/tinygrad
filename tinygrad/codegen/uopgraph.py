@@ -565,10 +565,9 @@ class UOpGraph:
     def push(u:UOp):
       priority = 0
       # prefer uops that are loop children
-      if u.op is UOps.RANGE and u.arg:
-        priority += 10000*(len(set([j for i in range_phi[u] for j in range_srcs[i] if not any(k in scope_children[u] for k in range_phi[j])]))+1)+u.arg[0]
-      else: 
-        priority -= len(set([j for l, ss in scope_children.items() if l.op is UOps.RANGE and u in ss for i in range_phi[l] for j in range_srcs[i]]))
+      if u.op is UOps.RANGE and u.arg[1]: priority += u.arg[0] + 10000 * \
+        (len([j for i in range_phi[u] for j in range_srcs[i] if j.arg[1] and not any(k in scope_children[u] for k in range_phi[j])])+1)
+      else: priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
       heapq.heappush(queue, (priority, u))
 
     for u in children:
