@@ -401,8 +401,7 @@ class HCQSignal:
     Returns:
       The timestamp in microseconds.
     """
-    return self._get_timestamp()
-  def _get_timestamp(self) -> decimal.Decimal: raise NotImplementedError("_get_timestamp() method must be implemented")
+    raise NotImplementedError("timestamp property must be implemented")
 
   def wait(self, value:int, timeout:int=10000):
     """
