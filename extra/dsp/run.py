@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 import os, ctypes, ctypes.util, struct, platform
-import adsprpc
+from tinygrad.runtime.autogen import libc, adsprpc
 def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 from hexdump import hexdump
 
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
 processor = platform.processor()
 
 def get_struct(argp, stype):
