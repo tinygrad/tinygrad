@@ -13,7 +13,7 @@ print(t3.cast(dtypes.float32).numpy())
 """
 
 from tinygrad.helpers import getenv
-dtype_in = dtypes.f8e5m2
+dtype_in = dtypes.float8
 acc_dtype = dtypes.float32
 N = getenv("N", 1000)
 M = getenv("M", N)
