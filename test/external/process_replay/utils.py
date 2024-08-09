@@ -1,4 +1,4 @@
-import difflib
+import difflib, logging
 from tinygrad.helpers import colored, getenv
 
 def print_diff(s0, s1, unified=getenv("UNIFIED_DIFF",1)):
@@ -8,4 +8,4 @@ def print_diff(s0, s1, unified=getenv("UNIFIED_DIFF",1)):
   else:
     import ocdiff
     diff = ocdiff.console_diff(str(s0), str(s1))
-  print(diff)
+  logging.info(diff)
