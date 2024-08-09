@@ -247,12 +247,13 @@ class TestSchedule(unittest.TestCase):
 
     c1 = nn.Conv2d(3,16,3, bias=False)
     c1.weight.requires_grad = True
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
 
     # run
-    img = Tensor.rand(2,3,64,64, requires_grad=True)
     c1(img).relu().mean().backward()
-    dtypes.default_float = old_float
+    assert img.grad is not None and c1.weight.grad is not None
     run_schedule(check_schedule([img.grad, c1.weight.grad], 5))
+    dtypes.default_float = old_float
 
     # compare
     import torch
