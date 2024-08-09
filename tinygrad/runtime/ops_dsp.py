@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List
-import ctypes, fcntl, os, mmap, time
+import ctypes, fcntl, os, mmap, tempfile
 from tinygrad.device import BufferOptions, LRUAllocator, Compiled
 from tinygrad.runtime.autogen import libc
 from tinygrad.helpers import from_mv, getenv
@@ -17,25 +17,31 @@ adsp = ctypes.CDLL(ctypes.util.find_library("adsprpc"))
 
 class DSPProgram:
   def __init__(self, name:str, lib:bytes):
-    with open("/tmp/swag.so", "wb") as f: f.write(lib)
-    self.handle = ctypes.c_int64(-1)
-    adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:////tmp/swag.so?entry&_modver=1.0&_dom=cdsp"), ctypes.byref(self.handle))
+    with tempfile.NamedTemporaryFile(delete=True) as output_file:
+      output_file.write(lib)
+      output_file.flush()
+      self.handle = ctypes.c_int64(-1)
+      fp = f"file:///{output_file.name}?entry&_modver=1.0&_dom=cdsp"
+      adsp.remote_handle64_open(ctypes.create_string_buffer(fp.encode()), ctypes.byref(self.handle))
+      assert self.handle.value != -1, "load failed"
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     assert len(vals) == 0
     assert len(bufs) < 16
-    pra = (adsprpc.union_remote_arg64 * (1+len(bufs)))()
+    pra = (adsprpc.union_remote_arg64 * (2+len(bufs)))()
     test = (ctypes.c_int32 * len(bufs))()
+    time_est = ctypes.c_uint64(0)
     pra[0].buf.pv = ctypes.addressof(test)
     pra[0].buf.len = 4 * len(bufs)
+    pra[1].buf.pv = ctypes.addressof(time_est)
+    pra[1].buf.len = 8
     for i,b in enumerate(bufs):
       test[i] = b[1]
-      pra[i+1].dma.fd = b[2].fd
-      pra[i+1].dma.len = b[1]
-    st = time.perf_counter()
-    ret = adsp.remote_handle64_invoke(self.handle, (1<<24) | (1<<16) | (len(bufs)<<4), pra)
+      pra[i+2].dma.fd = b[2].fd
+      pra[i+2].dma.len = b[1]
+    ret = adsp.remote_handle64_invoke(self.handle, (1<<24) | (1<<16) | (1 << 8) | (len(bufs)<<4), pra)
     assert ret == 0, f"invoke returned {ret}"
-    return time.perf_counter() - st
+    return time_est.value / 1e6
 
 ION_IOC_ALLOC = 0
 ION_IOC_SHARE = 4
@@ -70,6 +76,7 @@ class DSPRenderer(CStyleLanguage):
     prefix = ['#define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })']
     msrc = ['typedef struct { int fd; unsigned int offset; } remote_dma_handle;',
             'typedef struct { void *pv; unsigned int len; } remote_buf;',
+            'unsigned long long HAP_perf_get_time_us(void);'
             'typedef union { remote_buf buf; remote_dma_handle dma; } remote_arg;',
             'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);',
             'int HAP_munmap(void *addr, int len);',
@@ -77,8 +84,10 @@ class DSPRenderer(CStyleLanguage):
             'if (sc>>24 == 1) {']
 
     for i,b in enumerate(bufs):
-      msrc.append(f'  void *buf_{i} = HAP_mmap(0, ((int*)pra[0].buf.pv)[{i}], 3, 0, pra[{i+1}].dma.fd, 0);')
+      msrc.append(f'  void *buf_{i} = HAP_mmap(0, ((int*)pra[0].buf.pv)[{i}], 3, 0, pra[{i+2}].dma.fd, 0);')
+    msrc.append("  unsigned long long start = HAP_perf_get_time_us();")
     msrc.append(f"  {function_name}({', '.join([f'buf_{i}' for i in range(len(bufs))])});")
+    msrc.append("  *(unsigned long long *)(pra[1].buf.pv) = HAP_perf_get_time_us() - start;")
     for i,b in enumerate(bufs):
       msrc.append(f'  HAP_munmap(buf_{i}, ((int*)pra[0].buf.pv)[{i}]);')
     msrc.append("}")
