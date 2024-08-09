@@ -123,8 +123,8 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   if not something_changed: return newx//(c//gcd) if 1 < gcd < c and (newx:=div_folding(x, gcd)) is not None else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const(0) if rem is None else div_folding(rem, gcd)//(c//gcd)
-  return quo if rem is None else div_folding(rem, gcd)//(c//gcd)+quo
+  if quo is None: return x.const(0) if rem is None else cast(UOp, div_folding(rem, gcd))//(c//gcd)
+  return quo if rem is None else cast(UOp, div_folding(rem, gcd))//(c//gcd)+quo
 
 # ***** transcendental *****
 
