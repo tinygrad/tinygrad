@@ -36,4 +36,4 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
-helper_tc_allclose(128, 128, 128, dtypes.f8e4m3, dtypes.float32)
+helper_tc_allclose(128, 128, 128, dtypes.bfloat16, dtypes.float32)
