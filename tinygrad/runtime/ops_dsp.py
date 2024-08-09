@@ -2,13 +2,15 @@ from __future__ import annotations
 from typing import Tuple, List
 import ctypes, fcntl, os, mmap, tempfile
 from tinygrad.device import BufferOptions, LRUAllocator, Compiled
-from tinygrad.helpers import from_mv, getenv
+from tinygrad.helpers import from_mv, getenv, DEBUG
 from tinygrad.runtime.ops_clang import ClangCompiler
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.dtype import DType
 from tinygrad.codegen.uops import UOp
+
 from tinygrad.runtime.autogen import libc, ion, msm_ion, adsprpc
 ION_IOC_ALLOC = 0
+ION_IOC_FREE = 1
 ION_IOC_SHARE = 4
 
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
@@ -24,6 +26,7 @@ class DSPProgram:
       fp = f"file:///{output_file.name}?entry&_modver=1.0&_dom=cdsp"
       adsp.remote_handle64_open(ctypes.create_string_buffer(fp.encode()), ctypes.byref(self.handle))
       assert self.handle.value != -1, "load failed"
+      if DEBUG >= 6: os.system(f"llvm-objdump -d {output_file.name}")
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     assert len(vals) == 0
@@ -39,7 +42,7 @@ class DSPProgram:
       test[i] = b[1]
       pra[i+2].dma.fd = b[2].fd
       pra[i+2].dma.len = b[1]
-    ret = adsp.remote_handle64_invoke(self.handle, (1<<24) | (1<<16) | (1 << 8) | (len(bufs)<<4), pra)
+    ret = adsp.remote_handle64_invoke(self.handle, (1<<24) | (1<<16) | (1<<8) | (len(bufs)<<4), pra)
     assert ret == 0, f"invoke returned {ret}"
     return time_est.value / 1e6
 
@@ -53,11 +56,16 @@ class DSPAllocator(LRUAllocator):
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
-    arg3 = ion.struct_ion_allocation_data(len=size, align=0x10, heap_id_mask=1<<msm_ion.ION_SYSTEM_HEAP_ID, flags=ion.ION_FLAG_CACHED)
+    arg3 = ion.struct_ion_allocation_data(len=size, align=0x200, heap_id_mask=1<<msm_ion.ION_SYSTEM_HEAP_ID, flags=ion.ION_FLAG_CACHED)
     ion_iowr(self.ion_fd, ION_IOC_ALLOC, arg3)
     ion_iowr(self.ion_fd, ION_IOC_SHARE, arg2:=ion.struct_ion_fd_data(handle=arg3.handle))
     res = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, arg2.fd, 0)
     return (res, size, arg2)
+
+  def _free(self, opaque, options:BufferOptions):
+    libc.munmap(opaque[0], opaque[1])
+    os.close(opaque[2].fd)
+    ion_iowr(self.ion_fd, ION_IOC_FREE, ion.struct_ion_handle_data(handle=opaque[2].handle))
 
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest[0], from_mv(src), dest[1])
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src[0], src[1])
@@ -66,6 +74,7 @@ class DSPRenderer(CStyleLanguage):
   device = "DSP"
   supports_float4 = False
   has_local = False
+  buffer_suffix = " restrict __attribute__((align_value(128)))"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
