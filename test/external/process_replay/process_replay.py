@@ -5,9 +5,7 @@ from tabulate import tabulate
 from datetime import datetime
 from typing import Dict, List, cast
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.device import Device
 from tinygrad.helpers import Context, ContextVar, colored, db_connection, VERSION, getenv, temp, tqdm
-from tinygrad.ops import LazyOp
 
 # *** process replay settings
 PAGE_SIZE = 100
@@ -27,7 +25,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 BASE_URL = f"https://api.github.com/repos/{os.getenv('GITHUB_REPOSITORY', 'tinygrad/tinygrad')}"
 GH_HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN', '')}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 
-def diff_kernel(offset:int, ref_schedule:List[LazyOp], kernel_changed):
+def diff_kernel(offset:int, kernel_changed):
   if early_stop.is_set(): return
   conn = db_connection()
   cur = conn.cursor()
@@ -51,11 +49,6 @@ def diff_kernel(offset:int, ref_schedule:List[LazyOp], kernel_changed):
       kernel_changed.value = True
       if ASSERT_DIFF: raise e
       continue
-    # try compare
-    if COMPARE_SCHEDULE and ast not in ref_schedule:
-      with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
-        print(opts.render(name, Kernel(ast, opts=opts).linearize().uops))
-      continue
     try: assert compare_src == good_src
     except AssertionError as e:
       changed += 1
@@ -74,13 +67,19 @@ def diff_kernel(offset:int, ref_schedule:List[LazyOp], kernel_changed):
   conn.commit()
   cur.close()
 
-def get_ref_schedule(offset:int, ref_schedule):
-  conn = sqlite3.connect("/tmp/process_replay/process_replay.db")
+def print_ast_diff(offset:int):
+  conn = db_connection()
   cur = conn.cursor()
-  cur.execute(f"SELECT val FROM '{REF_TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
-  for row in cur.fetchall(): ref_schedule.append(pickle.loads(row[0])[0])
-  conn.commit()
-  cur.close()
+  cur.execute(f"SELECT val FROM 'schedule_diff_{VERSION}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
+  for row in cur.fetchall():
+    buf, asts = pickle.loads(row[0])
+    if len(asts) == 1:
+      print(f"{buf} was folded")
+      print(asts[0])
+    else:
+      diff = list(difflib.unified_diff(str(asts[0]).splitlines(), str(asts[1]).splitlines()))
+      unified_diff = "\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in diff)
+      print(unified_diff)
 
 def download_artifact(run_id:str, name:str, dest:str):
   res = requests.get(f"{BASE_URL}/actions/runs/{run_id}/artifacts?name={name}", headers=GH_HEADERS)
@@ -118,23 +117,26 @@ def process_replay():
     logging.info(tabulate(diff, headers=["job", "master", "compare", "diff"]))
 
   # *** schedule diff
-  ref_schedule = multiprocessing.Manager().list()
   if COMPARE_SCHEDULE:
-    logging.info("fetching process replay reference")
-    # TODO: make this run_id dynamic
-    download_artifact("10093148840", f"process_replay_{Device.DEFAULT.lower()}.db", f"{TEMP_DIR}/schedule")
-    ref_conn = sqlite3.connect(f"{TEMP_DIR}/schedule/process_replay.db")
-    row_count = ref_conn.execute(f"select count(*) from '{REF_TABLE_NAME}'").fetchone()[0]
+    conn = db_connection()
+    cur = conn.cursor()
+    try: row_count = cur.execute(f"select count(*) from 'schedule_diff_{VERSION}'").fetchone()[0]
+    except sqlite3.OperationalError:
+      logging.warning(f"schedule_diff_{VERSION} isn't accessible in master, did DB_VERSION change?")
+      exit(0)
+    conn.commit()
+    cur.close()
     processes = []
+    changed = multiprocessing.Manager().Value('b', False)
     for i in tqdm(range(0, row_count, PAGE_SIZE)):
-      processes.append(p:=multiprocessing.Process(target=get_ref_schedule, args=(i, ref_schedule)))
+      processes.append(p:=multiprocessing.Process(target=print_ast_diff, args=(i,)))
       p.start()
     for p in processes: p.join()
-    ref_conn.close()
-  conn = db_connection()
-  cur = conn.cursor()
+    if row_count != 0 and ASSERT_DIFF: raise Exception("scheduler process replay detected changes")
 
   # *** kernel diff
+  conn = db_connection()
+  cur = conn.cursor()
   try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
   except sqlite3.OperationalError:
     logging.warning(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
@@ -144,10 +146,10 @@ def process_replay():
   processes = []
   changed = multiprocessing.Manager().Value('b', False)
   for i in tqdm(range(0, row_count, PAGE_SIZE)):
-    processes.append(p:=multiprocessing.Process(target=diff_kernel, args=(i, ref_schedule, changed)))
+    processes.append(p:=multiprocessing.Process(target=diff_kernel, args=(i, changed)))
     p.start()
   for p in processes: p.join()
-  if changed.value and ASSERT_DIFF: raise Exception("process replay detected changes")
+  if changed.value and ASSERT_DIFF: raise Exception("kernel process replay detected changes")
 
 if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
