@@ -179,10 +179,10 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
   return model
 
 # default settings
-TEMPERATURE = 0.85
-TOP_K = 25
-TOP_P = 0.9
-ALPHA_F = 0.1
+TEMPERATURE = 0.95
+TOP_K = 0
+TOP_P = 0.0
+ALPHA_F = 0.0
 ALPHA_P = 0.0
 
 last_seen_toks = []
