@@ -50,7 +50,7 @@ if __name__ == "__main__":
   b = a + 7
   b.lazydata.buffer.allocate()
   si = create_schedule([b.lazydata])[-1]
-  runner = dev.get_runner(*si.ast)
+  runner = dev.get_runners(*si.ast)[0]
   prg: AMDProgram = runner.clprg
   print("device initted")
 

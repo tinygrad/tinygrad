@@ -51,7 +51,7 @@ class KernelInfo:
   upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to EXPAND)
   dont_use_locals: bool = False # don't use local indexing
 
-@dataclass(frozen=True, eq=False)
+@dataclass(eq=False)
 class LazyOp:
   op: Op
   src: Tuple[LazyOp, ...] = ()

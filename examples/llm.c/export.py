@@ -46,7 +46,7 @@ if __name__ == "__main__":
   ast_dedup = dedup([si.ast for si in sched if si.ast[0].op is BufferOps.STORE])
   srcs = {}
   for ast in ast_dedup:
-    k = get_kernel(Device["CLANG"].renderer, ast)
+    k = get_kernel(Device["CLANG"].renderer, ast)[0]
     k.linearize()
     src = Device["CLANG"].renderer.render(to_function_name(k.name), k.uops)
     srcs[ast] = (k.name, src)
