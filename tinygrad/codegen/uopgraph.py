@@ -568,7 +568,7 @@ class UOpGraph:
         priority += u.arg[0]
         # for each phi in this range's scope
         for p in range_phi[u]:
-          # increment the priority by on how many depending ranges the phi has, excepting ranges that are part of this reduction 
+          # increment the priority by on how many depending ranges the phi has, excepting ranges that are part of this reduction
           priority += 10000*len([r for r in range_srcs[p] if not set(range_phi[u]).intersection(set(range_phi[r]))])
         # this de-prioritizes places ranges based on how many ranges need to preceed them
       else: # prefer uops that are loop children
