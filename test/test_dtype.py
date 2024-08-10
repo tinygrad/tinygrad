@@ -257,13 +257,10 @@ class TestBitCast(unittest.TestCase):
   def test_int32_to_float32_hard(self):
     tens_np = np.random.randint(-1000, 1000, size=(3,40), dtype=np.int32)
     tens = Tensor(tens_np, dtype=dtypes.int32)
-    
     pre_tens_np = (tens_np * 10) + 1
     pre_tens = (tens * 10) + 1
-    
     bitcast_tens_np = pre_tens_np.view(np.float32)
     bitcast_tens = pre_tens.bitcast(dtypes.float32)
-    
     post_tens_np = (bitcast_tens_np / 4) + 1.23
     post_tens = (bitcast_tens / 4) + 1.23
     _test_op(lambda: post_tens, dtypes.float32, post_tens_np)
