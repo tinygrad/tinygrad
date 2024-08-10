@@ -145,11 +145,11 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: Dict[Tuple[str, LazyOp, int, bool], CompiledRunner] = {}
+method_cache: Dict[Tuple[str, LazyOp, int, int, bool], CompiledRunner] = {}
 def get_runners(dname:str, ast:LazyOp) -> Tuple:
-  ckey = (dname, ast, BEAM.value, False)
+  ckey = (dname, ast, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return (cret,)
-  bkey = (dname.split(":")[0], ast, BEAM.value, True)
+  bkey = (dname.split(":")[0], ast, BEAM.value, NOOPT.value, True)
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = run = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
     return (run,)

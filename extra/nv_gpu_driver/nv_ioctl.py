@@ -202,7 +202,7 @@ def _dump_qmd(address, packets):
             bits = vv
           if isinstance(vv, types.FunctionType):
             bits = vv(0)
-          
+
           if bits is not None:
             res = 0
             for bt in range(bits[1], bits[0]+1): res |= ((gpfifo[i + 3 + bt // 32] >> (bt % 32)) & 0x1) << (bt - bits[1])

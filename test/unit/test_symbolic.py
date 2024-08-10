@@ -46,7 +46,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
 
   def test_div_reduction(self):
-   self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
+    self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
   def test_var_becomes_num(self):
     assert isinstance(Variable("a", 2, 2), NumNode)
@@ -299,6 +299,13 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((gidx0*4+lidx2*2+1)//10, 0, 3, "(((gidx0*2)+lidx2)//5)")
     self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//10, 0, 3, "(((gidx0*2)+lidx2)//5)")
     self.helper_test_variable((gidx0*2+lidx2)//10, 0, 1, "(gidx0//5)")
+
+  def test_sum_div_complex3(self):
+    gidx0 = Variable("gidx0", 0, 7)
+    lidx2 = Variable("lidx2", 0, 12)
+    lidx3 = Variable("lidx3", 0, 1)
+    self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
+    self.helper_test_variable((lidx2*2+gidx0*4+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
