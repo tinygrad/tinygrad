@@ -343,7 +343,7 @@ class TestOps(unittest.TestCase):
   def test_lerp(self):
     helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
     helper_test_op(None, lambda x,y,z: x.lerp(y,z), vals=[[1.,2.,3.], [4.,5.,6.], 0.5])
-  
+
   @unittest.skipIf(Device.DEFAULT in {"GPU", "QCOM"}, "OpenCL fails to compile this (both on GPU/QCOM backends)")
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril())
