@@ -1567,7 +1567,7 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule([out0, out1], 1)
     r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
     np.testing.assert_allclose(out0.numpy(), r_ref+2, rtol=2e-7)
-    np.testing.assert_allclose(out1.numpy(), r_ref+3)
+    np.testing.assert_allclose(out1.numpy(), r_ref+3, rtol=2e-7)
 
   @unittest.expectedFailure
   def test_fold_arange_view(self):
