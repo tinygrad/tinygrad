@@ -433,7 +433,8 @@ def create_gate(root:UOp) -> Optional[UOp]:
     if u.op is UOps.BARRIER: return u
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER and gate.op is not UOps.IF:
       return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
-    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op is UOps.ALU and u.src[-1].dtype == dtypes.bool:
+    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op in { UOps.ALU, UOps.CAST } and u.src[-1].dtype == dtypes.bool:
+    # if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].dtype == dtypes.bool:
       return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (u.src[-1],)),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
