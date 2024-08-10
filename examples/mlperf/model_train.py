@@ -614,7 +614,7 @@ def train_retinanet():
       coco_eval.summarize()
       eval_acc = coco_eval.stats[0]
       eval_time = time.perf_counter()-bt
-      print(colored(f'{SHIFT if EVAL_ONLY else epoch} EVAL_ACC {eval_acc} || {eval_time / 60:4.2f}', 'green'))
+      print(colored(f'{SHIFT if EVAL_ONLY else epoch} EVAL_ACC {eval_acc} || {eval_time / 60:4.2f}\n\n', 'green'))
       if WANDB:
           wandb.log({"eval/acc": eval_acc, "eval/total_time": eval_time, "epoch": SHIFT if EVAL_ONLY else epoch})
       if getenv("RESET_STEP", 1): val_step.reset()
