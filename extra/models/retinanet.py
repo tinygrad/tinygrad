@@ -96,8 +96,12 @@ class RetinaNet:
       assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat)
 
-  def load_checkpoint(self, fn):
+  def load_checkpoint(self, fn, syncbn, num_devices):
     d = safe_load(fn)
+    for k,v in d.items():
+      if 'running' in k:
+        if syncbn: d[k] = v[0]
+        else: d[k] = v[:num_devices]
     load_state_dict(self, d)
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)

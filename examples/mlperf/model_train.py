@@ -372,7 +372,9 @@ def train_retinanet():
   if WANDB:
     import wandb
     wandb.init(project='RetinaNet', config=config, resume='allow')
- 
+
+  for i in range(getenv('SHIFT', 0)):
+    GPUS.append(GPUS.pop(0))
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
@@ -405,7 +407,7 @@ def train_retinanet():
   model.backbone.body.fc = None
 
   if EVAL_ONLY and getenv('EVAL_LOAD', 1):
-    model.load_checkpoint(CHKPT_PATH)
+    model.load_checkpoint(CHKPT_PATH, SYNCBN, len(GPUS))
 
   for k, v in get_state_dict(model).items():
     if 'head' in k and ('clas' in k or 'reg' in k ): v.requires_grad = True
