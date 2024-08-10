@@ -564,7 +564,7 @@ class UOpGraph:
     def push(u:UOp):
       priority = 0
       # ensure ranges fall in the proper order
-      if u.op is UOps.RANGE and u.arg[1]: 
+      if u.op is UOps.RANGE and u.arg[1]:
         priority += u.arg[0]
         # for each phi in this range's scope
         for p in range_phi[u]:
