@@ -77,6 +77,7 @@ class QcomDevice(HCQCompiled):
   signals_page: Any = None
   signals_pool: List[Any] = []
   gpu_id: int = 0
+  gpu_stack: HCQBuffer = None
 
   def __init__(self, device:str=""):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
@@ -85,6 +86,7 @@ class QcomDevice(HCQCompiled):
     info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, 0xC0A00, map_to_cpu=True), 0
     QcomDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     assert(QcomDevice.gpu_id < 700)
+    QcomDevice.gpu_stack = self._gpu_alloc(0x1000000, kgsl.KGSL_MEMTYPE_CL_KERNEL_STACK << kgsl.KGSL_MEMTYPE_SHIFT)
 
     super().__init__(device, QcomAllocator(self), QCOMRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
                      QcomSignal, QcomComputeQueue, None, timeline_signals=(QcomSignal(), QcomSignal()))
@@ -254,7 +256,7 @@ class QcomComputeQueue(HWComputeQueue):
       | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT)
       | (4 << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
       0x41, 0, prg.prg_offset, # offsets
-      *data64_le(prg.lib_gpu.va_addr), 0, *data64_le(prg.private_gpu.va_addr), prg.private_gpu.size,
+      *data64_le(prg.lib_gpu.va_addr), 1, *data64_le(QcomDevice.gpu_stack.va_addr), 0x101,
     )
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
              (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT)
