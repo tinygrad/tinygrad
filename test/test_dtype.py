@@ -275,6 +275,10 @@ class TestBitCast(unittest.TestCase):
     b = a.bitcast(dtypes.float32)
     assert b.numpy()[0,0] == 1.
 
+  def test_bitcast_non_contiguous(self):
+    with self.assertRaises(RuntimeError):
+      _test_bitcast(Tensor.ones((3, 40), dtype=dtypes.int16), dtypes.uint32)
+
 class TestInt16DType(TestDType): DTYPE = dtypes.int16
 
 class TestUint16DType(TestDType):
