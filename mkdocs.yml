@@ -32,6 +32,10 @@ nav:
 #extra_css:
 #- css/tinygrad.css
 
+validation:
+  links:
+    anchors: warn
+
 markdown_extensions:
 - attr_list
 - admonition
