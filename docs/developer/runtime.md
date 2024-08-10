@@ -4,7 +4,7 @@
 
 A typical runtime consists of the following parts:
 
-- [Compiled](#device)
+- [Compiled](#compiled)
 - [Allocator](#allocator)
 - [Program](#program)
 - [Compiler](#compiler)

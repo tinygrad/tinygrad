@@ -47,7 +47,7 @@ class CStyleLanguage(Renderer):
 
   # returns a str expression of the const with the given type
   def render_const(self, x:ConstType, dtype:DType) -> str:
-    assert dtype.count == 1, "consts should be scalar, got {dtype}"
+    assert dtype.count == 1, f"consts should be scalar, got {dtype}"
     if math.isnan(x): val = self.nan
     elif math.isinf(x): val = ("-" if x < 0 else "") + self.infinity
     elif dtype == dtypes.bool: val = "1" if x else "0"
