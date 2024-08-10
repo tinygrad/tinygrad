@@ -74,7 +74,7 @@ class QcomSignal(HCQSignal):
 
 MAP_FIXED = 0x10
 class QcomDevice(HCQCompiled):
-  signals_page:Any = None
+  signals_page: Any = None
   signals_pool: List[Any] = []
   gpu_id: int = 0
 
@@ -82,7 +82,7 @@ class QcomDevice(HCQCompiled):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
     QcomDevice.signals_page = self._gpu_alloc(16 * 65536, flags=0xC0A00, map_to_cpu=True, uncached=True)
     QcomDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
-    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx(), self._gpu_alloc(0x100000, 0xC0A00, map_to_cpu=True), 0
+    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, 0xC0A00, map_to_cpu=True), 0
     QcomDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     assert(QcomDevice.gpu_id < 700)
 
@@ -92,14 +92,20 @@ class QcomDevice(HCQCompiled):
     QcomComputeQueue().setup().signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
 
-  def __del__(self): self._gpu_free(self.cmd_buf)
+  def __del__(self):
+    if hasattr(self, 'ctx'): self._ctx_destroy(self.ctx)
+    if hasattr(self, 'cmd_buf'): self._gpu_free(self.cmd_buf)
 
-  def _ctx(self):
+  def _ctx_create(self):
     cr = kgsl.struct_kgsl_drawctxt_create(flags=(kgsl.KGSL_CONTEXT_TYPE_CL << kgsl.KGSL_CONTEXT_TYPE_SHIFT) | kgsl.KGSL_CONTEXT_PREAMBLE
                                                  | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE)
     self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
     self.context_id = cr.drawctxt_id
     return self.context_id
+
+  def _ctx_destroy(self, ctx_id):
+    dstr = kgsl.struct_kgsl_drawctxt_destroy(drawctxt_id=ctx_id)
+    self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_DESTROY, dstr)
 
   def _info(self):
     info = kgsl.struct_kgsl_devinfo()
