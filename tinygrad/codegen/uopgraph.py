@@ -475,7 +475,7 @@ reducer = PatternMatcher([
 
 # *** uop graph ***
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp]], in_degree:Dict[UOp, int]):
+def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
   if u in children: return srcs[u]
   srcs[u] = {}
   children[u] = []
@@ -546,7 +546,7 @@ class UOpGraph:
     # filter nodes that don't link to a sink
     # BFS toposort
     children: Dict[UOp, List[UOp]] = {}
-    range_srcs: Dict[UOp, Dict[UOp]] = {}
+    range_srcs: Dict[UOp, Dict[UOp, None]] = {}
     in_degree: Dict[UOp, int] = {}
     get_children_dfs(sink, children, range_srcs, in_degree)
 
