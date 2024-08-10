@@ -77,12 +77,15 @@ class Buffer:
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
   def allocate(self, opaque=None) -> Buffer:
+    print('ALLOC_HIT', self._base)
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
     if self._base is not None:
       self._base.ensure_allocated()
       if self.offset==0 and self.nbytes==self._base.nbytes: 
-        self._buf = self.base._buf
+        print('ALLOC_IF_EQ')
+        pass
+        # self._buf = self.base._buf
       else:
         assert hasattr(self.allocator, "offset"), "offset function required for view"
         self._buf: Any = self.allocator.offset(self.base._buf, self.nbytes, self.offset)
@@ -128,8 +131,12 @@ class Buffer:
     self.allocator.copyout(mv, self._buf)
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
+    print('BUFFER_VIEW', self.nbytes, self.offset, dtype, dtype.itemsize ,size, offset, self._base, self)
     assert offset < self.nbytes, "offset must be less than nbytes"
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
+    if self.offset==offset and self.nbytes == size*dtype.itemsize:
+      print('VIEW_TOTVIEW')
+      # return self
     return Buffer(self.device, size, dtype, base=self, offset=offset)
 
 # TODO: size, dest, src are the same type. can we enforce this?

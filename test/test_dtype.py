@@ -241,6 +241,8 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
+  # def test_simp(self):
+  #   a = Tensor([100000], dtype=dtypes.float32).bitcast(dtypes.uint8).realize()
   def test_fp32_to_uint8(self):
     _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8)
     _test_bitcast(Tensor.randn((3,40), dtype=dtypes.float32), dtypes.uint8)
