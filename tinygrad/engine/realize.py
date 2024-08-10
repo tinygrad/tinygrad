@@ -153,16 +153,15 @@ def get_runners(dname:str, ast:LazyOp) -> Tuple:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = run = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
     return (run,)
-  else:
-    programs: Tuple[Program, ...] = tuple(k.to_program() for k in get_kernels(Device[dname].renderer, ast))
-    runners: List = []
-    for prg in programs:
-      if getenv("FUZZ_UOPS"):
-        from test.external.fuzz_uops import UOpsFuzzerRunner
-        runners.append(UOpsFuzzerRunner(replace(prg, dname=dname)))
-      else:
-        method_cache[ckey] = method_cache[bkey] = run = CompiledRunner(replace(prg, dname=dname))
-        runners.append(run)
+  programs: Tuple[Program, ...] = tuple(k.to_program() for k in get_kernels(Device[dname].renderer, ast))
+  runners: List = []
+  for prg in programs:
+    if getenv("FUZZ_UOPS"):
+      from test.external.fuzz_uops import UOpsFuzzerRunner
+      runners.append(UOpsFuzzerRunner(replace(prg, dname=dname)))
+    else:
+      method_cache[ckey] = method_cache[bkey] = run = CompiledRunner(replace(prg, dname=dname))
+      runners.append(run)
   return tuple(runners)
 
 # **************** lowering functions ****************

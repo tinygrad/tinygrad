@@ -23,8 +23,8 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
     seen_diff.add((asts[0], asts[1]))
     changed += 1
     #print(ocdiff.console_diff(render(ast[0]), render(ast[1])))
-    ei0 = lower_schedule_item(si[0])
-    ei1 = lower_schedule_item(si[1])
+    ei0 = lower_schedule_item(si[0])[0]
+    ei1 = lower_schedule_item(si[1])[0]
     assert isinstance(ei0.prg, CompiledRunner) and isinstance(ei1.prg, CompiledRunner)
     diff = list(difflib.unified_diff(ei0.prg.p.src.splitlines(), ei1.prg.p.src.splitlines()))
     unified_diff = "\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in diff)
