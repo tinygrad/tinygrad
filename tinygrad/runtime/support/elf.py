@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import Tuple, List, Any
+from typing import Tuple, Dict, List, Any
 from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc
 
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
 
-def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[ElfSection], Any]:
+def elf_loader(blob:bytes, force_section_align:int=1, reserve:int=0) -> Tuple[memoryview, List[ElfSection], Any, Dict[str, int]]:
   def _strtab(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
 
   header = libc.Elf64_Ehdr.from_buffer_copy(blob)
@@ -17,11 +17,11 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[
   def _to_carray(sh, ctype): return (ctype * (sh.header.sh_size // sh.header.sh_entsize)).from_buffer_copy(sh.content)
   rel = [(sh, sh.name[4:], _to_carray(sh, libc.Elf64_Rel)) for sh in sections if sh.header.sh_type == libc.SHT_REL]
   rela = [(sh, sh.name[5:], _to_carray(sh, libc.Elf64_Rela)) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
-  symtab = [_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB][0]
+  symtab, sl = [(_to_carray(sh, libc.Elf64_Sym), sh.header.sh_link) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB][0]
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
   # Prealloc image for all fixed addresses.
-  image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0]))
+  image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [reserve]))
   for sh in progbits:
     if sh.header.sh_addr != 0: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
     else:
@@ -35,4 +35,7 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[
     rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
     relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
-  return memoryview(image), sections, relocs
+  # Exports
+  exports = {_strtab(sections[sl].content, sym.st_name):sections[sym.st_shndx].header.sh_addr + sym.st_value for sym in symtab if sym.st_info == 0x12}
+
+  return memoryview(image), sections, relocs, exports
