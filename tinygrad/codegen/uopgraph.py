@@ -97,7 +97,10 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
-  quotient, remainder, rem_const, something_changed, gcd = [], [], 0, False, c
+  # simple cancel div case
+  if 0 <= x.vmin.arg and x.vmax.arg < c: return x.const(0)
+
+  quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
   for u in _get_add_chain(x):
     if u.op is UOps.CONST:
       # add all const together first
@@ -107,6 +110,8 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
       if factor: quotient.append(u.divides(c))
       something_changed = True
     else:
+      # divisor is the smallest common divisor of all MULs
+      if u.op is UOps.ALU and u.arg is BinaryOps.MUL and factor > 1 and c % factor == 0 and (divisor == 1 or divisor > factor): divisor = factor
       remainder.append(u)
       gcd = math.gcd(gcd, factor)
 
@@ -115,19 +120,16 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
     something_changed = True
     quotient.append(x.const(rem_const//c))
     rem_const = rem_const%c
-  if rem_const != 0:
-    if 0 < rem_const < gcd: something_changed = True  # cancel the const
-    else:
-      # only include rem_const in remainder if it's not cancelled
-      gcd = math.gcd(gcd, rem_const)
-      remainder.append(x.const(rem_const))
+  if rem_const != 0: remainder.append(x.const(rem_const))
 
-  if not something_changed: return cast(UOp, x.divides(gcd))//(c//gcd) if gcd != c and gcd != 1 else None
+  # x // c -> quotient + (remainder // div) // (c // div)
+  div = gcd if gcd > 1 else divisor
+
+  if not something_changed: return newx//(c//div) if 1 < div < c and (newx:=div_folding(x, div)) is not None else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
-  if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const(0) if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)
-  return quo if rem is None else quo+cast(UOp, rem.divides(gcd))//(c//gcd)
+  if quo is None: return x.const(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
+  return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
 
 # ***** transcendental *****
 
@@ -190,8 +192,10 @@ constant_folder = PatternMatcher([
   *[(NOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(NOp(UOps.GEP, dtypes.half,
                          src=(NOp.var('x', dtype=dtypes.half.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
   # tensor core with a 0 input is acc
-  (NOp(UOps.WMMA, src=(NOp.const(None, 0.0), NOp.var(), NOp.var('acc'))), lambda acc: acc),
-  (NOp(UOps.WMMA, src=(NOp.var(), NOp.const(None, 0.0), NOp.var('acc'))), lambda acc: acc),
+  *[(NOp(UOps.WMMA, src=(NOp(UOps.VECTORIZE, src=tuple(NOp.const(None, 0.0) for _ in range(i))), NOp.var(), NOp.var('acc'))),
+     lambda acc: acc) for i in [2, 4, 8]],
+  *[(NOp(UOps.WMMA, src=(NOp.var(), NOp(UOps.VECTORIZE, src=tuple(NOp.const(None, 0.0) for _ in range(i))), NOp.var('acc'))),
+     lambda acc: acc) for i in [2, 4, 8]],
   # tensor core cleanups
   *[(NOp(UOps.REDUCE, src=(NOp(UOps.EXPAND, src=tuple(NOp(UOps.GEP, dtypes.float, src=(NOp.var('x'),), arg=i) for i in range(j)), name="expand"),)
     ,name="reduce", allow_any_len=True), reduce_before_expand) for j in [2,4,8]],
@@ -261,7 +265,7 @@ constant_folder = PatternMatcher([
   (NOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # x-x -> 0
   (NOp.var('x') - NOp.var('x'), lambda x: x.const(0)),
-  (UPat(op=UOps.ALU, name='x'), lambda x: x.const(x.vmin.arg) if x.op is not UOps.CONST and x.vmin.arg == x.vmax.arg else None),
+  (UPat(UOps.ALU, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
   # ** load/store folding **
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.load(NOp.var("buf"), NOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
@@ -270,8 +274,8 @@ constant_folder = PatternMatcher([
   # *** rules from symbolic ***
   # ** lt **
   # c0*x<c1 for positive int c0,c1
-  ((NOp.cvar('c0',dtypes.int)*NOp.var('x')).lt(NOp.cvar('c1',dtypes.int)),
-   lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if c0.arg > 0 and c1.arg > 0 else None),
+  ((NOp.cvar('c0')*NOp.var('x')).lt(NOp.cvar('c1')),
+   lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if dtypes.is_int(x.dtype) and c0.arg > 0 and c1.arg > 0 else None),
   # mul add lt
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
    lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
@@ -279,9 +283,6 @@ constant_folder = PatternMatcher([
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
    newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
-  # mul div
-  ((NOp.var("x") * NOp.cvar("c0")) // NOp.cvar("c1"),
-   lambda x,c0,c1: x*(c0.arg//gcd)//(c1.arg//gcd) if c1.arg!=0 and (gcd:=math.gcd(c0.arg,c1.arg))> 1 else None),
   # mul add div
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
    x*(c0.arg//g)//(c1.arg//g) if c0.arg > 0 and c1.arg > 0 and (g:=math.gcd(c0.arg,c1.arg)) > 1 and g > x2.vmax.arg and x2.vmin.arg >= 0 else None),
@@ -298,6 +299,9 @@ constant_folder = PatternMatcher([
   # ** combine terms **
   # -(x+y) -> -x + -y
   (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
+  # (x+c0)*c1 -> x*c1+c0*c1. only for signed int, float have inf*0=nan issue
+  ((NOp.var("x") + NOp.cvar("c0")) * NOp.cvar("c1"), lambda x,c0,c1:
+   x*c1+c0.arg*c1.arg if dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
   # (x*c0)+(x*c1) -> x*(c0+c1)
   (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
   # (x*c0)+(y*c0) -> (x+y)*c0
@@ -328,11 +332,11 @@ constant_folder = PatternMatcher([
   (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (NOp(UOps.VECTORIZE, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
-  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.cvar("var"), NOp.const(dtypes.bool, True)), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
-  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.cvar("var"), NOp.const(dtypes.bool, True), NOp.var("barrier")),
+  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True)), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
+  (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True), NOp.var("barrier")),
    lambda buf,idx,var,barrier: UOp.load(buf, idx, barrier, dtype=var.dtype)),
-  (NOp.load(NOp.var(), NOp.var(), NOp.cvar("var"), NOp.const(dtypes.bool, False)), lambda var: var),
-  (NOp.load(NOp.var(), NOp.var(), NOp.cvar("var"), NOp.const(dtypes.bool, False), NOp.var()), lambda var: var),
+  (NOp.load(NOp.var(), NOp.var(), NOp.var("var"), NOp.const(dtypes.bool, False)), lambda var: var),
+  (NOp.load(NOp.var(), NOp.var(), NOp.var("var"), NOp.const(dtypes.bool, False), NOp.var()), lambda var: var),
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("val"), NOp.const(dtypes.bool, True)), UOp.store),
   (NOp.store(NOp.var(), NOp.var(), NOp.var(), NOp.const(dtypes.bool, False)), lambda: UOp(UOps.NOOP)),
   # remove NOOPs from SINK
@@ -392,12 +396,13 @@ def do_expand(root:UOp):
   return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
 
 acc_number = 0
-def do_reduce(root):
+def do_reduce(root:UOp):
   global acc_number
   reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].parents)
   ret = root.src[0]
   if len(reduce_parented):
-    const = UOp.const(root.dtype.scalar(), 0 if root.arg is BinaryOps.ADD else dtypes.min(root.dtype))
+    assert root.dtype is not None
+    const = UOp.const(root.dtype, 0 if root.arg is BinaryOps.ADD else dtypes.min(root.dtype.scalar()))
     acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(reduce_parented), (acc_number,))
     acc_number += 1
     ret = UOp(UOps.PHI, root.dtype, (acc, acc.alu(root.arg, ret)))
@@ -464,8 +469,6 @@ reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
   # no ALU on vectorized dtypes
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
-  # VECTORIZE a CONST is a CONST (eventually remove this rule)
-  (UPat(UOps.VECTORIZE, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
   # delete_redundant_gates (after expand, is this still needed?)
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
 ])
@@ -566,7 +569,7 @@ class UOpGraph:
     self._uops = []
     while queue:
       p,x = heapq.heappop(queue)
-      if DEBUG >= 7: print(p,x)
+      if DEBUG >= 7: print(f"{p:5d}",x)
       if x in scope_children: scope_end[x] = x
       if x.op is UOps.DEFINE_ACC:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])

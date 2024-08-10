@@ -14,12 +14,12 @@ FUZZ_SCHEDULE_MAX_PATHS = getenv("FUZZ_SCHEDULE_MAX_PATHS", 10)
 
 def fuzz_schedule(outs:List[LazyBuffer]):
   # find toposorts across all tunable params
-  unique_ts: Dict[Tuple[LazyBuffer, ...], Tuple[Dict[str, int], Dict[LazyBuffer, LBScheduleItem]]] = {}
+  unique_ts: Dict[Tuple[LBScheduleItem, ...], Dict[str, int]] = {}
   for combination in itertools.product(*ctx_vars.values()):
     for var, val in zip(ctx_vars, combination): var.value = val
     ctx_var_values = dict(zip([v.key for v in ctx_vars], combination))
-    graph, in_degree, prescheduled = _graph_schedule(outs, set())
-    for ts in find_all_toposorts(graph, in_degree): unique_ts[ts] = (ctx_var_values, prescheduled)
+    graph, in_degree = _graph_schedule(outs, set())
+    for ts in find_all_toposorts(graph, in_degree): unique_ts[ts] = ctx_var_values
   toposorts = list(unique_ts.items())
   if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
 
@@ -29,9 +29,9 @@ def fuzz_schedule(outs:List[LazyBuffer]):
   # IMPORTANT: freeze prerealized bufs before ScheduleItem exec
   prerealized: Dict[LazyBuffer, memoryview] = {}
   seed = Tensor._seed
-  ts, (_, prescheduled) = toposorts[0]
-  for key in ts:
-    for out in (lsi:=prescheduled[key]).outputs:
+  ts,_ = toposorts[0]
+  for lsi in ts:
+    for out in lsi.outputs:
       # freeze assign state before exec
       if out.op is MetaOps.ASSIGN:
         prerealized[out] = out.buffer.as_buffer()
@@ -45,11 +45,11 @@ def fuzz_schedule(outs:List[LazyBuffer]):
       del out.srcs # only schedule the LazyBuffer in this fuzz run
 
   # exec and validate each permutation with new Buffers
-  for i, (ts, (ctx, prescheduled)) in enumerate(toposorts[1:]):
+  for i, (ts, ctx) in enumerate(toposorts[1:]):
     if DEBUG >= 1: print(colored(f"testing permutation {i} {ctx}", "yellow"))
     rawbufs: Dict[LazyBuffer, Buffer] = {}
-    for key in ts:
-      for out in (lsi:=prescheduled[key]).outputs:
+    for lsi in ts:
+      for out in lsi.outputs:
         rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype)
         if out.op is MetaOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in lsi.inputs:
