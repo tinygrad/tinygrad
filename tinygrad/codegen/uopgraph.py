@@ -477,7 +477,6 @@ reducer = PatternMatcher([
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Set[UOp]], in_degree:Dict[UOp, int]):
   if u in children: return srcs[u]
-  # if u in children: return
   srcs[u] = set()
   children[u] = []
   for x in u.src:
