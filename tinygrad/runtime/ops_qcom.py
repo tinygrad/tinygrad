@@ -175,7 +175,7 @@ class QcomComputeQueue(HWComputeQueue):
                *data64_le(mv_address(signal._signal) + (0 if value else 8)), value & 0xFFFFFFFF)
       self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_INVALIDATE)
     else:
-      # TODO: fails starting with Qualcomm Snapdragon 8 Gen 1. And 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP.
+      # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
       raise RuntimeError('CP_EVENT_WRITE7 is not supported')
 
   def _timestamp(self, signal): return self._signal(signal, 0)
@@ -297,18 +297,19 @@ class QcomProgram(HCQProgram):
   def __init__(self, device: QcomDevice, name: str, lib: bytes):
     self.device, self.name, self.lib = device, name, lib
 
-    self.private_gpu = self.device._gpu_alloc(0x101, 0xC0F00)
-
     image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.halfreg, self.fullreg = parse_cl_lib(self.lib, self.name)
     image = bytearray(lib[image_offset:image_offset+self.image_size])
 
     # check if buffers are contigious for hcq
     for i in range(1, len(self.buffs_info)): assert(self.buffs_info[i] - self.buffs_info[i-1] == 0x10)
 
-    self.lib_gpu = self.device._gpu_alloc(len(image), 0x10C0A00, map_to_cpu=True)
+    self.lib_gpu = self.device._gpu_alloc(len(image) + 0x20000, 0x00C0A00, map_to_cpu=True) # reserve some space after for gpu to use
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(memoryview(image)), self.image_size)
 
     super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=self.buffs_info[0] if len(self.buffs_info) else 0)
+
+  def __del__(self):
+    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu)
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     if len(bufs) + len(vals) != len(self.buffs_info): raise RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
