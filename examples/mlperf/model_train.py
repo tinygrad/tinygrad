@@ -371,9 +371,9 @@ def train_retinanet():
   np.random.seed(SEED)
   if WANDB:
     import wandb
-    wandb.init(project='RetinaNet', config=config, resume='allow')
+    wandb.init(project='RetinaNet', config=config, resume='allow', group='multi')
 
-  for i in range(getenv('SHIFT', 0)):
+  for i in range(SHIFT:=getenv('SHIFT', 0)):
     GPUS.append(GPUS.pop(0))
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
@@ -542,14 +542,14 @@ def train_retinanet():
       if getenv("RESET_STEP", 1): train_step.reset()
       Tensor.training = False
       BEAM.value = EVAL_BEAM
-      print(colored(f'{epoch} START EVAL', 'cyan'))
+      print(colored(f'{SHIFT if EVAL_ONLY else epoch} START EVAL', 'cyan'))
       coco_val = COCO(openimages('validation'))
       coco_eval = COCOeval(coco_val, iouType="bbox")
       eval_times = []
       coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
       batch_loader = batch_load_retinanet(batch_size=BS_EVAL, shuffle=False, seed=SEED, val=True, pad_first_batch=PART_BATCH)
-      it = iter(tqdm(batch_loader, total=len(val_files)//BS_EVAL, desc=f"epoch_val {epoch}"))
+      it = iter(tqdm(batch_loader, total=len(val_files)//BS_EVAL, desc=f"epoch_val {SHIFT if EVAL_ONLY else epoch}"))
       cnt, proc = 0, data_get_val(it)
 
       while proc is not None:
@@ -604,7 +604,7 @@ def train_retinanet():
           f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9/(pt-st):9.2f} GFLOPS")
         if WANDB: wandb.log({"eval/step_time": ct - st, "eval/model_time": pt - st, "eval/post_proc": dt - npt, "eval/data": nt - pt, 
                              "eval/np": npt - nt, "eval/evaluate": ct - dt, "eval/GFLOPS": GlobalCounters.global_ops * 1e-9 / (pt - st), 
-                             "epoch": epoch - 1 + (cnt + 1) / (len(val_files)//BS_EVAL)})
+                             "epoch": (SHIFT if EVAL_ONLY else epoch) - 1 + (cnt + 1) / (len(val_files)//BS_EVAL)})
         cnt+=1
 
       coco_eval.params.imgIds = evaluated_imgs
@@ -614,9 +614,9 @@ def train_retinanet():
       coco_eval.summarize()
       eval_acc = coco_eval.stats[0]
       eval_time = time.perf_counter()-bt
-      print(colored(f'{epoch} EVAL_ACC {eval_acc} || {eval_time / 60:4.2f}', 'green'))
+      print(colored(f'{SHIFT if EVAL_ONLY else epoch} EVAL_ACC {eval_acc} || {eval_time / 60:4.2f}', 'green'))
       if WANDB:
-          wandb.log({"eval/acc": eval_acc, "eval/total_time": eval_time, "epoch": epoch})
+          wandb.log({"eval/acc": eval_acc, "eval/total_time": eval_time, "epoch": SHIFT if EVAL_ONLY else epoch})
       if getenv("RESET_STEP", 1): val_step.reset()
       if EVAL_ONLY: break
       if eval_acc>MAP_TARGET:

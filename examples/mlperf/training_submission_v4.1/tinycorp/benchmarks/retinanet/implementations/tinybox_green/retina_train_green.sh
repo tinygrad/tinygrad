@@ -16,8 +16,16 @@ export WANDB_RUN_ID=$(date +%Y%m%d%H%M%S%N)
 python3 extra/datasets/openimages.py
 
 TRAIN_ONLY=1 python3 examples/mlperf/model_train.py
+export SYNCBN=1
+export LOAD_BN=0
+EVAL_ONLY=1 SHIFT=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${LOAD_BN}_E${SHIFT}.safe" python3 examples/mlperf/model_train.py &
+sleep 30
+EVAL_ONLY=1 SHIFT=2 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${LOAD_BN}_E${SHIFT}.safe" python3 examples/mlperf/model_train.py &
+sleep 30
+EVAL_ONLY=1 SHIFT=3 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${LOAD_BN}_E${SHIFT}.safe" python3 examples/mlperf/model_train.py &
+sleep 30
+EVAL_ONLY=1 SHIFT=4 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${LOAD_BN}_E${SHIFT}.safe" python3 examples/mlperf/model_train.py &
 
-EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${SYNCBN}_E1.safe" python3 examples/mlperf/model_train.py
-EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${SYNCBN}_E2.safe" python3 examples/mlperf/model_train.py
-EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${SYNCBN}_E3.safe" python3 examples/mlperf/model_train.py
-EVAL_ONLY=1 CHKPT_PATH="ckpts/retinanet_6x${TINY_TYPE}_B${BS}_S${SYNCBN}_E4.safe" python3 examples/mlperf/model_train.py
+wait
+
+echo "RETINA SCRIPT COMPLETE"
