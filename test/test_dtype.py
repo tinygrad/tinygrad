@@ -241,8 +241,6 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
-  # def test_simp(self):
-  #   a = Tensor([100000], dtype=dtypes.float32).bitcast(dtypes.uint8).realize()
   def test_fp32_to_uint8(self):
     _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8)
     _test_bitcast(Tensor.randn((3,40), dtype=dtypes.float32), dtypes.uint8)
@@ -255,6 +253,20 @@ class TestBitCast(unittest.TestCase):
   def test_int16_to_uint32(self):
     _test_bitcast(Tensor([100000, 10], dtype=dtypes.int16), dtypes.uint32)
     _test_bitcast(Tensor.randn((3,40), dtype=dtypes.int16), dtypes.uint32)
+
+  def test_int32_to_float32_hard(self):
+    tens_np = np.random.randint(-1000, 1000, size=(3,40), dtype=np.int32)
+    tens = Tensor(tens_np, dtype=dtypes.int32)
+    
+    pre_tens_np = (tens_np * 10) + 1
+    pre_tens = (tens * 10) + 1
+    
+    bitcast_tens_np = pre_tens_np.view(np.float32)
+    bitcast_tens = pre_tens.bitcast(dtypes.float32)
+    
+    post_tens_np = (bitcast_tens_np / 4) + 1.23
+    post_tens = (bitcast_tens / 4) + 1.23
+    _test_op(lambda: post_tens, dtypes.float32, post_tens_np)
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
