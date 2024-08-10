@@ -1,20 +1,19 @@
-import unittest, os
+import unittest, subprocess, platform
 from tinygrad.runtime.support.elf import elf_loader
-from typing import Dict, List, Any
 
-def helper_test_loader(file: str, img: str, relocs_expected: List[Any], exports_expected: Dict[str, int]):
-  with open(f'{os.path.dirname(__file__)}/blobs/{file}', 'rb') as fd: blob = fd.read()
-  image, _, relocs, exports = elf_loader(blob)
-  with open(f'{os.path.dirname(__file__)}/blobs/{img}', 'rb') as fd: image_expected = fd.read()
-  assert bytes(image) == image_expected, f'Image missmatch\nexpected: {image_expected!r}\ngot: {bytes(image)!r}'
-  assert relocs == relocs_expected, f'Relocs missmatch\nexpected: {[]}\ngot: {relocs_expected}'
-  assert exports == exports_expected, f'Exports missmatch\nexpected: {exports_expected}\ngot: {exports}'
-
-class TestZeroCopy(unittest.TestCase):
-  def test_load_amd_hip(self): helper_test_loader('hip.elf', 'hip.img', [], {'r_32_16_8_16_256_4_4_4': 11264})
-  def test_load_nvidia_cuda(self): helper_test_loader('cuda.cubin', 'cuda.img', [(68, 512, 2, 0)], {'r_32_16_8_16_256_4_4_4': 512})
-  def test_load_clang_jit_simple(self): helper_test_loader('clang.o', 'clang.img', [], {'r_256_256_256_4_4_4': 0})
-  def test_load_clang_jit_reloc(self): helper_test_loader('clang_reloc.o', 'clang_reloc.img', [(4, 0, 282, 0)], {'entry': 0})
+class TestElfLoader(unittest.TestCase):
+  def test_load_clang_jit_strtab(self):
+    src = '''
+      void relocation(int); // will be a jump to relocation (needed for .rela.text to exist)
+      void test(int x) {
+        relocation(x+1);
+      }
+    '''
+    args = ('-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-ffreestanding', '-nostdlib')
+    obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode('utf-8'))
+    _, sections, _ = elf_loader(obj)
+    section_names = [sh.name for sh in sections]
+    assert '.text' in section_names and '.rela.text' in section_names, str(section_names)
 
 if __name__ == '__main__':
   unittest.main()

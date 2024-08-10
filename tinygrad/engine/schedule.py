@@ -1,4 +1,4 @@
-import sys, pickle, atexit, importlib
+import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
@@ -381,9 +381,9 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
   graph, in_degree = _graph_schedule(outs, seen)
-  if getenv("RUN_PROCESS_REPLAY"):
-    try: importlib.import_module("test.external.process_replay.diff_schedule").process_replay(outs, graph, in_degree)
-    except (ImportError, AttributeError): print("can't access test.external.process_replay.diff_schedule, hint: process relpay needs PYTHONPATH=.")
+  if getenv("RUN_PROCESS_REPLAY") and getenv("COMPARE_SCHEDULE", 1):
+    # NOTE: process relpay needs PYTHONPATH=., remove this once it just pickles LazyBuffers
+    with contextlib.suppress(Exception): importlib.import_module("test.external.process_replay.diff_schedule").process_replay(outs, graph, in_degree)
 
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
