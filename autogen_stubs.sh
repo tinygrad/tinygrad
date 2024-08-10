@@ -153,6 +153,14 @@ generate_nvrtc() {
   python3 -c "import tinygrad.runtime.autogen.nvrtc"
 }
 
+generate_cupti() {
+  clang2py /usr/local/cuda/include/cupti.h -o $BASE/cupti.py -l /usr/local/cuda/lib64/libcupti.so --clang-args="-I/usr/local/cuda/include"
+  sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cupti.py
+  sed -i "s\ctypes.CDLL('/usr/local/cuda/lib64/cupti.so')\ctypes.CDLL(ctypes.util.find_library('cupti'))\g" $BASE/cupti.py
+  fixup $BASE/cupti.py
+  python3 -c "import tinygrad.runtime.autogen.cupti"
+}
+
 generate_nv() {
   NVKERN_COMMIT_HASH=d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6
   NVKERN_SRC=/tmp/open-gpu-kernel-modules-$NVKERN_COMMIT_HASH
@@ -284,12 +292,13 @@ elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "nvrtc" ]; then generate_nvrtc
+elif [ "$1" == "cupti" ]; then generate_cupti
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_cupti; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
 else echo "usage: $0 <type>"
 fi
