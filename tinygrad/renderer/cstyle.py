@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uops import UOps, UOp, NOp, PatternMatcher
 from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
@@ -198,10 +198,11 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
+  extra_matcher = PatternMatcher([(NOp.var('x', dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float64))])
 
   # language options
   buffer_suffix = " restrict"
-  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
+  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16", dtypes.int8: "int8_t"}
   code_for_op = {**CStyleLanguage().code_for_op,
                  UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
