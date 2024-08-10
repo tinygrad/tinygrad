@@ -116,8 +116,7 @@ class CStyleLanguage(Renderer):
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       # these four uops don't have output dtypes
       if uop is UOps.IF:
-        try: kk(f"if ({r[src[0]]}) {{")
-        except KeyError: kk(f"if ({r[src[0].src[0]]}) {{")
+        kk(f"if ({r[src[0]]}) {{")
         depth += 1
       elif uop is UOps.BARRIER: kk(self.barrier)
       elif uop in {UOps.ENDRANGE, UOps.ENDIF}:
