@@ -1,6 +1,6 @@
 import unittest, os
 from tinygrad.runtime.support.elf import elf_loader
-from typing import Dict, List, Any
+from typing import List, Any
 
 def helper_test_loader(file: str, img: str, relocs_expected: List[Any]):
   with open(f'{os.path.dirname(__file__)}/blobs/{file}', 'rb') as fd: blob = fd.read()
