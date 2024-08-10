@@ -563,10 +563,16 @@ class UOpGraph:
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
       priority = 0
-      # prefer uops that are loop children
-      if u.op is UOps.RANGE and u.arg[1]: priority += u.arg[0] + 10000 * \
-        (len([j for i in range_phi[u] for j in range_srcs[i] if not any(k in scope_children[u] for k in range_phi[j])])+1)
-      else: priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
+      # ensure ranges fall in the proper order
+      if u.op is UOps.RANGE and u.arg[1]: 
+        priority += u.arg[0]
+        # for each phi in this range's scope
+        for p in range_phi[u]:
+          # increment the priority by on how many depending ranges the phi has, excepting ranges that are part of this reduction 
+          priority += 10000*len([r for r in range_srcs[p] if not set(range_phi[u]).intersection(set(range_phi[r]))])
+        # this de-prioritizes places ranges based on how many ranges need to preceed them
+      else: # prefer uops that are loop children
+        priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
       heapq.heappush(queue, (priority, u))
 
     for u in children:
