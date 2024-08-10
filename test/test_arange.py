@@ -159,7 +159,7 @@ class TestIndexing(unittest.TestCase):
         torch_emb.weight[:] = torch.tensor(emb_w, dtype=torch.float32)
       torch_z = torch_emb(torch.tensor(x.numpy()))
       # TODO: reshape to match torch, should we do this in nn?
-      np.testing.assert_allclose(z.numpy().reshape(4, 3), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
+      np.testing.assert_allclose(z.numpy().reshape(4, embed_size), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
   # at least the arange is being fused
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1736704000)
 
