@@ -97,7 +97,10 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
-  quotient, remainder, rem_const, something_changed, gcd = [], [], 0, False, c
+  # simple cancel div case
+  if 0 <= x.vmin.arg and x.vmax.arg < c: return x.const(0)
+
+  quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
   for u in _get_add_chain(x):
     if u.op is UOps.CONST:
       # add all const together first
@@ -107,6 +110,8 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
       if factor: quotient.append(u.divides(c))
       something_changed = True
     else:
+      # divisor is the smallest common divisor of all MULs
+      if u.op is UOps.ALU and u.arg is BinaryOps.MUL and factor > 1 and c % factor == 0 and (divisor == 1 or divisor > factor): divisor = factor
       remainder.append(u)
       gcd = math.gcd(gcd, factor)
 
@@ -115,18 +120,16 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
     something_changed = True
     quotient.append(x.const(rem_const//c))
     rem_const = rem_const%c
-  # make const a multiple of gcd
-  if c > 0 and rem_const > 0 and rem_const % gcd != 0:
-    something_changed = True
-    rem_const = (rem_const//gcd)*gcd
   if rem_const != 0: remainder.append(x.const(rem_const))
 
-  if not something_changed: return cast(UOp, x.divides(gcd))//(c//gcd) if gcd != c and gcd != 1 else None
+  # x // c -> quotient + (remainder // div) // (c // div)
+  div = gcd if gcd > 1 else divisor
+
+  if not something_changed: return newx//(c//div) if 1 < div < c and (newx:=div_folding(x, div)) is not None else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
-  if rem is not None and 0 <= rem.vmin.arg and rem.vmax.arg < c: rem = None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const(0) if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)
-  return quo if rem is None else cast(UOp, rem.divides(gcd))//(c//gcd)+quo
+  if quo is None: return x.const(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
+  return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
 
 # ***** transcendental *****
 
@@ -280,9 +283,6 @@ constant_folder = PatternMatcher([
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
    newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
-  # mul div
-  ((NOp.var("x") * NOp.cvar("c0")) // NOp.cvar("c1"),
-   lambda x,c0,c1: x*(c0.arg//gcd)//(c1.arg//gcd) if c1.arg!=0 and (gcd:=math.gcd(c0.arg,c1.arg))> 1 else None),
   # mul add div
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
    x*(c0.arg//g)//(c1.arg//g) if c0.arg > 0 and c1.arg > 0 and (g:=math.gcd(c0.arg,c1.arg)) > 1 and g > x2.vmax.arg and x2.vmin.arg >= 0 else None),

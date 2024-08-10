@@ -13,6 +13,8 @@ def helper_test_loader(file: str, img: str, relocs_expected: List[Any], exports_
 class TestZeroCopy(unittest.TestCase):
   def test_load_amd_hip(self): helper_test_loader('hip.elf', 'hip.img', [], {'r_32_16_8_16_256_4_4_4': 11264})
   def test_load_nvidia_cuda(self): helper_test_loader('cuda.cubin', 'cuda.img', [(68, 512, 2, 0)], {'r_32_16_8_16_256_4_4_4': 512})
+  def test_load_clang_jit_simple(self): helper_test_loader('clang.o', 'clang.img', [], {'r_256_256_256_4_4_4': 0})
+  def test_load_clang_jit_reloc(self): helper_test_loader('clang_reloc.o', 'clang_reloc.img', [(4, 0, 282, 0)], {'entry': 0})
 
 if __name__ == '__main__':
   unittest.main()
