@@ -196,8 +196,8 @@ class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
   has_local = False
   global_max = None
-  infinity = "__builtin_inf()"
-  nan = '__builtin_nan("")'
+  infinity = "__builtin_inff()"
+  nan = '__builtin_nanf("")'
 
   # language options
   buffer_suffix = " restrict"
