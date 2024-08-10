@@ -84,7 +84,7 @@ class Buffer:
       if self.offset==0 and self.nbytes==self._base.nbytes: self._buf: Any = self._base._buf #view whole buffer
       else:
         assert hasattr(self.allocator, "offset"), "offset function required for view"
-        self._buf: Any = self.allocator.offset(self.base._buf, self.nbytes, self.offset)
+        self._buf = self.allocator.offset(self.base._buf, self.nbytes, self.offset)
     else:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
