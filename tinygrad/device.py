@@ -82,10 +82,10 @@ class Buffer:
     self.allocator = Device[self.device].allocator
     if self._base is not None:
       self._base.ensure_allocated()
-      if self.offset==0 and self.nbytes==self._base.nbytes: 
+      if self.offset==0 and self.nbytes==self._base.nbytes:
         print('ALLOC_IF_EQ')
-        pass
-        # self._buf = self.base._buf
+        # pass
+        self._buf = self._base._buf
       else:
         assert hasattr(self.allocator, "offset"), "offset function required for view"
         self._buf: Any = self.allocator.offset(self.base._buf, self.nbytes, self.offset)
