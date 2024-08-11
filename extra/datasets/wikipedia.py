@@ -351,12 +351,14 @@ def instance_to_features(instance:dict, tokenizer:Tokenizer) -> dict:
 
 def process_part(part:int):
   tokenizer = Tokenizer(getenv("BASEDIR", Path(__file__).parent / "wiki") / "vocab.txt")
-  os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
-  for i, feature_batch in enumerate(process_iterate(tokenizer, val=False, part=part)):
-    with open(BASEDIR / f"train/{str(part)}/{part}_{i}_of_{len(feature_batch)}.pkl", "wb") as f:
-      pickle.dump(feature_batch, f)
+  os.makedirs(BASEDIR / "train", exist_ok=True)
 
-def process_iterate(tokenizer:Tokenizer, val:bool=False, part:int=0) -> list[dict]: # Convert raw text to masked NSP samples
+  if os.path.exists(BASEDIR / f"train/{str(part)}.pkl"): return
+  features = get_features_from_part(tokenizer, val=False, part=part)
+  with open(BASEDIR / f"train/{str(part)}.pkl", "wb") as f:
+    pickle.dump(features, f)
+
+def get_features_from_part(tokenizer:Tokenizer, val:bool=False, part:int=0) -> list[dict]: # Convert raw text to masked NSP samples
   rng = random.Random(getenv('RANDOM_SEED', 12345))
 
   if val:
@@ -368,25 +370,16 @@ def process_iterate(tokenizer:Tokenizer, val:bool=False, part:int=0) -> list[dic
     tqdm.write(f"Picking 10000 samples")
 
     pick_ratio = len(instances) / 10000
-    picks = [instance_to_features(instances[int(inst*pick_ratio)], tokenizer) for inst in range(10000)]
-    for batch in range(10):
-      yield picks[batch*1000:(batch+1)*1000]
+    return [instance_to_features(instances[int(inst*pick_ratio)], tokenizer) for inst in range(10000)]
   else:
     documents = get_documents(rng, tokenizer, f"results4/part-{part:05d}-of-00500")
     instances = get_instances(rng, tokenizer, documents)
-
-    while len(instances) > 0:
-      batch_size = min(1000, len(instances)) # We batch 1000 samples to one file
-      batch = instances[:batch_size]
-      del instances[:batch_size]
-      yield [instance_to_features(instance, tokenizer) for instance in batch]
+    return [instance_to_features(instance, tokenizer) for instance in instances]
 
 ##################### Load files #####################
 
-def get_wiki_val_files(): return sorted(list((BASEDIR / "eval/").glob("*.pkl")))
-
 @diskcache
-def get_wiki_train_files(): return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
+def get_wiki_train_files(): return sorted(list((BASEDIR / "train/").glob("*.pkl")))
 
 if __name__ == "__main__":
   tokenizer = Tokenizer(getenv("BASEDIR", Path(__file__).parent / "wiki") / "vocab.txt")
@@ -394,18 +387,12 @@ if __name__ == "__main__":
   assert len(sys.argv) > 1, "Usage: python wikipedia.py pre-eval|pre-train [part]|all"
 
   if sys.argv[1] == "pre-eval": # Generate 10000 eval samples
-    os.makedirs(BASEDIR / "eval", exist_ok=True)
-
-    for i, feature_batch in tqdm(enumerate(process_iterate(tokenizer, val=True)), total=10):
-      with open(BASEDIR / f"eval/{i}.pkl", "wb") as f:
-        pickle.dump(feature_batch, f)
+    with open(BASEDIR / "eval.pkl", "wb") as f:
+      pickle.dump(get_features_from_part(tokenizer, val=True), f)
   elif sys.argv[1] == "pre-train":
-    os.makedirs(BASEDIR / "train", exist_ok=True)
     if sys.argv[2] == "all": # Use all 500 parts for training generation
       process_map(process_part, [part for part in range(500)], max_workers=getenv('NUM_WORKERS', min(os.cpu_count(), 32)), chunksize=1)
     else: # Use a specific part for training generation
-      part = int(sys.argv[2])
-      os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
-      for i, feature_batch in tqdm(enumerate(process_iterate(tokenizer, val=False, part=part))):
-        with open(BASEDIR / f"train/{str(part)}/{part}_{i}_of_{len(feature_batch)}.pkl", "wb") as f:
-          pickle.dump(feature_batch, f)
+      part = sys.argv[2]
+      print(f"Processing part {part}...")
+      process_part(int(part))

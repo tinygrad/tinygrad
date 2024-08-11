@@ -111,16 +111,16 @@ if __name__ == "__main__":
     choices = []
     for (lin, nm) in lins:
       tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
-      ops = lin.to_program().op_estimate
+      ops = (prg:=lin.to_program()).op_estimate
       gflops = sym_infer(ops, {k:k.min for k in lin.ast.vars()})*1e-9/tm
-      choices.append((tm, gflops, lin.linearize(), nm))
+      choices.append((tm, gflops, lin, prg, nm))
 
     sorted_choices = sorted(choices, key=lambda x: x[0])
     if DEBUG >= 1: # print all kernels
-      for tm, gflops, lin, nm in choices:
-        print(f"                 kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS -- {colored(nm, 'green') if lin is sorted_choices[0][2] else nm}")
+      for tm, gflops, lin, prg, nm in choices:
+        print(f"                 kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(prg.global_size):18s} {str(prg.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS -- {colored(nm, 'green') if lin is sorted_choices[0][2] else nm}")
 
-    tm, gflops, lin, nm = sorted_choices[0]
+    tm, gflops, lin, prg, nm = sorted_choices[0]
     if getenv("SRC"):
       print(si.ast)
       print(lin.applied_opts)
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     running_gflops += gflops * tm
     if (key := str([str(m) for m in si.metadata] if si.metadata is not None else None)) not in usage: usage[key] = (0, 0)
     usage[key] = (usage[key][0] + tm, usage[key][1] + 1)
-    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[str(m) for m in si.metadata] if si.metadata is not None else ''}")
+    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(prg.global_size):18s} {str(prg.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[str(m) for m in si.metadata] if si.metadata is not None else ''}")
   print(f"******* total {total_tm*1000:.2f} ms, {running_gflops/total_tm:6.0f} GFLOPS")
   print("usage:")
   for k in sorted(usage, key=lambda x: -usage[x][0])[:10]:

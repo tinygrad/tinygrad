@@ -399,6 +399,7 @@ def train_bert():
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
+  BENCHMARK = getenv("BENCHMARK")
   if getenv("LOGMLPERF"):
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
@@ -427,11 +428,11 @@ def train_bert():
     MLLOGGER = None
 
   # ** hyperparameters **
-  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 16 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
+  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
-  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.00035 * math.sqrt(BS/256))
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.0001 * math.sqrt(BS/66))
 
-  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 4800000 // BS)
+  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3000000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 1)
   max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", (10000 + EVAL_BS - 1) // EVAL_BS) # EVAL_BS * MAX_EVAL_STEPS >= 10000
   eval_step_freq     = config["EVAL_STEP_FREQ"]         = getenv("EVAL_STEP_FREQ", int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS)) # Round down
@@ -440,7 +441,7 @@ def train_bert():
   save_ckpt_dir      = config["SAVE_CKPT_DIR"]          = getenv("SAVE_CKPT_DIR", "./ckpts")
   init_ckpt          = config["INIT_CKPT_DIR"]          = getenv("INIT_CKPT_DIR", BASEDIR)
 
-  loss_scaler        = config["LOSS_SCALER"]            = getenv("LOSS_SCALER", 2.0**9 if dtypes.default_float == dtypes.float16 else 1.0)
+  loss_scaler        = config["LOSS_SCALER"]            = getenv("LOSS_SCALER", 2.0**13 if dtypes.default_float == dtypes.float16 else 1.0)
   decay              = config["DECAY"]                  = getenv("DECAY", 0.01)
   epsilon            = config["EPSILON"]                = getenv("EPSILON", 1e-6)
   poly_power         = config["POLY_POWER"]             = getenv("POLY_POWER", 1.0)
@@ -454,7 +455,7 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  model = get_mlperf_bert_model(init_ckpt)
+  model = get_mlperf_bert_model(init_ckpt if not INITMLPERF else None)
   
   for _, x in get_state_dict(model).items():
     x.realize().to_(GPUS)
@@ -502,7 +503,7 @@ def train_bert():
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=config["GLOBAL_BATCH_SIZE"] * config["TRAIN_STEPS"])
 
   # ** resume from checkpointing **
-  start_step = 1
+  start_step = 0
   previous_step = None
   if ckpt:=getenv("RESUME", ""):
     load_training_state(model, optimizer_group, scheduler_group, safe_load(ckpt))
@@ -516,11 +517,11 @@ def train_bert():
     wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
     wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
 
-  BENCHMARK = getenv("BENCHMARK")
-
   if not INITMLPERF:
     eval_it = iter(batch_load_val_bert(EVAL_BS))
-    train_it = iter(tqdm(batch_load_train_bert(BS, start_step), initial=start_step, total=train_steps, disable=BENCHMARK))
+    train_it = iter(tqdm(batch_load_train_bert(BS), total=train_steps, disable=BENCHMARK))
+    for _ in range(start_step): next(train_it) # Fast forward
+
 
   step_times = []
   # ** train loop **
@@ -674,7 +675,7 @@ def train_bert():
         os.remove(os.path.join(ckpt_dir, last))
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.end(key="checkpoint_stop", value=None, metadata={"step_num": i})
-        MLLOGGER.start(key=mllog_constants.BLOCK_START, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "epoch_count": 1, "samples_count": config["EVAL_BS"] * config["MAX_EVAL_STEPS"], "step_num": i, "first_step_num": i+1})
+        MLLOGGER.start(key=mllog_constants.BLOCK_START, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "epoch_count": 1, "samples_count": i * BS, "step_num": i, "first_step_num": i+1})
         previous_step = i
 
 def train_maskrcnn():

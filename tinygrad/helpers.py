@@ -23,10 +23,11 @@ def argfix(*x):
     return tuple(x[0])
   return x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def all_same(items:List[T]): return all(x == items[0] for x in items)
+def all_same(items:Union[Tuple[T, ...], List[T]]): return all(x == items[0] for x in items)
 def all_int(t: Sequence[Any]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
+def memsize_to_str(_bytes: int) -> str: return [f"{(_bytes / d):.2f} {pr}" for d,pr in [(1e9,"GB"),(1e6,"MB"),(1e3,"KB"),(1,"B")] if _bytes > d][0]
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
@@ -40,10 +41,10 @@ def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"  # noqa: E501
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst:List[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
+def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
   a:List[T] = []
   b:List[T] = []
-  for s in lst: (a if fxn(s) else b).append(s)
+  for s in itr: (a if fxn(s) else b).append(s)
   return a,b
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
@@ -78,8 +79,6 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 
-class GraphException(Exception): pass
-
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs
@@ -107,9 +106,10 @@ class ContextVar:
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
 WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
-MULTIOUTPUT, PROFILE, TRANSCENDENTAL = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("TRANSCENDENTAL", 1)
-USE_TC, TC_OPT = ContextVar("TC", 1), ContextVar("TC_OPT", 0)
-FUSE_AS_ONE_KERNEL, FUSE_CONV_BW = ContextVar("FUSE_AS_ONE_KERNEL", 0), ContextVar("FUSE_CONV_BW", 0)
+MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
+USE_TC, TC_OPT, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("TRANSCENDENTAL", 1)
+FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
+SPLIT_REDUCEOP, ARANGE_DIFF = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("ARANGE_DIFF", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -163,30 +163,40 @@ class Profiling(contextlib.ContextDecorator):
 class ProfileLogger:
   writers: int = 0
   mjson: List[Dict] = []
-  actors: Dict[str, int] = {}
-  subactors: Dict[Tuple[str, str], int] = {}
-  path = getenv("PROFILE_OUTPUT_FILE", temp("tinygrad_profile.json"))
+  actors: Dict[Union[str, Tuple[str, str]], int] = {}
 
-  def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
+  def __init__(self): self.events, self.deps, ProfileLogger.writers = [], [], ProfileLogger.writers + 1
 
-  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor)]
+  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None, args=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor, args)]
+
+  def _ensure_actor(self, actor_name, subactor_name):
+    if actor_name not in self.actors:
+      self.actors[actor_name] = (pid:=len(self.actors))
+      self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+
+    if (subactor_key:=(actor_name,subactor_name)) not in self.actors:
+      self.actors[subactor_key] = (tid:=len(self.actors))
+      self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
+
+    return self.actors[actor_name], self.actors.get(subactor_key, -1)
 
   def __del__(self):
-    for name,st,et,actor_name,subactor_name in self.events:
-      if actor_name not in self.actors:
-        self.actors[actor_name] = (pid:=len(self.actors))
-        self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+    # perfetto json docs: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
+    for name, st, et, actor_name, subactor_name, args in self.events:
+      pid, tid = self._ensure_actor(actor_name,subactor_name)
+      args = {k: (v if v.__class__ is str else v(et-st)) for k, v in args.items()} if args is not None else None
+      self.mjson.append({"name": name, "ph": "X", "pid": pid, "tid": tid, "ts": st, "dur": et-st, "args": args})
 
-      if (subactor_key:=(actor_name,subactor_name)) not in self.subactors:
-        self.subactors[subactor_key] = (tid:=len(self.subactors))
-        self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
-
-      self.mjson.append({"name": name, "ph": "X", "pid": self.actors[actor_name], "tid": self.subactors.get(subactor_key, -1), "ts":st, "dur":et-st})
+    for en,st,dep_actor_name,dep_subactor_name,actor_name,subactor_name in self.deps:
+      dep_pid, dep_tid = self._ensure_actor(dep_actor_name,dep_subactor_name)
+      pid, tid = self._ensure_actor(actor_name,subactor_name)
+      self.mjson.append({"ph": "s", "pid": dep_pid, "tid": dep_tid, "id": len(self.mjson), "ts": en, "bp": "e"})
+      self.mjson.append({"ph": "f", "pid": pid, "tid": tid, "id": len(self.mjson)-1, "ts": st, "bp": "e"})
 
     ProfileLogger.writers -= 1
     if ProfileLogger.writers == 0 and len(self.mjson) > 0:
-      with open(self.path, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
-      print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/ to open it.")
+      with open(PROFILEPATH.value, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
+      print(f"Saved profile to {PROFILEPATH.value}. Use https://ui.perfetto.dev/ to open it.")
 
 # *** universal database cache ***
 
@@ -201,7 +211,9 @@ def db_connection():
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
-    _db_connection.execute("PRAGMA journal_mode=WAL")
+    # another connection has set it already or is in the process of setting it
+    # that connection will lock the database
+    with contextlib.suppress(sqlite3.OperationalError): _db_connection.execute("PRAGMA journal_mode=WAL").fetchone()
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
 
@@ -333,4 +345,4 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   if cache is None: dfs(x, cache:={})
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
   cx[2], srcs = True, ('None' if srcfn(x) is None else''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
-  return f"{' '*d} {f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
+  return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs

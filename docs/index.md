@@ -12,7 +12,7 @@ python3 -m pip install -e .
 
 After you have installed tinygrad, try the [MNIST tutorial](mnist.md)
 
-We also have [developer docs](developer.md), and Di Zhu has created a [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) to help understand how tinygrad works.
+We also have [developer docs](developer/developer.md), and Di Zhu has created a [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) to help understand how tinygrad works.
 
 ## tinygrad Usage
 
@@ -40,7 +40,7 @@ In tinygrad, you can do [`x.conv2d(w, b)`](tensor/ops.md/#tinygrad.Tensor.conv2d
 
 ### tinygrad is lazy
 
-When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor/index.md/#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
+When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor/properties.md#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
 
 ### tinygrad requires @TinyJit to be fast
 

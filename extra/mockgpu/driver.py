@@ -1,7 +1,7 @@
-import ctypes, struct, os, functools
-from typing import Union
+import ctypes, struct, os
+from typing import Any
 from dataclasses import dataclass
-from tinygrad.helpers import round_up, to_mv
+from tinygrad.helpers import round_up
 
 class VirtFileDesc:
   def __init__(self, fd): self.fd, self.off = fd, 0
@@ -71,11 +71,11 @@ class DirFileDesc(VirtFileDesc):
 @dataclass(frozen=True)
 class VirtFile():
   path: str
-  fdcls: Union[VirtFileDesc, functools.partial[VirtFileDesc]]
+  fdcls: Any # TODO: fix this Union[VirtFileDesc, functools.partial[VirtFileDesc]]
 
   @staticmethod
   def build_fstat(st_dev=0x20, st_ino=0x100000, st_mode=0o100777, st_nlink=1, st_uid=0, st_gid=0, st_rdev=0, st_size=0,
-                  st_blksize=4096, st_blocks=0, st_atime=0, st_mtime=0, st_ctime=0):    
+                  st_blksize=4096, st_blocks=0, st_atime=0, st_mtime=0, st_ctime=0):
     assert (ssz:=struct.calcsize(fmt_string:='QQQIIIQQiQqqq')) == 96, f"{ssz} != 96"
     return struct.pack(fmt_string, st_dev, st_ino, st_nlink, st_mode, st_uid, st_gid,
                        st_rdev, st_size, st_blksize, st_blocks, st_atime, st_mtime, st_ctime)

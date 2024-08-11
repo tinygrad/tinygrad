@@ -12,12 +12,11 @@ with contextlib.suppress(ImportError): import networkx as nx
 
 # **** debugging and graphing ****
 
-if DEBUG >= 2:
-  def print_globalcounters():
-    if GlobalCounters.time_sum_s == 0: return
-    print(f"avg: {GlobalCounters.global_ops*1e-9/GlobalCounters.time_sum_s:8.2f} GFLOPS {GlobalCounters.global_mem*1e-9/GlobalCounters.time_sum_s:8.2f} GB/s",  # noqa: E501
-          f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")  # noqa: E501
-  atexit.register(print_globalcounters)
+def print_globalcounters():
+  if GlobalCounters.time_sum_s == 0: return
+  print(f"avg: {GlobalCounters.global_ops*1e-9/GlobalCounters.time_sum_s:8.2f} GFLOPS {GlobalCounters.global_mem*1e-9/GlobalCounters.time_sum_s:8.2f} GB/s",  # noqa: E501
+        f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")  # noqa: E501
+if DEBUG >= 2: atexit.register(print_globalcounters)
 
 def save_graph(G, fn, opt=""):
   print("saving", G, f"to {fn}.svg")

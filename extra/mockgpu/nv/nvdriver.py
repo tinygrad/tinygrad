@@ -1,7 +1,7 @@
 import pathlib, re, ctypes, mmap, collections, struct, functools, os, copy
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 from typing import Optional, Any
-from tinygrad.helpers import from_mv
+from tinygrad.helpers import to_mv
 from extra.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from extra.mockgpu.nv.nvgpu import NVGPU
 
@@ -43,7 +43,7 @@ class NVDevFileDesc(VirtFileDesc):
     self._mapping_userland = False
 
   def ioctl(self, fd, request, argp): return self.driver.dev_ioctl(self.gpu, request, argp)
-  def mmap(self, start, sz, prot, flags, fd, offset): 
+  def mmap(self, start, sz, prot, flags, fd, offset):
     start = libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
     if self._mapping_userland: self.driver.track_address(start, start+sz, lambda mv,off: None, lambda mv, off: self.driver._gpu_mmio_write(mv, off, self.gpu))
     return start
@@ -81,7 +81,7 @@ class NVDriver(VirtDriver):
     self.gpus[gpu_id] = NVGPU(gpu_id)
     self.tracked_files += [VirtFile(f'/dev/nvidia{gpu_id}', functools.partial(NVDevFileDesc, driver=self, gpu=self.gpus[gpu_id]))]
 
-  def open(self, name, flags, mode, virtfile): 
+  def open(self, name, flags, mode, virtfile):
     cl = virtfile.fdcls(self._alloc_fd())
     self.opened_fds[cl.fd] = cl
     return cl
@@ -138,13 +138,21 @@ class NVDriver(VirtDriver):
     if struct.cmd == nv_gpu.NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2:
       params:Any = nv_gpu.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS.from_address(params_ptr)
       params.deviceInstance = params.gpuId # emulate them to be the same
-    elif struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2:
-      params = nv_gpu.NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS.from_address(params_ptr)
+    elif struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2 or struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST:
+      if struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST:
+        params = nv_gpu.NV0080_CTRL_GPU_GET_CLASSLIST_PARAMS.from_address(params_ptr)
+      else:
+        params = nv_gpu.NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS.from_address(params_ptr)
+
       classes = [50021, 51607, 51648, 50543, 51125, 51125, 51125, 51125, 50529, 36967, 36909, 37105, 33868, 36978, 37095, 37094, 36980, 37014, 49270,
                  41068, 41088, 41280, 50025, 96, 112, 115, 125, 20608, 20640, 20539, 20540, 41089, 41092, 50034, 50810, 50811, 50814, 51056, 51057,
                  51059, 51069, 51071, 51632, 51639, 51639, 51706, 52019, 222, 50287, 50273, 50031, 50017] # from ada102
       params.numClasses = len(classes)
-      for i,c in enumerate(classes): params.classList[i] = c
+      if struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST:
+        clslist = to_mv(params.classList, params.numClasses * 4).cast('I')
+        for i,c in enumerate(classes): clslist[i] = c
+      else:
+        for i,c in enumerate(classes): params.classList[i] = c
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO:
       info = {nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION: nv_gpu.NV2080_CTRL_GR_INFO_SM_VERSION_3_5}
 
@@ -177,7 +185,7 @@ class NVDriver(VirtDriver):
     elif nr == nv_gpu.NV_ESC_RM_MAP_MEMORY:
       st:Any = nv_gpu.nv_ioctl_nvos33_parameters_with_fd.from_address(argp)
       obj = self.object_by_handle[st.params.hMemory]
-      if isinstance(obj, NVUserMode): 
+      if isinstance(obj, NVUserMode):
         file = self.opened_fds[st.fd]
         assert isinstance(file, NVDevFileDesc)
         file._mapping_userland = True
@@ -200,7 +208,7 @@ class NVDriver(VirtDriver):
       assert any(all(st.gpu_uuid.uuid[i] == gpu.gpu_uuid()[i] for i in range(16)) for gpu in self.gpus.values())
     elif nr == nv_gpu.UVM_REGISTER_GPU_VASPACE: pass
     elif nr == nv_gpu.UVM_ENABLE_PEER_ACCESS: pass # uvm and shared spaced are setup already, no emulation for now
-    elif nr == nv_gpu.UVM_CREATE_EXTERNAL_RANGE: 
+    elif nr == nv_gpu.UVM_CREATE_EXTERNAL_RANGE:
       st = nv_gpu.UVM_CREATE_EXTERNAL_RANGE_PARAMS.from_address(argp)
       libc.mmap(st.base, st.length, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
     elif nr == nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION:
