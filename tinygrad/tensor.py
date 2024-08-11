@@ -3071,9 +3071,10 @@ class Tensor:
 
   def _view_dtype(self, dtype:DType) -> Tensor:
     # only called when MetaOps.VIEW isn't available for shape changing bitcast
+    self.realize()
     new_shape = self.shape[:-1] + ((self.shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
     b = LazyBuffer.metaop(MetaOps.EMPTY, new_shape, dtype, self.device)
-    b.buffer.allocate(self.data().tobytes())
+    b.buffer.allocate(self.lazydata.base.realized.as_buffer(allow_zero_copy=True))
     return Tensor(b, dtype=dtype, device=self.device)
 
   def float(self) -> Tensor:
