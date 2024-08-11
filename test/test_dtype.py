@@ -63,7 +63,7 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not cls.DTYPE or not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
-    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 8)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
@@ -103,13 +103,11 @@ class TestDType(unittest.TestCase):
      get_available_cast_dtypes(self.DTYPE)
     ))
   def test_shape_change_bitcast(self):
-    from tinygrad.lazy import view_supported_devices
-    if Device.DEFAULT not in view_supported_devices: raise unittest.SkipTest("no shape changing bitcast for devices without view support")
     if Device.DEFAULT == "WEBGL": raise unittest.SkipTest("no bitcast in WebGL GLSL")
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
     list(map(
       lambda dtype:
-        _test_bitcast(Tensor.arange(8, dtype=self.DTYPE), dtype) if dtype.itemsize != self.DTYPE.itemsize and dtype != dtypes.bool else None,
+        _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype.itemsize != self.DTYPE.itemsize and dtype != dtypes.bool else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
 
@@ -253,8 +251,6 @@ class TestUint8DType(TestDType):
 class TestBitCast(unittest.TestCase):
   def test_bitcast_runtime_errors(self):
     with self.assertRaises(RuntimeError):
-      # no shape changing bitcast for devices without view support
-      Tensor([0,1], dtype=dtypes.float32, device="PYTHON").bitcast(dtypes.uint8)
       # bitcasting non-contiguous tensor is not supported
       Tensor.empty((4,), dtype=dtypes.float32).reshape(2,2).transpose().bitcast(dtypes.uint8)
       # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
