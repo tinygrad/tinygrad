@@ -76,7 +76,7 @@ class QcomDevice(HCQCompiled):
   signals_page: Any = None
   signals_pool: List[Any] = []
   gpu_id: int = 0
-  gpu_stack: HCQBuffer = None
+  gpu_stack: Any = None
 
   def __init__(self, device:str=""):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
@@ -310,7 +310,7 @@ class QcomProgram(HCQProgram):
     super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=self.buffs_info[0] if len(self.buffs_info) else 0)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu)
+    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True))
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     if len(bufs) + len(vals) != len(self.buffs_info): raise RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
