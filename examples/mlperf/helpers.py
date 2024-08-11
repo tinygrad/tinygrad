@@ -1,5 +1,6 @@
 from collections import OrderedDict
 import unicodedata
+from typing import Optional
 import numpy as np
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor, dtypes
@@ -207,7 +208,7 @@ def get_mlperf_bert_config():
     "vocab_size": 30522
   }
 
-def get_mlperf_bert_model(checkpoint_path:str=""):
+def get_mlperf_bert_model(checkpoint_path:Optional[str]=None):
   from extra.models import bert
   from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert
 
@@ -220,8 +221,7 @@ def get_mlperf_bert_model(checkpoint_path:str=""):
   if getenv("DISABLE_DROPOUT", 0):
     config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
   model = BertForPretraining(**config)
-  if checkpoint_path: model.load_from_pretrained(checkpoint_path)
-  return model
+  return model.load_from_pretrained(checkpoint_path) if checkpoint_path else model
 
 def get_data_bert(GPUS:list[str], it):
   data: dict[str, Tensor] = next(it)
