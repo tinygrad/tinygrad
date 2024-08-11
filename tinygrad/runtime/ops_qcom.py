@@ -1,7 +1,6 @@
 import os, time, math, ctypes, fcntl, functools, mmap, struct, array, decimal
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast
-
 from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, hcq_command
 import tinygrad.runtime.autogen.kgsl as kgsl
 import tinygrad.runtime.autogen.adreno as adreno
@@ -137,11 +136,12 @@ class QcomDevice(HCQCompiled):
       va_addr = libc.mmap(va_addr, va_len := (va_len or alloc.mmapsize), mmap.PROT_READ|mmap.PROT_WRITE,
                           mmap.MAP_SHARED | (MAP_FIXED if va_addr is not None else 0), self.fd, alloc.id * 0x1000)
 
-    return SimpleNamespace(va_addr=va_addr, size=va_len, info=alloc)
+    return SimpleNamespace(va_addr=va_addr, size=va_len, mapped=map_to_cpu or (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP), info=alloc)
 
-  def _gpu_free(self, opaque):
-    free = kgsl.struct_kgsl_gpuobj_free(id=opaque.info.id)
+  def _gpu_free(self, mem):
+    free = kgsl.struct_kgsl_gpuobj_free(id=mem.info.id)
     self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_FREE, free)
+    if mem.mapped: libc.munmap(mem.va_addr, mem.size)
 
   def _alloc_cmd_buf(self, sz: int):
     self.cmd_buf_ptr = (cur_ptr:=self.cmd_buf_ptr if self.cmd_buf_ptr + sz < self.cmd_buf.size else 0) + sz
