@@ -450,6 +450,45 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
+def merge_gates(root:UOp) -> Optional[UOp]:
+    @functools.lru_cache(None)
+    def find_gate(x:UOp) -> Optional[UOp]:
+      # if x.op is UOps.IF:
+      #   return x
+      if x.op is UOps.RANGE:
+        return x
+      return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
+
+    if len(root.src) == 4 and root.src[-1].op is UOps.IF and root.src[-1].src[-1] is not root.src[2]:
+      if_gate = root.src[-1]
+      # if root.src[2].op is UOps.PHI:
+      non_if_gate = find_gate(root.src[2])
+      if non_if_gate is not None:
+        if_gate = UOp(UOps.IF, None, (if_gate.src[0],) + (root.src[2],), if_gate.arg)
+        return UOp(UOps.STORE, root.dtype, root.src[:-1] + (if_gate,), root.arg)
+      # for y in root.src:
+      #     if non_if_gate in if_gate.src: return None
+      #     if_gate = UOp(UOps.IF, None, (if_gate.src[0],) + (non_if_gate,), if_gate.arg)
+
+    return None
+
+    # for x in root.src:
+    #   if x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF:
+    #     if_gate = x.src[-1]
+    #     store_gates = []
+    #     non_if_gates = []
+    #     for y in x.src:
+    #       non_if_gate = find_gate(y)
+    #       if non_if_gate is not None:
+    #         if_gate = UOp(UOps.IF, None, (if_gate.src[0], non_if_gate), if_gate.arg)
+    #       # non_if_gates.append(y)
+    #     # x.src[-1] = if_gate
+    #     x.src = x.src[:-1] + (if_gate,)
+    # # gate = find_gate(sink)
+    # # if gate is None: return None
+    # return None
+    #
+    #
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
   # no ALU on vectorized dtypes
@@ -458,6 +497,7 @@ reducer = PatternMatcher([
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
+  (NOp(UOps.STORE, name="root"), merge_gates),
 ])
 
 no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.pyint, name="x"),
