@@ -44,11 +44,11 @@ class BertForPretraining:
     """Default is BERT-large"""
     self.bert = Bert(hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
     self.cls = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
-  
+
   def __call__(self, input_ids:Tensor, attention_mask:Tensor, masked_lm_positions:Tensor, token_type_ids:Tensor):
     output = self.bert(input_ids, attention_mask, token_type_ids)
     return self.cls(output, masked_lm_positions)
-  
+
   def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
     # Reference has residual on denominator: https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/run_pretraining.py#L315
     def sparse_categorical_crossentropy(predictions:Tensor, labels:Tensor, ignore_index=-1):
@@ -60,7 +60,7 @@ class BertForPretraining:
     masked_lm_loss = sparse_categorical_crossentropy(prediction_logits, masked_lm_ids, ignore_index=masked_lm_weights)
     next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
-  
+
   def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
 
     valid = masked_lm_ids != 0
@@ -73,7 +73,7 @@ class BertForPretraining:
     next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
 
     return masked_lm_accuracy.sum() / valid.sum(), seq_relationship_accuracy.mean(), masked_lm_loss, next_sentence_loss
-  
+
   def load_from_pretrained(self, tf_weight_path:str=Path(__file__).parent.parent / "datasets" / "wiki"):
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' # Mute tf flag info
     # load from tensorflow
@@ -148,7 +148,7 @@ class BertPredictionHeadTransform:
     self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
 
   def __call__(self, hidden_states:Tensor):
-   return self.LayerNorm(gelu(self.dense(hidden_states)))
+    return self.LayerNorm(gelu(self.dense(hidden_states)))
 
 class BertPooler:
   def __init__(self, hidden_size:int):

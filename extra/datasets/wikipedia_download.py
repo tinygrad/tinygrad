@@ -7,7 +7,7 @@ import gdown
 from tqdm import tqdm
 from tinygrad.helpers import getenv
 
-def gdrive_download(url:str, path:str): 
+def gdrive_download(url:str, path:str):
   if not os.path.exists(path): gdown.download(url, path)
 
 def wikipedia_uncompress_and_extract(file:str, path:str, small:bool=False):
@@ -47,8 +47,8 @@ def download_wikipedia(path:str):
     gdrive_download("https://drive.google.com/uc?id=1tmMgLwoBvbEJEHXh77sqrXYw5RpqT8R_", os.path.join(path, "bert_reference_results_text_md5.txt"))
     gdrive_download("https://drive.google.com/uc?id=14xV2OUGSQDG_yDBrmbSdcDC-QGeqpfs_", os.path.join(path, "results_text.tar.gz"))
     wikipedia_uncompress_and_extract(os.path.join(path, "results_text.tar.gz"), path)
-    if getenv("VERIFY_CHECKSUM", 0): 
+    if getenv("VERIFY_CHECKSUM", 0):
       verify_checksum(os.path.join(path, "results4"), os.path.join(path, "bert_reference_results_text_md5.txt"))
 
-if __name__ == "__main__": 
+if __name__ == "__main__":
   download_wikipedia(getenv("BASEDIR", os.path.join(Path(__file__).parent / "wiki")))

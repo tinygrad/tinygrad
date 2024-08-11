@@ -22,6 +22,8 @@ class CStyleLanguage(Renderer):
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
   type_map: Dict[DType, str] = {}
+  infinity: str = "INFINITY"
+  nan: str = "NAN"
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x,dtype: f"(!{x})" if dtype == dtypes.bool else f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
@@ -45,13 +47,13 @@ class CStyleLanguage(Renderer):
 
   # returns a str expression of the const with the given type
   def render_const(self, x:ConstType, dtype:DType) -> str:
-    if math.isnan(x): val = "NAN"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    elif dtype.scalar() == dtypes.bool: val = "1" if x else "0"
-    elif dtype.scalar() == dtypes.float: val = f"{x}f"
-    elif dtype.scalar() == dtypes.uint64: val = f"{x}ULL"
+    assert dtype.count == 1, f"consts should be scalar, got {dtype}"
+    if math.isnan(x): val = self.nan
+    elif math.isinf(x): val = ("-" if x < 0 else "") + self.infinity
+    elif dtype == dtypes.bool: val = "1" if x else "0"
+    elif dtype == dtypes.float: val = f"{x}f"
+    elif dtype == dtypes.uint64: val = f"{x}ULL"
     else: val = str(x)
-    if dtype.count > 1: return self.render_vectorize([val] * dtype.count, dtype)
     return (self.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
@@ -195,11 +197,15 @@ class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
   has_local = False
   global_max = None
+  infinity = "__builtin_inff()"
+  nan = '__builtin_nanf("")'
 
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+  code_for_op = {**CStyleLanguage().code_for_op,
+                 UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
+                 BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = [_make_clang_dtype(self, dtype) for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
