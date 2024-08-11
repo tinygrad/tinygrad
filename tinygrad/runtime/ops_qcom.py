@@ -82,7 +82,7 @@ class QcomDevice(HCQCompiled):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
     QcomDevice.signals_page = self._gpu_alloc(16 * 65536, flags=0xC0A00, map_to_cpu=True, uncached=True)
     QcomDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
-    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, 0xC0A00, map_to_cpu=True), 0
+    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0
     QcomDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     assert(QcomDevice.gpu_id < 700)
     QcomDevice.gpu_stack = self._gpu_alloc(0x1000000, kgsl.KGSL_MEMTYPE_CL_KERNEL_STACK << kgsl.KGSL_MEMTYPE_SHIFT)
@@ -99,7 +99,9 @@ class QcomDevice(HCQCompiled):
 
   def _ctx_create(self):
     cr = kgsl.struct_kgsl_drawctxt_create(flags=(kgsl.KGSL_CONTEXT_TYPE_CL << kgsl.KGSL_CONTEXT_TYPE_SHIFT) | kgsl.KGSL_CONTEXT_PREAMBLE
-                                                 | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE)
+                                                | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE
+                                                | (kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN << kgsl.KGSL_CONTEXT_PREEMPT_STYLE_SHIFT)
+                                                | (8 << kgsl.KGSL_CONTEXT_PRIORITY_SHIFT))
     self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
     self.context_id = cr.drawctxt_id
     return self.context_id
@@ -199,8 +201,8 @@ class QcomComputeQueue(HWComputeQueue):
     ctypes.memmove(hw_page_addr, mv_address(memoryview(cmdbytes)), len(cmdbytes) * 4)
 
     self.obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(cmdbytes) * 4, flags=0x1)
-    self.submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(self.obj), cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object),
-                                                   numcmds=1, context_id=device.ctx)
+    self.submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(self.obj), numcmds=1, context_id=device.ctx,
+                                                   cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
     # From now on, the queue is on the device for faster submission.
     self.q = to_mv(hw_page_addr, len(self.q) * 4).cast("I") # type: ignore
 
@@ -213,8 +215,8 @@ class QcomComputeQueue(HWComputeQueue):
     ctypes.memmove(hw_page_addr, mv_address(memoryview(cmdbytes)), len(cmdbytes) * 4)
 
     obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(cmdbytes) * 4, flags=0x1)
-    submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object),
-                                              numcmds=1, context_id=device.ctx)
+    submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=device.ctx,
+                                              cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
     device._ioctl(kgsl.IOCTL_KGSL_GPU_COMMAND, submit_req)
 
   @hcq_command
@@ -230,7 +232,6 @@ class QcomComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, adreno.A6XX_SP_PERFCTR_ENABLE_CS)
     self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, adreno.ISAMMODE_CL | (1 << 3)) # ISAMMODE|UNK3
     self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
-    self.reg(adreno.REG_A6XX_SP_CHICKEN_BITS, 0x20)
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_ENABLED)
     self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, 0)
 
@@ -272,7 +273,6 @@ class QcomComputeQueue(HWComputeQueue):
             *data64_le(prg.lib_gpu.va_addr))
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.image_size // 4)
     self.cmd(adreno.CP_RUN_OPENCL, 0)
-    self.cmd(adreno.CP_WAIT_FOR_IDLE)
 
   def _update_exec(self, cmd_idx, global_size, local_size):
     if global_size is not None:
@@ -303,7 +303,8 @@ class QcomProgram(HCQProgram):
     # check if buffers are contigious for hcq
     for i in range(1, len(self.buffs_info)): assert(self.buffs_info[i] - self.buffs_info[i-1] == 0x10)
 
-    self.lib_gpu = self.device._gpu_alloc(len(image) + 0x20000, 0x00C0A00, map_to_cpu=True) # reserve some space after for gpu to use
+    # reserve some space after for gpu to use
+    self.lib_gpu = self.device._gpu_alloc(len(image) + 0x20000, kgsl.KGSL_MEMTYPE_CL << kgsl.KGSL_MEMTYPE_SHIFT, map_to_cpu=True)
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(memoryview(image)), self.image_size)
 
     super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=self.buffs_info[0] if len(self.buffs_info) else 0)
