@@ -3064,18 +3064,18 @@ class Tensor:
     if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
     if (dt:=to_dtype(dtype)).itemsize != self.dtype.itemsize:
       if not all_int(self.shape): raise RuntimeError("shape changing bitcast with symbolic shape isn't supported yet")
-      if not (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
+      if not (self.shape[-1]*self.dtype.itemsize) % dt.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
       if not self.lazydata.st.consecutive: raise RuntimeError("must be contiguous for shape changing bitcast")
       if not self.lazydata.can_view() and not self.lazydata.is_unrealized_const(): return self._view_dtype(dt)
     return F.Cast.apply(self, dtype=dt, bitcast=True) if self.dtype != dt else self
 
   def _view_dtype(self, dtype:DType) -> Tensor:
     # only called when MetaOps.VIEW isn't available for shape changing bitcast
-    self.realize()
     new_shape = self.shape[:-1] + ((self.shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
-    b = LazyBuffer.metaop(MetaOps.EMPTY, new_shape, dtype, self.device)
-    b.buffer.allocate(self.lazydata.base.realized.as_buffer(allow_zero_copy=True))
-    return Tensor(b, dtype=dtype, device=self.device)
+    lb = LazyBuffer.metaop(MetaOps.EMPTY, new_shape, dtype, self.device)
+    buf = cast(Buffer, cast(LazyBuffer, self.realize().lazydata).base.realized)
+    lb.buffer.allocate(buf.as_buffer(allow_zero_copy=True))
+    return Tensor(lb, dtype=dtype, device=self.device)
 
   def float(self) -> Tensor:
     """
