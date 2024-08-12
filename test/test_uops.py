@@ -11,7 +11,7 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.uops import UOps, NOp, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
-from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
+from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops_list, print_uops=False):
   uops = UOpGraph(uops_list)
@@ -378,7 +378,7 @@ class TestUOpCompare(unittest.TestCase):
     self.assertEqual(a, b)
     self.assertLess(time.perf_counter()-st, 1e-2)
 
-class TestUOpStr(TestEqUOps):
+class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
     for _ in range(20): a = a + a
@@ -390,7 +390,7 @@ class TestUOpStr(TestEqUOps):
     # nice big complicated uop
     with Context(NOOPT=1):
       sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
-    self.assert_equiv_uops(sink, eval(str(sink)))
+    self.assertEqual(sink, eval(str(sink)))
 
   def test_nop_str(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
