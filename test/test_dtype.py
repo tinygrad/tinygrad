@@ -241,29 +241,6 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
-  # def simple(self):
-  #   import tempfile, pathlib
-  #   _, tmp = tempfile.mkstemp()
-  #   a = Tensor(np.ones((3,40), np.float32), dtype=dtypes.float32, device=f"disk:{tmp}").bitcast(dtypes.int8).realize()
-  #   b = np.ones((3,40), np.float32).view(np.int8)
-  #   np.testing.assert_equal(a.numpy(), b)
-  #   pathlib.Path(tmp).unlink()
-  # def simple1(self):
-  #   a = Tensor(np.ones((3,40), np.float32), dtype=dtypes.float32).bitcast(dtypes.int8).realize()
-  #   b = np.ones((3,40), np.float32).view(np.int8)
-  #   np.testing.assert_equal(a.numpy(), b)
-  # def simple2(self):
-  #   a = Tensor(np.ones((3,40), np.float32), dtype=dtypes.float32).bitcast(dtypes.int16).realize()
-  #   b = np.ones((3,40), np.float32).view(np.int16)
-  #   np.testing.assert_equal(a.numpy(), b)
-  # def simple3(self):
-  #   from tinygrad.ops import MetaOps
-  #   a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous().realize()
-  #   # assert isinstance(a.lazydata, LazyBuffer)
-  #   self.assertIs(a.lazydata.base.op, MetaOps.VIEW)
-  #   # a = Tensor.ones((3,40), dtype=dtypes.float32).bitcast(dtypes.int16).realize()
-  #   # b = np.ones((3,40), np.float32).view(np.int16)
-  #   # np.testing.assert_equal(a.numpy(), b)
   def test_fp32_to_uint8(self):
     _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8)
     _test_bitcast(Tensor.randn((3,40), dtype=dtypes.float32), dtypes.uint8)
