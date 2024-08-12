@@ -3000,17 +3000,17 @@ class Tensor:
 
   def is_floating_point(self) -> bool:
     """
-    Returns `True` if the tensor contains floating point types, i.e. is one of `dtype.half`, `dtype.float`,
-    `dtype.double`, `dtype.default_float`, `dtype.float16`, `dtype.float32`, `dtype.float64`, `dtype.bfloat16`.
+    Returns `True` if the tensor contains floating point types, i.e. is one of `dtype.float64`, `dtype.float32`,
+    `dtype.float16`, `dtype.bfloat16`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.float)
+    t = Tensor([8, 9], dtype=dtypes.float32)
     print(t.is_floating_point())
     ```
     """
     return dtypes.is_float(self.dtype)
 
-  def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]:
+  def size(self, dim:Optional[int]=None) -> Union[sint, Tuple[sint, ...]]:
     """
     Return the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
 
