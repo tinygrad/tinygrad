@@ -98,7 +98,7 @@ class TextDecoder:
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, is_decoder_block=True, max_self_attn_cache_len=self.max_self_attn_cache_len) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
-    self.getjitted = collections.defaultdict((lambda: ([TinyJit(block.__call__) for block in self.blocks], TinyJit(self.output_tok))))
+    self.getjitted = collections.defaultdict((lambda: print(colored("get new jit", "blue")) or ([TinyJit(block.__call__) for block in self.blocks], TinyJit(self.output_tok))))
 
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
 
@@ -250,35 +250,23 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
   Returns Iterator[List[str]] if not use_timestampse else Iterator[List[Tuple[str, float, float]]]
   """
 
-  res = []
-  for wave in waveforms:
-    toks = []
-    for new_tokens in inference(model, enc, [wave],ctx=None, use_timestamps=use_timestamps):
-      toks.extend(new_tokens[0,:-1])
-      if len(toks) >= model.decoder.max_tokens_to_sample: break
-    res.append(toks)
-  yield [parse_timestamps(toks, enc, 0) if use_timestamps else enc.decode(toks) for toks in res]
-  ctx = [toks[-model.decoder.max_tokens_to_sample:] for toks in res]
-  for toks in inference(model, enc, waveforms, ctx=ctx, use_timestamps=use_timestamps):
-    yield [parse_timestamps(toks, enc, i*30) if use_timestamps else enc.decode(toks) for i,toks in enumerate(toks)]
-
-
-def inference(model:Whisper, enc, waveforms:List[np.ndarray], ctx=None, use_timestamps=False):
-
   start_tokens = ["<|startoftranscript|>", *(["<|en|>", "<|transcribe|>"] if model.is_multilingual else []), *(["<|notimestamps|>"] if not use_timestamps else [])]
   start_tokens = [enc._special_tokens[x] for x in start_tokens]
 
-  def inferloop(ctx):
+  def inferloop(ctx, encoded_audio):
+
+
     print(colored(f'prompt: {enc.decode(ctx[0])}', 'cyan'))
     pos, prompt = 0, ctx
-    for _ in range(nsample-1):
+    for i in range(nsample*2-2):
       next_tokens = model.decoder(Tensor(prompt), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32)
       next_tokens[ctx[:, -1] == eot] = eot
       prompt = next_tokens.reshape(-1, 1)
       ctx = np.concatenate((ctx, prompt), axis=1)
       pos = ctx.shape[-1] - 1
       if (next_tokens == eot).all(): break
-    print(colored(f'output: {enc.decode(ctx[0])}', 'magenta'))
+      if i == nsample-2: ctx = np.array([start_tokens+gettexttoks(cs) for cs in ctx])
+
     return ctx
 
   def special(des): return enc._special_tokens[f'<|{des}|>']
@@ -287,17 +275,17 @@ def inference(model:Whisper, enc, waveforms:List[np.ndarray], ctx=None, use_time
   eot = special("endoftext")
   nsample = model.decoder.max_tokens_to_sample
 
-  for chunks in zip(*waveforms, strict=True):
-    ctx = np.tile(start_tokens, (len(waveforms),1)) if ctx is None else np.array([[special('startofprev')]+gettexttoks(cs)+start_tokens for cs in ctx])
-    log_spec = prep_audio(chunks, model.n_mels)[:,:,FRATE:-FRATE].contiguous()
-    encoded_audio = model.encoder.encode(log_spec)
-    ctx = inferloop(ctx)
+  ctx = np.tile(start_tokens, (len(waveforms),1)) 
+  for frame, chunks in enumerate(zip(*waveforms, strict=True)):
 
-    # if not (ctx[:, -1] == eot).all():
-    #   if DEBUG>=0: print(colored("REFRAME", "red"))
-    #   ctx = inferloop(np.array([start_tokens+gettexttoks(cs) for cs in ctx]))
+    encoded_audio = model.encoder.encode(prep_audio(chunks, model.n_mels)[:,:,FRATE:-FRATE].contiguous())
 
-    yield ctx[:, np.where(ctx[0] == start_tokens[-1])[0][0]+1:]
+    if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
+    else: ctx = [inferloop((np.array([c]*len(ctx))), encoded_audio)[i] for i,c in enumerate(ctx)]
+
+    res = [c[np.where(c == start_tokens[-1])[0][0]+1:] for c in ctx]
+    yield [parse_timestamps(arr[:np.where(arr == eot)[0][0]], enc, frame*30.) for arr in res]
+    ctx = [[special('startofprev')]+gettexttoks(cs)+start_tokens for cs in ctx]
 
 
 CHUNK = 1600
@@ -317,33 +305,22 @@ def listener(q):
 if __name__ == "__main__":
   model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=getenv("BATCH", 1))
   st = time.perf_counter()
-  dur, frame = [0], [0]
+  # dur, frame = [0], [0]
 
   def timestring(s): return f'{int(s//60//60)}:{int(s//60%60)}:{int(s%60)}'
 
   if len(sys.argv) > 1:
 
-    # bs = getenv("BATCH", 1)
-    # filedur = int(librosa.get_duration(path=sys.argv[1])+1)
-    # nsegments = filedur // SEGMENT_SECONDS
-    # nsegments = nsegments + bs - (nsegments % bs)
-    # offsets = range(0, nsegments * SEGMENT_SECONDS, nsegments // bs * SEGMENT_SECONDS)
-
-    offsets = [3600*3+60*57]
-    # offsets= [0]
+    filename = fetch(sys.argv[1]) if sys.argv[1].startswith("http") else sys.argv[1]
+    waves = [load_file_waveform(filename, 0), load_file_waveform(filename, 60)]
 
 
-    try:
-      # for lines in transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1], offset, offset+(nsegments//bs)*SEGMENT_SECONDS) for offset in offsets], use_timestamps=getenv("TIMESTAMPS", 0)):
-      for lines in transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1], offsets[0])], use_timestamps=True):
-        for i,line in enumerate(lines):
-          if isinstance(line, str):print(colored(line, 'green' if i % 2 == 0 else 'blue'))
-          else:
-            for text, start, end in line: print(f'[{timestring(start+offsets[i])} - {timestring(end+offsets[i])}] {text}')
-        dur[0] = time.perf_counter() - st
-        frame[0] += 1
-    except KeyboardInterrupt:pass
-    print(f"inference duration: {dur[0]:.2f}s, {frame[0]*30/dur[0]:.2f}x realtime")
+    for frame, lines in enumerate(transcribe_waveform(model, enc, waves, use_timestamps=True)):
+      for i,line in enumerate(lines):
+        if isinstance(line, str):print(colored(line, 'green' if i % 2 == 0 else 'blue'))
+        else:
+          for text, start, end in line: print(f'[{timestring(start)} - {timestring(end)}] {text}')
+      print(f"inference duration: {(dur:= time.perf_counter()- st):.2f}s, {frame*30/dur:.2f}x realtime")
 
   else:
     # online
