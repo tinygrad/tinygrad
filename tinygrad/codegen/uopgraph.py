@@ -452,12 +452,13 @@ def merge_gates(sink:UOp) -> Optional[UOp]:
   def find_gate(x:UOp) -> Optional[UOp]:
     if x.op is UOps.RANGE: return x
     return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-  if_src_to_if_op, new_sink_srcs = {}, []
+  if_src_to_if_op: Dict[UOp, UOp] = {}
   for x in sink.src:
     if x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF and find_gate(x.src[2]) and x.src[2] not in x.src[-1].src:
       if_to_update = if_src_to_if_op.get(x.src[-1].src[0], x.src[-1])
       if_src_to_if_op[x.src[-1].src[0]] = UOp(UOps.IF, None, (if_to_update.src[0],) + if_to_update.src[1:] + (x.src[2],), if_to_update.arg)
   if len(if_src_to_if_op) == 0: return None
+  new_sink_srcs = []
   for x in sink.src:
     if x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF:
       new_sink_srcs.append(UOp(UOps.STORE, x.dtype, x.src[:-1] + (if_src_to_if_op[x.src[-1].src[0]],), x.arg))
