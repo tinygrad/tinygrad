@@ -558,17 +558,17 @@ class UOpGraph:
     # scope children impact the toposort and END* insertion
     scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
     range_phi = {r:[p for p in scope_children[r] if p.op is UOps.PHI] for r in scope_children if r.op is UOps.RANGE}
-    range_srcs = {p:range_srcs[p] for p in range_srcs if p.op is UOps.PHI}
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
       priority = 0
-      # ensure ranges fall in the proper order
+      # prefer ranges that depend on the least number of independent ranges
       if u.op is UOps.RANGE and u.arg[1]:
         priority += u.arg[0]
         for p in range_phi[u]:
           priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
-      else: # prefer uops that are loop children
+      # prefer uops that are loop children
+      else:
         priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
       heapq.heappush(queue, (priority, u))
 
