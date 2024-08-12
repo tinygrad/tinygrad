@@ -50,7 +50,7 @@ class UOp:
     return context.setdefault(key, all(a.cached_eq(b, context) for a,b in zip(self.src, x.src)))
   def __eq__(self, x): return self.cached_eq(x, context={})
   @functools.cached_property
-  def hash(self): return hash((self.op, self.src, self.arg))
+  def hash(self): return hash((self.op, self.dtype, self.src, self.arg))
   def __hash__(self): return self.hash
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
   # *** uop syntactic sugar
