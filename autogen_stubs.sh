@@ -217,13 +217,16 @@ generate_amd() {
 
   sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/nvd.h >> $BASE/amd_gpu.py # comments
   sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h >> $BASE/amd_gpu.py # comments
+  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/gc_11_0_0_offset.h >> $BASE/amd_gpu.py # comments
+  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/gc_10_3_0_offset.h >> $BASE/amd_gpu.py # comments
+  sed -i 's/^\/\//#/' $BASE/amd_gpu.py # // -> #
   sed -i 's/#\s*define\s*\([^ \t]*\)(\([^)]*\))\s*\(.*\)/def \1(\2): return \3/' $BASE/amd_gpu.py # #define name(x) (smth) -> def name(x): return (smth)
   sed -i '/#\s*define\s\+\([^ \t]\+\)\s\+\([^ ]\+\)/s//\1 = \2/' $BASE/amd_gpu.py # #define name val -> name = val
 
-  sed -e '/^reg/s/^\(reg[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
-    -e '/^ix/s/^\(ix[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
-    -e '/^[ \t]/d' \
-    extra/hip_gpu_driver/gc_11_0_0.reg >> $BASE/amd_gpu.py
+  # sed -e '/^reg/s/^\(reg[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
+  #   -e '/^ix/s/^\(ix[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
+  #   -e '/^[ \t]/d' \
+  #   extra/hip_gpu_driver/gc_11_0_0.reg >> $BASE/amd_gpu.py
 
   fixup $BASE/amd_gpu.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/amd_gpu.py
