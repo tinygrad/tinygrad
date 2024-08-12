@@ -105,7 +105,7 @@ class TextDecoder:
     seqlen = x.shape[-1]
     x = self.token_embedding(x) + self.positional_embedding[pos:pos+seqlen]
 
-    jitblocks, jitoutput = self.getjitted[seqlen]
+    jitblocks, jitoutput = self.getjitted[x.shape]
     for block in jitblocks:
       if pos == 0: x = block(x, xa=encoded_audio, mask=self.mask, len=0)  # pass xa for cross attn kv caching
       else: x = block(x, mask=self.mask, len=Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos))
@@ -249,10 +249,10 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
   Returns Iterator[List[str]] if not use_timestampse else Iterator[List[Tuple[str, float, float]]]
   """
 
-  def inferloop(curr_segment_tokens):
+  def inferloop(curr_segment_tokens, audio:Tensor):
     pos, prompt = 0, curr_segment_tokens
     for _ in range(nsample-1):
-      next_tokens = model.decoder(Tensor(prompt), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32)
+      next_tokens = model.decoder(Tensor(prompt), pos, audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32)
       next_tokens[curr_segment_tokens[:, -1] == eot] = eot
       prompt = next_tokens.reshape(-1, 1)
       curr_segment_tokens = np.concatenate((curr_segment_tokens, prompt), axis=1)
@@ -274,7 +274,7 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
     log_spec = prep_audio(chunks, model.batch_size, model.n_mels)
     if curr_frame > 0: log_spec = log_spec[:,:,-FRAMES_PER_SECOND-FRAMES_PER_SEGMENT:]
     encoded_audio = model.encoder.encode(log_spec[:,:,:FRAMES_PER_SEGMENT].contiguous())
-    curr_segment_tokens = inferloop(curr_segment_tokens)
+    curr_segment_tokens = inferloop(curr_segment_tokens, encoded_audio)
 
     if not (curr_segment_tokens[:, -1] == eot).all():
       if DEBUG>=0: print(colored("REFRAME", "red"))
