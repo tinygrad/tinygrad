@@ -68,7 +68,7 @@ class Buffer:
       assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
       self._base = base
-    if preallocate: self.allocate()
+    if preallocate: self.allocate(opaque)
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
@@ -79,12 +79,13 @@ class Buffer:
   def allocate(self, opaque=None) -> Buffer:
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
-    if self._base is not None:
+    if opaque is not None: self._buf: Any = opaque
+    elif self._base is not None:
       self._base.ensure_allocated()
       assert hasattr(self.allocator, "offset"), "offset function required for view"
       self._buf: Any = self.allocator.offset(self.base._buf, self.nbytes, self.offset)
     else:
-      self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
+      self._buf = self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     return self
   def __reduce__(self):
@@ -126,6 +127,7 @@ class Buffer:
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
+    if self.nbytes==size*dtype.itemsize: return Buffer(self.device, size, dtype, base=self, opaque=self.ensure_allocated()._buf, preallocate=True)
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
 

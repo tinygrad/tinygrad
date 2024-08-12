@@ -241,9 +241,52 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
-  def test_shape_change_bitcast(self):
-    with self.assertRaises(RuntimeError):
-      _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+  # def simple(self):
+  #   import tempfile, pathlib
+  #   _, tmp = tempfile.mkstemp()
+  #   a = Tensor(np.ones((3,40), np.float32), dtype=dtypes.float32, device=f"disk:{tmp}").bitcast(dtypes.int8).realize()
+  #   b = np.ones((3,40), np.float32).view(np.int8)
+  #   np.testing.assert_equal(a.numpy(), b)
+  #   pathlib.Path(tmp).unlink()
+  # def simple1(self):
+  #   a = Tensor(np.ones((3,40), np.float32), dtype=dtypes.float32).bitcast(dtypes.int8).realize()
+  #   b = np.ones((3,40), np.float32).view(np.int8)
+  #   np.testing.assert_equal(a.numpy(), b)
+  # def simple2(self):
+  #   a = Tensor(np.ones((3,40), np.float32), dtype=dtypes.float32).bitcast(dtypes.int16).realize()
+  #   b = np.ones((3,40), np.float32).view(np.int16)
+  #   np.testing.assert_equal(a.numpy(), b)
+  # def simple3(self):
+  #   from tinygrad.ops import MetaOps
+  #   a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous().realize()
+  #   # assert isinstance(a.lazydata, LazyBuffer)
+  #   self.assertIs(a.lazydata.base.op, MetaOps.VIEW)
+  #   # a = Tensor.ones((3,40), dtype=dtypes.float32).bitcast(dtypes.int16).realize()
+  #   # b = np.ones((3,40), np.float32).view(np.int16)
+  #   # np.testing.assert_equal(a.numpy(), b)
+  def test_fp32_to_uint8(self):
+    _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8)
+    _test_bitcast(Tensor.randn((3,40), dtype=dtypes.float32), dtypes.uint8)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f'Half not supported for {Device.DEFAULT}')
+  def test_fp16_to_int32(self):
+    _test_bitcast(Tensor([100000, 10], dtype=dtypes.float16), dtypes.int32)
+    _test_bitcast(Tensor.randn((3,40), dtype=dtypes.float16), dtypes.int32)
+
+  def test_int16_to_uint32(self):
+    _test_bitcast(Tensor([100000, 10], dtype=dtypes.int16), dtypes.uint32)
+    _test_bitcast(Tensor.randn((3,40), dtype=dtypes.int16), dtypes.uint32)
+
+  def test_int32_to_float32_hard(self):
+    tens_np = np.random.randint(-1000, 1000, size=(3,40), dtype=np.int32)
+    tens = Tensor(tens_np, dtype=dtypes.int32)
+    pre_tens_np = (tens_np * 10) + 1
+    pre_tens = (tens * 10) + 1
+    bitcast_tens_np = pre_tens_np.view(np.float32)
+    bitcast_tens = pre_tens.bitcast(dtypes.float32)
+    post_tens_np = (bitcast_tens_np / 4) + 1.23
+    post_tens = (bitcast_tens / 4) + 1.23
+    _test_op(lambda: post_tens, dtypes.float32, post_tens_np)
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
@@ -254,6 +297,10 @@ class TestBitCast(unittest.TestCase):
     a = Tensor.zeros(100, 4, dtype=dtypes.int32).contiguous() + 0x3f800000
     b = a.bitcast(dtypes.float32)
     assert b.numpy()[0,0] == 1.
+
+  def test_bitcast_non_contiguous(self):
+    with self.assertRaises(RuntimeError):
+      _test_bitcast(Tensor.ones((3, 40), dtype=dtypes.int16), dtypes.uint32)
 
 class TestInt16DType(TestDType): DTYPE = dtypes.int16
 
