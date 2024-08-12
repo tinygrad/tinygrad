@@ -1025,7 +1025,7 @@ class TestSchedule(unittest.TestCase):
     b = r.sum(0) * 4
     c = r.sum(1) * 2
     schedule = check_schedule([b, c], 3)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_simple_chase(self):
@@ -1036,7 +1036,7 @@ class TestSchedule(unittest.TestCase):
     c = r.sum(1) + 12
     np_r = (a.numpy() + (a.numpy().sum(0) + 6)).sum(0) * 2
     # schedule = check_schedule([b,c], 3)
-    # assert schedule[0].ast[0].src[0].op is BinaryOps.MUL
+    # self.assertIs(schedule[0].ast[0].src[0].op, BinaryOps.MUL)
     schedule = check_schedule([b,c], 4)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), np_r.sum(0) + 8, atol=1e-4, rtol=1e-4)
@@ -1049,7 +1049,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * d
     schedule = check_schedule([d, e], 3)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_push_permute_chase(self):
@@ -1060,7 +1060,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * (d + a).sum(2)
     schedule = check_schedule([d, e], 3) # make sure it doesn't fuse
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(d.numpy(), (a.numpy().sum(2) + b.numpy()).T * 4, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), (a.numpy().sum(2) + b.numpy()) * (d.numpy() + a.numpy()).sum(2), atol=1e-4, rtol=1e-4)
@@ -1072,7 +1072,7 @@ class TestSchedule(unittest.TestCase):
     r = a.sum(1) + c
     d = r[:4] * b
     schedule = check_schedule(d, 2)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_push_shrink_chase(self):
@@ -1085,7 +1085,7 @@ class TestSchedule(unittest.TestCase):
     out = r[:4] * b + d.sum(1)[:4]
     # schedule = check_schedule(out, 2)
     schedule = check_schedule(out, 3)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(out.numpy(), (a.numpy().sum(1) + c.numpy())[:4] * b.numpy() + d.numpy().sum(1)[:4], atol=1e-4, rtol=1e-4)
 
@@ -1093,7 +1093,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(16, 16)
     b = (a.sum(0) + a.max(1)) + 2
     schedule = check_schedule(b, 2)
-    assert schedule[0].ast.src[0].src[0].op is ReduceOps.MAX
+    self.assertIs(schedule[0].ast.src[0].src[0].op, ReduceOps.MAX)
 
   # multireduce spec
   def test_multireduce_midreduce_nochase(self):
@@ -1102,7 +1102,7 @@ class TestSchedule(unittest.TestCase):
     b = (a.sum(0)+a.max(0) + a.max(1)+a.sum(1)) + 2
     # schedule = check_schedule(b, 2)
     schedule = check_schedule(b, 4)
-    assert schedule[0].ast.src[0].src[0].op is ReduceOps.MAX
+    self.assertIs(schedule[0].ast.src[0].src[0].op, ReduceOps.MAX)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), a.numpy().sum(0)+a.numpy().max(0) + a.numpy().max(1)+a.numpy().sum(1)+2, atol=1e-4, rtol=1e-4)
 
