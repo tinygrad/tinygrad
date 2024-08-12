@@ -2,7 +2,7 @@ import unittest
 from typing import List, cast
 import numpy as np
 from tinygrad.codegen.uops import UOp, UOps
-from tinygrad.device import Buffer, CompileError, Device
+from tinygrad.device import Buffer, Device
 from tinygrad.dtype import PtrDType, DType, dtypes
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, flatten
