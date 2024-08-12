@@ -283,8 +283,7 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
     if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
     else: ctx = [inferloop((np.array([c]*len(ctx))), encoded_audio)[i] for i,c in enumerate(ctx)]
 
-    res = [c[np.where(c == start_tokens[-1])[0][0]+1:] for c in ctx]
-    yield [parse_timestamps(arr[:np.where(arr == eot)[0][0]], enc, frame*30.) for arr in res]
+    yield [arr[np.where(arr == start_tokens[-1])[0][0]+1:np.where(arr == eot)[0][0]] for arr in ctx]
     ctx = [[special('startofprev')]+gettexttoks(cs)+start_tokens for cs in ctx]
 
 
@@ -313,14 +312,16 @@ if __name__ == "__main__":
 
     filename = fetch(sys.argv[1]) if sys.argv[1].startswith("http") else sys.argv[1]
     waves = [load_file_waveform(filename, 0), load_file_waveform(filename, 60)]
+    use_timestamps = getenv("TIMESTAMPS", False)
 
-
-    for frame, lines in enumerate(transcribe_waveform(model, enc, waves, use_timestamps=True)):
+    for frame, lines in enumerate(transcribe_waveform(model, enc, waves, use_timestamps=use_timestamps)):
       for i,line in enumerate(lines):
-        if isinstance(line, str):print(colored(line, 'green' if i % 2 == 0 else 'blue'))
-        else:
-          for text, start, end in line: print(f'[{timestring(start)} - {timestring(end)}] {text}')
-      print(f"inference duration: {(dur:= time.perf_counter()- st):.2f}s, {frame*30/dur:.2f}x realtime")
+
+        if use_timestamps:
+          for text, start, end in parse_timestamps(line, enc, frame*30.): print(f'[{timestring(start)} - {timestring(end)}] {text}')
+        else: print(colored(enc.decode(line), 'green' if i % 2 == 0 else 'blue'))
+        print('//')
+      print(f"inference duration: {(dur:= time.perf_counter()- st):.2f}s, {(frame*30+30)/dur:.2f}x realtime")
 
   else:
     # online
