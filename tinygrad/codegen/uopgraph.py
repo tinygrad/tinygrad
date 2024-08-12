@@ -505,9 +505,9 @@ reducer = PatternMatcher([
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
   # NOTE: this works, but fails to group IFs together due to them having different src's now
-  # (NOp(UOps.STORE, name="root"), merge_gates),
+  (NOp(UOps.STORE, name="root"), merge_gates),
   # NOTE: this doesn't quite work, but it should group IFs together ideally. TODO for me tm
-  (NOp(UOps.SINK, name="sink"), merge_gates_sink),
+  # (NOp(UOps.SINK, name="sink"), merge_gates_sink),
 ])
 
 no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.pyint, name="x"),
