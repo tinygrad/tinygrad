@@ -2,7 +2,7 @@
 
 ## Overview
 
-The main aspect of HCQ-compatible runtimes is how they interact with devices. In HCQ, all interactions with devices occur in a hardware-friendly manner using [command queues](#commandqueues). This approach allows commands to be issued directly to devices, bypassing runtime overhead such as HIP or CUDA. Additionally, by using the HCQ API, these runtimes can benefit from various optimizations and features, including [HCQGraph](#hcqgraph) and built-in profiling capabilities.
+The main aspect of HCQ-compatible runtimes is how they interact with devices. In HCQ, all interactions with devices occur in a hardware-friendly manner using [command queues](#command-queues). This approach allows commands to be issued directly to devices, bypassing runtime overhead such as HIP or CUDA. Additionally, by using the HCQ API, these runtimes can benefit from various optimizations and features, including [HCQGraph](#hcqgraph) and built-in profiling capabilities.
 
 ### Command Queues
 
@@ -97,7 +97,7 @@ Each HCQ-compatible device must allocate two signals for global synchronization 
 
 ### HCQ Compatible Allocator
 
-The `HCQAllocator` base class simplifies allocator logic by leveraging [command queues](#commandqueues) abstractions. This class efficiently handles copy and transfer operations, leaving only the alloc and free functions to be implemented by individual backends.
+The `HCQAllocator` base class simplifies allocator logic by leveraging [command queues](#command-queues) abstractions. This class efficiently handles copy and transfer operations, leaving only the alloc and free functions to be implemented by individual backends.
 
 ::: tinygrad.device.HCQAllocator
     options:

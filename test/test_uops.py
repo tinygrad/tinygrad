@@ -102,8 +102,11 @@ class TestUOps(unittest.TestCase):
 
 class TestFloatUOps(TestUOps):
   def test_neg(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a)
+  @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
   def test_exp2(self): self._test_uop_fxn(UnaryOps.EXP2, lambda a: np.exp2(a))
+  @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
   def test_log2(self): self._test_uop_fxn(UnaryOps.LOG2, lambda a: math.log2(a) if a > 0 else float('-inf' if a==0 else 'nan'))
+  @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
   def test_sin(self): self._test_uop_fxn(UnaryOps.SIN, lambda a: math.sin(a))
   def test_recip(self): self._test_uop_fxn(UnaryOps.RECIP, lambda a: 1/a if a != 0 else float('inf'))
   def test_sqrt(self): self._test_uop_fxn(UnaryOps.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))

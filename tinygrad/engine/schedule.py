@@ -1,10 +1,10 @@
-import sys, pickle, atexit
+import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import ARANGE_DIFF, GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, Context, \
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, \
                              GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -89,6 +89,7 @@ def _recursive_lazyop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer,
   if buf.op in ReduceOps:
     # if we are merging the reduce, skip it
     if (buf, st) not in reduce_info:
+      assert buf.srcs[0].base.op is buf.op, f"can't merge reduceop {buf.op} with {buf.srcs[0].base.op}\n{st}"
       return _recursive_lazyop(buf.srcs[0], st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
     st, arg = reduce_info[(buf, st)]
 
@@ -128,9 +129,11 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
       axis = tuple(range(len(input_st.shape)-len(new_rshape), len(input_st.shape)))
     elif top_reduce is not None:
       top_reduce_input_st, top_reduce_axes = reduce_info[top_reduce]
-      if buf.srcs[0] is top_reduce[0] and buf.op is top_reduce[0].op:
+      if buf.srcs[0] is not buf.srcs[0].base and buf.srcs[0].base is top_reduce[0] and buf.op is top_reduce[0].op:
         # merge this reduce with its parent
-        reduce_info[top_reduce] = (top_reduce_input_st, top_reduce_axes+axis)
+        new_st = top_reduce[1]+st
+        top_reduce = (top_reduce[0], new_st.reshape(reduce_st(top_reduce_input_st, new_axis:=axis+top_reduce_axes)))
+        reduce_info[top_reduce] = (top_reduce_input_st, new_axis)
         return None
       # reshape this reduceop based on the top reduce
       input_st = input_st.reshape(tuple(1 if i in top_reduce_axes else s for i,s in enumerate(top_reduce_input_st.shape)))
@@ -367,9 +370,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
 
   if SAVE_SCHEDULE:
     def _save():
-      if ARANGE_DIFF:
-        from test.external.process_replay.diff_schedule import diff_schedule
-        return diff_schedule(SCHEDULES)
       print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
       with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
     if len(SCHEDULES) == 0: atexit.register(_save)
@@ -380,10 +380,11 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
 
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
-  if ARANGE_DIFF:
-    with Context(FUSE_ARANGE=0, SAVE_SCHEDULE=1): _graph_schedule(outs, set())
-    with Context(FUSE_ARANGE=1, SAVE_SCHEDULE=1): graph, in_degree = _graph_schedule(outs, seen)
-  else: graph, in_degree = _graph_schedule(outs, seen)
+  graph, in_degree = _graph_schedule(outs, seen)
+  if getenv("RUN_PROCESS_REPLAY") and getenv("COMPARE_SCHEDULE", 1):
+    # NOTE: process relpay needs PYTHONPATH=., remove this once it just pickles LazyBuffers
+    with contextlib.suppress(Exception): importlib.import_module("test.external.process_replay.diff_schedule").process_replay(outs, graph, in_degree)
+
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
