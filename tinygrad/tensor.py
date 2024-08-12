@@ -3061,8 +3061,18 @@ class Tensor:
     print(t.dtype, t.numpy())
     ```
     """
+    dt = to_dtype(dtype)
     if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
-    return F.Cast.apply(self, dtype=dt, bitcast=True) if self.dtype != (dt:=to_dtype(dtype)) else self
+    if (not isinstance(self.device, str) or not self.device.startswith("DISK")) and dt.itemsize != self.dtype.itemsize:
+      if self.dtype == dtypes.float and dt == dtypes.uint8:
+        tmp = self.bitcast(dtypes.uint32)
+        return Tensor.stack(tmp&0xFF, (tmp>>8)&0xFF, (tmp>>16)&0xFF, (tmp>>24)&0xFF, dim=-1).flatten(-2).cast(dt)
+      if self.dtype == dtypes.uint8 and dt == dtypes.float:
+        if self.shape[-1]%4 != 0: raise RuntimeError("size must be divisible by 4")
+        tmp = self.cast(dtypes.uint32)
+        return Tensor.bitcast(tmp[..., ::4] | (tmp[..., 1::4]<<8) | (tmp[..., 2::4]<<16) | (tmp[..., 3::4]<<24), dt)
+      raise RuntimeError(f"can't bitcast from {self.dtype} to {dt}")
+    return F.Cast.apply(self, dtype=dt, bitcast=True) if self.dtype != dt else self
 
   def float(self) -> Tensor:
     """
