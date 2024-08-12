@@ -294,13 +294,13 @@ class QcomProgram(HCQProgram):
     for i in range(1, len(self.buffs_info)): assert(self.buffs_info[i] - self.buffs_info[i-1] == 0x10)
 
     # reserve some space after for gpu to use
-    self.lib_gpu = self.device._gpu_alloc(len(image) + 0x20000, kgsl.KGSL_MEMTYPE_CL << kgsl.KGSL_MEMTYPE_SHIFT, map_to_cpu=True)
+    self.lib_gpu = self.device.allocator.alloc(len(image) + 0x20000, options=BufferOptions(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(memoryview(image)), self.image_size)
 
     super().__init__(self.device, self.name, kernargs_alloc_size=1024, kernargs_args_offset=self.buffs_info[0] if len(self.buffs_info) else 0)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True))
+    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
 
   def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
     if len(bufs) + len(vals) != len(self.buffs_info): raise RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
