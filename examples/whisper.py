@@ -129,10 +129,11 @@ SEGMENT_SECONDS=30
 SAMPLES_PER_SEGMENT = RATE * SEGMENT_SECONDS # 480000
 N_FFT = 400
 HOP_LENGTH = 160
-FRAMES_PER_SECOND = RATE // HOP_LENGTH # 100
+FRATE = RATE // HOP_LENGTH # 100
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
 def prep_audio(waveforms: List[np.ndarray], batch_size: int, n_mels: int = 80) -> Tensor:
+  batch_size = len(waveforms)
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
@@ -143,10 +144,8 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, n_mels: int = 80) -
     curr_len = len(arr)
     if curr_len == target_len:
       return arr
-    elif curr_len < target_len:
-      return np.pad(arr, (0, target_len - curr_len), 'constant')
-    else:
-      return arr[:target_len]
+    elif curr_len < target_len: return np.pad(arr, (0, target_len - curr_len), 'constant')
+    else: return arr[:target_len]
 
   waveforms = np.array(list(map(lambda w: pad_or_trim(w, SAMPLES_PER_SEGMENT+RATE*2), waveforms)))
   assert waveforms.shape[0] <= batch_size
@@ -219,11 +218,12 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   enc = get_encoding("multilingual" if model.is_multilingual else "gpt2", model.num_languages)
   return model, enc
 
-def load_file_waveform(filename, offset=0, end=0):
+def load_file_waveform(filename, start=0, end=0):
   if not end: end = int(librosa.get_duration(path=filename)+1)
-  for i in range(offset, end, SEGMENT_SECONDS):
-    res = librosa.load(filename, sr=RATE, offset=max(0,i-1), duration=SEGMENT_SECONDS+2)[0]
-    assert res.shape[0] <= RATE * (SEGMENT_SECONDS+2)
+  for s in range(start, end, SEGMENT_SECONDS):
+    res = librosa.load(filename, sr=RATE, offset=(max(0,s-1)), duration=SEGMENT_SECONDS+1+bool(s))[0]
+    if s == 0: res = np.pad(res, (RATE, 0))
+    res = np.pad(res, (0, SAMPLES_PER_SEGMENT+RATE*2 - len(res)))
     yield res
 
 def transcribe_file(model, enc, *filenames):
@@ -240,6 +240,7 @@ def parse_timestamps(tokens:np.ndarray, enc, timeoffset:float) -> List[Tuple[str
         content = None
       else: content = ''
       timestart = time
+  if content: res.append((content, timestart, 30.0 + timeoffset))
   return res
 
 def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timestamps=False):
@@ -249,45 +250,55 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
   Returns Iterator[List[str]] if not use_timestampse else Iterator[List[Tuple[str, float, float]]]
   """
 
-  def inferloop(curr_segment_tokens, audio:Tensor):
-    pos, prompt = 0, curr_segment_tokens
-    for _ in range(nsample-1):
-      next_tokens = model.decoder(Tensor(prompt), pos, audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32)
-      next_tokens[curr_segment_tokens[:, -1] == eot] = eot
-      prompt = next_tokens.reshape(-1, 1)
-      curr_segment_tokens = np.concatenate((curr_segment_tokens, prompt), axis=1)
-      pos = curr_segment_tokens.shape[-1] - 1
-      if (next_tokens == eot).all(): break
-    return curr_segment_tokens
+  res = []
+  for wave in waveforms:
+    toks = []
+    for new_tokens in inference(model, enc, [wave],ctx=None, use_timestamps=use_timestamps):
+      toks.extend(new_tokens[0,:-1])
+      if len(toks) >= model.decoder.max_tokens_to_sample: break
+    res.append(toks)
+  yield [parse_timestamps(toks, enc, 0) if use_timestamps else enc.decode(toks) for toks in res]
+  ctx = [toks[-model.decoder.max_tokens_to_sample:] for toks in res]
+  for toks in inference(model, enc, waveforms, ctx=ctx, use_timestamps=use_timestamps):
+    yield [parse_timestamps(toks, enc, i*30) if use_timestamps else enc.decode(toks) for i,toks in enumerate(toks)]
 
-  def gettexttoks(line): return ([nosp]*nsample+[tok for tok in line if tok < eot or tok > enc._special_tokens['<|notimestamps|>']])[-nsample+1:]
 
-  # TODO detect language
+def inference(model:Whisper, enc, waveforms:List[np.ndarray], ctx=None, use_timestamps=False):
+
   start_tokens = ["<|startoftranscript|>", *(["<|en|>", "<|transcribe|>"] if model.is_multilingual else []), *(["<|notimestamps|>"] if not use_timestamps else [])]
   start_tokens = [enc._special_tokens[x] for x in start_tokens]
 
-  eot, nosp = enc._special_tokens["<|endoftext|>"], enc._special_tokens["<|nospeech|>"]
-  N_audio, nsample = len(waveforms), model.decoder.max_tokens_to_sample
+  def inferloop(ctx):
+    print(colored(f'prompt: {enc.decode(ctx[0])}', 'cyan'))
+    pos, prompt = 0, ctx
+    for _ in range(nsample-1):
+      next_tokens = model.decoder(Tensor(prompt), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32)
+      next_tokens[ctx[:, -1] == eot] = eot
+      prompt = next_tokens.reshape(-1, 1)
+      ctx = np.concatenate((ctx, prompt), axis=1)
+      pos = ctx.shape[-1] - 1
+      if (next_tokens == eot).all(): break
+    print(colored(f'output: {enc.decode(ctx[0])}', 'magenta'))
+    return ctx
 
-  curr_segment_tokens = np.tile(start_tokens, (model.batch_size, 1))
-  for curr_frame, chunks in enumerate(zip(*waveforms, strict=True)):
-    log_spec = prep_audio(chunks, model.batch_size, model.n_mels)
-    if curr_frame > 0: log_spec = log_spec[:,:,-FRAMES_PER_SECOND-FRAMES_PER_SEGMENT:]
-    encoded_audio = model.encoder.encode(log_spec[:,:,:FRAMES_PER_SEGMENT].contiguous())
-    curr_segment_tokens = inferloop(curr_segment_tokens, encoded_audio)
+  def special(des): return enc._special_tokens[f'<|{des}|>']
+  def gettexttoks(line): return [tok for tok in line if tok < eot or tok > special('notimestamps')][-nsample+1:]
 
-    if not (curr_segment_tokens[:, -1] == eot).all():
-      if DEBUG>=0: print(colored("REFRAME", "red"))
-      curr_segment_tokens = inferloop(np.array([start_tokens+gettexttoks(cs) for cs in curr_segment_tokens]))
+  eot = special("endoftext")
+  nsample = model.decoder.max_tokens_to_sample
 
-    res = []
-    for toks in curr_segment_tokens[:N_audio]:
-      if DEBUG >= 1: print(colored(f'parse: {enc.decode(toks)}', 'yellow'))
-      toks = toks[np.where(toks == start_tokens[-1])[0][0]+1:eoti[0] if len(eoti := np.where(toks == eot)[0]) else None]
-      res.append(parse_timestamps(toks, enc, curr_frame*SEGMENT_SECONDS) if use_timestamps else enc.decode(toks))
-    yield res
+  for chunks in zip(*waveforms, strict=True):
+    ctx = np.tile(start_tokens, (len(waveforms),1)) if ctx is None else np.array([[special('startofprev')]+gettexttoks(cs)+start_tokens for cs in ctx])
+    log_spec = prep_audio(chunks, model.n_mels)[:,:,FRATE:-FRATE].contiguous()
+    encoded_audio = model.encoder.encode(log_spec)
+    ctx = inferloop(ctx)
 
-    curr_segment_tokens = np.array([[enc._special_tokens["<|startofprev|>"]]+gettexttoks(cs)+start_tokens for cs in curr_segment_tokens])
+    # if not (ctx[:, -1] == eot).all():
+    #   if DEBUG>=0: print(colored("REFRAME", "red"))
+    #   ctx = inferloop(np.array([start_tokens+gettexttoks(cs) for cs in ctx]))
+
+    yield ctx[:, np.where(ctx[0] == start_tokens[-1])[0][0]+1:]
+
 
 CHUNK = 1600
 RECORD_SECONDS = 10
@@ -307,23 +318,28 @@ if __name__ == "__main__":
   model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=getenv("BATCH", 1))
   st = time.perf_counter()
   dur, frame = [0], [0]
+
+  def timestring(s): return f'{int(s//60//60)}:{int(s//60%60)}:{int(s%60)}'
+
   if len(sys.argv) > 1:
 
-    filename = fetch(sys.argv[1]) if sys.argv[1].startswith("http") else sys.argv[1]
-    bs = getenv("BATCH", 1)
-    filedur = int(librosa.get_duration(path=filename)+1)
-    frames = filedur // SEGMENT_SECONDS
-    frames = frames + bs - (frames % bs)
-    offsets = range(0, frames * SEGMENT_SECONDS, frames // bs * SEGMENT_SECONDS)
+    # bs = getenv("BATCH", 1)
+    # filedur = int(librosa.get_duration(path=sys.argv[1])+1)
+    # nsegments = filedur // SEGMENT_SECONDS
+    # nsegments = nsegments + bs - (nsegments % bs)
+    # offsets = range(0, nsegments * SEGMENT_SECONDS, nsegments // bs * SEGMENT_SECONDS)
 
-    st = time.perf_counter()
-    dur, frame = [0], [0]
+    offsets = [3600*3+60*57]
+    # offsets= [0]
+
+
     try:
-      for lines in transcribe_waveform(model, enc, [load_file_waveform(filename, offset, offset+(frames//bs)*SEGMENT_SECONDS) for offset in offsets], use_timestamps=getenv("TIMESTAMPS", 0)):
+      # for lines in transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1], offset, offset+(nsegments//bs)*SEGMENT_SECONDS) for offset in offsets], use_timestamps=getenv("TIMESTAMPS", 0)):
+      for lines in transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1], offsets[0])], use_timestamps=True):
         for i,line in enumerate(lines):
           if isinstance(line, str):print(colored(line, 'green' if i % 2 == 0 else 'blue'))
           else:
-            for text, start, end in line: print(f'[{start:.2f} - {end:.2f}] {text}')
+            for text, start, end in line: print(f'[{timestring(start+offsets[i])} - {timestring(end+offsets[i])}] {text}')
         dur[0] = time.perf_counter() - st
         frame[0] += 1
     except KeyboardInterrupt:pass
