@@ -11,7 +11,7 @@ SUB = PACKET3_SET_SH_REG_START - BASE_ADDR
 
 regCOMPUTE_PGM_LO = 0x1bac - SUB
 regCOMPUTE_USER_DATA_0 = 0x1be0 - SUB
-regCOMPUTE_START_X = 0x1ba4 - SUB
+regCOMPUTE_NUM_THREAD_X = 0x1ba7 - SUB
 
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
 
@@ -153,7 +153,7 @@ class PM4Executor(AMDQueue):
 
     prg_addr = (self.gpu.regs[regCOMPUTE_PGM_LO] + (self.gpu.regs[regCOMPUTE_PGM_LO + 1] << 32)) << 8
     args_addr = self.gpu.regs[regCOMPUTE_USER_DATA_0] + (self.gpu.regs[regCOMPUTE_USER_DATA_0 + 1] << 32)
-    lc = [self.gpu.regs[i] for i in range(regCOMPUTE_START_X+3, regCOMPUTE_START_X+6)]
+    lc = [self.gpu.regs[i] for i in range(regCOMPUTE_NUM_THREAD_X, regCOMPUTE_NUM_THREAD_X+3)]
 
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
