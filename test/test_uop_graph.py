@@ -649,7 +649,6 @@ class TestIFUOps(TestUOps):
       self.assertEqual(len(st.src), 4)
 
   # this will be fixed with the merge gated stores bounty
-  # @unittest.expectedFailure
   def test_expand_ifs_dumb(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
