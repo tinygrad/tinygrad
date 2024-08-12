@@ -50,9 +50,9 @@ def parse_cl_lib(lib: bytes, name:str):
       consts_info.append((cnst, offset_words * (sz_bytes:=(2 << is32)), sz_bytes))
 
   ptr = struct.unpack("I", lib[0x34:0x38])[0] # read main offset
-  fullreg, halfreg = struct.unpack("II", lib[ptr+20:ptr+28])
+  fullreg, hlfreg = struct.unpack("II", lib[ptr+20:ptr+28])
 
-  return image_offset, image_size, prg_offset, buffs_info, consts_info, halfreg, fullreg
+  return image_offset, image_size, prg_offset, buffs_info, consts_info, hlfreg, fullreg
 
 class QcomCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
@@ -80,7 +80,7 @@ class QcomDevice(HCQCompiled):
 
   def __init__(self, device:str=""):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
-    QcomDevice.signals_page = self._gpu_alloc(16 * 65536, flags=0xC0A00, map_to_cpu=True, uncached=True)
+    QcomDevice.signals_page = self._gpu_alloc(16 * 65536, map_to_cpu=True, uncached=True)
     QcomDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
     info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0
     QcomDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
@@ -200,7 +200,7 @@ class QcomComputeQueue(HWComputeQueue):
     cmdbytes, hw_page_addr = array.array('I', self.q), device._alloc_cmd_buf(len(self.q) * 4)
     ctypes.memmove(hw_page_addr, mv_address(memoryview(cmdbytes)), len(cmdbytes) * 4)
 
-    self.obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(cmdbytes) * 4, flags=0x1)
+    self.obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(cmdbytes) * 4, flags=kgsl.KGSL_CMDLIST_IB)
     self.submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(self.obj), numcmds=1, context_id=device.ctx,
                                                    cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
     # From now on, the queue is on the device for faster submission.
@@ -214,7 +214,7 @@ class QcomComputeQueue(HWComputeQueue):
     cmdbytes, hw_page_addr = array.array('I', self.q), device._alloc_cmd_buf(len(self.q) * 4)
     ctypes.memmove(hw_page_addr, mv_address(memoryview(cmdbytes)), len(cmdbytes) * 4)
 
-    obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(cmdbytes) * 4, flags=0x1)
+    obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(cmdbytes) * 4, flags=kgsl.KGSL_CMDLIST_IB)
     submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=device.ctx,
                                               cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
     device._ioctl(kgsl.IOCTL_KGSL_GPU_COMMAND, submit_req)
@@ -223,11 +223,10 @@ class QcomComputeQueue(HWComputeQueue):
   def setup(self):
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
     self.cmd(adreno.CP_SET_MARKER, adreno.RM6_COMPUTE)
-    self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc, 0x140)
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, adreno.A6XX_HLSQ_INVALIDATE_CMD_CS_STATE | adreno.A6XX_HLSQ_INVALIDATE_CMD_CS_IBO)
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x0)
-    self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, 0x80)
-    self.reg(adreno.REG_A6XX_SP_CS_IBO_COUNT, 0x40)
+    self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, 0xff) # set to max
+    self.reg(adreno.REG_A6XX_SP_CS_IBO_COUNT, 0xff) # set to max
     self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, adreno.ISAMMODE_CL << adreno.A6XX_SP_MODE_CONTROL_ISAMMODE__SHIFT)
     self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, adreno.A6XX_SP_PERFCTR_ENABLE_CS)
     self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, adreno.ISAMMODE_CL | (1 << 3)) # ISAMMODE|UNK3
@@ -237,40 +236,31 @@ class QcomComputeQueue(HWComputeQueue):
 
   def _exec(self, prg, kernargs, global_size, local_size):
     global_size_mp = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size))) if local_size else global_size
+    self.cmd_idx_to_dims[len(self) - 1] = [global_size, local_size]
 
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
-    self.cmd_idx_to_dims[len(self) - 1] = [global_size, local_size]
-    self.reg(
-      adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
-        # kernel dimenstion = 3
-        3 | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT)
-        | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT)
-        | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT),
-        global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, # global size x,y,z followed by offsets
-        0xccc0cf, 0x2fc,
-        global_size[0], global_size[1], global_size[2], # original global sizes
-    )
-    self.reg(
-      adreno.REG_A6XX_SP_CS_CTRL_REG0,
-      (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT)
-      | (prg.halfreg << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT)
-      | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT)
-      | (4 << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
-      0x41, 0, prg.prg_offset, # offsets
-      *data64_le(prg.lib_gpu.va_addr), 1, *data64_le(QcomDevice.gpu_stack.va_addr), 0x101,
-    )
+    self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
+             (3 << adreno.A6XX_HLSQ_CS_NDRANGE_0_KERNELDIM__SHIFT) | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT)
+             | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT)
+             | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT),
+             global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf,
+             0xfc | (adreno.THREAD128 << adreno.A6XX_HLSQ_CS_CNTL_1_THREADSIZE__SHIFT), global_size[0], global_size[1], global_size[2])
+    self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
+             (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT) | (prg.hlfreg << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT)
+             | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT) | (4 << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
+             adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6 | (1 << adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE__SHIFT), 0,
+             prg.prg_offset, *data64_le(prg.lib_gpu.va_addr), (1 << adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT),
+             *data64_le(QcomDevice.gpu_stack.va_addr), (0x101 << adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-             (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT)
-             | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
+             (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
              | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
-             | (256 << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT),
-             *data64_le(kernargs))
+             | ((prg.kernargs_alloc_size // 4) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(kernargs))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-            (adreno.ST_SHADER << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT)
-            | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
-            | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
-            | (math.ceil(prg.image_size / 128) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT),
-            *data64_le(prg.lib_gpu.va_addr))
+             (adreno.ST_SHADER << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
+             | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
+             | (math.ceil(prg.image_size / 128) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(prg.lib_gpu.va_addr))
+    self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc,
+             ((prg.kernargs_alloc_size // 4) >> 2) << adreno.A6XX_HLSQ_CS_CNTL_CONSTLEN__SHIFT | adreno.A6XX_HLSQ_CS_CNTL_ENABLED)
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.image_size // 4)
     self.cmd(adreno.CP_RUN_OPENCL, 0)
 
@@ -281,8 +271,8 @@ class QcomComputeQueue(HWComputeQueue):
 
     if local_size is not None:
       payload = (3 | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT)
-        | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT)
-        | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT))
+                 | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT)
+                 | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT))
 
       self._patch(cmd_idx, offset=2, data=[payload])
       self.cmd_idx_to_dims[cmd_idx][1] = local_size
@@ -297,7 +287,7 @@ class QcomProgram(HCQProgram):
   def __init__(self, device: QcomDevice, name: str, lib: bytes):
     self.device, self.name, self.lib = device, name, lib
 
-    image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.halfreg, self.fullreg = parse_cl_lib(self.lib, self.name)
+    image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.hlfreg, self.fullreg = parse_cl_lib(self.lib, self.name)
     image = bytearray(lib[image_offset:image_offset+self.image_size])
 
     # check if buffers are contigious for hcq
@@ -307,7 +297,7 @@ class QcomProgram(HCQProgram):
     self.lib_gpu = self.device._gpu_alloc(len(image) + 0x20000, kgsl.KGSL_MEMTYPE_CL << kgsl.KGSL_MEMTYPE_SHIFT, map_to_cpu=True)
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(memoryview(image)), self.image_size)
 
-    super().__init__(self.device, self.name, kernargs_alloc_size=0x1000, kernargs_args_offset=self.buffs_info[0] if len(self.buffs_info) else 0)
+    super().__init__(self.device, self.name, kernargs_alloc_size=1024, kernargs_args_offset=self.buffs_info[0] if len(self.buffs_info) else 0)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True))
