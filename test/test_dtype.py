@@ -99,7 +99,7 @@ class TestDType(unittest.TestCase):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
     list(map(
       lambda dtype:
-        _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype.itemsize == self.DTYPE.itemsize and dtype != dtypes.bool else None,
+        _test_bitcast(Tensor.ones((3,40), dtype=self.DTYPE).contiguous(), dtype) if dtype != dtypes.bool else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
 
