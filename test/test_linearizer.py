@@ -103,7 +103,6 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("can't group with multiple reduces yet")
   def test_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(32, dtype=dtypes.float).realize()
@@ -114,25 +113,29 @@ class TestLinearizer(unittest.TestCase):
     second_reduce = LazyOp(ReduceOps.SUM, (diff,), (0,))
     store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((1, 1))))
     opts = [
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # grouping
-      [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
-      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # grouping
+      # [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
+      # [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
+      # [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)], # unroll reduce
       [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)],
       [Opt(OptOps.UNROLL, 0, 8), Opt(OptOps.UNROLL, 1, 8)] if Device.DEFAULT not in {"NV", "METAL"} else [], # can't do float8,
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)], # grouping + unrolling
-      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
-      [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 0, 8)],
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)], # grouping + unrolling
+      # [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      # [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
+      # [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 0, 8)],
     ]
     wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1).reshape(1,1)
-    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("can't group with multiple reduces yet")
   def test_mid_dim_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
@@ -147,44 +150,49 @@ class TestLinearizer(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 3)],
       [Opt(OptOps.LOCAL, 0, 9)],
       [Opt(OptOps.LOCAL, 0, 27)],
-      # grouping
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
-      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
-      # unroll
+      # # grouping
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      # [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
+      # [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
+      # [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
+      # # unroll
       [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)],
       [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)],
       [Opt(OptOps.UNROLL, 0, 8), Opt(OptOps.UNROLL, 1, 8)] if Device.DEFAULT not in {"NV", "METAL"} else [],
-      # upcasting
+      # # upcasting
       [Opt(OptOps.UPCAST, 0, 3)],
       [Opt(OptOps.UPCAST, 0, 9)],
-      # locals with grouping
-      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      # locals with unroll
-      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)],
-      # locals with upcasting
+      # # locals with grouping
+      # [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      # # locals with unroll
+      # [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)],
+      # # locals with upcasting
       [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 9)],
-      # grouping with unrolling
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
-      # grouping with upcasting
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UPCAST, 0, 3)],
-      # locals with grouping with unroll
-      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
-      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
-      # locals with grouping with upcasting
-      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.LOCAL, 0, 9), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      # grouping with unrolling and upcasting
-      [Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
-      [Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
-      # locals + grouping + unrolling + upcasting
-      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2),
-        Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      # # grouping with unrolling
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      # [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
+      # # grouping with upcasting
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UPCAST, 0, 3)],
+      # # locals with grouping with unroll
+      # [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      # [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
+      # # locals with grouping with upcasting
+      # [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      # [Opt(OptOps.LOCAL, 0, 9), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      # # grouping with unrolling and upcasting
+      # [Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      # [Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
+      # # locals + grouping + unrolling + upcasting
+      # [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2),
+      #   Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
     ]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
-    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
   def test_triple_multireduce(self):
     Tensor.manual_seed(0)
@@ -201,12 +209,16 @@ class TestLinearizer(unittest.TestCase):
     third_reduce = second_reduce = LazyOp(ReduceOps.SUM, (mul,), (1,))
     store = LazyOp(BufferOps.STORE, (third_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 1, 5))))
     wanna_output = (x2.numpy()*(x1.numpy()-x0.numpy().sum(axis=1, keepdims=True)).sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,1,5)
-    helper_linearizer_ast((store, ), [x0,x1,x2], wanna_output=[wanna_output])
+    lins = helper_linearizer_ast((store, ), [x0,x1,x2], wanna_output=[wanna_output])
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("can't group with multiple reduces yet")
   def test_double_reduce_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(8, 32, 8, 16, dtype=dtypes.float).realize()
@@ -220,36 +232,40 @@ class TestLinearizer(unittest.TestCase):
     opts = [
       # openCL / GPU=1 is 256 max threads
       # grouping
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # first dim of both reduces
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the second reduce
-      [Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)], # second dim of both reduces
-      [Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the first reduce
-      # group all reduce dims
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
-      # checking how it works with 2 grouped reduces + unrolling
-      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
-        Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
-      # Checking how it works with 2 grouped reduces + locals.
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 0, 4),
-       Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
-      # Checking how it works with 2 grouped reduces + locals + unroll.
-      [Opt(OptOps.LOCAL, 0, 2),
-       Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
-       Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
-      # Checking how it works with 2 grouped reduces + locals + upcast.
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
-       Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
-      # Checking how it works with 2 grouped reduces + locals + upcast + unroll.
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
-       Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
-       Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # first dim of both reduces
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the second reduce
+      # [Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)], # second dim of both reduces
+      # [Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the first reduce
+      # # group all reduce dims
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
+      # # checking how it works with 2 grouped reduces + unrolling
+      # [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
+      #   Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      # # Checking how it works with 2 grouped reduces + locals.
+      # [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 0, 4),
+      #  Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
+      # # Checking how it works with 2 grouped reduces + locals + unroll.
+      # [Opt(OptOps.LOCAL, 0, 2),
+      #  Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
+      #  Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      # # Checking how it works with 2 grouped reduces + locals + upcast.
+      # [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
+      #  Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
+      # # Checking how it works with 2 grouped reduces + locals + upcast + unroll.
+      # [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
+      #  Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
+      #  Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
     ]
-    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i < 2: continue
+        assert ranges[i-2] != u or ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-2], ranges[i-1], {u}}"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("can't group with multiple reduces yet")
   def test_partial_opt_multireduce(self):
     # check how it works with one reduce optimized and one unoptimized
     Tensor.manual_seed(0)
@@ -261,15 +277,20 @@ class TestLinearizer(unittest.TestCase):
     second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
     store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
     opts = [
-      [Opt(OptOps.GROUPTOP, 0, 3)], # grouping
-      [Opt(OptOps.GROUPTOP, 1, 3)],
-      [Opt(OptOps.GROUPTOP, 0, 15)],
-      [Opt(OptOps.GROUPTOP, 1, 15)],
+      # [Opt(OptOps.GROUPTOP, 0, 3)], # grouping
+      # [Opt(OptOps.GROUPTOP, 1, 3)],
+      # [Opt(OptOps.GROUPTOP, 0, 15)],
+      # [Opt(OptOps.GROUPTOP, 1, 15)],
       [Opt(OptOps.UNROLL, 0, 3)],
       [Opt(OptOps.UNROLL, 1, 3)],
     ]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
-    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -300,7 +321,12 @@ class TestLinearizer(unittest.TestCase):
       # [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 0, 8)],
     ]
     wanna_output = (x.numpy()-(x.numpy().sum(-1, keepdims=True)+np.exp2(x_p.numpy()).sum(-1, keepdims=True))).sum(-1).reshape(4, 1,1)
-    helper_linearizer_ast((store, ), [x,x_p], wanna_output=[wanna_output], opts=opts)
+    lins = helper_linearizer_ast((store, ), [x,x_p], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_multiout_multireduce(self):
@@ -1811,18 +1837,32 @@ class TestKernelOpts(unittest.TestCase):
         [Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
         [Opt(OptOps.UNROLL, 0, 2)], # check unroll
-        [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
-        [Opt(OptOps.LOCAL, 0, 4)], # check local
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
         [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
-        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
         # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
+      ], apply_tc=True, atol=atol, rtol=rtol)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_tensor_core_opts_locals(self):
+    N = 128
+    Tensor.manual_seed(1552)
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
+      if tc.dtype_in == dtypes.bfloat16: continue
+      a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
+      r = a.matmul(b, acc_dtype=tc.dtype_out)
+      (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
+      helper_linearizer_opt(r, [
+        [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
+        [Opt(OptOps.LOCAL, 0, 4)], # check local
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
+        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   @unittest.skip("parallel tensor cores")
