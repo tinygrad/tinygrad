@@ -378,6 +378,11 @@ class TestUOpCompare(unittest.TestCase):
     self.assertEqual(a, b)
     self.assertLess(time.perf_counter()-st, 1e-2)
 
+  def test_nop(self):
+    a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
+    b = NOp(UOps.CONST, dtypes.float, (), 2.0, name="b")
+    self.assertEqual(a, b)
+
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
