@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
-# TARGET arch is: ['-I/usr/local/cuda/include']
+# TARGET arch is: ['-I/usr/local/cuda/include', '-x', 'c++']
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
