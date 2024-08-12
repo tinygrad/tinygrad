@@ -309,8 +309,9 @@ if __name__ == "__main__":
   dur, frame = [0], [0]
   if len(sys.argv) > 1:
 
+    filename = fetch(sys.argv[1]) if sys.argv[1].startswith("http") else sys.argv[1]
     bs = getenv("BATCH", 1)
-    filedur = int(librosa.get_duration(path=sys.argv[1])+1)
+    filedur = int(librosa.get_duration(path=filename)+1)
     frames = filedur // SEGMENT_SECONDS
     frames = frames + bs - (frames % bs)
     offsets = range(0, frames * SEGMENT_SECONDS, frames // bs * SEGMENT_SECONDS)
@@ -318,7 +319,7 @@ if __name__ == "__main__":
     st = time.perf_counter()
     dur, frame = [0], [0]
     try:
-      for lines in transcribe_waveform(model, enc, [load_file_waveform(sys.argv[1], offset, offset+(frames//bs)*SEGMENT_SECONDS) for offset in offsets], use_timestamps=getenv("TIMESTAMPS", 0)):
+      for lines in transcribe_waveform(model, enc, [load_file_waveform(filename, offset, offset+(frames//bs)*SEGMENT_SECONDS) for offset in offsets], use_timestamps=getenv("TIMESTAMPS", 0)):
         for i,line in enumerate(lines):
           if isinstance(line, str):print(colored(line, 'green' if i % 2 == 0 else 'blue'))
           else:
