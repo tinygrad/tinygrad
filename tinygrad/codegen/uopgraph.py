@@ -474,7 +474,7 @@ def merge_gates_sink(sink:UOp) -> Optional[UOp]:
       return x
     return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
 
-  if_src_and_stores: Dict[UOp, List[UOp]] = {} # UOp.ALU -> [UOp.STORE]
+  # if_src_and_stores: Dict[UOp, List[UOp]] = {} # UOp.ALU -> [UOp.STORE]
   if_src_and_ifs: Dict[UOp, UOp] = {} # UOp.ALU -> UOp.IF
   for x in sink.src:
     if x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF:
@@ -485,11 +485,12 @@ def merge_gates_sink(sink:UOp) -> Optional[UOp]:
         # if if_to_update := if_src_and_ifs.get(if_gate.src[0], if_gate):
         new_if = UOp(UOps.IF, None, (if_to_update.src[0],) + if_to_update.src[1:] + (x.src[2],), if_to_update.arg)
         if_src_and_ifs[if_gate.src[0]] = new_if
-        try:
-          if_src_and_stores[if_to_update.src[0]].append(x)
-        except KeyError:
-          if_src_and_stores[if_to_update.src[0]] = [x]
-  if len(if_src_and_stores) == 0: return None
+        # try:
+        #   if_src_and_stores[if_to_update.src[0]].append(x)
+        # except KeyError:
+        #   if_src_and_stores[if_to_update.src[0]] = [x]
+  # if len(if_src_and_stores) == 0: return None
+  if len(if_src_and_ifs) == 0: return None
 
   new_sink_srcs = []
   for x in sink.src:
@@ -522,9 +523,9 @@ reducer = PatternMatcher([
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
   # NOTE: this works, but fails to group IFs together due to them having different src's now
-  (NOp(UOps.STORE, name="root"), merge_gates),
+  # (NOp(UOps.STORE, name="root"), merge_gates),
   # NOTE: this doesn't quite work, but it should group IFs together ideally. TODO for me tm
-  # (NOp(UOps.SINK, name="sink"), merge_gates_sink),
+  (NOp(UOps.SINK, name="sink"), merge_gates_sink),
 ])
 
 no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.pyint, name="x"),
