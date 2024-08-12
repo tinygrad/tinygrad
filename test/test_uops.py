@@ -1,5 +1,5 @@
 from typing import Optional, Tuple, Any, List
-import unittest, math
+import unittest, math, time
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
@@ -356,6 +356,27 @@ class TestUOpCompare(unittest.TestCase):
     add = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.ADD)
     mul = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.MUL)
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
+
+  def test_uop_eq_fields(self):
+    a = UOp(UOps.CONST, dtypes.float, (), 2.0)
+    b = UOp(UOps.CONST, dtypes.float, (), 2.0)
+    self.assertEqual(a, b)
+
+  def test_uop_ne_fields(self):
+    a = UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), UOp.const(dtypes.pyint, 1)), (1, False))
+    b = UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), UOp.const(dtypes.pyint, 2)), (1, False))
+    self.assertNotEqual(a, b)
+
+  def test_recursive_eq_src(self):
+    st = time.perf_counter()
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
+    idx = UOp.const(dtypes.int, 0)
+    a = UOp(UOps.LOAD, dtypes.float, (buf, idx))
+    for _ in range(24): a += a
+    b = UOp(UOps.LOAD, dtypes.float, (buf, idx))
+    for _ in range(24): b += b
+    self.assertEqual(a, b)
+    self.assertLess(time.perf_counter()-st, 1e-2)
 
 class TestUOpStr(TestEqUOps):
   def test_uop_str(self):
