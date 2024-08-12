@@ -378,11 +378,16 @@ class TestUOpCompare(unittest.TestCase):
     self.assertEqual(a, b)
     self.assertLess(time.perf_counter()-st, 1e-2)
 
-  # NOTE: NOp uses the dataclass compare
-  def test_nop(self):
+  # NOTE: NOp uses the dataclass compare, this is fine
+  def test_nop_ne(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
     b = NOp(UOps.CONST, dtypes.float, (), 2.0, name="b")
-    self.assertEqual(a, b)
+    self.assertNotEqual(a, b)
+
+  def test_nop_eq(self):
+    a1 = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
+    a2 = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
+    self.assertEqual(a1, a2)
 
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
