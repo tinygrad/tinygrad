@@ -95,7 +95,7 @@ class LazyBuffer:
   def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True) -> LazyBuffer:
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
-    if bitcast and not self.st.contiguous: raise RuntimeError("non-contiguous bitcast not supported")
+    if bitcast and not self.st.contiguous and not self.device.startswith("DISK"): raise RuntimeError("non-contiguous bitcast not supported")
     if self.is_unrealized_unmasked_const() and not bitcast:
       return create_lazybuffer(self.device, self.st, dtype, MetaOps.CONST, dtypes.as_const(self.base.arg, dtype))
     new_shape = self.shape
