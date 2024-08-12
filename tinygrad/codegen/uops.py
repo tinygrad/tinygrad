@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import prod, pretty_print
+from tinygrad.helpers import merge_dicts, prod, pretty_print
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -87,9 +87,9 @@ class UOp:
   @staticmethod
   def store(*src:UOp, **kwargs): return type((src:=(*src, *kwargs.values()))[0])(UOps.STORE, None, src)
   @functools.cached_property
-  def parents(self) -> Set[UOp]: return set.union(set(self.src), *[x.parents for x in self.src])
+  def parents(self) -> Dict[UOp, None]: return merge_dicts([{x:None for x in self.src}]+[x.parents for x in self.src])
   @property  # parents with self
-  def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
+  def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def const_factor(self) -> int:
     """largest known int that divides self"""
