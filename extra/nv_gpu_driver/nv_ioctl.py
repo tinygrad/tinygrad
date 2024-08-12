@@ -76,6 +76,15 @@ global_ioctl_id = 0
 gpus_user_modes = []
 gpus_mmio = []
 gpus_fifo = []
+pma_paddrs = []
+pma_vaddrs = []
+
+import logging
+logging.basicConfig(filename="/home/nimlgen/tinygrad/regwr.r",
+                    filemode='a',
+                    format='%(message)s',
+                    datefmt='%H:%M:%S',
+                    level=logging.DEBUG)
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def ioctl(fd, request, argp):
@@ -97,19 +106,31 @@ def ioctl(fd, request, argp):
         if struc is not None: dump_struct(get_struct(s.params, struc))
         elif hasattr(nv_gpu, name+"_PARAMS"): dump_struct(get_struct(argp, getattr(nv_gpu, name+"_PARAMS")))
         elif name == "NVA06C_CTRL_CMD_GPFIFO_SCHEDULE": dump_struct(get_struct(argp, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS))
+
+        if name == "NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM":
+          sttt = get_struct(s.params, struc)
+          pma_paddrs.append(sttt.hMemPmaBuffer)
+        if name == "NVB0CC_CTRL_CMD_EXEC_REG_OPS":
+          st = get_struct(s.params, struc)
+          for i in range(st.regOpCount):
+            print("{" + ", ".join(f'"{v[0]}":{getattr(st.regOps[i], v[0])}' for v in type(st.regOps[i])._fields_) + "},")
+            # logging.info("{" + ", ".join(f'"{v[0]}":{getattr(st.regOps[i], v[0])}' for v in type(st.regOps[i])._fields_) + "},")
+            # print("{" + ", ".join(f'"{v[0]}"={getattr(st, v[0])}' for v in type(st)._fields_) + "},")
+            # dump_struct(st.regOps[i])
       else:
         print("unhandled cmd", hex(s.cmd))
       # format_struct(s)
       # print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : {ret:2d} = {name:40s}", ' '.join(format_struct(s)))
     elif nr == nv_gpu.NV_ESC_RM_ALLOC:
       s = get_struct(argp, nv_gpu.NVOS21_PARAMETERS)
-      print(f"NV_ESC_RM_ALLOC    hClass={nvclasses.get(s.hClass, 'unk'):30s}, hRoot={s.hRoot}, hObjectParent={s.hObjectParent}, pAllocParms={s.pAllocParms}, hObjectNew={s.hObjectNew}")
+      print(f"NV_ESC_RM_ALLOC    hClass={nvclasses.get(s.hClass, f'unk {s.hClass}'):30s}, hRoot={s.hRoot}, hObjectParent={s.hObjectParent}, pAllocParms={s.pAllocParms}, hObjectNew={s.hObjectNew}")
       if s.pAllocParms is not None:
         if s.hClass == nv_gpu.NV01_DEVICE_0: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV0080_ALLOC_PARAMETERS))
         if s.hClass == nv_gpu.FERMI_VASPACE_A: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS))
         if s.hClass == nv_gpu.NV50_MEMORY_VIRTUAL: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == nv_gpu.NV1_MEMORY_USER: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == nv_gpu.NV1_MEMORY_SYSTEM: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
+        if s.hClass == nv_gpu.MAXWELL_PROFILER_DEVICE: dump_struct(get_struct(s.pAllocParms, nv_gpu.NVB2CC_ALLOC_PARAMETERS))
         if s.hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
           sx = get_struct(s.pAllocParms, nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS)
           dump_struct(sx)
@@ -119,7 +140,16 @@ def ioctl(fd, request, argp):
     elif nr == nv_gpu.NV_ESC_RM_MAP_MEMORY:
       # nv_ioctl_nvos33_parameters_with_fd
       s = get_struct(argp, nv_gpu.NVOS33_PARAMETERS)
+      if s.hMemory in pma_paddrs: pma_vaddrs.append(s.pLinearAddress)
       print(f"NV_ESC_RM_MAP_MEMORY   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, length={s.length} flags={s.flags} pLinearAddress={s.pLinearAddress}")
+    # elif nr == nv_gpu.NV_ESC_RM_UNMAP_MEMORY:
+    #   s = get_struct(argp, nv_gpu.NVOS34_PARAMETERS)
+      # if s.hMemory in pma_paddrs:
+        # assert s.pLinearAddress in pma_vaddrs
+        # s.pLinearAddress = 4294967296
+        # print(f"dump {s.pLinearAddress:x}")
+        # hexdump(to_mv(s.pLinearAddress, 0x1000))
+      # print(f"NV_ESC_RM_UNMAP_MEMORY   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, flags={s.flags} pLinearAddress={s.pLinearAddress}")
     elif nr == nv_gpu.NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO:
       s = get_struct(argp, nv_gpu.NVOS56_PARAMETERS)
       print(f"NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, pOldCpuAddress={s.pOldCpuAddress} pNewCpuAddress={s.pNewCpuAddress} status={s.status}")
@@ -213,5 +243,11 @@ def _dump_qmd(address, packets):
       # hexdump(to_mv(const_addr, const_len))
 
     i += size + 1
+
+def dump_prof_buffers():
+  from hexdump import hexdump
+  for addr in pma_vaddrs[-1:]:
+    print(f"dump {addr:x}")
+    hexdump(to_mv(addr, 0x1000))
 
 # IOCTL=1 PTX=1 CUDA=1 python3 test/test_ops.py TestOps.test_tiny_add

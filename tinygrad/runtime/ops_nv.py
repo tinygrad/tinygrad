@@ -4,13 +4,15 @@ from typing import Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
                             HCQProgram, HCQSignal, BufferOptions
-from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
+from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod, from_mv
 from tinygrad.renderer.assembly import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler, nv_disassemble
-from tinygrad.runtime.autogen import nv_gpu, libc
+from tinygrad.runtime.autogen import nv_gpu, libc, nv_regs
 from tinygrad.runtime.support.elf import elf_loader
-if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
+if getenv("IOCTL"):
+  import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
+  # from extra.nv_gpu_driver.nv_ioctl import dump_prof_buffers
 if MOCKGPU:=getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
@@ -27,16 +29,16 @@ def rm_alloc(fd, clss, root, parant, params):
   return made
 
 def rm_control(cmd, sttyp, fd, client, obj, **kwargs):
-  made = nv_gpu.NVOS54_PARAMETERS(hClient=client, hObject=obj, cmd=cmd, paramsSize=ctypes.sizeof(params:=sttyp(**kwargs)),
-                                  params=ctypes.cast(ctypes.byref(params), ctypes.c_void_p) if params is not None else None)
+  made = nv_gpu.NVOS54_PARAMETERS(hClient=client, hObject=obj, cmd=cmd, paramsSize=ctypes.sizeof(params:=sttyp(**kwargs)) if sttyp is not None else 0,
+                                  params=ctypes.cast(ctypes.byref(params), ctypes.c_void_p) if sttyp is not None else None)
   nv_iowr(fd, nv_gpu.NV_ESC_RM_CONTROL, made)
   if made.status != 0: raise RuntimeError(f"rm_control returned {get_error_str(made.status)}")
-  return params
+  return None if sttyp is None else params
 
 def make_rmctrl_type():
-  return type("NVRMCTRL", (object,), {name[name.find("_CTRL_CMD_")+10:].lower(): functools.partial(rm_control, dt, sttyp)
-    for name,dt in nv_gpu.__dict__.items() if name.find("_CTRL_CMD_")>=0 and
-      (sttyp:=getattr(nv_gpu, name.replace("_CTRL_CMD_", "_CTRL_")+"_PARAMS", getattr(nv_gpu, name+"_PARAMS", None)))})
+  return type("NVRMCTRL", (object,), {name[name.find("_CTRL_CMD_")+10:].lower():
+    functools.partial(rm_control, dt, sttyp:=getattr(nv_gpu, name.replace("_CTRL_CMD_", "_CTRL_")+"_PARAMS", getattr(nv_gpu, name+"_PARAMS", None)))
+    for name,dt in nv_gpu.__dict__.items() if name.find("_CTRL_CMD_")>=0})
 rmctrl = make_rmctrl_type()
 
 def uvm_ioctl(cmd, sttyp, fd, **kwargs):
@@ -280,7 +282,17 @@ class NVProgram(HCQProgram):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
-    return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
+    x = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=True)
+
+    if True:
+      # import time
+      # time.sleep(4)
+      from hexdump import hexdump
+      hexdump(to_mv(self.device.profbuf.va_addr, 0x1000))
+      # hexdump(to_mv(4294967296, 0x1000))
+      # hexdump(to_mv(self.device.profmeta.va_addr, 0x10))
+
+    return x
 
 class NVAllocator(HCQAllocator):
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
@@ -348,6 +360,16 @@ class NVDevice(HCQCompiled):
       attr2=(nv_gpu.NVOS32_ATTR2_ZBC_PREFER_NO_ZBC << 0) | (nv_gpu.NVOS32_ATTR2_GPU_CACHEABLE_NO << 2),
       flags=(nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED |
              nv_gpu.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED), format=6, size=size, alignment=(4<<10), offset=0, limit=size-1)
+    mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_SYSTEM, self.root, self.device, alloc_params).hObjectNew
+
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
+    if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags, system=True)
+
+    return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=map_to_cpu)
+
+  def _gpu_system_alloc_2(self, size:int, va_addr=None, map_to_cpu=False, map_flags=0):
+    alloc_params = nv_gpu.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root, type=13,
+      attr=713031680, attr2=4194313, flags=49152, format=6, size=size, alignment=(4<<10), offset=0, limit=size-1)
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_SYSTEM, self.root, self.device, alloc_params).hObjectNew
 
     if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
@@ -458,6 +480,38 @@ class NVDevice(HCQCompiled):
 
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     channel_group = rm_alloc(self.fd_ctl, nv_gpu.KEPLER_CHANNEL_GROUP_A, self.root, self.device, channel_params).hObjectNew
+
+    if True:
+      prof_params = nv_gpu.NVB2CC_ALLOC_PARAMETERS(hClientTarget=self.root, hContextTarget=channel_group)
+      prof_subdev = rm_alloc(self.fd_ctl, nv_gpu.MAXWELL_PROFILER_DEVICE, self.root, self.subdevice, prof_params).hObjectNew
+      # _ = rm_alloc(self.fd_ctl, nv_gpu.GF100_PROFILER, self.root, channel_group, None).hObjectNew
+      # print(prof_subdev)
+
+      self.profbuf = self._gpu_system_alloc(33554432, map_to_cpu=True)
+      self.profmeta = self._gpu_system_alloc_2(4096)
+
+      # print(a.hMemory, a.size)
+
+      # print(hex(a.va_addr))
+      rmctrl.alloc_pma_stream(self.fd_ctl, self.root, prof_subdev, hMemPmaBuffer=self.profbuf.hMemory, pmaBufferSize=self.profbuf.size,
+                              hMemPmaBytesAvailable=self.profmeta.hMemory, pmaBufferVA=4294967296)
+      rmctrl.reserve_pm_area_smpc(self.fd_ctl, self.root, prof_subdev, ctxsw=0)
+      rmctrl.reserve_hwpm_legacy(self.fd_ctl, self.root, prof_subdev, ctxsw=0)
+
+      # NVB0CC_CTRL_CMD_BIND_PM_RESOURCES
+      rmctrl.bind_pm_resources(self.fd_ctl, self.root, prof_subdev)
+      # print(len(nv_regs.regs))
+      for st in range(0, len(nv_regs.regs), 11):
+        # print(st)
+        off = nv_regs.regs[st:st+11]
+        # st = nv_gpu.struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS()
+        # st.regOpCount = len(off)
+        ops = (nv_gpu.struct_NV2080_CTRL_GPU_REG_OP*124)()
+        for i,d in enumerate(off): ops[i] = nv_gpu.struct_NV2080_CTRL_GPU_REG_OP(**d)
+        # print(ops[i])
+
+        with contextlib.suppress(RuntimeError): rmctrl.exec_reg_ops(self.fd_ctl, self.root, prof_subdev, regOpCount=len(off), regOps=ops)
+      print("done prof setup")
 
     gpfifo_area = self._gpu_alloc(0x200000, contig=True, huge_page=True, map_to_cpu=True, map_flags=0x10d0000)
 
