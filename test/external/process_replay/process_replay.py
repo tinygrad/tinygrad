@@ -106,7 +106,6 @@ def process_replay():
 
   # *** schedule diff
   if COMPARE_SCHEDULE:
-    logging.info("diffing the scheduler")
     conn = db_connection()
     cur = conn.cursor()
     try: has_diff = cur.execute(f"select name from sqlite_master where type='table' and name='schedule_diff_{VERSION}'").fetchone()
@@ -145,7 +144,6 @@ if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
     logging.info("skipping process replay.")
     exit(0)
-  logging.info(f"diffing codegen/*{' and schedule.py' if COMPARE_SCHEDULE else ''}")
   try: process_replay()
   except Exception as e:
     if ASSERT_DIFF: raise e
