@@ -433,15 +433,8 @@ def create_gate(root:UOp) -> Optional[UOp]:
     if u.op is UOps.BARRIER: return u
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER and gate.op is not UOps.IF:
       return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
-    # if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op in { UOps.ALU, UOps.CAST } and u.src[-1].dtype == dtypes.bool:
-    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].dtype == dtypes.bool and u.src[2] not in u.src[-1].src:
-    # if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].dtype == dtypes.bool:
-      # new_if = UOp(UOps.IF, None, (if_to_update.src[0],) + if_to_update.src[1:] + (x.src[2],), if_to_update.arg)
-
-      # new_if = UOp(UOps.IF, None, (u.src[-1],) + u.src[1:] + (x.src[2],), if_to_update.arg)
-      # return UOp(u.op, u.dtype, u.src[:-1] + (new_if,), u.arg)
-      # return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (u.src[-1],)),), u.arg)
-      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (u.src[-1], u.src[2])),), u.arg)
+    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op in { UOps.ALU, UOps.CAST } and u.src[-1].dtype == dtypes.bool:
+      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (u.src[-1],)),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
@@ -473,52 +466,26 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
-def merge_gates_sink(sink:UOp) -> Optional[UOp]:
+def merge_gates(sink:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def find_gate(x:UOp) -> Optional[UOp]:
     if x.op is UOps.RANGE:
       return x
     return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-
-  # if_src_and_stores: Dict[UOp, List[UOp]] = {} # UOp.ALU -> [UOp.STORE]
-  if_src_and_ifs: Dict[UOp, UOp] = {} # UOp.ALU -> UOp.IF
+  if_src_to_if_op: Dict[UOp, UOp] = {} # UOp.ALU -> UOp.IF
   for x in sink.src:
     if x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF:
       if_gate = x.src[-1]
-      non_if_gate = find_gate(x.src[2])
-      if non_if_gate and x.src[2] not in if_gate.src:
-        if_to_update = if_src_and_ifs.get(if_gate.src[0], if_gate)
-        # if if_to_update := if_src_and_ifs.get(if_gate.src[0], if_gate):
-        new_if = UOp(UOps.IF, None, (if_to_update.src[0],) + if_to_update.src[1:] + (x.src[2],), if_to_update.arg)
-        if_src_and_ifs[if_gate.src[0]] = new_if
-        # try:
-        #   if_src_and_stores[if_to_update.src[0]].append(x)
-        # except KeyError:
-        #   if_src_and_stores[if_to_update.src[0]] = [x]
-  # if len(if_src_and_stores) == 0: return None
-  if len(if_src_and_ifs) == 0: return None
-
+      if find_gate(x.src[2]) and x.src[2] not in if_gate.src:
+        if_to_update = if_src_to_if_op.get(if_gate.src[0], if_gate)
+        if_src_to_if_op[if_gate.src[0]] = UOp(UOps.IF, None, (if_to_update.src[0],) + if_to_update.src[1:] + (x.src[2],), if_to_update.arg)
+  if len(if_src_to_if_op) == 0: return None
   new_sink_srcs = []
   for x in sink.src:
     if x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF:
-      new_sink_srcs.append(UOp(UOps.STORE, x.dtype, x.src[:-1] + (if_src_and_ifs[x.src[-1].src[0]],), x.arg))
+      new_sink_srcs.append(UOp(UOps.STORE, x.dtype, x.src[:-1] + (if_src_to_if_op[x.src[-1].src[0]],), x.arg))
     else: new_sink_srcs.append(x)
   return UOp(UOps.SINK, sink.dtype, tuple(new_sink_srcs), sink.arg)
-
-def merge_gates(root:UOp) -> Optional[UOp]:
-    @functools.lru_cache(None)
-    def find_gate(x:UOp) -> Optional[UOp]:
-      if x.op is UOps.RANGE:
-        return x
-      return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-
-    if len(root.src) == 4 and root.src[-1].op is UOps.IF and root.src[-1].src[-1] is not root.src[2]:
-      if_gate = root.src[-1]
-      non_if_gate = find_gate(root.src[2])
-      if non_if_gate is not None:
-        if_gate = UOp(UOps.IF, None, (if_gate.src[0],) + if_gate.src[1:-1] + (root.src[2],), if_gate.arg)
-        return UOp(UOps.STORE, root.dtype, root.src[:-1] + (if_gate,), root.arg)
-    return None
 
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
@@ -528,10 +495,7 @@ reducer = PatternMatcher([
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
-  # NOTE: this works, but fails to group IFs together due to them having different src's now
-  # (NOp(UOps.STORE, name="root"), merge_gates),
-  # NOTE: this doesn't quite work, but it should group IFs together ideally. TODO for me tm
-  # (NOp(UOps.SINK, name="sink"), merge_gates_sink),
+  (NOp(UOps.SINK, name="sink"), merge_gates),
 ])
 
 no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.pyint, name="x"),
