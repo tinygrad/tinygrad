@@ -724,6 +724,7 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
+      if getenv("RAWAST"): print(self.ast)
       print(modified_ast)
       print(self.applied_opts)
     verify_lazyop(modified_ast)

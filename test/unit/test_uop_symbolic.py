@@ -395,6 +395,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((((alu2+150)//(-32))+4), 0, 0, "0")
     self.helper_test_variable((((alu2+158)//(-32))+4), 0, 0, "0")
 
+  def test_div_mod_recombine(self):
+    gidx = Variable("gidx", 0, 124)
+    self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
+    self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
+
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):

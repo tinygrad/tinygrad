@@ -137,6 +137,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.ALU:
           # remove parens if ALU types are the same. TODO: can do more here
           if args in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == args else r[v]for v in src]
+          elif args is BinaryOps.MAX: operands = [self.render_cast(r[v], cast(DType, v.dtype)) if v.op is UOps.CONST else r[v] for v in src]
           else: operands = [r[v] for v in src]
           val = self.code_for_op[args](*operands, dtype)
           assert child_count[u] != 0, f"childless ALU op found {u}"
