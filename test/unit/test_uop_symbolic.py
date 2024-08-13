@@ -97,7 +97,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_lt_factors(self):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
-    self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
+    self.helper_test_variable(expr, 0, 1, {"(((idx1*4)+FLOAT4_INDEX)<512)", "(((FLOAT4_INDEX//4)+idx1)<128)"})
 
   def test_div_reduction(self):
     self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
@@ -229,7 +229,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sum_lt_fold(self):
     self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]), 16), 0, 1, "(a<4)")
-    self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]), 16), 0, 1, "(((a*4)+b)<16)")
+    self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]), 16), 0, 1,
+                              {"(((a*4)+b)<16)", "(((b//4)+a)<4)"})
     # TODO: fix
     with self.assertRaises(AssertionError):
       self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
