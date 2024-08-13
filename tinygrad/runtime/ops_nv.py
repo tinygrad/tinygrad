@@ -3,7 +3,7 @@ import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, time, array, 
 from typing import Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
-                            HCQProgram, HCQSignal, BufferOptions
+                            HCQArgsState, HCQProgram, HCQSignal, BufferOptions
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
 from tinygrad.renderer.assembly import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
@@ -142,17 +142,17 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
 
   def _memory_barrier(self): self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
 
-  def _exec(self, prg, kernargs, global_size, local_size):
+  def _exec(self, prg, args_state, global_size, local_size):
     cmd_idx = len(self) - 1
 
-    ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
+    ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     self.cmd_idx_to_qmd[cmd_idx] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
     self.cmd_idx_to_local_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
 
     qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
     qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
-    qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(kernargs)
+    qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.ptr)
 
     if (prev_qmd:=self.cmd_idx_to_qmd.get(cmd_idx - 1)) is None:
       self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8]
@@ -210,6 +210,19 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
 
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).dma_gpfifo)
 
+class NVArgsState(HCQArgsState):
+  def __init__(self, ptr:int, prg:NVProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
+    super().__init__(ptr, prg, bufs, vals=vals)
+
+    if MOCKGPU: prg.constbuffer_0[0:2] = [len(bufs), len(vals)]
+    kernargs = [arg_half for arg in bufs for arg_half in data64_le(arg.va_addr)] + list(vals)
+    to_mv(self.ptr, (len(prg.constbuffer_0) + len(kernargs)) * 4).cast('I')[:] = array.array('I', prg.constbuffer_0 + kernargs)
+    self.bufs = to_mv(self.ptr + len(prg.constbuffer_0) * 4, len(bufs) * 8).cast('Q')
+    self.vals = to_mv(self.ptr + len(prg.constbuffer_0) * 4 + len(bufs) * 8, len(vals) * 4).cast('I')
+
+  def update_buffer(self, index:int, buf:HCQBuffer): self.bufs[index] = buf.va_addr
+  def update_var(self, index:int, val:int): self.vals[index] = val
+
 class NVProgram(HCQProgram):
   def __init__(self, device:NVDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
@@ -266,16 +279,11 @@ class NVProgram(HCQProgram):
     self.max_threads = ((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    super().__init__(self.device, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
+    super().__init__(NVArgsState, self.device, self.name,
+                     kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
-
-  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
-    # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
-    if MOCKGPU: self.constbuffer_0[0:2] = [len(bufs), len(vals)]
-    kernargs = [arg_half for arg in bufs for arg_half in data64_le(arg.va_addr)] + list(vals)
-    to_mv(kernargs_ptr, (len(self.constbuffer_0) + len(kernargs)) * 4).cast('I')[:] = array.array('I', self.constbuffer_0 + kernargs)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
