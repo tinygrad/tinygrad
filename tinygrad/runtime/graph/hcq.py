@@ -21,21 +21,11 @@ class HCQGraph(MultiGraphRunner):
     kernargs_ptrs: Dict[Compiled, int] = {dev:buf.va_addr for dev,buf in self.kernargs_bufs.items()}
 
     # Fill initial arguments.
-    # self.kargs_addrs: Dict[int, int] = {}
-    self.ji_args_bufs: Dict[int, memoryview] = {}
-    self.ji_args_vars: Dict[int, memoryview] = {}
     self.ji_args_state: Dict[int, HCQArgsState] = {}
     for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
-      # self.kargs_addrs[j] = kernargs_ptrs[ji.prg.device]
-
-
       self.ji_args_state[j] = ji.prg.clprg.args_state_t(ji.prg.clprg, [cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], kernargs_ptrs[ji.prg.device])
       kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
-
-      # ji.prg.clprg.fill_kernargs([cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], self.kargs_addrs[j])
-      # self.ji_args_bufs[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset, len(ji.bufs) * 8).cast('Q')
-      # self.ji_args_vars[j] = to_mv(self.kargs_addrs[j] + ji.prg.clprg.kernargs_args_offset + len(ji.bufs) * 8, len(ji.prg.p.vars) * 4).cast('I')
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any

@@ -220,7 +220,6 @@ class NVArgsState(HCQArgsState):
     self.bufs = to_mv(self.ptr + len(prg.constbuffer_0) * 4, len(bufs) * 8).cast('Q')
     self.vals = to_mv(self.ptr + len(prg.constbuffer_0) * 4 + len(bufs) * 8, len(vals) * 4).cast('I')
 
-  # TODO: batch update?
   def update_buf(self, index: int, buf: HCQBuffer): self.bufs[index] = buf.va_addr
   def update_var(self, index: int, val: int): self.vals[index] = val
 
@@ -286,15 +285,6 @@ class NVProgram(HCQProgram):
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
-
-  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
-    # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
-    if MOCKGPU: self.constbuffer_0[0:2] = [len(bufs), len(vals)]
-    kernargs = [arg_half for arg in bufs for arg_half in data64_le(arg.va_addr)] + list(vals)
-    to_mv(kernargs_ptr, (len(self.constbuffer_0) + len(kernargs)) * 4).cast('I')[:] = array.array('I', self.constbuffer_0 + kernargs)
-
-  # def new_args_state(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), ptr:Optional[int]=None):
-  #   return NVArgsState(self, ptr)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
