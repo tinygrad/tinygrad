@@ -567,14 +567,14 @@ def ELF32_ST_BIND(val):  # macro
    return (((val))>>4)
 def ELF32_ST_TYPE(val):  # macro
    return ((val)&0xf)
-def ELF32_ST_INFO(bind, type):  # macro
-   return (((bind)<<4)+((type)&0xf))
+# def ELF32_ST_INFO(bind, type):  # macro
+#    return (((bind)<<4)+((type)&0xf))
 def ELF64_ST_BIND(val):  # macro
-   return (((val))>>4)(val)
+   return ELF32_ST_BIND(val)
 def ELF64_ST_TYPE(val):  # macro
-   return ((val)&0xf)(val)
-def ELF64_ST_INFO(bind, type):  # macro
-   return (((bind)<<4)+((type)&0xf))((bind),(type))
+   return ELF32_ST_TYPE(val)
+# def ELF64_ST_INFO(bind, type):  # macro
+#    return ELF32_ST_INFO((bind),(type))
 STB_LOCAL = 0 # macro
 STB_GLOBAL = 1 # macro
 STB_WEAK = 2 # macro
@@ -601,7 +601,7 @@ STN_UNDEF = 0 # macro
 def ELF32_ST_VISIBILITY(o):  # macro
    return ((o)&0x03)
 def ELF64_ST_VISIBILITY(o):  # macro
-   return ((o)&0x03)(o)
+   return ELF32_ST_VISIBILITY(o)
 STV_DEFAULT = 0 # macro
 STV_INTERNAL = 1 # macro
 STV_HIDDEN = 2 # macro
@@ -610,14 +610,14 @@ def ELF32_R_SYM(val):  # macro
    return ((val)>>8)
 def ELF32_R_TYPE(val):  # macro
    return ((val)&0xff)
-def ELF32_R_INFO(sym, type):  # macro
-   return (((sym)<<8)+((type)&0xff))
+# def ELF32_R_INFO(sym, type):  # macro
+#    return (((sym)<<8)+((type)&0xff))
 def ELF64_R_SYM(i):  # macro
    return ((i)>>32)
 def ELF64_R_TYPE(i):  # macro
    return ((i)&0xffffffff)
-def ELF64_R_INFO(sym, type):  # macro
-   return ((((Elf64_Xword)(sym))<<32)+(type))
+# def ELF64_R_INFO(sym, type):  # macro
+#    return ((((Elf64_Xword)(sym))<<32)+(type))
 PN_XNUM = 0xffff # macro
 PT_NULL = 0 # macro
 PT_LOAD = 1 # macro
@@ -801,8 +801,8 @@ def DT_VERSIONTAGIDX(tag):  # macro
 DT_VERSIONTAGNUM = 16 # macro
 DT_AUXILIARY = 0x7ffffffd # macro
 DT_FILTER = 0x7fffffff # macro
-def DT_EXTRATAGIDX(tag):  # macro
-   return ((Elf32_Word)-((Elf32_Sword)(tag)<<1>>1)-1)
+# def DT_EXTRATAGIDX(tag):  # macro
+#    return ((Elf32_Word)-((Elf32_Sword)(tag)<<1>>1)-1)
 DT_EXTRANUM = 3 # macro
 DF_ORIGIN = 0x00000001 # macro
 DF_SYMBOLIC = 0x00000002 # macro
@@ -943,14 +943,14 @@ def ELF32_M_SYM(info):  # macro
    return ((info)>>8)
 def ELF32_M_SIZE(info):  # macro
    return ((info))
-def ELF32_M_INFO(sym, size):  # macro
-   return (((sym)<<8)+(size))
+# def ELF32_M_INFO(sym, size):  # macro
+#    return (((sym)<<8)+(size))
 def ELF64_M_SYM(info):  # macro
-   return ((info)>>8)(info)
+   return ELF32_M_SYM(info)
 def ELF64_M_SIZE(info):  # macro
-   return ((info))(info)
-def ELF64_M_INFO(sym, size):  # macro
-   return (((sym)<<8)+(size))(sym,size)
+   return ELF32_M_SIZE(info)
+# def ELF64_M_INFO(sym, size):  # macro
+#    return ELF32_M_INFO(sym,size)
 EF_CPU32 = 0x00810000 # macro
 R_68K_NONE = 0 # macro
 R_68K_32 = 1 # macro
