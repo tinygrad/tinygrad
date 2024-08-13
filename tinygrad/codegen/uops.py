@@ -34,6 +34,11 @@ class UOp:
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  @functools.cached_property
+  def real_dtype(self) -> DType:
+    if self.op is UOps.STORE: return self.src[1].real_dtype
+    assert self.dtype is not None, f"no real dtype for {self.dtype}"
+    return self.dtype
   def commutative(self) -> bool:
     return (self.op is UOps.ALU and \
       self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
@@ -71,7 +76,7 @@ class UOp:
   def recip(self): return self.alu(UnaryOps.RECIP)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return UOp._const(self.dtype if isinstance(self, UOp) else self, b)
   def sconst(self:Union[UOp, DType, None], b:ConstType|Variable):
-    return UOp._const(cast(DType, self.dtype if isinstance(self, UOp) else self).scalar() if self is not None else self, b)
+    return UOp._const((self.real_dtype if isinstance(self, UOp) else self).scalar() if self is not None else self, b)
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def _const(dtype:Optional[DType], b:ConstType|Variable):
@@ -108,9 +113,9 @@ class UOp:
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
   @functools.cached_property
-  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None and not math.isnan(x.arg) else self.sconst(dtypes.min(cast(DType, self.dtype)))
+  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None and not math.isnan(x.arg) else self.sconst(dtypes.min(self.real_dtype))
   @functools.cached_property
-  def vmax(self) -> UOp: return x if (x:=self._min_max[1]) is not None and not math.isnan(x.arg) else self.sconst(dtypes.max(cast(DType, self.dtype)))
+  def vmax(self) -> UOp: return x if (x:=self._min_max[1]) is not None and not math.isnan(x.arg) else self.sconst(dtypes.max(self.real_dtype))
   @functools.cached_property
   def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
     # NOTE: returned UOp is assumed to be CONST
@@ -119,9 +124,9 @@ class UOp:
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
     if self.op is UOps.CONST: return self, self
-    if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
+    if self.op is UOps.ALU and self.real_dtype.count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
-      if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(cast(DType, self.dtype)):
+      if self.arg is UnaryOps.NEG and self.dtype != dtypes.bool and not dtypes.is_unsigned(self.real_dtype):
         return self.sconst(-s0.vmax.arg), self.sconst(-s0.vmin.arg)
       if self.arg is BinaryOps.ADD: return self.sconst(s0.vmin.arg+s1.vmin.arg), self.sconst(s0.vmax.arg+s1.vmax.arg)
       if self.arg is BinaryOps.MUL and (s0.vmin.arg >= 0 or s1.vmin.arg >= 0):
@@ -246,7 +251,7 @@ def type_verify(uops):
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
-  if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
+  if u.op is UOps.ALU: return exec_alu(u.arg, u.real_dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
 def print_uops(uops:List[UOp]):

@@ -198,8 +198,8 @@ class IndependentLowerer:
         upcast_axes = x.arg[-2]
         wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
         ret = UOp(UOps.WMMA, dtype=dtype.vec(wmma_sz[2]), src=(
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=upcast_axes[0]),
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=upcast_axes[1]),
+          UOp(UOps.CONTRACT, dtype=in_uops[0].real_dtype.vec(wmma_sz[0]), src=(in_uops[0],), arg=upcast_axes[0]),
+          UOp(UOps.CONTRACT, dtype=in_uops[1].real_dtype.vec(wmma_sz[1]), src=(in_uops[1],), arg=upcast_axes[1]),
           UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
         return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axes[2])
       # NOTE: always using ridxs is fine here
@@ -208,7 +208,7 @@ class IndependentLowerer:
       ret = in_uops[0]
       if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
         ret = UOp(UOps.CONTRACT, dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
-        ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(cast(DType, ret.dtype).count)])
+        ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(ret.real_dtype.count)])
       return UOp(UOps.REDUCE, dtype, (ret,) + tuple(reduce_range), alu_op) if len(reduce_range) else ret
     return in_uops[0].alu(x.op, *in_uops[1:])
 

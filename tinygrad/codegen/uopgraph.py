@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same, partition
 from tinygrad.codegen.uops import UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify, print_uops
@@ -66,7 +66,7 @@ def vectorize_reduce(vec:UOp):
 
 def vectorize_alu(vec:UOp):
   if not all_same([x.arg for x in vec.src]): return None
-  return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
+  return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, vec.src[0].src[i].real_dtype.vec(vec.real_dtype.count),
                                              tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
 
 float4_folding = PatternMatcher([
