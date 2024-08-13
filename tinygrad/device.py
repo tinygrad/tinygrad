@@ -441,6 +441,18 @@ class HCQProgram:
   def __init__(self, device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
     self.device, self.name, self.kernargs_alloc_size, self.kernargs_args_offset = device, name, kernargs_alloc_size, kernargs_args_offset
 
+  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
+    """
+    Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
+    Args:
+      bufs: Buffers to be written to kernel arguments.
+      vals: Values to be written to kernel arguments.
+      kernargs_ptr: Optional pointer to pre-allocated kernel arguments memory.
+    Returns:
+      Arguments state with the given buffers and values set for the program.
+    """
+    return self.args_state_t(self, bufs, vals=vals, ptr=kernargs_ptr)
+
   def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
                vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
     """
@@ -460,7 +472,7 @@ class HCQProgram:
     q = self.device.hw_compute_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
     with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-      q.exec(self, self.args_state_t(self, bufs, vals), global_size, local_size)
+      q.exec(self, self.fill_kernargs(bufs, vals), global_size, local_size)
 
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1

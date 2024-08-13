@@ -81,8 +81,8 @@ class TestProfiler(unittest.TestCase):
     TestProfiler.runner = get_runner(TestProfiler.d0.dname, si.ast)
     TestProfiler.b.lazydata.buffer.allocate()
 
-    TestProfiler.kernargs_ba_ptr = TestProfiler.runner.clprg.args_state_t([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])
-    TestProfiler.kernargs_ab_ptr = TestProfiler.runner.clprg.args_state_t([TestProfiler.a.lazydata.buffer._buf, TestProfiler.b.lazydata.buffer._buf])
+    TestProfiler.kernargs_ba_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])
+    TestProfiler.kernargs_ab_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.a.lazydata.buffer._buf, TestProfiler.b.lazydata.buffer._buf])
 
   def test_profile_kernel_run(self):
     runner_name = TestProfiler.runner.clprg.name
