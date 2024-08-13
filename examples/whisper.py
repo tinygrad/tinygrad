@@ -100,6 +100,16 @@ class TextDecoder:
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
     self.getjitted = collections.defaultdict((lambda: print(colored("get new jit", "blue")) or ([TinyJit(block.__call__) for block in self.blocks], TinyJit(self.output_tok))))
 
+  
+  def forward(self, x: Tensor, pos: int, encoded_audio: Tensor):
+    seqlen = x.shape[-1]
+    x = self.token_embedding(x) + self.positional_embedding[pos:pos+seqlen]
+    for block in self.blocks:
+      if pos == 0: x = block(x, xa=encoded_audio, mask=self.mask, len=0)
+      else: x = block(x, mask=self.mask, len=Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos))
+    return self.output_tok(x)
+    
+
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
 
     seqlen = x.shape[-1]
@@ -133,7 +143,6 @@ FRATE = RATE // HOP_LENGTH # 100
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
 def prep_audio(waveforms: List[np.ndarray], batch_size: int, n_mels: int = 80) -> Tensor:
-  assert batch_size == 2
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
@@ -305,9 +314,8 @@ if __name__ == "__main__":
   def timestring(s): return f'{int(s//60//60)}:{int(s//60%60)}:{int(s%60)}'
   if len(sys.argv) > 1:
 
-    model.batch_size = 2
     filename = fetch(sys.argv[1]) if sys.argv[1].startswith("http") else sys.argv[1]
-    waves = [load_file_waveform(filename, 0), load_file_waveform(filename, 60)]
+    waves = [load_file_waveform(filename, i*30) for i in range(model.batch_size)]
     use_timestamps = getenv("TIMESTAMPS", False)
 
     for frame, lines in enumerate(transcribe_waveform(model, enc, waves, use_timestamps=use_timestamps)):
@@ -316,7 +324,7 @@ if __name__ == "__main__":
           for text, start, end in parse_timestamps(line, enc, frame*30.): print(f'[{timestring(start)} - {timestring(end)}] {text}')
         else: print(colored(enc.decode(line), 'green' if i % 2 == 0 else 'blue'))
         print('//')
-      print(f"inference duration: {(dur:= time.perf_counter()- st):.2f}s, {(frame*30+30)/dur:.2f}x realtime")
+      print(f"inference duration: {(dur:= time.perf_counter()- st):.2f}s, {(frame*30+30)/dur:.2f}x [{(frame*30+30)*len(waves)/dur:.2f}] realtime")
 
   else:
     # online
