@@ -133,7 +133,7 @@ FRATE = RATE // HOP_LENGTH # 100
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
 def prep_audio(waveforms: List[np.ndarray], batch_size: int, n_mels: int = 80) -> Tensor:
-  batch_size = len(waveforms)
+  assert batch_size == 2
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
@@ -227,7 +227,7 @@ def load_file_waveform(filename, start=0, end=0):
     yield res
 
 def transcribe_file(model, enc, *filenames):
-  return [''.join(stream).strip() for stream in zip(* transcribe_waveform(model, enc, [load_file_waveform(fn) for fn in filenames]))]
+  return [''.join(map(enc.decode, stream)).strip() for stream in zip(* transcribe_waveform(model, enc, [load_file_waveform(fn) for fn in filenames]))]
 
 def parse_timestamps(tokens:np.ndarray, enc, timeoffset:float) -> List[Tuple[str, float, float]]:
   res, content, timestart = [], None, timeoffset
@@ -255,7 +255,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
 
   def inferloop(ctx, encoded_audio):
 
-
     print(colored(f'prompt: {enc.decode(ctx[0])}', 'cyan'))
     pos, prompt = 0, ctx
     for i in range(nsample*2-2):
@@ -266,7 +265,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
       pos = ctx.shape[-1] - 1
       if (next_tokens == eot).all(): break
       if i == nsample-2: ctx = np.array([start_tokens+gettexttoks(cs) for cs in ctx])
-
     return ctx
 
   def special(des): return enc._special_tokens[f'<|{des}|>']
@@ -275,15 +273,15 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
   eot = special("endoftext")
   nsample = model.decoder.max_tokens_to_sample
 
-  ctx = np.tile(start_tokens, (len(waveforms),1)) 
-  for frame, chunks in enumerate(zip(*waveforms, strict=True)):
-
-    encoded_audio = model.encoder.encode(prep_audio(chunks, model.n_mels)[:,:,FRATE:-FRATE].contiguous())
+  ctx = np.tile(start_tokens, (model.batch_size,1))
+  for chunks in zip(*waveforms, strict=True):
+    audio = prep_audio(chunks, model.batch_size, model.n_mels)[:,:,FRATE:-FRATE].contiguous()
+    encoded_audio = model.encoder.encode(audio)
 
     if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
-    else: ctx = [inferloop((np.array([c]*len(ctx))), encoded_audio)[i] for i,c in enumerate(ctx)]
+    else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
 
-    yield [arr[np.where(arr == start_tokens[-1])[0][0]+1:np.where(arr == eot)[0][0]] for arr in ctx]
+    yield [arr[np.where(arr == start_tokens[-1])[0][0]+1:np.where(arr == eot)[0][0]] for arr in ctx[:len(waveforms)]]
     ctx = [[special('startofprev')]+gettexttoks(cs)+start_tokens for cs in ctx]
 
 
@@ -304,19 +302,16 @@ def listener(q):
 if __name__ == "__main__":
   model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=getenv("BATCH", 1))
   st = time.perf_counter()
-  # dur, frame = [0], [0]
-
   def timestring(s): return f'{int(s//60//60)}:{int(s//60%60)}:{int(s%60)}'
-
   if len(sys.argv) > 1:
 
+    model.batch_size = 2
     filename = fetch(sys.argv[1]) if sys.argv[1].startswith("http") else sys.argv[1]
     waves = [load_file_waveform(filename, 0), load_file_waveform(filename, 60)]
     use_timestamps = getenv("TIMESTAMPS", False)
 
     for frame, lines in enumerate(transcribe_waveform(model, enc, waves, use_timestamps=use_timestamps)):
       for i,line in enumerate(lines):
-
         if use_timestamps:
           for text, start, end in parse_timestamps(line, enc, frame*30.): print(f'[{timestring(start)} - {timestring(end)}] {text}')
         else: print(colored(enc.decode(line), 'green' if i % 2 == 0 else 'blue'))
