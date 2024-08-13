@@ -266,8 +266,8 @@ class AMDArgsState(HCQArgsState):
     self.bufs[:] = array.array('Q', [b.va_addr for b in bufs])
     self.vals[:] = array.array('I', vals)
 
-  def update_buffer(self, index: int, buf: HCQBuffer): self.bufs[index] = buf.va_addr
-  def update_var(self, index: int, val: int): self.vals[index] = val
+  def update_buffer(self, index:int, buf:HCQBuffer): self.bufs[index] = buf.va_addr
+  def update_var(self, index:int, val:int): self.vals[index] = val
 
 class AMDProgram(HCQProgram):
   def __init__(self, device:AMDDevice, name:str, lib:bytes):

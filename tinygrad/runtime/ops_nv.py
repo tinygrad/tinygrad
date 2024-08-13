@@ -220,8 +220,8 @@ class NVArgsState(HCQArgsState):
     self.bufs = to_mv(self.ptr + len(prg.constbuffer_0) * 4, len(bufs) * 8).cast('Q')
     self.vals = to_mv(self.ptr + len(prg.constbuffer_0) * 4 + len(bufs) * 8, len(vals) * 4).cast('I')
 
-  def update_buffer(self, index: int, buf: HCQBuffer): self.bufs[index] = buf.va_addr
-  def update_var(self, index: int, val: int): self.vals[index] = val
+  def update_buffer(self, index:int, buf:HCQBuffer): self.bufs[index] = buf.va_addr
+  def update_var(self, index:int, val:int): self.vals[index] = val
 
 class NVProgram(HCQProgram):
   def __init__(self, device:NVDevice, name:str, lib:bytes):
