@@ -266,12 +266,10 @@ class AMDArgsState(HCQArgsState):
     self.bufs[:] = array.array('Q', [b.va_addr for b in bufs])
     self.vals[:] = array.array('I', vals)
 
-  def update_buf(self, index: int, buf: HCQBuffer): self.bufs[index] = buf.va_addr
+  def update_buffer(self, index: int, buf: HCQBuffer): self.bufs[index] = buf.va_addr
   def update_var(self, index: int, val: int): self.vals[index] = val
 
 class AMDProgram(HCQProgram):
-  args_state_t = AMDArgsState
-
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
@@ -303,7 +301,7 @@ class AMDProgram(HCQProgram):
     self.enable_dispatch_ptr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
 
-    super().__init__(self.device, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
+    super().__init__(AMDArgsState, self.device, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): cast(AMDDevice, self.device)._gpu_free(self.lib_gpu)

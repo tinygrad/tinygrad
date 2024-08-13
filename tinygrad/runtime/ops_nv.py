@@ -220,12 +220,10 @@ class NVArgsState(HCQArgsState):
     self.bufs = to_mv(self.ptr + len(prg.constbuffer_0) * 4, len(bufs) * 8).cast('Q')
     self.vals = to_mv(self.ptr + len(prg.constbuffer_0) * 4 + len(bufs) * 8, len(vals) * 4).cast('I')
 
-  def update_buf(self, index: int, buf: HCQBuffer): self.bufs[index] = buf.va_addr
+  def update_buffer(self, index: int, buf: HCQBuffer): self.bufs[index] = buf.va_addr
   def update_var(self, index: int, val: int): self.vals[index] = val
 
 class NVProgram(HCQProgram):
-  args_state_t = NVArgsState
-
   def __init__(self, device:NVDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
     if DEBUG >= 6: nv_disassemble(lib)
@@ -281,7 +279,8 @@ class NVProgram(HCQProgram):
     self.max_threads = ((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    super().__init__(self.device, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
+    super().__init__(NVArgsState, self.device, self.name,
+                     kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))

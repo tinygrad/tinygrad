@@ -434,12 +434,13 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
 class HCQArgsState:
   def __init__(self, prg:HCQProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), ptr:Optional[int]=None):
     self.prg, self.ptr = prg, ptr or prg.device._alloc_kernargs(prg.kernargs_alloc_size)
-  def update_buf(self, index: int, buf: HCQBuffer): pass
-  def update_var(self, index: int, val: int): pass
+  def update_buffer(self, index:int, buf:HCQBuffer): raise NotImplementedError("need update_buffer")
+  def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
 class HCQProgram:
-  def __init__(self, device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
-    self.device, self.name, self.kernargs_alloc_size, self.kernargs_args_offset = device, name, kernargs_alloc_size, kernargs_args_offset
+  def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
+    self.args_state_t, self.device, self.name = args_state_t, device, name
+    self.kernargs_alloc_size, self.kernargs_args_offset = kernargs_alloc_size, kernargs_args_offset
 
   def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
     """

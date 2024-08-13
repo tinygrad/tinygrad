@@ -152,7 +152,7 @@ class HCQGraph(MultiGraphRunner):
 
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items():
-      if j in self.ji_args: self.ji_args[j].update_buf(i, input_rawbuffers[input_idx]._buf)
+      if j in self.ji_args: self.ji_args[j].update_buffer(i, input_rawbuffers[input_idx]._buf)
       else: self.op_cmd_idx[j][0].update_copy(self.op_cmd_idx[j][1], **{('dest' if i == 0 else 'src'): input_rawbuffers[input_idx]._buf.va_addr})
 
     # Update var_vals
