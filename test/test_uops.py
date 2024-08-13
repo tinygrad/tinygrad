@@ -1,5 +1,5 @@
 from typing import Optional, Tuple, Any, List
-import unittest, math, time
+import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
@@ -11,7 +11,7 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.uops import UOps, NOp, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
-from test.helpers import is_dtype_supported
+from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
 def _uops_to_prg(uops_list, print_uops=False):
   uops = UOpGraph(uops_list)
@@ -357,39 +357,7 @@ class TestUOpCompare(unittest.TestCase):
     mul = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.MUL)
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
-  def test_uop_eq_fields(self):
-    a = UOp(UOps.CONST, dtypes.float, (), 2.0)
-    b = UOp(UOps.CONST, dtypes.float, (), 2.0)
-    self.assertEqual(a, b)
-
-  def test_uop_ne_fields(self):
-    a = UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), UOp.const(dtypes.pyint, 1)), (1, False))
-    b = UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), UOp.const(dtypes.pyint, 2)), (1, False))
-    self.assertNotEqual(a, b)
-
-  def test_recursive_eq_src(self):
-    st = time.perf_counter()
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
-    idx = UOp.const(dtypes.int, 0)
-    a = UOp(UOps.LOAD, dtypes.float, (buf, idx))
-    for _ in range(24): a += a
-    b = UOp(UOps.LOAD, dtypes.float, (buf, idx))
-    for _ in range(24): b += b
-    self.assertEqual(a, b)
-    self.assertLess(time.perf_counter()-st, 1e-2)
-
-  # NOTE: NOp uses the dataclass compare, this is fine
-  def test_nop_ne(self):
-    a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
-    b = NOp(UOps.CONST, dtypes.float, (), 2.0, name="b")
-    self.assertNotEqual(a, b)
-
-  def test_nop_eq(self):
-    a1 = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
-    a2 = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
-    self.assertEqual(a1, a2)
-
-class TestUOpStr(unittest.TestCase):
+class TestUOpStr(TestEqUOps):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
     for _ in range(20): a = a + a
@@ -401,7 +369,7 @@ class TestUOpStr(unittest.TestCase):
     # nice big complicated uop
     with Context(NOOPT=1):
       sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
-    self.assertEqual(sink, eval(str(sink)))
+    self.assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
