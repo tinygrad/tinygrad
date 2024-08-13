@@ -100,7 +100,6 @@ class TextDecoder:
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
     self.getjitted = collections.defaultdict((lambda: print(colored("get new jit", "blue")) or ([TinyJit(block.__call__) for block in self.blocks], TinyJit(self.output_tok))))
 
-  
   def forward(self, x: Tensor, pos: int, encoded_audio: Tensor):
     seqlen = x.shape[-1]
     x = self.token_embedding(x) + self.positional_embedding[pos:pos+seqlen]
@@ -108,7 +107,6 @@ class TextDecoder:
       if pos == 0: x = block(x, xa=encoded_audio, mask=self.mask, len=0)
       else: x = block(x, mask=self.mask, len=Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos))
     return self.output_tok(x)
-    
 
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
 
