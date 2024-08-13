@@ -432,8 +432,7 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQArgsState:
-  def __init__(self, prg:HCQProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), ptr:Optional[int]=None):
-    self.prg, self.ptr = prg, ptr or prg.device._alloc_kernargs(prg.kernargs_alloc_size)
+  def __init__(self, ptr:int, prg:HCQProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): self.ptr, self.prg = ptr, prg
   def update_buffer(self, index:int, buf:HCQBuffer): raise NotImplementedError("need update_buffer")
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
@@ -452,7 +451,7 @@ class HCQProgram:
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
-    return self.args_state_t(self, bufs, vals=vals, ptr=kernargs_ptr)
+    return self.args_state_t(self, kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size), bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
                vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
