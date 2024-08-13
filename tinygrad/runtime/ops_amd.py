@@ -257,8 +257,8 @@ class AMDCopyQueue(HWCopyQueue):
     device.sdma_queue.doorbell[0] = device.sdma_queue.put_value
 
 class AMDArgsState(HCQArgsState):
-  def __init__(self, prg:AMDProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), ptr:Optional[int]=None):
-    super().__init__(prg, bufs, vals=vals, ptr=ptr)
+  def __init__(self, ptr:int, prg:AMDProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
+    super().__init__(ptr, prg, bufs, vals=vals)
 
     self.bufs = to_mv(self.ptr, len(bufs) * 8).cast('Q')
     self.vals = to_mv(self.ptr + len(bufs) * 8, len(vals) * 4).cast('I')

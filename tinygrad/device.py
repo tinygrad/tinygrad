@@ -451,7 +451,7 @@ class HCQProgram:
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
-    return self.args_state_t(self, kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size), bufs, vals=vals)
+    return self.args_state_t(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size), self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
                vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:

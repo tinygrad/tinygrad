@@ -211,8 +211,8 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
   def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).dma_gpfifo)
 
 class NVArgsState(HCQArgsState):
-  def __init__(self, prg:NVProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), ptr:Optional[int]=None):
-    super().__init__(prg, bufs, vals=vals, ptr=ptr)
+  def __init__(self, ptr:int, prg:NVProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
+    super().__init__(ptr, prg, bufs, vals=vals)
 
     if MOCKGPU: prg.constbuffer_0[0:2] = [len(bufs), len(vals)]
     kernargs = [arg_half for arg in bufs for arg_half in data64_le(arg.va_addr)] + list(vals)
