@@ -1,5 +1,7 @@
 name: Benchmarks
 env:
+  # TODO: this rescheduling makes gpt2, mixtral and llama unjitted slower
+  COMPARE_SCHEDULE: "0"
   RUN_PROCESS_REPLAY: "1"
   ASSERT_PROCESS_REPLAY: "0"
   PYTHONPATH: .
@@ -476,11 +478,11 @@ jobs:
     - name: validate openpilot 0.9.7
       run: PYTHONPATH=. FLOAT16=0 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
     - name: benchmark openpilot 0.9.4
-      run: PYTHONPATH=. GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_4.txt
+      run: PYTHONPATH=. GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_4.txt
     - name: benchmark openpilot 0.9.7
       run: PYTHONPATH=. GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_7.txt
     - name: benchmark openpilot w IMAGE=2 0.9.4
-      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_4.txt
+      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_4.txt
     - name: benchmark openpilot w IMAGE=2 0.9.7
       run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 GPU=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
     - name: Run process replay tests

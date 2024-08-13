@@ -1965,7 +1965,7 @@ class Tensor:
     x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
-      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32), [1] * self.ndim
+      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
       index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
       reshape[i] = expand[i] = size[i]
       low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
@@ -3000,17 +3000,17 @@ class Tensor:
 
   def is_floating_point(self) -> bool:
     """
-    Returns `True` if the tensor contains floating point types, i.e. is one of `dtype.half`, `dtype.float`,
-    `dtype.double`, `dtype.default_float`, `dtype.float16`, `dtype.float32`, `dtype.float64`, `dtype.bfloat16`.
+    Returns `True` if the tensor contains floating point types, i.e. is one of `dtype.float64`, `dtype.float32`,
+    `dtype.float16`, `dtype.bfloat16`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.float)
+    t = Tensor([8, 9], dtype=dtypes.float32)
     print(t.is_floating_point())
     ```
     """
     return dtypes.is_float(self.dtype)
 
-  def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]:
+  def size(self, dim:Optional[int]=None) -> Union[sint, Tuple[sint, ...]]:
     """
     Return the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
 

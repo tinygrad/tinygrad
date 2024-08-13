@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import prod, pretty_print
+from tinygrad.helpers import merge_dicts, prod, pretty_print
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -43,6 +43,15 @@ class UOp:
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
+  def cached_eq(self, x:UOp, context:Dict[Tuple[int, int], bool]) -> bool:
+    if id(self) == id(x): return True
+    if self.op != x.op or self.dtype != x.dtype or self.arg != x.arg or len(self.src) != len(x.src): return False
+    if (key := (id(self), id(x))) in context: return context[key]
+    return context.setdefault(key, all(a.cached_eq(b, context) for a,b in zip(self.src, x.src)))
+  def __eq__(self, x): return self.cached_eq(x, context={})
+  @functools.cached_property
+  def hash(self): return hash((self.op, self.dtype, self.src, self.arg))
+  def __hash__(self): return self.hash
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
   # *** uop syntactic sugar
   def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
@@ -87,9 +96,9 @@ class UOp:
   @staticmethod
   def store(*src:UOp, **kwargs): return type((src:=(*src, *kwargs.values()))[0])(UOps.STORE, None, src)
   @functools.cached_property
-  def parents(self) -> Set[UOp]: return set.union(set(self.src), *[x.parents for x in self.src])
+  def parents(self) -> Dict[UOp, None]: return merge_dicts([{x:None for x in self.src}]+[x.parents for x in self.src])
   @property  # parents with self
-  def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
+  def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def const_factor(self) -> int:
     """largest known int that divides self"""

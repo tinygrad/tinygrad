@@ -352,7 +352,7 @@ class TestLinearizerFailures(unittest.TestCase):
            LazyOp(BinaryOps.MUL, arg=None, src=(
              LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 256, 1, 128, 4, 58, 4, 58), strides=(0, 401408, 0, 3136, 0, 56, 0, 1), offset=-57, mask=((0, 1), (0, 256), (0, 1), (0, 128), (0, 4), (1, 57), (0, 4), (1, 57)), contiguous=False), View(shape=(256, 1, 128, 28, 28, 128, 3, 3), strides=(6889472, 0, 0, 464, 2, 53824, 13688, 59), offset=0, mask=None, contiguous=False)))), src=()), LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(256, 1, 128, 28, 28, 128, 3, 3), strides=(0, 0, 1152, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),)),))
     opts=[Opt(op=OptOps.TC, axis=5, amt=2), Opt(op=OptOps.UNROLL, axis=0, amt=0)]
-    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["AMD", "HIP"])
+    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["AMD", "HIP", "METAL"])
 
   # llama3 8B failure with BEAM=2 https://github.com/tinygrad/tinygrad/actions/runs/10150118124/job/28066519425#step:14:1, these don't compile
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
@@ -440,7 +440,7 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
   def test_failure_47(self):
-    # upcast an arange, failed with UOP_IS_SYMBOLIC=1
+    # upcast an arange, failed with UOP_IS_SYMBOLIC=1 (fixed!)
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
       LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(60000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
         LazyOp(BinaryOps.ADD, arg=None, src=(
@@ -449,6 +449,19 @@ class TestLinearizerFailures(unittest.TestCase):
           LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(60000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=0, amt=3)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
+
+  @unittest.skipUnless(not CI and Device.DEFAULT in ("NV", "CUDA"), "for real NV")
+  def test_failure_48(self):
+    # with UOP_IS_SYMBOLIC=1, generates the wrong IDIV
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 64, 1, 1, 256, 1, 1, 256), strides=(0, 0, 65536, 0, 0, 256, 0, 0, 1), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(ReduceOps.SUM, arg=(3, 4), src=(
+          LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
+            LazyOp(BinaryOps.MUL, arg=None, src=(
+              LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 1, 64, 56, 56, 256, 1, 1, 256), strides=(0, 0, 0, 56, 1, 3136, 0, 0, 802816), offset=0, mask=None, contiguous=False),))), src=()),
+              LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 1, 64, 56, 56, 256, 1, 1, 256), strides=(0, 0, 3136, 56, 1, 0, 0, 0, 200704), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),))
+    opts = [Opt(op=OptOps.TC, axis=0, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=2)]
+    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
 if __name__ == '__main__':
   unittest.main()

@@ -315,7 +315,7 @@ class Open:
 
       pooled = x[:, text.argmax(dim=-1)] @ self.text_projection
       return pooled
-  
+
   class ClipVisionTransformer:
     def __init__(self, width:int, layers:int, d_head:int, image_size:int, patch_size:int):
       grid_size = image_size // patch_size

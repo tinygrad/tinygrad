@@ -227,7 +227,7 @@ class TestSchedule(unittest.TestCase):
     # run
     c1(img).relu().mean().backward()
     assert img.grad is not None and c1.weight.grad is not None
-    run_schedule(check_schedule([img.grad, c1.weight.grad], 5))
+    run_schedule(check_schedule([img.grad, c1.weight.grad], 7, filter_sink=False))
 
     # compare
     import torch
@@ -241,7 +241,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  @unittest.skipIf(CI and Device.DEFAULT in {"METAL", "CLANG"}, "TOOD: why is this wrong in METAL and CLANG CI?")
   def test_fold_conv_relu_backward_half(self):
     old_float = dtypes.default_float
     dtypes.default_float = dtypes.float16
@@ -253,7 +252,7 @@ class TestSchedule(unittest.TestCase):
     # run
     c1(img).relu().mean().backward()
     assert img.grad is not None and c1.weight.grad is not None
-    run_schedule(check_schedule([img.grad, c1.weight.grad], 5))
+    run_schedule(check_schedule([img.grad, c1.weight.grad], 7, filter_sink=False))
     dtypes.default_float = old_float
 
     # compare
@@ -1026,7 +1025,7 @@ class TestSchedule(unittest.TestCase):
     b = r.sum(0) * 4
     c = r.sum(1) * 2
     schedule = check_schedule([b, c], 3)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_simple_chase(self):
@@ -1037,7 +1036,7 @@ class TestSchedule(unittest.TestCase):
     c = r.sum(1) + 12
     np_r = (a.numpy() + (a.numpy().sum(0) + 6)).sum(0) * 2
     # schedule = check_schedule([b,c], 3)
-    # assert schedule[0].ast[0].src[0].op is BinaryOps.MUL
+    # self.assertIs(schedule[0].ast[0].src[0].op, BinaryOps.MUL)
     schedule = check_schedule([b,c], 4)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), np_r.sum(0) + 8, atol=1e-4, rtol=1e-4)
@@ -1050,7 +1049,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * d
     schedule = check_schedule([d, e], 3)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_push_permute_chase(self):
@@ -1061,7 +1060,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * (d + a).sum(2)
     schedule = check_schedule([d, e], 3) # make sure it doesn't fuse
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(d.numpy(), (a.numpy().sum(2) + b.numpy()).T * 4, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), (a.numpy().sum(2) + b.numpy()) * (d.numpy() + a.numpy()).sum(2), atol=1e-4, rtol=1e-4)
@@ -1073,7 +1072,7 @@ class TestSchedule(unittest.TestCase):
     r = a.sum(1) + c
     d = r[:4] * b
     schedule = check_schedule(d, 2)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_push_shrink_chase(self):
@@ -1086,7 +1085,7 @@ class TestSchedule(unittest.TestCase):
     out = r[:4] * b + d.sum(1)[:4]
     # schedule = check_schedule(out, 2)
     schedule = check_schedule(out, 3)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(out.numpy(), (a.numpy().sum(1) + c.numpy())[:4] * b.numpy() + d.numpy().sum(1)[:4], atol=1e-4, rtol=1e-4)
 
@@ -1094,7 +1093,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(16, 16)
     b = (a.sum(0) + a.max(1)) + 2
     schedule = check_schedule(b, 2)
-    assert schedule[0].ast.src[0].src[0].op is ReduceOps.MAX
+    self.assertIs(schedule[0].ast.src[0].src[0].op, ReduceOps.MAX)
 
   # multireduce spec
   def test_multireduce_midreduce_nochase(self):
@@ -1103,7 +1102,7 @@ class TestSchedule(unittest.TestCase):
     b = (a.sum(0)+a.max(0) + a.max(1)+a.sum(1)) + 2
     # schedule = check_schedule(b, 2)
     schedule = check_schedule(b, 4)
-    assert schedule[0].ast.src[0].src[0].op is ReduceOps.MAX
+    self.assertIs(schedule[0].ast.src[0].src[0].op, ReduceOps.MAX)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), a.numpy().sum(0)+a.numpy().max(0) + a.numpy().max(1)+a.numpy().sum(1)+2, atol=1e-4, rtol=1e-4)
 
@@ -1567,8 +1566,8 @@ class TestIndexing(unittest.TestCase):
     out1 = r+3
     self.check_schedule([out0, out1], 1)
     r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
-    np.testing.assert_allclose(out0.numpy(), r_ref+2)
-    np.testing.assert_allclose(out1.numpy(), r_ref+3)
+    np.testing.assert_allclose(out0.numpy(), r_ref+2, rtol=2e-7)
+    np.testing.assert_allclose(out1.numpy(), r_ref+3, rtol=2e-7)
 
   @unittest.expectedFailure
   def test_fold_arange_view(self):

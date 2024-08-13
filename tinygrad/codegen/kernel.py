@@ -698,7 +698,7 @@ class Kernel:
               # for TC=2, we can't do the shapetracker fixup
               srcs = [fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])]
             # MUL/SUM instead of WMMA
-            ret = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.MUL, tuple(srcs)),), wmma_arg[-1])
+            ret = LazyOp(ReduceOps.SUM, (LazyOp(UnaryOps.CAST, (LazyOp(BinaryOps.MUL, tuple(srcs)),), tc.dtype_out),), wmma_arg[-1])
           else:
             ret = LazyOp(ReduceOps.WMMA, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
           return LazyOp(op.op, (ret,), new_reduce_axes) if (new_reduce_axes:=tuple(i for i in arg if i-self.first_upcast not in reduce_axes)) else ret
@@ -724,6 +724,7 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
+      if getenv("RAWAST"): print(self.ast)
       print(modified_ast)
       print(self.applied_opts)
     verify_lazyop(modified_ast)

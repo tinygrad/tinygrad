@@ -100,7 +100,7 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simple cancel div case
   if 0 <= x.vmin.arg and x.vmax.arg < c: return x.const(0)
 
-  quotient, remainder, rem_const, something_changed, gcd = [], [], 0, False, c
+  quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
   for u in _get_add_chain(x):
     if u.op is UOps.CONST:
       # add all const together first
@@ -110,6 +110,8 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
       if factor: quotient.append(u.divides(c))
       something_changed = True
     else:
+      # divisor is the smallest common divisor of all MULs
+      if u.op is UOps.ALU and u.arg is BinaryOps.MUL and factor > 1 and c % factor == 0 and (divisor == 1 or divisor > factor): divisor = factor
       remainder.append(u)
       gcd = math.gcd(gcd, factor)
 
@@ -120,16 +122,20 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
     rem_const = rem_const%c
   if rem_const != 0: remainder.append(x.const(rem_const))
 
-  if not something_changed: return newx//(c//gcd) if 1 < gcd < c and (newx:=div_folding(x, gcd)) is not None else None
+  # x // c -> quotient + (remainder // div) // (c // div)
+  div = gcd if gcd > 1 else divisor
+
+  if not something_changed: return newx//(c//div) if 1 < div < c and (newx:=div_folding(x, div)) is not None else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const(0) if rem is None else cast(UOp, div_folding(rem, gcd))//(c//gcd)
-  return quo if rem is None else cast(UOp, div_folding(rem, gcd))//(c//gcd)+quo
+  if quo is None: return x.const(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
+  return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
 
 # ***** transcendental *****
 
-transcendental_folding = PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=k), cast(Callable, v))
-                                         for k,v in ((UnaryOps.EXP2, xexp2), (UnaryOps.LOG2, xlog2), (UnaryOps.SIN, xsin))])
+def transcendental_folding(ops):
+  return PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=k), cast(Callable, v))
+                         for k,v in ((UnaryOps.EXP2, xexp2), (UnaryOps.LOG2, xlog2), (UnaryOps.SIN, xsin)) if k not in ops])
 
 # ***** threefry *****
 
@@ -177,9 +183,6 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  # bigint is rewritten to int32
-  (UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.bigint, name="x"),
-   lambda x: UOp(x.op, dtypes.int32, x.src, x.arg)),
   # VECTORIZE/GEP
   (NOp(UOps.GEP, src=(NOp(UOps.VECTORIZE, name="cast"),), name="gep"), lambda gep, cast: cast.src[gep.arg]),
   *[(NOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(NOp(UOps.GEP, dtypes.float,
@@ -291,6 +294,8 @@ constant_folder = PatternMatcher([
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
   # mod mod
   ((NOp.var('x') % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c1 if c0.arg % c1.arg == 0 else None),
+  # (x%c)+(x//c)*c = x
+  (NOp.var('x')%NOp.cvar('c')+(NOp.var('x')//NOp.cvar('c'))*NOp.cvar('c'), lambda x,c: x),
   # ** combine terms **
   # -(x+y) -> -x + -y
   (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
@@ -470,13 +475,16 @@ reducer = PatternMatcher([
 
 # *** uop graph ***
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
-  if u in children: return
+def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
+  if u in children: return srcs[u]
+  srcs[u] = {}
   children[u] = []
   for x in u.src:
-    get_children_dfs(x, children, in_degree)
+    srcs[u].update(get_children_dfs(x, children, srcs, in_degree))
+    if x.op is UOps.RANGE and x.arg[1]: srcs[u][x] = None
     children[x].append(u)
   in_degree[u] = len(u.src)
+  return srcs[u]
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
@@ -496,9 +504,7 @@ class UOpGraph:
     # used by linearizer
     self._uops: Optional[List[UOp]] = None
     self.opts = opts
-    self.folder = constant_folder
-    if TRANSCENDENTAL >= 2 or (opts is not None and TRANSCENDENTAL >= 1 and opts.device in {"CLANG", "LLVM"}):
-      self.folder = self.folder + transcendental_folding
+    self.folder = constant_folder + transcendental_folding({} if TRANSCENDENTAL >= 2 or opts is None else opts.code_for_op.keys())
 
   def __reduce__(self): return self.__class__, (self.sink, self.opts)
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
@@ -526,6 +532,10 @@ class UOpGraph:
     # do graph rewrite
     sink = graph_rewrite(self.sink, self.folder)
 
+    # rewrite pyint to int32
+    sink = graph_rewrite(sink, PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE}, dtype=dtypes.pyint, name="x"),
+      lambda x: UOp(x.op, dtypes.int32, x.src, x.arg))]))
+
     # expand
     UOpGraph.cnt += 1
     if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
@@ -538,8 +548,9 @@ class UOpGraph:
     # filter nodes that don't link to a sink
     # BFS toposort
     children: Dict[UOp, List[UOp]] = {}
+    range_srcs: Dict[UOp, Dict[UOp, None]] = {}
     in_degree: Dict[UOp, int] = {}
-    get_children_dfs(sink, children, in_degree)
+    get_children_dfs(sink, children, range_srcs, in_degree)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
@@ -548,13 +559,19 @@ class UOpGraph:
 
     # scope children impact the toposort and END* insertion
     scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
+    range_phi = {r:[p for p in scope_children[r] if p.op is UOps.PHI] for r in scope_children if r.op is UOps.RANGE}
 
     queue:List[Tuple[int, UOp]] = []
     def push(u:UOp):
       priority = 0
+      # prefer ranges that depend on the least number of independent ranges
+      if u.op is UOps.RANGE and u.arg[1]:
+        priority += u.arg[0]
+        for p in range_phi[u]:
+          priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
       # prefer uops that are loop children
-      for l, ss in scope_children.items():
-        if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+      else:
+        priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
       heapq.heappush(queue, (priority, u))
 
     for u in children:

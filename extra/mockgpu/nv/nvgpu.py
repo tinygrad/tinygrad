@@ -52,7 +52,7 @@ class GPFIFO:
   def _state(self, reg): return self.state[reg]
   def _state64(self, reg): return (self.state[reg] << 32) + self.state[reg + 4]
   def _state64_le(self, reg): return (self.state[reg + 4] << 32) + self.state[reg]
-  
+
   def _reset_buf_state(self): self.buf, self.buf_ptr = None, 0
   def _set_buf_state(self, gpfifo_entry):
     ptr = ((gpfifo_entry >> 2) & 0xfffffffff) << 2

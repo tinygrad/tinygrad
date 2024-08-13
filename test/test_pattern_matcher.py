@@ -1,11 +1,10 @@
 import unittest, itertools
-from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
 from tinygrad.ops import BinaryOps, TernaryOps, ReduceOps, UnaryOps # noqa: F401
 from tinygrad.codegen.uops import UOps, UOp, PatternMatcher, UPat
 from tinygrad.codegen.uopgraph import constant_folder
 
-class TestPatternMatcher(TestUOps):
+class TestPatternMatcher(unittest.TestCase):
   def test_simple_match(self):
     matcher = PatternMatcher([(UPat(UOps.CONST, name="x", dtype=dtypes.float), lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
