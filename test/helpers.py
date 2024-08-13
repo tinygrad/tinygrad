@@ -1,6 +1,8 @@
-import sys
+import sys, unittest
+from typing import Optional, Set, Tuple
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.codegen.uops import UOp
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import DType
@@ -51,3 +53,20 @@ def rand_for_dtype(dt:DType, size:int):
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
   return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
+
+class TestUOps(unittest.TestCase):
+  def assert_equiv_uops(self, uop1:UOp, uop2:UOp, cache:Optional[Set[Tuple[UOp, UOp]]]=None):
+    if cache is None: cache = set()
+    if (uop1, uop2) in cache: return
+    cache.add((uop1, uop2))
+    # NOTE: direct UOps __eq__ is comparing object reference, use this function to compare two uops
+    try:
+      self.assertIs(uop1.op, uop2.op)
+      self.assertEqual(uop1.dtype, uop2.dtype)
+      self.assertEqual(uop1.arg, uop2.arg)
+      self.assertEqual(len(uop1.src), len(uop2.src))
+      for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
+    except AssertionError as e:
+      print(f"{uop1=}")
+      print(f"{uop2=}")
+      raise e
