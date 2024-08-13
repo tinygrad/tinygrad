@@ -1,7 +1,7 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Callable, Any, List, Optional
 from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.renderer import Renderer
 
@@ -53,7 +53,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   has_shared = False
   global_max = None
-  code_for_op = {
+  code_for_op: Dict[Op, Callable] = {
     UnaryOps.NEG: lambda builder, x, dtype: builder.neg(x) if dtypes.is_int(dtype) else \
     (builder.not_(x) if dtype == dtypes.bool else builder.fneg(x, flags=MFLAGS)),
     UnaryOps.RECIP: lambda builder, x, dtype: builder.fdiv(const(1, dtype), x, flags=MFLAGS),
