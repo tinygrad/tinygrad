@@ -1,4 +1,5 @@
 import unittest
+from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
@@ -89,7 +90,7 @@ class TestGraphRewrite(unittest.TestCase):
       self.assertEqual(sink.src[1].op, UOps.CONST)
       self.assertEqual(len([x for x in sink.sparents if x.op is UOps.CONST]), 3)
 
-class TestUOpGraph(unittest.TestCase):
+class TestUOpGraph(TestUOps):
   def test_add_constant_fold(self):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
@@ -160,7 +161,7 @@ class TestUOpGraph(unittest.TestCase):
     # possible
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
     xyzw = tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(4))
-    self.assertEqual(_test_vec(xyzw), val)
+    self.assert_equiv_uops(_test_vec(xyzw), val)
 
     # unaligned
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
@@ -189,7 +190,7 @@ class TestUOpGraph(unittest.TestCase):
       geps = [UOp(UOps.GEP, dtypes.float, (vec,), i) for i in range(vec_size)]
       g = UOpGraph(geps)
       for uop, const in zip(g.uops, consts):
-        self.assertEqual(uop, const)
+        self.assert_equiv_uops(uop, const)
 
   def test_wmma_vectorize_fold(self):
     for i in [2, 4, 8]:
@@ -198,7 +199,7 @@ class TestUOpGraph(unittest.TestCase):
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
       g = UOpGraph([wmma])
-      self.assertEqual(g.uops[0], acc)
+      self.assert_equiv_uops(g.uops[0], acc)
       self.assertEqual(len(g.uops), 1)
 
     for i in [2, 4, 8]:
@@ -207,7 +208,7 @@ class TestUOpGraph(unittest.TestCase):
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       g = UOpGraph([wmma])
-      self.assertEqual(g.uops[0], acc)
+      self.assert_equiv_uops(g.uops[0], acc)
       self.assertEqual(len(g.uops), 1)
 
   def test_wmma_vectorize_no_fold(self):
@@ -219,7 +220,7 @@ class TestUOpGraph(unittest.TestCase):
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
       g = UOpGraph([wmma])
-      self.assertEqual(g.uops[-1], wmma)
+      self.assert_equiv_uops(g.uops[-1], wmma)
 
     for i in [4, 8]:
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
@@ -229,7 +230,7 @@ class TestUOpGraph(unittest.TestCase):
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       g = UOpGraph([wmma])
-      self.assertEqual(g.uops[-1], wmma)
+      self.assert_equiv_uops(g.uops[-1], wmma)
 
     for i in [2, 4, 8]:
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
@@ -238,7 +239,7 @@ class TestUOpGraph(unittest.TestCase):
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
       g = UOpGraph([wmma])
-      self.assertEqual(g.uops[-1], wmma)
+      self.assert_equiv_uops(g.uops[-1], wmma)
 
     for i in [2, 4, 8]:
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
@@ -247,7 +248,7 @@ class TestUOpGraph(unittest.TestCase):
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       g = UOpGraph([wmma])
-      self.assertEqual(g.uops[-1], wmma)
+      self.assert_equiv_uops(g.uops[-1], wmma)
 
   def test_cast_alu_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=0)
@@ -293,9 +294,9 @@ class TestUOpGraph(unittest.TestCase):
     uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
-    self.assertEqual(ld1, UOp.const(dtypes.int, 2))
+    self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
     # the gate and invalid value are deleted from ld1
-    self.assertEqual(ld0, UOp.load(glbl2, idx, dtype=dtypes.int))
+    self.assert_equiv_uops(ld0, UOp.load(glbl2, idx, dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
@@ -308,9 +309,9 @@ class TestUOpGraph(unittest.TestCase):
     uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, lidx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
-    self.assertEqual(ld1, UOp.const(dtypes.int, 2))
+    self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
     # the gate and invalid value are deleted from ld1
-    self.assertEqual(ld0, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
+    self.assert_equiv_uops(ld0, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
 
   def test_fold_gated_store(self):
     glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
@@ -322,7 +323,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = UOpGraph([st0, st1])
     # only the second store happens
     self.assertEqual(len(uops.uops), 4)
-    self.assertEqual(uops[-1], UOp.store(glbl, idx1, val))
+    self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
 
   def test_asserts_bad_gate(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
@@ -559,7 +560,7 @@ class TestLoadStoreFolder(unittest.TestCase):
 
 def gate_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + reducer)
 
-class TestIFUOps(unittest.TestCase):
+class TestIFUOps(TestUOps):
   def test_create_ifs(self):
     gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 4))
@@ -575,7 +576,7 @@ class TestIFUOps(unittest.TestCase):
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
-    self.assertEqual(if_uops[0].src[0], gate)
+    self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
 
@@ -593,7 +594,7 @@ class TestIFUOps(unittest.TestCase):
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
-    self.assertEqual(if_uops[0].src[0], gate)
+    self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
 
@@ -609,19 +610,19 @@ class TestIFUOps(unittest.TestCase):
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
-    self.assertEqual(if_uops[0].src[0], gate)
+    self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
 
-class TestDivMod(unittest.TestCase):
+class TestDivMod(TestUOps):
   def c(self, c:int): return UOp.const(dtypes.int, c)
   def x(self, expr:str, nmin:int, nmax:int): return UOp(UOps.DEFINE_VAR, dtypes.int, (self.c(nmin), self.c(nmax)), Variable(expr, nmin, nmax))
 
   # NOTE: does not simplify to the end
   def test_const_mod(self):
-    self.assertEqual(mod_folding(self.c(6), 3), self.c(1)*self.c(0))
-    self.assertEqual(mod_folding(self.c(7), 3), self.c(1)*self.c(1))
-    self.assertEqual(mod_folding(self.c(8), 3), self.c(1)*self.c(2))
+    self.assert_equiv_uops(mod_folding(self.c(6), 3), self.c(1)*self.c(0))
+    self.assert_equiv_uops(mod_folding(self.c(7), 3), self.c(1)*self.c(1))
+    self.assert_equiv_uops(mod_folding(self.c(8), 3), self.c(1)*self.c(2))
 
   def test_var_mod(self):
     self.assertIsNone(mod_folding(self.x("x", 0, 6), 3))
@@ -629,32 +630,32 @@ class TestDivMod(unittest.TestCase):
 
   @unittest.skip("does not simplify to the end")
   def test_add_mod(self):
-    self.assertEqual(mod_folding(self.x("x", 0, 6)+40, 5), self.x("x", 0, 6))
-    self.assertEqual(mod_folding(self.x("x", 0, 6)-40, 5), self.x("x", 0, 6))
-    self.assertEqual(mod_folding(self.x("x", 0, 6)+42, 5), (self.x("x", 0, 6)+2))
-    self.assertEqual(mod_folding(self.x("x", 0, 6)-42, 5), (self.x("x", 0, 6)+3))
-    self.assertEqual(mod_folding(40+self.x("x", 0, 6), 5), self.x("x", 0, 6))
-    self.assertEqual(mod_folding(-40+self.x("x", 0, 6), 5), self.x("x", 0, 6))
-    self.assertEqual(mod_folding(42+self.x("x", 0, 6), 5), (2+self.x("x", 0, 6)))
-    self.assertEqual(mod_folding(-42+self.x("x", 0, 6), 5), (3+self.x("x", 0, 6)))
+    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)+40, 5), self.x("x", 0, 6))
+    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)-40, 5), self.x("x", 0, 6))
+    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)+42, 5), (self.x("x", 0, 6)+2))
+    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)-42, 5), (self.x("x", 0, 6)+3))
+    self.assert_equiv_uops(mod_folding(40+self.x("x", 0, 6), 5), self.x("x", 0, 6))
+    self.assert_equiv_uops(mod_folding(-40+self.x("x", 0, 6), 5), self.x("x", 0, 6))
+    self.assert_equiv_uops(mod_folding(42+self.x("x", 0, 6), 5), (2+self.x("x", 0, 6)))
+    self.assert_equiv_uops(mod_folding(-42+self.x("x", 0, 6), 5), (3+self.x("x", 0, 6)))
 
   @unittest.skip("does not simplify to the end")
   def test_mul_mod(self):
-    self.assertEqual(mod_folding(self.x("x", 0, 6)*40, 5), self.c(0))
-    self.assertEqual(mod_folding(self.x("x", 0, 6)*-40, 5), self.c(0))
-    self.assertEqual(mod_folding(self.x("x", 0, 6)*42, 5), (self.x("x", 0, 6)*2))
-    self.assertEqual(mod_folding(self.x("x", 0, 6)*-42, 5), (self.x("x", 0, 6)*3))
-    self.assertEqual(mod_folding(40*self.x("x", 0, 6), 5), self.c(0))
-    self.assertEqual(mod_folding(-40*self.x("x", 0, 6), 5), self.c(0))
-    self.assertEqual(mod_folding(42*self.x("x", 0, 6), 5), (2*self.x("x", 0, 6)))
-    self.assertEqual(mod_folding(-42*self.x("x", 0, 6), 5), (3*self.x("x", 0, 6)))
+    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)*40, 5), self.c(0))
+    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)*-40, 5), self.c(0))
+    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)*42, 5), (self.x("x", 0, 6)*2))
+    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)*-42, 5), (self.x("x", 0, 6)*3))
+    self.assert_equiv_uops(mod_folding(40*self.x("x", 0, 6), 5), self.c(0))
+    self.assert_equiv_uops(mod_folding(-40*self.x("x", 0, 6), 5), self.c(0))
+    self.assert_equiv_uops(mod_folding(42*self.x("x", 0, 6), 5), (2*self.x("x", 0, 6)))
+    self.assert_equiv_uops(mod_folding(-42*self.x("x", 0, 6), 5), (3*self.x("x", 0, 6)))
 
   @unittest.skip("does not simplify to the end now")
   def test_mul_add_mod(self):
     x = self.x("x", 0, 10)
     y = self.x("y", 0, 10)
     z = self.x("z", 0, 10)
-    self.assertEqual(mod_folding(x*40+y*12+z, 5), (y*2+z))
+    self.assert_equiv_uops(mod_folding(x*40+y*12+z, 5), (y*2+z))
 
 
 if __name__ == '__main__':
