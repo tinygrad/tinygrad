@@ -20,8 +20,8 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.runner = get_runner(TestHCQ.d0.dname, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
 
-    TestHCQ.kernargs_ba_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
-    TestHCQ.kernargs_ab_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf])
+    TestHCQ.kernargs_ba_ptr = TestHCQ.runner.clprg.args_state_t([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
+    TestHCQ.kernargs_ab_ptr = TestHCQ.runner.clprg.args_state_t([TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf])
 
   def setUp(self):
     TestHCQ.d0.synchronize()
@@ -147,7 +147,7 @@ class TestHCQ(unittest.TestCase):
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
     ctypes.memset(zb._buf.va_addr, 0, zb.nbytes)
-    kernargs = runner.clprg.fill_kernargs([zt._buf, zb._buf])
+    kernargs = runner.clprg.args_state_t([zt._buf, zb._buf])
 
     q = TestHCQ.d0.hw_compute_queue_t()
     q.memory_barrier() \
@@ -419,7 +419,7 @@ class TestHCQ(unittest.TestCase):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
 
-    kernargs_ptr = runner.clprg.fill_kernargs([buf1._buf, buf2._buf])
+    kernargs_ptr = runner.clprg.args_state_t([buf1._buf, buf2._buf])
 
     for i in range(255):
       ctypes.memset(buf2._buf.va_addr, i, 2)

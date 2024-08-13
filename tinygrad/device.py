@@ -433,7 +433,7 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
 
 class HCQArgsState:
   def __init__(self, prg:HCQProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), ptr:Optional[int]=None):
-    self.prg, self.ptr = prg,ptr or prg.device._alloc_kernargs(prg.kernargs_alloc_size)
+    self.prg, self.ptr = prg, ptr or prg.device._alloc_kernargs(prg.kernargs_alloc_size)
   def update_buf(self, index: int, buf: HCQBuffer): pass
   def update_var(self, index: int, val: int): pass
 

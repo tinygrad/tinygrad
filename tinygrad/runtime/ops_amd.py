@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Tuple, List, Any, cast
+from typing import Tuple, List, Any, cast, Optional
 import os, fcntl, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal
 from dataclasses import dataclass
-from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, \
+from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, HCQArgsState, \
                             HCQSignal, HCQProgram, BufferOptions
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
@@ -256,7 +256,22 @@ class AMDCopyQueue(HWCopyQueue):
     device.sdma_queue.write_ptr[0] = device.sdma_queue.put_value
     device.sdma_queue.doorbell[0] = device.sdma_queue.put_value
 
+class AMDArgsState(HCQArgsState):
+  def __init__(self, prg:AMDProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), ptr:Optional[int]=None):
+    super().__init__(prg, bufs, vals=vals, ptr=ptr)
+
+    self.bufs = to_mv(self.ptr, len(bufs) * 8).cast('Q')
+    self.vals = to_mv(self.ptr + len(bufs) * 8, len(vals) * 4).cast('I')
+
+    self.bufs[:] = array.array('Q', [b.va_addr for b in bufs])
+    self.vals[:] = array.array('I', vals)
+
+  def update_buf(self, index: int, buf: HCQBuffer): self.bufs[index] = buf.va_addr
+  def update_var(self, index: int, val: int): self.vals[index] = val
+
 class AMDProgram(HCQProgram):
+  args_state_t = AMDArgsState
+
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
@@ -292,11 +307,6 @@ class AMDProgram(HCQProgram):
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): cast(AMDDevice, self.device)._gpu_free(self.lib_gpu)
-
-  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
-    if (given:=len(bufs)*8 + len(vals)*4) != (want:=self.kernargs_segment_size): raise RuntimeError(f'incorrect args size {given=} != {want=}')
-    if len(bufs): to_mv(kernargs_ptr, len(bufs) * 8).cast('Q')[:] = array.array('Q', [b.va_addr for b in bufs])
-    if len(vals): to_mv(kernargs_ptr + len(bufs) * 8, len(vals) * 4).cast('I')[:] = array.array('I', vals)
 
 class AMDAllocator(HCQAllocator):
   def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
