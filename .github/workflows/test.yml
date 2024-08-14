@@ -326,12 +326,11 @@ jobs:
       run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-      # TODO: this is timing out
-      #- name: Run process replay tests
-      #run: |
-      #  export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
-      #  export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-      #  cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+    - name: Run process replay tests
+      run: |
+        export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+        export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+        cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
 #  testwebgl:
 #    name: WebGL Tests
