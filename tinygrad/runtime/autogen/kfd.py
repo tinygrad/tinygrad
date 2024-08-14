@@ -208,7 +208,7 @@ struct_kfd_ioctl_get_version_args._fields_ = [
     ('minor_version', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_GET_VERSION = AMDKFD_IOR ( 0x01 , struct_kfd_ioctl_get_version_args ) # macro from list
+AMDKFD_IOC_GET_VERSION = AMDKFD_IOR ( 0x01 , struct_kfd_ioctl_get_version_args ) # macro (from list)
 class struct_kfd_ioctl_create_queue_args(Structure):
     pass
 
@@ -231,7 +231,7 @@ struct_kfd_ioctl_create_queue_args._fields_ = [
     ('ctl_stack_size', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_CREATE_QUEUE = AMDKFD_IOWR ( 0x02 , struct_kfd_ioctl_create_queue_args ) # macro from list
+AMDKFD_IOC_CREATE_QUEUE = AMDKFD_IOWR ( 0x02 , struct_kfd_ioctl_create_queue_args ) # macro (from list)
 class struct_kfd_ioctl_destroy_queue_args(Structure):
     pass
 
@@ -241,7 +241,7 @@ struct_kfd_ioctl_destroy_queue_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_DESTROY_QUEUE = AMDKFD_IOWR ( 0x03 , struct_kfd_ioctl_destroy_queue_args ) # macro from list
+AMDKFD_IOC_DESTROY_QUEUE = AMDKFD_IOWR ( 0x03 , struct_kfd_ioctl_destroy_queue_args ) # macro (from list)
 class struct_kfd_ioctl_update_queue_args(Structure):
     pass
 
@@ -254,7 +254,7 @@ struct_kfd_ioctl_update_queue_args._fields_ = [
     ('queue_priority', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_UPDATE_QUEUE = AMDKFD_IOW ( 0x07 , struct_kfd_ioctl_update_queue_args ) # macro from list
+AMDKFD_IOC_UPDATE_QUEUE = AMDKFD_IOW ( 0x07 , struct_kfd_ioctl_update_queue_args ) # macro (from list)
 class struct_kfd_ioctl_set_cu_mask_args(Structure):
     pass
 
@@ -265,7 +265,7 @@ struct_kfd_ioctl_set_cu_mask_args._fields_ = [
     ('cu_mask_ptr', ctypes.c_uint64),
 ]
 
-AMDKFD_IOC_SET_CU_MASK = AMDKFD_IOW ( 0x1A , struct_kfd_ioctl_set_cu_mask_args ) # macro from list
+AMDKFD_IOC_SET_CU_MASK = AMDKFD_IOW ( 0x1A , struct_kfd_ioctl_set_cu_mask_args ) # macro (from list)
 class struct_kfd_ioctl_get_queue_wave_state_args(Structure):
     pass
 
@@ -278,7 +278,7 @@ struct_kfd_ioctl_get_queue_wave_state_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_GET_QUEUE_WAVE_STATE = AMDKFD_IOWR ( 0x1B , struct_kfd_ioctl_get_queue_wave_state_args ) # macro from list
+AMDKFD_IOC_GET_QUEUE_WAVE_STATE = AMDKFD_IOWR ( 0x1B , struct_kfd_ioctl_get_queue_wave_state_args ) # macro (from list)
 class struct_kfd_ioctl_set_memory_policy_args(Structure):
     pass
 
@@ -292,7 +292,7 @@ struct_kfd_ioctl_set_memory_policy_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_SET_MEMORY_POLICY = AMDKFD_IOW ( 0x04 , struct_kfd_ioctl_set_memory_policy_args ) # macro from list
+AMDKFD_IOC_SET_MEMORY_POLICY = AMDKFD_IOW ( 0x04 , struct_kfd_ioctl_set_memory_policy_args ) # macro (from list)
 class struct_kfd_ioctl_get_clock_counters_args(Structure):
     pass
 
@@ -306,7 +306,7 @@ struct_kfd_ioctl_get_clock_counters_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_GET_CLOCK_COUNTERS = AMDKFD_IOWR ( 0x05 , struct_kfd_ioctl_get_clock_counters_args ) # macro from list
+AMDKFD_IOC_GET_CLOCK_COUNTERS = AMDKFD_IOWR ( 0x05 , struct_kfd_ioctl_get_clock_counters_args ) # macro (from list)
 class struct_kfd_process_device_apertures(Structure):
     pass
 
@@ -332,7 +332,7 @@ struct_kfd_ioctl_get_process_apertures_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_GET_PROCESS_APERTURES = AMDKFD_IOR ( 0x06 , struct_kfd_ioctl_get_process_apertures_args ) # macro from list
+AMDKFD_IOC_GET_PROCESS_APERTURES = AMDKFD_IOR ( 0x06 , struct_kfd_ioctl_get_process_apertures_args ) # macro (from list)
 class struct_kfd_ioctl_get_process_apertures_new_args(Structure):
     pass
 
@@ -343,7 +343,7 @@ struct_kfd_ioctl_get_process_apertures_new_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_GET_PROCESS_APERTURES_NEW = AMDKFD_IOWR ( 0x14 , struct_kfd_ioctl_get_process_apertures_new_args ) # macro from list
+AMDKFD_IOC_GET_PROCESS_APERTURES_NEW = AMDKFD_IOWR ( 0x14 , struct_kfd_ioctl_get_process_apertures_new_args ) # macro (from list)
 class struct_kfd_ioctl_dbg_register_args(Structure):
     pass
 
@@ -353,7 +353,7 @@ struct_kfd_ioctl_dbg_register_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_DBG_REGISTER = AMDKFD_IOW ( 0x0D , struct_kfd_ioctl_dbg_register_args ) # macro from list
+AMDKFD_IOC_DBG_REGISTER = AMDKFD_IOW ( 0x0D , struct_kfd_ioctl_dbg_register_args ) # macro (from list)
 class struct_kfd_ioctl_dbg_unregister_args(Structure):
     pass
 
@@ -363,7 +363,7 @@ struct_kfd_ioctl_dbg_unregister_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_DBG_UNREGISTER = AMDKFD_IOW ( 0x0E , struct_kfd_ioctl_dbg_unregister_args ) # macro from list
+AMDKFD_IOC_DBG_UNREGISTER = AMDKFD_IOW ( 0x0E , struct_kfd_ioctl_dbg_unregister_args ) # macro (from list)
 class struct_kfd_ioctl_dbg_address_watch_args(Structure):
     pass
 
@@ -374,7 +374,7 @@ struct_kfd_ioctl_dbg_address_watch_args._fields_ = [
     ('buf_size_in_bytes', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_DBG_ADDRESS_WATCH = AMDKFD_IOW ( 0x0F , struct_kfd_ioctl_dbg_address_watch_args ) # macro from list
+AMDKFD_IOC_DBG_ADDRESS_WATCH = AMDKFD_IOW ( 0x0F , struct_kfd_ioctl_dbg_address_watch_args ) # macro (from list)
 class struct_kfd_ioctl_dbg_wave_control_args(Structure):
     pass
 
@@ -385,7 +385,7 @@ struct_kfd_ioctl_dbg_wave_control_args._fields_ = [
     ('buf_size_in_bytes', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_DBG_WAVE_CONTROL = AMDKFD_IOW ( 0x10 , struct_kfd_ioctl_dbg_wave_control_args ) # macro from list
+AMDKFD_IOC_DBG_WAVE_CONTROL = AMDKFD_IOW ( 0x10 , struct_kfd_ioctl_dbg_wave_control_args ) # macro (from list)
 class struct_kfd_ioctl_create_event_args(Structure):
     pass
 
@@ -400,7 +400,7 @@ struct_kfd_ioctl_create_event_args._fields_ = [
     ('event_slot_index', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_CREATE_EVENT = AMDKFD_IOWR ( 0x08 , struct_kfd_ioctl_create_event_args ) # macro from list
+AMDKFD_IOC_CREATE_EVENT = AMDKFD_IOWR ( 0x08 , struct_kfd_ioctl_create_event_args ) # macro (from list)
 class struct_kfd_ioctl_destroy_event_args(Structure):
     pass
 
@@ -410,7 +410,7 @@ struct_kfd_ioctl_destroy_event_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_DESTROY_EVENT = AMDKFD_IOW ( 0x09 , struct_kfd_ioctl_destroy_event_args ) # macro from list
+AMDKFD_IOC_DESTROY_EVENT = AMDKFD_IOW ( 0x09 , struct_kfd_ioctl_destroy_event_args ) # macro (from list)
 class struct_kfd_ioctl_set_event_args(Structure):
     pass
 
@@ -420,7 +420,7 @@ struct_kfd_ioctl_set_event_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_SET_EVENT = AMDKFD_IOW ( 0x0A , struct_kfd_ioctl_set_event_args ) # macro from list
+AMDKFD_IOC_SET_EVENT = AMDKFD_IOW ( 0x0A , struct_kfd_ioctl_set_event_args ) # macro (from list)
 class struct_kfd_ioctl_reset_event_args(Structure):
     pass
 
@@ -430,7 +430,7 @@ struct_kfd_ioctl_reset_event_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_RESET_EVENT = AMDKFD_IOW ( 0x0B , struct_kfd_ioctl_reset_event_args ) # macro from list
+AMDKFD_IOC_RESET_EVENT = AMDKFD_IOW ( 0x0B , struct_kfd_ioctl_reset_event_args ) # macro (from list)
 class struct_kfd_memory_exception_failure(Structure):
     pass
 
@@ -498,7 +498,7 @@ struct_kfd_ioctl_wait_events_args._fields_ = [
     ('wait_result', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_WAIT_EVENTS = AMDKFD_IOWR ( 0x0C , struct_kfd_ioctl_wait_events_args ) # macro from list
+AMDKFD_IOC_WAIT_EVENTS = AMDKFD_IOWR ( 0x0C , struct_kfd_ioctl_wait_events_args ) # macro (from list)
 class struct_kfd_ioctl_set_scratch_backing_va_args(Structure):
     pass
 
@@ -509,7 +509,7 @@ struct_kfd_ioctl_set_scratch_backing_va_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_SET_SCRATCH_BACKING_VA = AMDKFD_IOWR ( 0x11 , struct_kfd_ioctl_set_scratch_backing_va_args ) # macro from list
+AMDKFD_IOC_SET_SCRATCH_BACKING_VA = AMDKFD_IOWR ( 0x11 , struct_kfd_ioctl_set_scratch_backing_va_args ) # macro (from list)
 class struct_kfd_ioctl_get_tile_config_args(Structure):
     pass
 
@@ -525,7 +525,7 @@ struct_kfd_ioctl_get_tile_config_args._fields_ = [
     ('num_ranks', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_GET_TILE_CONFIG = AMDKFD_IOWR ( 0x12 , struct_kfd_ioctl_get_tile_config_args ) # macro from list
+AMDKFD_IOC_GET_TILE_CONFIG = AMDKFD_IOWR ( 0x12 , struct_kfd_ioctl_get_tile_config_args ) # macro (from list)
 class struct_kfd_ioctl_set_trap_handler_args(Structure):
     pass
 
@@ -537,7 +537,7 @@ struct_kfd_ioctl_set_trap_handler_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_SET_TRAP_HANDLER = AMDKFD_IOW ( 0x13 , struct_kfd_ioctl_set_trap_handler_args ) # macro from list
+AMDKFD_IOC_SET_TRAP_HANDLER = AMDKFD_IOW ( 0x13 , struct_kfd_ioctl_set_trap_handler_args ) # macro (from list)
 class struct_kfd_ioctl_acquire_vm_args(Structure):
     pass
 
@@ -547,7 +547,7 @@ struct_kfd_ioctl_acquire_vm_args._fields_ = [
     ('gpu_id', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_ACQUIRE_VM = AMDKFD_IOW ( 0x15 , struct_kfd_ioctl_acquire_vm_args ) # macro from list
+AMDKFD_IOC_ACQUIRE_VM = AMDKFD_IOW ( 0x15 , struct_kfd_ioctl_acquire_vm_args ) # macro (from list)
 class struct_kfd_ioctl_alloc_memory_of_gpu_args(Structure):
     pass
 
@@ -561,7 +561,7 @@ struct_kfd_ioctl_alloc_memory_of_gpu_args._fields_ = [
     ('flags', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_ALLOC_MEMORY_OF_GPU = AMDKFD_IOWR ( 0x16 , struct_kfd_ioctl_alloc_memory_of_gpu_args ) # macro from list
+AMDKFD_IOC_ALLOC_MEMORY_OF_GPU = AMDKFD_IOWR ( 0x16 , struct_kfd_ioctl_alloc_memory_of_gpu_args ) # macro (from list)
 class struct_kfd_ioctl_free_memory_of_gpu_args(Structure):
     pass
 
@@ -570,7 +570,7 @@ struct_kfd_ioctl_free_memory_of_gpu_args._fields_ = [
     ('handle', ctypes.c_uint64),
 ]
 
-AMDKFD_IOC_FREE_MEMORY_OF_GPU = AMDKFD_IOW ( 0x17 , struct_kfd_ioctl_free_memory_of_gpu_args ) # macro from list
+AMDKFD_IOC_FREE_MEMORY_OF_GPU = AMDKFD_IOW ( 0x17 , struct_kfd_ioctl_free_memory_of_gpu_args ) # macro (from list)
 class struct_kfd_ioctl_map_memory_to_gpu_args(Structure):
     pass
 
@@ -582,7 +582,7 @@ struct_kfd_ioctl_map_memory_to_gpu_args._fields_ = [
     ('n_success', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_MAP_MEMORY_TO_GPU = AMDKFD_IOWR ( 0x18 , struct_kfd_ioctl_map_memory_to_gpu_args ) # macro from list
+AMDKFD_IOC_MAP_MEMORY_TO_GPU = AMDKFD_IOWR ( 0x18 , struct_kfd_ioctl_map_memory_to_gpu_args ) # macro (from list)
 class struct_kfd_ioctl_unmap_memory_from_gpu_args(Structure):
     pass
 
@@ -594,7 +594,7 @@ struct_kfd_ioctl_unmap_memory_from_gpu_args._fields_ = [
     ('n_success', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU = AMDKFD_IOWR ( 0x19 , struct_kfd_ioctl_unmap_memory_from_gpu_args ) # macro from list
+AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU = AMDKFD_IOWR ( 0x19 , struct_kfd_ioctl_unmap_memory_from_gpu_args ) # macro (from list)
 class struct_kfd_ioctl_alloc_queue_gws_args(Structure):
     pass
 
@@ -606,7 +606,7 @@ struct_kfd_ioctl_alloc_queue_gws_args._fields_ = [
     ('pad', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_ALLOC_QUEUE_GWS = AMDKFD_IOWR ( 0x1E , struct_kfd_ioctl_alloc_queue_gws_args ) # macro from list
+AMDKFD_IOC_ALLOC_QUEUE_GWS = AMDKFD_IOWR ( 0x1E , struct_kfd_ioctl_alloc_queue_gws_args ) # macro (from list)
 class struct_kfd_ioctl_get_dmabuf_info_args(Structure):
     pass
 
@@ -620,7 +620,7 @@ struct_kfd_ioctl_get_dmabuf_info_args._fields_ = [
     ('dmabuf_fd', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_GET_DMABUF_INFO = AMDKFD_IOWR ( 0x1C , struct_kfd_ioctl_get_dmabuf_info_args ) # macro from list
+AMDKFD_IOC_GET_DMABUF_INFO = AMDKFD_IOWR ( 0x1C , struct_kfd_ioctl_get_dmabuf_info_args ) # macro (from list)
 class struct_kfd_ioctl_import_dmabuf_args(Structure):
     pass
 
@@ -632,7 +632,7 @@ struct_kfd_ioctl_import_dmabuf_args._fields_ = [
     ('dmabuf_fd', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_IMPORT_DMABUF = AMDKFD_IOWR ( 0x1D , struct_kfd_ioctl_import_dmabuf_args ) # macro from list
+AMDKFD_IOC_IMPORT_DMABUF = AMDKFD_IOWR ( 0x1D , struct_kfd_ioctl_import_dmabuf_args ) # macro (from list)
 
 # values for enumeration 'kfd_smi_event'
 kfd_smi_event__enumvalues = {
@@ -657,7 +657,7 @@ struct_kfd_ioctl_smi_events_args._fields_ = [
     ('anon_fd', ctypes.c_uint32),
 ]
 
-AMDKFD_IOC_SMI_EVENTS = AMDKFD_IOWR ( 0x1F , struct_kfd_ioctl_smi_events_args ) # macro from list
+AMDKFD_IOC_SMI_EVENTS = AMDKFD_IOWR ( 0x1F , struct_kfd_ioctl_smi_events_args ) # macro (from list)
 
 # values for enumeration 'kfd_mmio_remap'
 kfd_mmio_remap__enumvalues = {
@@ -727,7 +727,7 @@ struct_kfd_ioctl_svm_args._fields_ = [
     ('attrs', struct_kfd_ioctl_svm_attribute * 0),
 ]
 
-AMDKFD_IOC_SVM = AMDKFD_IOWR ( 0x20 , struct_kfd_ioctl_svm_args ) # macro from list
+AMDKFD_IOC_SVM = AMDKFD_IOWR ( 0x20 , struct_kfd_ioctl_svm_args ) # macro (from list)
 class struct_kfd_ioctl_set_xnack_mode_args(Structure):
     pass
 
@@ -736,7 +736,7 @@ struct_kfd_ioctl_set_xnack_mode_args._fields_ = [
     ('xnack_enabled', ctypes.c_int32),
 ]
 
-AMDKFD_IOC_SET_XNACK_MODE = AMDKFD_IOWR ( 0x21 , struct_kfd_ioctl_set_xnack_mode_args ) # macro from list
+AMDKFD_IOC_SET_XNACK_MODE = AMDKFD_IOWR ( 0x21 , struct_kfd_ioctl_set_xnack_mode_args ) # macro (from list)
 __all__ = \
     ['AMDKFD_COMMAND_END', 'AMDKFD_COMMAND_START',
     'AMDKFD_IOCTL_BASE', 'KFD_HW_EXCEPTION_ECC',
