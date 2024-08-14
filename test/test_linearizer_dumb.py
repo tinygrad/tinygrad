@@ -121,7 +121,28 @@ class TestLinearizerDumb(unittest.TestCase):
     prg = k.to_program()
     print(prg.src)
     load_idxs = [x.src[1] for x in k.uops if x.op is UOps.LOAD and x.src[0].arg == 3]
-    assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0]} then {load_idxs[1]}!"
+    assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
+
+  @unittest.expectedFailure
+  def test_unrolled_float4_align(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+  LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=(
+    LazyOp(ReduceOps.SUM, arg=(0, 1), src=(
+      LazyOp(TernaryOps.WHERE, arg=None, src=(
+        LazyOp(BinaryOps.CMPNE, arg=None, src=(
+          LazyOp(BinaryOps.CMPNE, arg=None, src=(
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.long, st=ShapeTracker(views=(View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True),))), src=()),
+            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.long, st=ShapeTracker(views=(View(shape=(3, 6), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+          LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(3, 6), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
+        LazyOp(BufferOps.CONST, arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 6), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),
+        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True),))), src=()),)),)),)),))
+    opts = [Opt(op=OptOps.UNROLL, axis=0, amt=0)]
+    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
+    for opt in opts: k.apply_opt(opt)
+    prg = k.to_program()
+    print(prg.src)
+    load_idxs = [x.src[1] for x in k.uops if x.op is UOps.LOAD and x.src[0].arg == 2]
+    assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
 
 if __name__ == '__main__':
   unittest.main()
