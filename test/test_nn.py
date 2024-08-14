@@ -504,6 +504,9 @@ class TestNN(unittest.TestCase):
   def test_lstm_cell_no_bias(self):
     layer = LSTMCell(32, 16, bias=False)
     inp = Tensor.randn(1, 32)
+    out_h, out_c = layer(inp)
+    out_h.realize()
+    out_c.realize()
     h = Tensor.randn(1, 16)
     c = Tensor.randn(1, 16)
     out_h, out_c = layer(inp, (h, c))
