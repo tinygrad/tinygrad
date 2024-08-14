@@ -144,6 +144,7 @@ if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
     logging.info("skipping process replay.")
     exit(0)
-  try: process_replay()
-  except Exception as e:
-    if ASSERT_DIFF: raise e
+  process_replay()
+  # try: process_replay()
+  # except Exception as e:
+  #   if ASSERT_DIFF: raise e
