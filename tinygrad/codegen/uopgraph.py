@@ -150,6 +150,21 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   if quo is None: return x.const(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
   return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
 
+def lt_folding(x:UOp, c:int) -> Optional[UOp]:
+  # simplify x < c, None means no change
+  for u in _get_add_chain(x):
+    if u.op is UOps.CONST: c -= u.arg
+  muls, others, gcd = [], [], c
+  for u in _get_add_chain(x):
+    if u.op is UOps.CONST: continue
+    if u.op is UOps.ALU and u.arg is BinaryOps.MUL:
+      muls.append(u)
+      gcd = math.gcd(gcd, u.const_factor())
+    else: others.append(u)
+  if 1 < gcd and others and 0 <= (s:=functools.reduce(operator.add, others)).vmin.arg and s.vmax.arg < gcd:
+    return functools.reduce(operator.add, muls).divides(gcd).lt(c//gcd) if muls else x.const(0).lt(c//gcd)
+  return None
+
 # ***** transcendental *****
 
 def transcendental_folding(ops):
@@ -301,9 +316,11 @@ constant_folder = PatternMatcher([
   # mul add lt
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
    lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
-  # generic lt folding (use div)
+  # generic lt folding (using div folding)
   (NOp.var('x').lt(NOp.cvar('c')), lambda x,c: newx.src[0].lt(newx.src[1]) if 0 < c.arg and dtypes.is_int(x.dtype) and \
    not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV else None),
+  # generic lt folding (speculative based on MUL)
+  (NOp.var('x').lt(NOp.cvar('c')), lambda x,c: ret if dtypes.is_int(x.dtype) and (ret:=lt_folding(x,c.arg)) is not None else None),
   # ** div **
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
