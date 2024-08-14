@@ -491,13 +491,15 @@ class TestNN(unittest.TestCase):
       layer.bias_ih.assign(torch_layer.bias_ih.numpy())
 
       inp = Tensor.randn(1, 32)
-      h = Tensor.randn(1, 16)
-      c = Tensor.randn(1, 16)
-      out_h, out_c = layer(inp, (h, c))
-      torch_out_h, torch_out_c = torch_layer(torch.tensor(inp.numpy()), (torch.tensor(h.numpy()), torch.tensor(c.numpy())))
+      out_h, out_c = layer(inp)
+      torch_out_h, torch_out_c = torch_layer(torch.tensor(inp.numpy()))
+      np.testing.assert_allclose(out_h.numpy(), torch_out_h.numpy(), atol=1e-6)
+      np.testing.assert_allclose(out_c.numpy(), torch_out_c.numpy(), atol=1e-6)
 
-    np.testing.assert_allclose(out_h.numpy(), torch_out_h.numpy(), atol=1e-6)
-    np.testing.assert_allclose(out_c.numpy(), torch_out_c.numpy(), atol=1e-6)
+      out_h, out_c = layer(inp, (out_h, out_c))
+      torch_out_h, torch_out_c = torch_layer(torch.tensor(inp.numpy()), (torch_out_h, torch_out_c))
+      np.testing.assert_allclose(out_h.numpy(), torch_out_h.numpy(), atol=1e-6)
+      np.testing.assert_allclose(out_c.numpy(), torch_out_c.numpy(), atol=1e-6)
 
   def test_lstm_cell_no_bias(self):
     layer = LSTMCell(32, 16, bias=False)
