@@ -168,7 +168,7 @@ class IndependentLowerer:
         return valid.where(UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
       if x.arg.idx < 0:
         buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype),
-                  arg=(f"temp{-x.arg.idx}", x.arg.st.real_size()))
+                  arg=(-x.arg.idx, x.arg.st.real_size()))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (), x.arg.idx)
       if x.op is BufferOps.LOAD:

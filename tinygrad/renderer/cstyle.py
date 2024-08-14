@@ -171,8 +171,8 @@ class CStyleLanguage(Renderer):
           if child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
-          kk(self.render_local(args[0], dtype, args[1]))
-          r[u] = args[0]
+          kk(self.render_local(nm:=f"temp{args[0]}", dtype, args[1]))
+          r[u] = nm
         elif uop is UOps.DEFINE_GLOBAL:
           bufs[u] = (nm:=f"data{args}", (dtype, False))
           r[u] = nm

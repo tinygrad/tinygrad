@@ -246,7 +246,7 @@ class PTXRenderer(Renderer):
         elif uop is UOps.DEFINE_LOCAL:
           # TODO: we should sum these, and fetch 0xC000 from somewhere
           assert args[1]*dtype.itemsize <= 0xC000, "too large local"
-          kk(*self.render_local(ssa('local', u, self.types[dtypes.ulong]), args[0], args[1], dtype))
+          kk(*self.render_local(ssa('local', u, self.types[dtypes.ulong]), f"temp{args[0]}", args[1], dtype))
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args}", dtype))
           r[u] = f"%{nm}"
