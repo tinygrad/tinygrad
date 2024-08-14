@@ -5,6 +5,7 @@
 import unittest
 from tinygrad import Device, dtypes
 from tinygrad.codegen.uops import UOps
+from tinygrad.helpers import getenv
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps # noqa: F401 # pylint: disable=unused-import
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
@@ -124,6 +125,7 @@ class TestLinearizerDumb(unittest.TestCase):
     assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
 
   @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need float4")
   def test_unrolled_float4_align(self):
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
   LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=(
@@ -145,6 +147,8 @@ class TestLinearizerDumb(unittest.TestCase):
     assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
 
   @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need float4")
+  @unittest.skipIf(getenv("PTX"), "this is somehow correct in PTX")
   def test_upcasted_stores_out_of_order(self):
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
       LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 1, 1, 4, 3, 3), strides=(2340, 468, 36, 0, 0, 0, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=True),))), src=(
