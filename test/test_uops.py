@@ -33,7 +33,7 @@ def _test_single_value(vals, op, dts):
   buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
-  out = uop(uops, UOps.STORE, output_dtype, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg([out])
@@ -48,7 +48,7 @@ def _test_single_value_const(vals, op, dts):
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
-  out = uop(uops, UOps.STORE, output_dtype, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -60,7 +60,7 @@ def _test_uops_result(output_dtype, uops, res):
   # uops = []
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   # res = output_fn(uops)
-  out = uop(uops, UOps.STORE, output_dtype, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
+  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out], print_uops=True)
   prg.exec([buf])
@@ -249,7 +249,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     idx = gidx0 * UOp.const(dtypes.int, 2)
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
-    store = UOp(UOps.STORE, dtypes.float, (gmem, idx, val, gate))
+    store = UOp(UOps.STORE, None, (gmem, idx, val, gate))
     uops = UOpGraph([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
@@ -304,7 +304,7 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_basic(self):
     uops = []
     smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ('smem', 16))
-    st = uop(uops, UOps.STORE, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42.0)))
+    st = uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, UOps.BARRIER, None, (st,))
     sres = uop(uops, UOps.LOAD, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
@@ -313,8 +313,8 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_indirect(self):
     uops = []
     smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.int32), (), ('smem', 16))
-    st1 = uop(uops, UOps.STORE, dtypes.int32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), uop(uops, UOps.CONST, dtypes.int32, (), 2)))
-    st2 = uop(uops, UOps.STORE, dtypes.int32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 2), uop(uops, UOps.CONST, dtypes.int32, (), 42)))
+    st1 = uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), uop(uops, UOps.CONST, dtypes.int32, (), 2)))
+    st2 = uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 2), uop(uops, UOps.CONST, dtypes.int32, (), 42)))
     barr = uop(uops, UOps.BARRIER, None, (st1,st2))
     ofs = uop(uops, UOps.LOAD, dtypes.int32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), barr))
     sres = uop(uops, UOps.LOAD, dtypes.int32, (smem, ofs))
@@ -404,6 +404,15 @@ class TestIndexingOrdering(unittest.TestCase):
     # both stores are aligned based on idx
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
     assert stores[2].src[1] < stores[3].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
+
+  def test_simple_order_with_special(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
+    st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
+    st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
+    uops = UOpGraph([st1, st0]).linearize(skip_check=True)
+    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

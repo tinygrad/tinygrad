@@ -144,5 +144,24 @@ class TestLinearizerDumb(unittest.TestCase):
     load_idxs = [x.src[1] for x in k.uops if x.op is UOps.LOAD and x.src[0].arg == 2]
     assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
 
+  @unittest.expectedFailure
+  def test_upcasted_stores_out_of_order(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 1, 1, 4, 3, 3), strides=(2340, 468, 36, 0, 0, 0, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(ReduceOps.SUM, arg=(6,), src=(
+          LazyOp(BinaryOps.MUL, arg=None, src=(
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 4, 1, 4, 3, 3), strides=(0, 0, 0, 0, 0, 0, 1, 0, 4, 48, 16), offset=0, mask=None, contiguous=False),))), src=()),
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 4, 1, 4, 3, 3), strides=(260, 13, 1, 0, 0, 0, 65, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),))
+    opts = [Opt(op=OptOps.UPCAST, axis=3, amt=0), Opt(op=OptOps.UPCAST, axis=2, amt=0)]
+    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
+    for opt in opts: k.apply_opt(opt)
+    prg = k.to_program()
+    print(prg.src)
+    store_idxs = [x.src[1] for x in k.uops if x.op is UOps.STORE]
+    for i in range(len(store_idxs) - 1):
+      first_bounds = store_idxs[i].vmin.arg+store_idxs[i].vmax.arg
+      next_bounds = store_idxs[i+1].vmin.arg+store_idxs[i+1].vmax.arg
+      assert first_bounds < next_bounds, f"first stored (max) idx {first_bounds} then {next_bounds}!"
+
 if __name__ == '__main__':
   unittest.main()
