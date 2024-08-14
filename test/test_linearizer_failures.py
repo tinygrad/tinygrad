@@ -452,7 +452,7 @@ class TestLinearizerFailures(unittest.TestCase):
 
   @unittest.skipUnless(not CI and Device.DEFAULT in ("NV", "CUDA"), "for real NV")
   def test_failure_48(self):
-    # with UOP_IS_SYMBOLIC=1, generates the wrong IDIV
+    # with UOP_IS_SYMBOLIC=1, generates the wrong IDIV (fixed!)
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
       LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 64, 1, 1, 256, 1, 1, 256), strides=(0, 0, 65536, 0, 0, 256, 0, 0, 1), offset=0, mask=None, contiguous=True),))), src=(
         LazyOp(ReduceOps.SUM, arg=(3, 4), src=(
@@ -461,6 +461,17 @@ class TestLinearizerFailures(unittest.TestCase):
               LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 1, 64, 56, 56, 256, 1, 1, 256), strides=(0, 0, 0, 56, 1, 3136, 0, 0, 802816), offset=0, mask=None, contiguous=False),))), src=()),
               LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 1, 64, 56, 56, 256, 1, 1, 256), strides=(0, 0, 3136, 56, 1, 0, 0, 0, 200704), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.TC, axis=0, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=2)]
+    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
+
+  def test_failure_49(self):
+    # with UOP_IS_SYMBOLIC=1, on METAL it breaks store fusion and has A+B and B+A being two different UOp
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(10, 6, 1), strides=(6, 1, 0), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(ReduceOps.SUM, arg=(2,), src=(
+          LazyOp(BinaryOps.MUL, arg=None, src=(
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(10, 6, 10), strides=(10, 0, 1), offset=0, mask=None, contiguous=False),))), src=()),
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(10, 6, 10), strides=(0, 1, 6), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),))
+    opts = [Opt(op=OptOps.TC, axis=0, amt=2), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
 if __name__ == '__main__':
