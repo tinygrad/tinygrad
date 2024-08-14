@@ -9,8 +9,8 @@ from tinygrad.helpers import getenv, DEBUG, fetch, colored, BEAM
 import numpy as np
 import librosa, functools
 
-class MultiHeadAttention:
-  def __init__(self, n_state, n_head, kv_caching: Literal['cross', 'self']=None, max_self_attn_cache_len=None):
+class CrossAttention:
+  def __init__(self, n_state, n_head, kv_caching = False, max_self_attn_cache_len=None):
     self.n_head = n_head
     self.query = nn.Linear(n_state, n_state)
     self.key = nn.Linear(n_state, n_state, bias=False)
@@ -21,29 +21,25 @@ class MultiHeadAttention:
     self.max_self_attn_cache_len = max_self_attn_cache_len
 
   def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[Variable,int]=None):
-    if self.kv_caching == 'cross':
-      if xa is not None:
-        k, v = self.key(xa), self.value(xa)
-        if not hasattr(self, 'cache_k'):
-          self.cache_k, self.cache_v = k, v
-        else:
-          self.cache_k.assign(k).realize()
-          self.cache_v.assign(v).realize()
-      else:
-        k, v = self.cache_k, self.cache_v
-    else:
-      k, v = self.key(x), self.value(x)
-      if self.kv_caching == 'self':
-        if not hasattr(self, 'cache_k'):
-          self.cache_k = Tensor.zeros(x.shape[0], self.max_self_attn_cache_len, x.shape[2])
-          self.cache_v = Tensor.zeros(x.shape[0], self.max_self_attn_cache_len, x.shape[2])
-        k = self.cache_k.shrink((None, (0, len), None)).cat(k, dim=1)
-        v = self.cache_v.shrink((None, (0, len), None)).cat(v, dim=1)
-        padding = self.max_self_attn_cache_len-len-x.shape[1]
-        self.cache_k.assign(k.pad((None, (0, padding), None)).contiguous()).realize()
-        self.cache_v.assign(v.pad((None, (0, padding), None)).contiguous()).realize()
 
+    if not hasattr(self, 'qkv'):
+      self.qkv = nn.Linear(1,1)
+      self.qkv.weight = Tensor.cat(self.key.weight, self.value.weight)
+      self.qkv.bias = Tensor.cat(Tensor.zeros_like(self.query.bias), self.value.bias)
+      del self.key, self.value
+    if xa is not None:
+      [k, v] = self.qkv(xa).chunk(2, 2)
+      if not hasattr(self, 'cache_k'):
+        self.cache_k, self.cache_v = k.contiguous().realize(), v.contiguous().realize()
+      else:
+        self.cache_k.assign(k).realize()
+        self.cache_v.assign(v).realize()
+    else:
+      k, v = self.cache_k, self.cache_v
     q = self.query(x)
+    return self.attn(q, k, v, mask)
+
+  def attn(self, q, k, v, mask=None):
     n_ctx = q.shape[1]
     assert(q.shape[-1] == k.shape[-1] == v.shape[-1])
     head_dim = q.shape[-1] // self.n_head
@@ -53,13 +49,33 @@ class MultiHeadAttention:
     attn = Tensor.scaled_dot_product_attention(q, k, v, mask[:n_ctx,:n_ctx] if mask is not None else None)
     wv = attn.permute(0, 2, 1, 3).flatten(start_dim=2)
     return self.out(wv)
+  
+class SelfAttention(CrossAttention):
+  def __call__(self, x, len:Union[Variable, int]=None, mask=None):
+    if not hasattr(self, 'qkv'):
+      self.qkv = nn.Linear(1,1)
+      self.qkv.weight = Tensor.cat(self.query.weight, self.key.weight, self.value.weight)
+      self.qkv.bias = Tensor.cat(self.query.bias, Tensor.zeros_like(self.query.bias), self.value.bias)
+      del self.query, self.key, self.value
+    [q, k, v] = self.qkv(x).chunk(3, 2)
+
+    if self.kv_caching:
+      if not hasattr(self, 'cache_k'):
+        self.cache_k = Tensor.zeros(x.shape[0], self.max_self_attn_cache_len, x.shape[2])
+        self.cache_v = Tensor.zeros(x.shape[0], self.max_self_attn_cache_len, x.shape[2])
+      k = self.cache_k.shrink((None, (0, len), None)).cat(k, dim=1)
+      v = self.cache_v.shrink((None, (0, len), None)).cat(v, dim=1)
+      padding = self.max_self_attn_cache_len-len-x.shape[1]
+      self.cache_k.assign(k.pad((None, (0, padding), None)).contiguous()).realize()
+      self.cache_v.assign(v.pad((None, (0, padding), None)).contiguous()).realize()
+    return self.attn(q, k, v, mask)
 
 class ResidualAttentionBlock:
   def __init__(self, n_state, n_head, is_decoder_block=False, max_self_attn_cache_len=None):
-    self.attn = MultiHeadAttention(n_state, n_head, kv_caching='self' if is_decoder_block else None, max_self_attn_cache_len=max_self_attn_cache_len)
+    self.attn = SelfAttention(n_state, n_head, kv_caching=is_decoder_block, max_self_attn_cache_len=max_self_attn_cache_len)
     self.attn_ln = nn.LayerNorm(n_state)
 
-    self.cross_attn = MultiHeadAttention(n_state, n_head, kv_caching='cross') if is_decoder_block else None
+    self.cross_attn = CrossAttention(n_state, n_head, kv_caching=True) if is_decoder_block else None
     self.cross_attn_ln = nn.LayerNorm(n_state) if is_decoder_block else None
 
     self.mlp = [nn.Linear(n_state, n_state*4), Tensor.gelu, nn.Linear(n_state*4, n_state)]
@@ -279,7 +295,6 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
 
     if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
     else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
-
     yield [arr[np.where(arr == start_tokens[-1])[0][0]+1:np.where(arr == eot)[0][0]] for arr in ctx[:len(waveforms)]]
     ctx = [[special('startofprev')]+gettexttoks(cs)+start_tokens for cs in ctx]
 
@@ -304,7 +319,7 @@ if __name__ == "__main__":
   if len(sys.argv) > 1:
 
     filename = fetch(sys.argv[1]) if sys.argv[1].startswith("http") else sys.argv[1]
-    waves = [load_file_waveform(filename, i*30) for i in range(model.batch_size)]
+    waves = [load_file_waveform(filename, i*360) for i in range(model.batch_size)]
     use_timestamps = getenv("TIMESTAMPS", 0)
 
     st = time.perf_counter()
@@ -321,9 +336,10 @@ if __name__ == "__main__":
 
       dur = time.perf_counter()-st
       st = time.perf_counter()
-      speed = 30/dur
+      speed = 30/dur*len(waves)
       avg_speed = (avg_speed or speed)*0.9 + speed*0.1
-      print(f"inference duration: {dur:.2f}s, {speed:.2f}x [{speed*len(waves):.2f}] realtime, {avg_speed:.2f}x [{avg_speed*len(waves):.2f}] ravg")
+      print(colored(f"inference duration: {dur:.2f}s, {speed:.2f}x realtime, {avg_speed:.2f}x roll. avg", 'green' if speed>10 else 'red'))
+      if frame == 20: break
 
   else:
     # online
