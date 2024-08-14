@@ -161,7 +161,7 @@ _SYS_MMAN_H = 1 # macro
 __need_size_t = True # macro
 __off_t_defined = True # macro
 __mode_t_defined = True # macro
-# MAP_FAILED = ((*) # macro
+# MAP_FAILED = ((void*)-1) # macro
 off_t = ctypes.c_int64
 mode_t = ctypes.c_uint32
 size_t = ctypes.c_uint64
@@ -567,14 +567,14 @@ def ELF32_ST_BIND(val):  # macro
    return (((val))>>4)
 def ELF32_ST_TYPE(val):  # macro
    return ((val)&0xf)
-# def ELF32_ST_INFO(bind, type):  # macro
-#    return (((bind)<<4)+((type)&0xf))
+def ELF32_ST_INFO(bind, type):  # macro
+   return (((bind)<<4)+((type)&0xf))
 def ELF64_ST_BIND(val):  # macro
    return ELF32_ST_BIND(val)
 def ELF64_ST_TYPE(val):  # macro
    return ELF32_ST_TYPE(val)
-# def ELF64_ST_INFO(bind, type):  # macro
-#    return ELF32_ST_INFO((bind),(type))
+def ELF64_ST_INFO(bind, type):  # macro
+   return ELF32_ST_INFO((bind),(type))
 STB_LOCAL = 0 # macro
 STB_GLOBAL = 1 # macro
 STB_WEAK = 2 # macro
@@ -610,14 +610,12 @@ def ELF32_R_SYM(val):  # macro
    return ((val)>>8)
 def ELF32_R_TYPE(val):  # macro
    return ((val)&0xff)
-# def ELF32_R_INFO(sym, type):  # macro
-#    return (((sym)<<8)+((type)&0xff))
+def ELF32_R_INFO(sym, type):  # macro
+   return (((sym)<<8)+((type)&0xff))
 def ELF64_R_SYM(i):  # macro
    return ((i)>>32)
 def ELF64_R_TYPE(i):  # macro
    return ((i)&0xffffffff)
-# def ELF64_R_INFO(sym, type):  # macro
-#    return ((((Elf64_Xword)(sym))<<32)+(type))
 PN_XNUM = 0xffff # macro
 PT_NULL = 0 # macro
 PT_LOAD = 1 # macro
@@ -755,7 +753,6 @@ DT_LOOS = 0x6000000d # macro
 DT_HIOS = 0x6ffff000 # macro
 DT_LOPROC = 0x70000000 # macro
 DT_HIPROC = 0x7fffffff # macro
-# DT_PROCNUM = DT_MIPS_NUM # macro
 DT_VALRNGLO = 0x6ffffd00 # macro
 DT_GNU_PRELINKED = 0x6ffffdf5 # macro
 DT_GNU_CONFLICTSZ = 0x6ffffdf6 # macro
@@ -801,8 +798,6 @@ def DT_VERSIONTAGIDX(tag):  # macro
 DT_VERSIONTAGNUM = 16 # macro
 DT_AUXILIARY = 0x7ffffffd # macro
 DT_FILTER = 0x7fffffff # macro
-# def DT_EXTRATAGIDX(tag):  # macro
-#    return ((Elf32_Word)-((Elf32_Sword)(tag)<<1>>1)-1)
 DT_EXTRANUM = 3 # macro
 DF_ORIGIN = 0x00000001 # macro
 DF_SYMBOLIC = 0x00000002 # macro
@@ -943,14 +938,14 @@ def ELF32_M_SYM(info):  # macro
    return ((info)>>8)
 def ELF32_M_SIZE(info):  # macro
    return ((info))
-# def ELF32_M_INFO(sym, size):  # macro
-#    return (((sym)<<8)+(size))
+def ELF32_M_INFO(sym, size):  # macro
+   return (((sym)<<8)+(size))
 def ELF64_M_SYM(info):  # macro
    return ELF32_M_SYM(info)
 def ELF64_M_SIZE(info):  # macro
    return ELF32_M_SIZE(info)
-# def ELF64_M_INFO(sym, size):  # macro
-#    return ELF32_M_INFO(sym,size)
+def ELF64_M_INFO(sym, size):  # macro
+   return ELF32_M_INFO(sym,size)
 EF_CPU32 = 0x00810000 # macro
 R_68K_NONE = 0 # macro
 R_68K_32 = 1 # macro
@@ -1366,6 +1361,7 @@ DT_MIPS_RWPLT = 0x70000034 # macro
 DT_MIPS_RLD_MAP_REL = 0x70000035 # macro
 DT_MIPS_XHASH = 0x70000036 # macro
 DT_MIPS_NUM = 0x37 # macro
+# DT_PROCNUM = DT_MIPS_NUM # macro
 RHF_NONE = 0 # macro
 RHF_QUICKSTART = (1<<0) # macro
 RHF_NOTPOT = (1<<1) # macro
@@ -3110,11 +3106,15 @@ Elf32_Half = ctypes.c_uint16
 Elf64_Half = ctypes.c_uint16
 Elf32_Word = ctypes.c_uint32
 Elf32_Sword = ctypes.c_int32
+def DT_EXTRATAGIDX(tag):  # macro
+   return ((Elf32_Word)-((Elf32_Sword)(tag)<<1>>1)-1)
 Elf64_Word = ctypes.c_uint32
 Elf64_Sword = ctypes.c_int32
 Elf32_Xword = ctypes.c_uint64
 Elf32_Sxword = ctypes.c_int64
 Elf64_Xword = ctypes.c_uint64
+def ELF64_R_INFO(sym, type):  # macro
+   return ((((Elf64_Xword)(sym))<<32)+(type))
 Elf64_Sxword = ctypes.c_int64
 Elf32_Addr = ctypes.c_uint32
 Elf64_Addr = ctypes.c_uint64
@@ -4595,19 +4595,18 @@ __all__ = \
     'LITUSE_ALPHA_TLS_GD', 'LITUSE_ALPHA_TLS_LDM', 'LL_DELAY_LOAD',
     'LL_DELTA', 'LL_EXACT_MATCH', 'LL_EXPORTS', 'LL_IGNORE_INT_VER',
     'LL_NONE', 'LL_REQUIRE_MINOR', 'L_INCR', 'L_SET', 'L_XTND',
-    'MAP_FAILED', 'MIPS_AFL_ASE_DSP', 'MIPS_AFL_ASE_DSPR2',
-    'MIPS_AFL_ASE_EVA', 'MIPS_AFL_ASE_MASK', 'MIPS_AFL_ASE_MCU',
-    'MIPS_AFL_ASE_MDMX', 'MIPS_AFL_ASE_MICROMIPS',
-    'MIPS_AFL_ASE_MIPS16', 'MIPS_AFL_ASE_MIPS3D', 'MIPS_AFL_ASE_MSA',
-    'MIPS_AFL_ASE_MT', 'MIPS_AFL_ASE_SMARTMIPS', 'MIPS_AFL_ASE_VIRT',
-    'MIPS_AFL_ASE_XPA', 'MIPS_AFL_EXT_10000', 'MIPS_AFL_EXT_3900',
-    'MIPS_AFL_EXT_4010', 'MIPS_AFL_EXT_4100', 'MIPS_AFL_EXT_4111',
-    'MIPS_AFL_EXT_4120', 'MIPS_AFL_EXT_4650', 'MIPS_AFL_EXT_5400',
-    'MIPS_AFL_EXT_5500', 'MIPS_AFL_EXT_5900',
-    'MIPS_AFL_EXT_LOONGSON_2E', 'MIPS_AFL_EXT_LOONGSON_2F',
-    'MIPS_AFL_EXT_LOONGSON_3A', 'MIPS_AFL_EXT_OCTEON',
-    'MIPS_AFL_EXT_OCTEON2', 'MIPS_AFL_EXT_OCTEONP',
-    'MIPS_AFL_EXT_SB1', 'MIPS_AFL_EXT_XLR',
+    'MIPS_AFL_ASE_DSP', 'MIPS_AFL_ASE_DSPR2', 'MIPS_AFL_ASE_EVA',
+    'MIPS_AFL_ASE_MASK', 'MIPS_AFL_ASE_MCU', 'MIPS_AFL_ASE_MDMX',
+    'MIPS_AFL_ASE_MICROMIPS', 'MIPS_AFL_ASE_MIPS16',
+    'MIPS_AFL_ASE_MIPS3D', 'MIPS_AFL_ASE_MSA', 'MIPS_AFL_ASE_MT',
+    'MIPS_AFL_ASE_SMARTMIPS', 'MIPS_AFL_ASE_VIRT', 'MIPS_AFL_ASE_XPA',
+    'MIPS_AFL_EXT_10000', 'MIPS_AFL_EXT_3900', 'MIPS_AFL_EXT_4010',
+    'MIPS_AFL_EXT_4100', 'MIPS_AFL_EXT_4111', 'MIPS_AFL_EXT_4120',
+    'MIPS_AFL_EXT_4650', 'MIPS_AFL_EXT_5400', 'MIPS_AFL_EXT_5500',
+    'MIPS_AFL_EXT_5900', 'MIPS_AFL_EXT_LOONGSON_2E',
+    'MIPS_AFL_EXT_LOONGSON_2F', 'MIPS_AFL_EXT_LOONGSON_3A',
+    'MIPS_AFL_EXT_OCTEON', 'MIPS_AFL_EXT_OCTEON2',
+    'MIPS_AFL_EXT_OCTEONP', 'MIPS_AFL_EXT_SB1', 'MIPS_AFL_EXT_XLR',
     'MIPS_AFL_FLAGS1_ODDSPREG', 'MIPS_AFL_REG_128', 'MIPS_AFL_REG_32',
     'MIPS_AFL_REG_64', 'MIPS_AFL_REG_NONE',
     'NOTE_GNU_PROPERTY_SECTION_NAME', 'NT_386_IOPERM', 'NT_386_TLS',

@@ -114,7 +114,7 @@ generate_nv() {
     popd
   fi
 
-  clang2py \
+  clang2py -k cdefstum \
     extra/nv_gpu_driver/clc6c0qmd.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
@@ -141,7 +141,7 @@ generate_nv() {
     $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlcb33.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrla06c.h \
     --clang-args="-include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
-    -o $BASE/nv_gpu.py -k cdefstum
+    -o $BASE/nv_gpu.py
   fixup $BASE/nv_gpu.py
   sed -i "s\(0000000001)\1\g" $BASE/nv_gpu.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/nv_gpu.py
@@ -202,15 +202,12 @@ generate_hsa() {
 }
 
 generate_io_uring() {
-  clang2py \
+  clang2py -k cdefstum \
     /usr/include/liburing.h \
     /usr/include/linux/io_uring.h \
     -o $BASE/io_uring.py
 
-  # clang2py can't parse defines
   sed -r '/^#define __NR_io_uring/ s/^#define __(NR_io_uring[^ ]+) (.*)$/\1 = \2/; t; d' /usr/include/asm-generic/unistd.h >> $BASE/io_uring.py # io_uring syscalls numbers
-  sed -r '/^#define\s+([^ \t]+)\s+([^ \t]+)/ s/^#define\s+([^ \t]+)\s*([^/]*).*$/\1 = \2/; s/1U/1/g; s/0ULL/0/g; t; d' /usr/include/linux/io_uring.h >> $BASE/io_uring.py # #define name (val) -> name = val
-
   fixup $BASE/io_uring.py
 }
 
