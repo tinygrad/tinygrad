@@ -100,5 +100,28 @@ class TestLinearizerDumb(unittest.TestCase):
     prg = k.to_program()
     print(prg.src)
 
+  # from process replay https://github.com/tinygrad/tinygrad/actions/runs/10389229290/job/28766762085#step:18:6490
+  @unittest.expectedFailure
+  def test_unaligns_idxs(self):
+    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
+      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),))), src=(
+        LazyOp(ReduceOps.SUM, arg=(2,), src=(
+          LazyOp(BinaryOps.MUL, arg=None, src=(
+            LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
+              LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                LazyOp(BinaryOps.CMPNE, arg=None, src=(
+                  LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.long, st=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),
+                  LazyOp(UnaryOps.CAST, arg=dtypes.long, src=(
+                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),
+                LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
+            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),))
+    opts = [Opt(op=OptOps.UNROLL, axis=0, amt=0), Opt(op=OptOps.LOCAL, axis=0, amt=3)]
+    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
+    for opt in opts: k.apply_opt(opt)
+    prg = k.to_program()
+    print(prg.src)
+    load_idxs = [x.src[1] for x in k.uops if x.op is UOps.LOAD and x.src[0].arg == 3]
+    assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0]} then {load_idxs[1]}!"
+
 if __name__ == '__main__':
   unittest.main()
