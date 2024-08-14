@@ -345,7 +345,7 @@ class AMDDevice(HCQCompiled):
     assert addr != 0xffffffffffffffff
 
     try: mem = kfd.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU(self.kfd, va_addr=addr, size=size, base=addr, length=size, gpu_id=self.gpu_id,
-                                                  lags=flags, mmap_offset=buf)
+                                                  flags=flags, mmap_offset=buf)
     except OSError as e:
       if e.errno == errno.EINVAL and (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) and public:
         raise MemoryError("Cannot allocate host-visible VRAM. Ensure the resizable BAR option is enabled on your system.") from e
