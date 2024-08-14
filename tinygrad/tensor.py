@@ -2173,7 +2173,7 @@ class Tensor:
     ```
     """
     return self*self
-  def clip(self, min_=None, max_=None):
+  def clamp(self, min_=None, max_=None):
     """
     Clips (clamps) the values in the tensor between `min_` and `max_` element-wise.
     If `min_` is `None`, there is no lower bound. If `max_` is None, there is no upper bound.
@@ -2185,6 +2185,11 @@ class Tensor:
     if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
     ret = self.maximum(min_) if min_ is not None else self
     return ret.minimum(max_) if max_ is not None else ret
+  def clip(self, min_=None, max_=None):
+    """
+    Alias for `Tensor.clamp`.
+    """
+    return self.clamp(min_, max_)
   def sign(self):
     """
     Returns the sign of the tensor element-wise.
