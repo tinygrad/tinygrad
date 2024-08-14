@@ -85,7 +85,8 @@ class UOp:
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return type(src[0])(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod
-  def store(*src:UOp, dtype:Optional[DType]=None, **kwargs): return type((src:=(*src, *kwargs.values()))[0])(UOps.STORE, dtype, src)
+  def store(*src:UOp, dtype:Optional[DType]=None, **kwargs):
+    return type((src:=(*src, *kwargs.values()))[0])(UOps.STORE, dtype if dtype is not None else src[2].dtype if len(src) > 2 else None, src)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return merge_dicts([{x:None for x in self.src}]+[x.parents for x in self.src])
   @property  # parents with self

@@ -140,7 +140,7 @@ class TestUOpGraph(TestUOps):
     vec = UOp(UOps.VECTORIZE, dtypes.float.vec(2), (ld,))
     x = UOp(UOps.GEP, dtypes.float, (vec, ), arg=0)
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
-    out = UOp(UOps.STORE, None, (d0, idx, alu))
+    out = UOp(UOps.STORE, dtypes.float, (d0, idx, alu))
     g = UOpGraph([out])
     self.assertEqual(len([x for x in g.uops if x.op is UOps.VECTORIZE]), 0)
 
@@ -151,7 +151,7 @@ class TestUOpGraph(TestUOps):
     idx = UOp.const(dtypes.int, 0)
     def _test_vec(geps, count=4):
       vec = UOp(UOps.VECTORIZE, dtypes.float.vec(count), geps)
-      out = UOp(UOps.STORE, None, (d0, idx, vec))
+      out = UOp(UOps.STORE, dtypes.float.vec(count), (d0, idx, vec))
       g = UOpGraph([out])
       if DEBUG >= 4:
         from tinygrad import Device
@@ -256,7 +256,7 @@ class TestUOpGraph(TestUOps):
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
     alu = ld.lt(1).cast(dtypes.bool)
-    out = UOp(UOps.STORE, None, (d0, idx, alu))
+    out = UOp(UOps.STORE, dtypes.bool, (d0, idx, alu))
     g = UOpGraph([out])
     self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
 
@@ -266,7 +266,7 @@ class TestUOpGraph(TestUOps):
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
     alu = ld.cast(dtypes.float).cast(dtypes.float)
-    out = UOp(UOps.STORE, None, (d0, idx, alu))
+    out = UOp(UOps.STORE, dtypes.float, (d0, idx, alu))
     g = UOpGraph([out])
     self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 1)
 
@@ -291,7 +291,7 @@ class TestUOpGraph(TestUOps):
     idx = UOp.const(dtypes.int, 0)
     ld0 = UOp(UOps.LOAD, dtypes.int, (glbl1, idx, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False)))
     ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True)))
-    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, ld1+ld0))])
+    uops = UOpGraph([UOp(UOps.STORE, dtypes.int, (glbl0, idx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
     self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
@@ -302,11 +302,11 @@ class TestUOpGraph(TestUOps):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     smem = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.int), (), ("temp", 1))
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
-    st = UOp(UOps.STORE, None, (smem, lidx, UOp.load(glbl0, lidx, dtype=dtypes.int)))
+    st = UOp(UOps.STORE, dtypes.int, (smem, lidx, UOp.load(glbl0, lidx, dtype=dtypes.int)))
     barrier = UOp(UOps.BARRIER, None, (st, ))
     ld0 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+1, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False), barrier))
     ld1 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+2, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True), barrier))
-    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, lidx, ld1+ld0))])
+    uops = UOpGraph([UOp(UOps.STORE, dtypes.int, (glbl0, lidx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
     self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
@@ -318,8 +318,8 @@ class TestUOpGraph(TestUOps):
     idx0 = UOp.const(dtypes.int, 0)
     idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
-    st0 = UOp(UOps.STORE, None, (glbl, idx0, val, UOp.const(dtypes.bool, False)))
-    st1 = UOp(UOps.STORE, None, (glbl, idx1, val, UOp.const(dtypes.bool, True)))
+    st0 = UOp(UOps.STORE, dtypes.int, (glbl, idx0, val, UOp.const(dtypes.bool, False)))
+    st1 = UOp(UOps.STORE, dtypes.int, (glbl, idx1, val, UOp.const(dtypes.bool, True)))
     uops = UOpGraph([st0, st1])
     # only the second store happens
     self.assertEqual(len(uops.uops), 4)
@@ -329,8 +329,8 @@ class TestUOpGraph(TestUOps):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     idx = UOp.const(dtypes.int, 0)
     bad_gate = UOp.const(dtypes.int, 1)
-    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
-    with self.assertRaises(AssertionError): uops.linearize()
+    uops = UOpGraph([UOp(UOps.STORE, dtypes.int, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
+    with self.assertRaisesRegex(AssertionError, "gate dtype mismatch"): uops.linearize()
 
   def test_switched_range_order(self):
     glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
@@ -340,7 +340,7 @@ class TestUOpGraph(TestUOps):
     r1 = UOp(UOps.RANGE, dtypes.int, (c0, c2), (1, 0, False))
     r2 = UOp(UOps.RANGE, dtypes.int, (c0, c2), (1, 1, False))
     alu = UOp(UOps.ALU, dtypes.int, (r2, r1), BinaryOps.MUL)
-    store = UOp(UOps.STORE, None, (glbl, alu, cf))
+    store = UOp(UOps.STORE, dtypes.float, (glbl, alu, cf))
     uops = UOpGraph([store]).uops
     ranges = [x for x in uops if x.op is UOps.RANGE]
     endranges = [x for x in uops if x.op is UOps.ENDRANGE]
