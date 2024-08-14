@@ -336,9 +336,10 @@ class LSTMCell:
     self.bias_ih, self.bias_hh = (Tensor.zeros(hidden_size*4), Tensor.zeros(hidden_size*4)) if bias else (None, None)
 
   def __call__(self, x:Tensor, hc:Optional[Tuple[Tensor, Tensor]]=None) -> Tuple[Tensor, Tensor]:
-    gates = x.linear(self.weight_ih.T, self.bias_ih) + (hc[0].linear(self.weight_hh.T, self.bias_hh) if hc is not None else (self.bias_hh or 0))
+    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device),)*2
+    gates = x.linear(self.weight_ih.T, self.bias_ih) + hc[0].linear(self.weight_hh.T, self.bias_hh)
     i, f, g, o = gates.chunk(4, dim=1)
     i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()
-    new_c = (f * hc[1] if hc is not None else 0) + i * g
+    new_c = f * hc[1] + i * g
     new_h = o * new_c.tanh()
     return (new_h.contiguous(), new_c.contiguous())
