@@ -22,7 +22,6 @@ class _Device:
     assert ((cpn:=multiprocessing.current_process().name) == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY"], \
       f"can only open device {ix} from parent, not {cpn}"
     x = ix.split(":")[0].upper()
-    x = "GPU" if x in ["INTEL"] else x  # list of specialized opencl devices
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     return ret

@@ -231,7 +231,7 @@ class OpenCLRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class IntelRenderer(OpenCLRenderer):
-  device, kernel_prefix = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
+  device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
   tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]]  # noqa: E501
   def render_dtype(self, var_dtype:DType) -> str:
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
