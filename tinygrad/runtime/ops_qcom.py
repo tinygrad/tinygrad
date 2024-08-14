@@ -1,7 +1,7 @@
 import os, time, math, ctypes, fcntl, functools, mmap, struct, array, decimal
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast
-from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, hcq_command
+from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState, hcq_command
 import tinygrad.runtime.autogen.kgsl as kgsl
 import tinygrad.runtime.autogen.adreno as adreno
 import tinygrad.runtime.autogen.libc as libc
@@ -234,7 +234,7 @@ class QcomComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_ENABLED)
     self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, 0)
 
-  def _exec(self, prg, kernargs, global_size, local_size):
+  def _exec(self, prg, args_state, global_size, local_size):
     global_size_mp = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size))) if local_size else global_size
     self.cmd_idx_to_dims[len(self) - 1] = [global_size, local_size]
 
@@ -254,7 +254,7 @@ class QcomComputeQueue(HWComputeQueue):
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
              (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
              | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
-             | ((prg.kernargs_alloc_size // 4) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(kernargs))
+             | ((prg.kernargs_alloc_size // 4) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(args_state.ptr))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
              (adreno.ST_SHADER << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
              | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
@@ -290,21 +290,26 @@ class QcomProgram(HCQProgram):
     image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.hlfreg, self.fullreg = parse_cl_lib(self.lib, self.name)
     image = bytearray(lib[image_offset:image_offset+self.image_size])
 
-    # check if buffers are contigious for hcq
-    for i in range(1, len(self.buffs_info)): assert(self.buffs_info[i] - self.buffs_info[i-1] == 0x10)
-
     # reserve some space after for gpu to use
     self.lib_gpu = self.device.allocator.alloc(len(image) + 0x20000, options=BufferOptions(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(memoryview(image)), self.image_size)
 
-    super().__init__(self.device, self.name, kernargs_alloc_size=1024, kernargs_args_offset=self.buffs_info[0] if len(self.buffs_info) else 0)
+    super().__init__(QcomArgsState, self.device, self.name, kernargs_alloc_size=1024)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
 
-  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[Any, ...], vals:Tuple[int, ...]=()):
-    if len(bufs) + len(vals) != len(self.buffs_info): raise RuntimeError(f'incorrect args size given={len(bufs)} != want={len(self.buffs_info)}')
-    for i, b in enumerate(bufs): ctypes.cast(kernargs_ptr + self.buffs_info[i], ctypes.POINTER(ctypes.c_int64))[0] = b.va_addr
-    for i, v in enumerate(vals): ctypes.cast(kernargs_ptr + self.buffs_info[i+len(bufs)], ctypes.POINTER(ctypes.c_int32))[0] = v
-    for cnst_val, cnst_off, cnst_sz in self.consts_info:
-      ctypes.memmove(kernargs_ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
+class QcomArgsState(HCQArgsState):
+  def __init__(self, ptr:int, prg:QcomProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
+    super().__init__(ptr, prg, bufs, vals=vals)
+
+    if len(bufs) + len(vals) != len(prg.buffs_info): raise RuntimeError(f'incorrect args size given={len(bufs)} != want={len(prg.buffs_info)}')
+    self.boffs, self.aoffs = self.prg.buffs_info[:len(bufs)], self.prg.buffs_info[len(bufs):]
+    for i, b in enumerate(bufs): self.update_buffer(i, b)
+    for i, v in enumerate(vals): self.update_var(i, v)
+
+    for cnst_val, cnst_off, cnst_sz in self.prg.consts_info:
+      ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
+
+  def update_buffer(self, index:int, buf:HCQBuffer): ctypes.cast(self.ptr + self.boffs[index], ctypes.POINTER(ctypes.c_int64))[0] = buf.va_addr
+  def update_var(self, index:int, val:int): ctypes.cast(self.ptr + self.aoffs[index], ctypes.POINTER(ctypes.c_int32))[0] = val
