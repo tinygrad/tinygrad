@@ -323,18 +323,18 @@ class HWComputeQueue(HWCommandQueue):
   def _memory_barrier(self): pass
 
   @hcq_command
-  def exec(self, prg:HCQProgram, kernargs:int, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+  def exec(self, prg:HCQProgram, args_state:HCQArgsState, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
     """
     Enqueues an execution command for a kernel program.
 
     Args:
       prg: The program to execute
-      kernargs: The pointer to kernel arguments
+      args_state: The args state to execute program with
       global_size: The global work size
       local_size: The local work size
     """
-    self._exec(prg, kernargs, global_size, local_size)
-  def _exec(self, prg, kernargs, global_size, local_size): raise NotImplementedError("backend should overload this function")
+    self._exec(prg, args_state, global_size, local_size)
+  def _exec(self, prg, args_state, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
   def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
     """
@@ -431,25 +431,27 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
 
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
-class HCQProgram:
-  def __init__(self, device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
-    self.device, self.name, self.kernargs_alloc_size, self.kernargs_args_offset = device, name, kernargs_alloc_size, kernargs_args_offset
+class HCQArgsState:
+  def __init__(self, ptr:int, prg:HCQProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): self.ptr, self.prg = ptr, prg
+  def update_buffer(self, index:int, buf:HCQBuffer): raise NotImplementedError("need update_buffer")
+  def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
-  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> int:
+class HCQProgram:
+  def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
+    self.args_state_t, self.device, self.name = args_state_t, device, name
+    self.kernargs_alloc_size, self.kernargs_args_offset = kernargs_alloc_size, kernargs_args_offset
+
+  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
     """
     Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
-
     Args:
       bufs: Buffers to be written to kernel arguments.
       vals: Values to be written to kernel arguments.
       kernargs_ptr: Optional pointer to pre-allocated kernel arguments memory.
-
     Returns:
-      Pointer to the filled kernel arguments.
+      Arguments state with the given buffers and values set for the program.
     """
-    self._fill_kernargs(ptr:=(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size)), bufs, vals)
-    return ptr
-  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
+    return self.args_state_t(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size), self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
                vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:

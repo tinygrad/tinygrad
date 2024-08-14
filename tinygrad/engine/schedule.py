@@ -1,8 +1,8 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
-from tinygrad.ops import MetaOps, BufferOps, LazyOp, Op, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
+from typing import Tuple, List, Dict, Optional, Set, DefaultDict, get_args
+from tinygrad.ops import MetaOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps, reduce_st
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, \
                              GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
@@ -55,22 +55,20 @@ def _recursive_lazyop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer,
   """recursively create a lazyop"""
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   if (buf, st) in cache: return cache[(buf, st)]
-  arg = buf.arg
+  assert buf.op is not None, "base must be a base itself"
 
-  # consts are always fused and generated
-  if buf.op is MetaOps.CONST:
-    unbound_st, st_var_vals = st.simplify().unbind()
-    var_vals.update(st_var_vals)
-    if isinstance(arg, Variable):
-      arg, var_val = arg.unbind()
-      var_vals[arg] = var_val
-    else: assert isinstance(arg, get_args(ConstType)), f"cannot create ConstBuffer with value {arg}"
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(arg, buf.dtype, unbound_st))
-
-  # if we aren't fusing it, it's a load and we add it to the inputs
+  # buffer ops define ShapeTracker
   if buf.realized is not None or (buf in realizes and buf not in outputs):
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
+    # if it's a const, we generate it
+    if buf.op is MetaOps.CONST:
+      if isinstance(val:=buf.arg, Variable):
+        val, var_val = val.unbind()
+        var_vals[val] = var_val
+      else: assert isinstance(val, get_args(ConstType)), f"cannot create ConstBuffer with value {val}"
+      return LazyOp(BufferOps.CONST, (), ConstBuffer(val, buf.dtype, unbound_st))
+    # otherwise, it's a load and we add it to the inputs
     if buf in assign_targets:
       # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
       if unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and\
@@ -80,22 +78,22 @@ def _recursive_lazyop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer,
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
     return LazyOp(BufferOps.LOAD, (), MemBuffer(len(outputs)+inputs.setdefault(buf, len(inputs)), buf.dtype, unbound_st))
 
-  # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
-  if buf.op in {MetaOps.CONTIGUOUS, MetaOps.ASSIGN}:
-    assert buf in outputs
-    return _recursive_lazyop(buf.srcs[0], st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
-
-  # if it's a reduce, we have to change the shapetracker
+  # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
+    rinfo = reduce_info.get((buf, st))
+    rsrc = _recursive_lazyop(buf.srcs[0], st:=(rinfo[0] if rinfo else st), outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
     # if we are merging the reduce, skip it
-    if (buf, st) not in reduce_info:
-      assert buf.srcs[0].base.op is buf.op, f"can't merge reduceop {buf.op} with {buf.srcs[0].base.op}\n{st}"
-      return _recursive_lazyop(buf.srcs[0], st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
-    st, arg = reduce_info[(buf, st)]
+    if rinfo is None:
+      assert rsrc.op is buf.op, f"can't merge reduceop {buf.op} with {rsrc.op}\n{st}"
+      return rsrc
+    return cache.setdefault((buf, st), LazyOp(buf.op, (rsrc,), rinfo[1]))
 
-  # otherwise we fuse it like normal
-  return cache.setdefault((buf, st), LazyOp(cast(Op,buf.op), tuple(_recursive_lazyop(x, st, outputs, var_vals, inputs, realizes, assign_targets, \
-      reduce_info, cache) for x in buf.srcs), arg))
+  # elementwise ops pass shapetracker
+  in_ops = tuple(_recursive_lazyop(x, st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache) for x in buf.srcs)
+  if buf.op in {MetaOps.CONTIGUOUS, MetaOps.ASSIGN}:
+    assert buf in outputs, f"{buf.op} must be writable"
+    return in_ops[0]
+  return cache.setdefault((buf, st), LazyOp(buf.op, in_ops, buf.arg))
 
 def _permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
   permute_axis = tuple(i for i in range(len(input_st.shape)) if i not in axis) + axis
@@ -149,7 +147,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     wr = LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))
     return LBScheduleItem(LazyOp(MetaOps.KERNEL, (wr,)), outs, [x.base for x in out.srcs])
   if out.op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
-    return LBScheduleItem(LazyOp(out.op, (), out.arg), outs, [x.base for x in out.srcs])
+    return LBScheduleItem(LazyOp(MetaOps.EXT, (), (out.op, out.arg)), outs, [x.base for x in out.srcs])
   # push through all movementops between reduceops
   reduce_info: Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]] = {}
   seen_ops: Dict[Tuple[LazyBuffer, ShapeTracker], Optional[Tuple[LazyBuffer, ShapeTracker]]] = {}
