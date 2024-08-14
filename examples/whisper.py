@@ -4,7 +4,7 @@ from typing import Optional, Union, Literal, List, Iterator, Tuple
 
 from tinygrad import Tensor, TinyJit, Variable, nn
 from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import getenv, DEBUG, fetch, colored
+from tinygrad.helpers import getenv, DEBUG, fetch, colored, BEAM
 
 import numpy as np
 import librosa, functools
@@ -98,26 +98,19 @@ class TextDecoder:
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, is_decoder_block=True, max_self_attn_cache_len=self.max_self_attn_cache_len) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
-    self.getjitted = collections.defaultdict((lambda: print(colored("get new jit", "blue")) or ([TinyJit(block.__call__) for block in self.blocks], TinyJit(self.output_tok))))
-
-  def forward(self, x: Tensor, pos: int, encoded_audio: Tensor):
-    seqlen = x.shape[-1]
-    x = self.token_embedding(x) + self.positional_embedding[pos:pos+seqlen]
-    for block in self.blocks:
-      if pos == 0: x = block(x, xa=encoded_audio, mask=self.mask, len=0)
-      else: x = block(x, mask=self.mask, len=Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos))
-    return self.output_tok(x)
+    self.getjitted = collections.defaultdict(lambda: TinyJit(self.forward))
 
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
+    pos = Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos) if pos else 0
+    return self.getjitted[x.shape](x, pos, encoded_audio)
 
+  def forward(self, x:Tensor, pos:Union[Variable, Literal[0]], encoded_audio:Tensor):
     seqlen = x.shape[-1]
-    x = self.token_embedding(x) + self.positional_embedding[pos:pos+seqlen]
-
-    jitblocks, jitoutput = self.getjitted[x.shape]
-    for block in jitblocks:
+    x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None, None))
+    for block in self.blocks:
       if pos == 0: x = block(x, xa=encoded_audio, mask=self.mask, len=0)  # pass xa for cross attn kv caching
-      else: x = block(x, mask=self.mask, len=Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos))
-    return jitoutput(x)
+      else: x = block(x, mask=self.mask, len=pos)
+    return self.output_tok(x)
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
@@ -262,20 +255,19 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
 
   def inferloop(ctx, encoded_audio):
 
-    print(colored(f'prompt: {enc.decode(ctx[0])}', 'cyan'))
     pos, prompt = 0, ctx
-    for i in range(nsample*2-2):
+    for i in range((nsample-len(start_tokens))*2):
       next_tokens = model.decoder(Tensor(prompt), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32)
       next_tokens[ctx[:, -1] == eot] = eot
       prompt = next_tokens.reshape(-1, 1)
       ctx = np.concatenate((ctx, prompt), axis=1)
       pos = ctx.shape[-1] - 1
       if (next_tokens == eot).all(): break
-      if i == nsample-2: ctx = np.array([start_tokens+gettexttoks(cs) for cs in ctx])
+      if i == nsample-len(start_tokens): ctx = np.array([start_tokens+gettexttoks(cs) for cs in ctx])
     return ctx
 
   def special(des): return enc._special_tokens[f'<|{des}|>']
-  def gettexttoks(line): return [tok for tok in line if tok < eot or tok > special('notimestamps')][-nsample+1:]
+  def gettexttoks(line): return [tok for tok in line if tok < eot or tok > special('notimestamps')][-nsample+len(start_tokens):]
 
   eot = special("endoftext")
   nsample = model.decoder.max_tokens_to_sample
@@ -308,21 +300,30 @@ def listener(q):
 
 if __name__ == "__main__":
   model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=getenv("BATCH", 1))
-  st = time.perf_counter()
   def timestring(s): return f'{int(s//60//60)}:{int(s//60%60)}:{int(s%60)}'
   if len(sys.argv) > 1:
 
     filename = fetch(sys.argv[1]) if sys.argv[1].startswith("http") else sys.argv[1]
     waves = [load_file_waveform(filename, i*30) for i in range(model.batch_size)]
-    use_timestamps = getenv("TIMESTAMPS", False)
+    use_timestamps = getenv("TIMESTAMPS", 0)
 
+    st = time.perf_counter()
+    avg_speed = None
+    beamval = BEAM.value
+    BEAM.value = 0
     for frame, lines in enumerate(transcribe_waveform(model, enc, waves, use_timestamps=use_timestamps)):
+      if frame==3: BEAM.value=beamval
       for i,line in enumerate(lines):
         if use_timestamps:
           for text, start, end in parse_timestamps(line, enc, frame*30.): print(f'[{timestring(start)} - {timestring(end)}] {text}')
-        else: print(colored(enc.decode(line), 'green' if i % 2 == 0 else 'blue'))
+        else: print(enc.decode(line))
         print('//')
-      print(f"inference duration: {(dur:= time.perf_counter()- st):.2f}s, {(frame*30+30)/dur:.2f}x [{(frame*30+30)*len(waves)/dur:.2f}] realtime")
+
+      dur = time.perf_counter()-st
+      st = time.perf_counter()
+      speed = 30/dur
+      avg_speed = (avg_speed or speed)*0.9 + speed*0.1
+      print(f"inference duration: {dur:.2f}s, {speed:.2f}x [{speed*len(waves):.2f}] realtime, {avg_speed:.2f}x [{avg_speed*len(waves):.2f}] ravg")
 
   else:
     # online
