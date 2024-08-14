@@ -76,11 +76,7 @@ generate_comgr() {
 
 generate_kfd() {
   clang2py /usr/include/linux/kfd_ioctl.h -o $BASE/kfd.py -k cdefstum
-  awk '/^#define AMDKFD_IOC_/ { if ($0 ~ /\\$/) { getline nextline; $0 = $0 nextline }
-    if (match($0, /AMDKFD_IOC_([A-Z_]+).*AMDKFD_(IOW?R?)\(0x([0-9A-F]+),.*struct ([a-z_]+)/, arr)) {
-      print "AMDKFD_IOC_" arr[1] " = (\"" arr[2] "\", 0x" arr[3] ", struct_" arr[4] ")"
-    }
-  }' /usr/include/linux/kfd_ioctl.h >> $BASE/kfd.py
+
   fixup $BASE/kfd.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
@@ -161,22 +157,14 @@ nv_status_codes = {}
 
 generate_amd() {
   # clang2py broken when pass -x c++ to prev headers
-  clang2py extra/hip_gpu_driver/sdma_registers.h \
+  clang2py -k cdefstum \
+    extra/hip_gpu_driver/sdma_registers.h \
+    extra/hip_gpu_driver/nvd.h \
+    extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h \
+    extra/hip_gpu_driver/gc_11_0_0_offset.h \
+    extra/hip_gpu_driver/gc_10_3_0_offset.h \
     --clang-args="-I/opt/rocm/include -x c++" \
     -o $BASE/amd_gpu.py
-
-  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/nvd.h >> $BASE/amd_gpu.py # comments
-  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h >> $BASE/amd_gpu.py # comments
-  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/gc_11_0_0_offset.h >> $BASE/amd_gpu.py # comments
-  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/gc_10_3_0_offset.h >> $BASE/amd_gpu.py # comments
-  sed -i 's/^\/\//#/' $BASE/amd_gpu.py # // -> #
-  sed -i 's/#\s*define\s*\([^ \t]*\)(\([^)]*\))\s*\(.*\)/def \1(\2): return \3/' $BASE/amd_gpu.py # #define name(x) (smth) -> def name(x): return (smth)
-  sed -i '/#\s*define\s\+\([^ \t]\+\)\s\+\([^ ]\+\)/s//\1 = \2/' $BASE/amd_gpu.py # #define name val -> name = val
-
-  # sed -e '/^reg/s/^\(reg[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
-  #   -e '/^ix/s/^\(ix[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
-  #   -e '/^[ \t]/d' \
-  #   extra/hip_gpu_driver/gc_11_0_0.reg >> $BASE/amd_gpu.py
 
   fixup $BASE/amd_gpu.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/amd_gpu.py
