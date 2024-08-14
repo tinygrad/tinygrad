@@ -85,7 +85,7 @@ class UOp:
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return type(src[0])(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod
-  def store(*src:UOp, **kwargs): return type((src:=(*src, *kwargs.values()))[0])(UOps.STORE, None, src)
+  def store(*src:UOp, dtype:Optional[DType]=None, **kwargs): return type((src:=(*src, *kwargs.values()))[0])(UOps.STORE, dtype, src)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return merge_dicts([{x:None for x in self.src}]+[x.parents for x in self.src])
   @property  # parents with self
@@ -225,7 +225,7 @@ def type_verify(uops):
     if uop is UOps.LOAD and len(src) > 3 and src[3].op is UOps.ALU: assert src[3].dtype == dtypes.bool and src[2].dtype == dtype
     if uop is UOps.GEP: assert dtype == src[0].dtype.scalar(), f"GEP of {src[0].dtype=} should be {src[0].dtype.scalar()} != {dtype}"
     if uop is UOps.STORE:
-      assert dtype is None, f"{uop} dtype must be None, got {dtype}"
+      assert dtype is not None and dtype == src[2].dtype, f"wrong store dtype {dtype} != {src[2].dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
     if uop is UOps.ALU:
       if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"

@@ -72,7 +72,7 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
 
     def render(s1, s2):
       glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg="idxs")
-      st = tuple(UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, i), s)) for i,s in enumerate([s1,s2]))
+      st = tuple(UOp(UOps.STORE, s.dtype, (glbl, UOp.const(dtypes.int, i), s)) for i,s in enumerate([s1,s2]))
       return OpenCLRenderer().render("indexing", UOpGraph(UOp(UOps.SINK, None, st)).linearize(skip_check=True).uops)
 
     cmp_symbolic, cmp_graph = render(symbolic_idx, symbolic_valid), render(graph_idx, graph_valid)
@@ -186,7 +186,7 @@ class IndependentLowerer:
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
         has_valid = valid.op is not UOps.CONST or valid.arg is not True
-      return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
+      return UOp(UOps.STORE, x.arg.dtype.scalar(), (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
     if x.op is MetaOps.KERNEL: return UOp(UOps.SINK, src=in_uops)

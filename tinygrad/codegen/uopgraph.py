@@ -51,7 +51,7 @@ def fold_expanded(ex, buf):
             new_load = UOp(UOps.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
             for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
           else:
-            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.STORE, None, tuple(new_src)) if i == 0 else None
+            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.STORE, load_1.dtype.vec(fold_length), tuple(new_src)) if i == 0 else None
           for i in range(fold_length): used.add((rootsrc,o+i))
 
   # dedup expand for LOAD
