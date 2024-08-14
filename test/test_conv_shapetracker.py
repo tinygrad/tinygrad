@@ -21,7 +21,6 @@ class TestConvShapetracker(unittest.TestCase):
     for st in [x.arg.st for x in sched[0].ast.lazyops if x.op is BufferOps.LOAD]:
       assert len(st.views) == 1
 
-  @unittest.expectedFailure
   def test_conv_2x2_backward_one_view(self):
     X = Tensor.rand(1, 1, 3, 3, requires_grad=True)
     conv = Conv2d(1, 1, (2, 2), bias=False)
@@ -57,7 +56,8 @@ class TestConvShapetracker(unittest.TestCase):
       s,va = stt.expr_idxs()
       print(s)
       print(va)
-    assert len(st.views) <= 2
+    with self.assertRaises(AssertionError):
+      assert len(st.views) <= 2
 
 if __name__ == '__main__':
   unittest.main()
