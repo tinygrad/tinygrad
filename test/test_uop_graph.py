@@ -323,7 +323,7 @@ class TestUOpGraph(TestUOps):
     uops = UOpGraph([st0, st1])
     # only the second store happens
     self.assertEqual(len(uops.uops), 4)
-    self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
+    self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val, dtype=dtypes.int))
 
   def test_asserts_bad_gate(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
