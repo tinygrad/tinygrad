@@ -7,7 +7,7 @@ from typing import Optional, List, Tuple, cast, Dict, Union, Final, DefaultDict,
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, MetaOps, UNSAFE_PAD_OPS, verify_lazyop, KernelInfo
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -648,6 +648,8 @@ class Kernel:
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
           if rsrc.op is UnaryOps.CAST: rsrc = rsrc.src[0]
+          dtype = rsrc.dtype
+          assert dtype is not None
           assert rsrc.op is BinaryOps.MUL
 
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
@@ -669,7 +671,10 @@ class Kernel:
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device in {"CUDA", "NV"}:
-            reduce_axes, upcast_axes = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
+            if dtype is not dtypes.f8e4m3:
+              reduce_axes, upcast_axes = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
+            else: # dtype is floating point 8, each lane loads 16 for matrix A, 8 for matrix B, 4 for accum
+              reduce_axes, upcast_axes = [0, 1], [[(0, 8), (1, 2)], [(2, 2), (3, 2), (4, 2)], [(2, 2), (3, 2)]]
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
             fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
               ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))

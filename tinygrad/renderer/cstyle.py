@@ -311,7 +311,7 @@ class CUDARenderer(CStyleLanguage):
   shared_max = 49152
   tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
   tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.f8e4m3, dtype_out=dtypes.float)]
-  def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
+  def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores #if int(arch[3:]) >= 80 else []
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
@@ -336,7 +336,7 @@ class CUDARenderer(CStyleLanguage):
         [get_fp8_header("e5m2")]
     if any(uop.dtype == dtypes.f8e4m3 for uop in uops):
       # need to include fp16 since there is no arithmetic intrinsics for fp8 in CUDA, so we cast to fp16, do the op and cast back if result is float.
-      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e4m3", x, x*2 if x != 2 else x) for x in [2, 4, 8]] + \
+      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e4m3", x, x*2 if x != 2 else x) for x in [2, 4, 8, 16]] + \
         [get_fp8_header("e4m3")]
 
     if any(uop.dtype == dtypes.half for uop in uops):
@@ -347,10 +347,12 @@ class CUDARenderer(CStyleLanguage):
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      ttt = "32" if dt_map[arg[2]][1] == "e4m3" else "16"
+      n,m,k = arg[1][0], arg[1][1], arg[1][2]
+      warpcnt = 32
+      a_sz, b_sz, acc_sz = m*k//warpcnt, k*n//warpcnt, 4
       fn, ti, to, ci, co = arg[0], dt_map[arg[2]][0], dt_map[arg[3]][0], dt_map[arg[2]][1], dt_map[arg[3]][1]
-      prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
-asm( "mma.sync.aligned.m16n8k{ttt}.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
+      prefix.append(f"""__device__ {to}{acc_sz} __{fn}({ti}{a_sz} a, {ti}{b_sz} b, {to}{acc_sz} c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
+asm( "mma.sync.aligned.m{m}n{n}k{k}.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
   : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
 return c;}}""")
 
