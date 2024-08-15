@@ -121,6 +121,7 @@ class IndependentLowerer:
     group_for_reduces = sum([any(j!=y for j in x) for x,y in zip(
       [[l.arg.st.shape[i] for l in local_loads] for i in range(first_reduce,first_upcasted)],
       ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
+    reduceops = [x for x in ast.parents if x.op in ReduceOps and all(i >= first_reduce and i < first_reduce+group_for_reduces for i in x.arg)]
     global_dims = first_reduce-ki.local_dims
 
     if opts.has_local:
@@ -129,8 +130,24 @@ class IndependentLowerer:
         self.idxs = get_grouped_dims("idx", full_shape[:global_dims], opts.global_max, reverse=True)
       else:
         # define indexes for GPU-like execution
-        self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
-                    get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
+        if len(opts.tensor_cores) == 0:
+          # reuse local indexes for reducops if they are equal
+          reuse_axes:Dict[int, int] = {}
+          shape_map = {i:full_shape[i] for r in reduceops for i in r.arg if i in range(first_reduce,first_reduce+group_for_reduces)}
+          for r in reduceops:
+            if r.src[0].op is BufferOps.LOAD and r.src[0].arg.idx < 0:
+              commit: Dict[int, int] = {}
+              for i in r.arg: commit[i] = {shape_map[a]:a for a in shape_map if a not in [commit[f] for f in commit]}[full_shape[i]]
+              reuse_axes.update(commit)
+          lidx_map = {i:list(reuse_axes.values()).index(reuse_axes[i]) for i in range(first_reduce,first_reduce+group_for_reduces)}
+
+          lidxs = get_grouped_dims("lidx", tuple(list(full_shape[global_dims:first_reduce]) + \
+            [full_shape[i] for i in range(first_reduce,first_reduce+group_for_reduces) if i in reuse_axes.values()]), opts.local_max)
+          lidxs = lidxs[:first_reduce-global_dims] + [lidxs[ki.local_dims+lidx_map[i]] for i in range(first_reduce,first_reduce+group_for_reduces)]
+          self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + lidxs
+        else:
+          self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
+            get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.global_max)
     else:
       # all loops are RANGES
       self.idxs = [UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), variable_to_uop(g)), (i, False))
