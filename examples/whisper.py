@@ -49,7 +49,7 @@ class CrossAttention:
     attn = Tensor.scaled_dot_product_attention(q, k, v, mask[:n_ctx,:n_ctx] if mask is not None else None)
     wv = attn.permute(0, 2, 1, 3).flatten(start_dim=2)
     return self.out(wv)
-  
+
 class SelfAttention(CrossAttention):
   def __call__(self, x, len:Union[Variable, int]=None, mask=None):
     if not hasattr(self, 'qkv'):
