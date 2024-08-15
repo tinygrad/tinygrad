@@ -43,7 +43,7 @@ class TestCStyleFailures(unittest.TestCase):
     self.assertEqual(ret[0], 1)
 
   # simplified version of test_padto_where_multireduce
-  def test_cast_to_half_out_of_scope(self):
+  def test_cast_half_out_of_scope(self):
     g = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     c0 = UOp.const(dtypes.int, 0)
     c4 = UOp.const(dtypes.int, 4)
@@ -51,7 +51,7 @@ class TestCStyleFailures(unittest.TestCase):
     r0 = UOp(UOps.RANGE, dtypes.int, (c0, c4), (1, 0, False))
     alu0 = UOp(UOps.ALU, dtypes.int, (r0, acc0), BinaryOps.ADD)
     phi0 = UOp(UOps.PHI, dtypes.int, (acc0, alu0))
-    cast0 = UOp(UOps.CAST, dtypes.half, (acc0,))
+    cast0 = UOp(UOps.CAST, dtypes.float, (acc0,))
     er0 = UOp(UOps.ENDRANGE, None, (r0,))
     gate0 = UOp(UOps.ALU, dtypes.bool, (acc0, c0), BinaryOps.CMPNE)
     # we want to have the IF come after the cast, but not actually dependent on it
@@ -63,7 +63,7 @@ class TestCStyleFailures(unittest.TestCase):
     uops = [g, c0, c4, acc0, r0, alu0, phi0, cast0, er0, gate0, if0, store0, eif0]
     ret = _test_uop_result([Tensor([1])], uops)[0]
     # self.assertEqual(ret[0], np.int32(14).astype(np.int64))
-    self.assertAlmostEqual(ret[0], 8.3e-07) # 14 casted to half
+    self.assertAlmostEqual(ret[0], 2e-44) # 14 casted
 
 if __name__ == '__main__':
   unittest.main()
