@@ -1970,11 +1970,12 @@ class Tensor:
       if mode == "nearest":
         index = (scale*arr).floor().cast(dtypes.int)
         x = x[tuple(index if i + x.ndim == dim else slice(None) for dim in range(x.ndim))]
-      else:
+      elif mode == "linear":
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
         reshape[i] = expand[i] = size[i]
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      else: raise ValueError(f"{mode=} is not supported")
     return x
 
   # ***** unary ops *****
