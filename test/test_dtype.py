@@ -99,7 +99,7 @@ class TestDType(unittest.TestCase):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
     list(map(
       lambda dtype:
-        _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype.itemsize == self.DTYPE.itemsize and dtype != dtypes.bool else None,
+        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
 
@@ -241,9 +241,20 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
-  def test_shape_change_bitcast(self):
+  @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
+  def test_shape_change_bitcast(self, dt1, dt2):
+    if dt2 == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
+    data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
+    _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, data.view(_to_np_dtype(dt2)).tolist())
+
+  def test_shape_change_bitcast_exceptions(self):
     with self.assertRaises(RuntimeError):
-      _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
+      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16)
+
+    with self.assertRaises(RuntimeError):
+      # should fail because backprop through bitcast is undefined
+      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True).bitcast(dtypes.float16)
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])

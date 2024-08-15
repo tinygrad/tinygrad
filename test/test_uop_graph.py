@@ -5,7 +5,7 @@ from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
 from tinygrad.codegen.uops import UOps, UOp, NOp, PatternMatcher
-from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite, expander, reducer, constant_folder, float4_folding, mod_folding
+from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite, expander, reducer, constant_folder, float4_folding
 
 simple_pm = PatternMatcher([
   (NOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -102,7 +102,7 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.arg, 3.0)
 
   def test_where_same_fold(self):
-    v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('tmp', 0, 1))
+    v = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp(UOps.CONST, dtypes.int, (), 0), UOp(UOps.CONST, dtypes.int, (), 1)), arg=Variable('tmp', 0, 1))
     c0 = UOp(UOps.CONST, dtypes.int, arg=0)
     vc = UOp(UOps.ALU, dtypes.bool, (v, c0), BinaryOps.CMPNE)
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
@@ -566,7 +566,7 @@ class TestIFUOps(TestUOps):
     sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 4))
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
-    gate = valid*(lidx.ne(2))
+    gate = valid&(lidx.ne(2))
     idx = UOp.const(dtypes.int, 0)
     st = UOp(UOps.STORE, None, (sbuf, idx, UOp.const(dtypes.float, 42)))
     barrier = UOp(UOps.BARRIER, None, (st,))
@@ -585,7 +585,7 @@ class TestIFUOps(TestUOps):
     sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 16))
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 4)).lt(1)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
-    gate = valid*(lidx.ne(2))
+    gate = valid&(lidx.ne(2))
     st = UOp(UOps.STORE, None, (sbuf, lidx, UOp.const(dtypes.float, 42)))
     barrier = UOp(UOps.BARRIER, None, (st,))
     lbufs = [UOp(UOps.LOAD, dtypes.float, (sbuf, UOp.const(dtypes.int, i), barrier)) for i in range(4)]
@@ -604,7 +604,7 @@ class TestIFUOps(TestUOps):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
-    gate = valid*(lidx.ne(2))
+    gate = valid&(lidx.ne(2))
     stores = [UOp(UOps.STORE, None, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(UOps.SINK, None, tuple(stores))
     sink = gate_rewrite(sink)
@@ -613,49 +613,6 @@ class TestIFUOps(TestUOps):
     self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
-
-class TestDivMod(TestUOps):
-  def c(self, c:int): return UOp.const(dtypes.int, c)
-  def x(self, expr:str, nmin:int, nmax:int): return UOp(UOps.DEFINE_VAR, dtypes.int, (self.c(nmin), self.c(nmax)), Variable(expr, nmin, nmax))
-
-  # NOTE: does not simplify to the end
-  def test_const_mod(self):
-    self.assert_equiv_uops(mod_folding(self.c(6), 3), self.c(1)*self.c(0))
-    self.assert_equiv_uops(mod_folding(self.c(7), 3), self.c(1)*self.c(1))
-    self.assert_equiv_uops(mod_folding(self.c(8), 3), self.c(1)*self.c(2))
-
-  def test_var_mod(self):
-    self.assertIsNone(mod_folding(self.x("x", 0, 6), 3))
-    self.assertIsNone(mod_folding(self.x("x", 0, 7), 3))
-
-  @unittest.skip("does not simplify to the end")
-  def test_add_mod(self):
-    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)+40, 5), self.x("x", 0, 6))
-    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)-40, 5), self.x("x", 0, 6))
-    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)+42, 5), (self.x("x", 0, 6)+2))
-    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)-42, 5), (self.x("x", 0, 6)+3))
-    self.assert_equiv_uops(mod_folding(40+self.x("x", 0, 6), 5), self.x("x", 0, 6))
-    self.assert_equiv_uops(mod_folding(-40+self.x("x", 0, 6), 5), self.x("x", 0, 6))
-    self.assert_equiv_uops(mod_folding(42+self.x("x", 0, 6), 5), (2+self.x("x", 0, 6)))
-    self.assert_equiv_uops(mod_folding(-42+self.x("x", 0, 6), 5), (3+self.x("x", 0, 6)))
-
-  @unittest.skip("does not simplify to the end")
-  def test_mul_mod(self):
-    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)*40, 5), self.c(0))
-    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)*-40, 5), self.c(0))
-    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)*42, 5), (self.x("x", 0, 6)*2))
-    self.assert_equiv_uops(mod_folding(self.x("x", 0, 6)*-42, 5), (self.x("x", 0, 6)*3))
-    self.assert_equiv_uops(mod_folding(40*self.x("x", 0, 6), 5), self.c(0))
-    self.assert_equiv_uops(mod_folding(-40*self.x("x", 0, 6), 5), self.c(0))
-    self.assert_equiv_uops(mod_folding(42*self.x("x", 0, 6), 5), (2*self.x("x", 0, 6)))
-    self.assert_equiv_uops(mod_folding(-42*self.x("x", 0, 6), 5), (3*self.x("x", 0, 6)))
-
-  @unittest.skip("does not simplify to the end now")
-  def test_mul_add_mod(self):
-    x = self.x("x", 0, 10)
-    y = self.x("y", 0, 10)
-    z = self.x("z", 0, 10)
-    self.assert_equiv_uops(mod_folding(x*40+y*12+z, 5), (y*2+z))
 
 
 if __name__ == '__main__':

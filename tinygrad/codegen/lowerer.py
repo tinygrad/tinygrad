@@ -115,7 +115,7 @@ class IndependentLowerer:
     first_upcasted = len(full_shape)-ki.upcasted
     # if there's no reduce, this is first_upcasted
     first_reduce = [x!=y for x,y in zip(ast.src[0].arg.st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
-    local_loads = [x for x in ast.lazyops if x.op is BufferOps.LOAD and x.arg.idx == -1]
+    local_loads = [x for x in ast.parents if x.op is BufferOps.LOAD and x.arg.idx == -1]
     # NOTE: this is taking the first one...there may be subtlelies here with multireduces
     group_for_reduces = sum([x!=y for x,y in zip(
       local_loads[0].arg.st.shape[first_reduce:first_upcasted], ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
@@ -160,20 +160,20 @@ class IndependentLowerer:
   def _to_uop(self, x:LazyOp) -> UOp:
     if x.op in BufferOps:
       idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs,
-        x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) and (not isinstance(x.arg, MemBuffer) or x.arg.idx == -1) else x.arg.dtype)
+        x.dtype.base if isinstance(x.dtype, ImageDType) and (not isinstance(x.arg, MemBuffer) or x.arg.idx == -1) else x.dtype)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
-        dtype = x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype
+        dtype = x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype
         return valid.where(UOp.const(dtype, x.arg.val), UOp.const(dtype, 0))
       if x.arg.idx < 0:
-        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.arg.dtype.base if isinstance(x.arg.dtype, ImageDType) else x.arg.dtype),
+        buf = UOp(UOps.DEFINE_LOCAL, PtrDType(x.dtype.base if isinstance(x.dtype, ImageDType) else x.dtype),
                   arg=(-x.arg.idx, x.arg.st.real_size()))
       else:
-        buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (), x.arg.idx)
+        buf = UOp(UOps.DEFINE_GLOBAL, x.dtype if isinstance(x.dtype, ImageDType) else PtrDType(x.dtype), (), x.arg.idx)
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
-        load_dtype = x.arg.dtype.scalar()
+        load_dtype = x.dtype.scalar()
         if idx.dtype == dtypes.int.vec(3):
           # this should all simplify if there's consts for id4. if not, w/e
           idx, id4 = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx.src[0], idx.src[1])), idx.src[2]

@@ -3067,7 +3067,14 @@ class Tensor:
     ```
     """
     if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
-    return F.Cast.apply(self, dtype=dt, bitcast=True) if self.dtype != (dt:=to_dtype(dtype)) else self
+    dt = to_dtype(dtype)
+    if (not isinstance(self.device, str) or not self.device.startswith("DISK")) and (ns:=dt.itemsize) != (os:=self.dtype.itemsize):
+      if not (self.shape[-1]*os) % ns == 0: raise RuntimeError("unsupported size in bitcast")
+      new_uint, old_uint = to_dtype(f"uint{8*ns}"), to_dtype(f"uint{8*os}")
+      tmp = self.bitcast(old_uint)
+      if ns > os: return functools.reduce(Tensor.__add__, (tmp[...,i::ns//os].cast(new_uint) << 8*i*os for i in range(ns//os))).bitcast(dtype)
+      return Tensor.stack(*(tmp>>8*i*ns for i in range(os//ns)), dim=-1).flatten(-2).cast(new_uint).bitcast(dtype)
+    return F.Cast.apply(self, dtype=dt, bitcast=True) if self.dtype != dt else self
 
   def float(self) -> Tensor:
     """
