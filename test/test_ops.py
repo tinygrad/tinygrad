@@ -1755,6 +1755,12 @@ class TestOps(unittest.TestCase):
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"))
 
+  def test_interpolate_nearest(self):
+    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
+
   def test_interpolate_linear_corners_aligned(self):
     for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
       helper_test_op([(2,3)+in_sz],

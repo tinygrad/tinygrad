@@ -901,7 +901,7 @@ def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestTensorOps(unittest.TestCase):
   def test_interpolate(self):
-    helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))
+    helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19), mode="linear"))
 
 if __name__ == '__main__':
   unittest.main()
