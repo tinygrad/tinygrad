@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import time, math, itertools, functools, struct, sys, inspect
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set, Literal
 from collections import defaultdict
 import numpy as np
 
@@ -1945,12 +1945,13 @@ class Tensor:
     """
     return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device, dtype=dtypes.bool).where(0, self).cast(self.dtype)
 
-  def interpolate(self, size:Tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
+  def interpolate(self, size:Tuple[int, ...], mode:Literal["linear", "nearest"], align_corners:bool=False) -> Tensor:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
 
-    The interpolation algorithm is selected with `mode` which currently only supports `linear`.
-    To run `bilinear` or `trilinear`, pass in a 2D or 3D size.
+    The interpolation algorithm is selected with `mode`
+    Supported modes: 'linear' | 'nearest'
+    To run `bilinear` or `trilinear`, pass in a 2D or 3D size with mode set as `linear`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 2, 3, 4], [21, 22, 23, 24], [41, 42, 43, 44]])
@@ -1961,15 +1962,19 @@ class Tensor:
     ```
     """
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
-    assert mode == "linear", "only supports linear interpolate"
+    assert not (mode == "nearest" and align_corners), 'align_corners option can only be set with the mode="linear"'
     x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-      reshape[i] = expand[i] = size[i]
-      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-      x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      if mode == "nearest":
+        index = (scale*arr).floor().clip(0, self.shape[i]-1).cast(dtypes.int)
+        x = x[tuple(index if i + x.ndim == dim else slice(None) for dim in range(x.ndim))]
+      else:
+        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+        reshape[i] = expand[i] = size[i]
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        x = x.gather(i, low).lerp(x.gather(i, high), perc)
     return x
 
   # ***** unary ops *****
