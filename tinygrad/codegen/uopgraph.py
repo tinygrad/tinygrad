@@ -84,16 +84,19 @@ def _get_add_chain(x:UOp):
   else: yield x
 
 def mod_folding(x:UOp, c:int) -> Optional[UOp]:
-  # simplify x in x % c
+  # simplify x % c
   # None means no change
   remainder, something_changed = [], False
   for u in _get_add_chain(x):
     if (factor:=u.const_factor())%c != factor:
       remainder.append(u.divides(factor)*(factor%c))
       something_changed = True
+    elif u.op is UOps.ALU and u.arg is BinaryOps.MOD and (s1:=u.src[1]).op is UOps.CONST and s1.arg%c == 0:
+      remainder.append(u.src[0])
+      something_changed = True
     else: remainder.append(u)
   if not something_changed: return None
-  return functools.reduce(operator.add, remainder) if remainder else x.const(0)
+  return functools.reduce(operator.add, remainder)%c if remainder else x.const(0)
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
@@ -255,7 +258,6 @@ constant_folder = PatternMatcher([
   (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
   (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
-  (NOp.var('x') / NOp.cvar('c'), lambda x,c: x*exec_alu(UnaryOps.RECIP, c.dtype, [c.arg])),    # x/c -> x*(1/c)
   # ** zero folding **
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
@@ -285,15 +287,13 @@ constant_folder = PatternMatcher([
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
    newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
   # ** mod **
-  # apply mod to mod input
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx%c if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # mod folding
+  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # remove mod
   (NOp.var('x') % NOp.cvar('c'), lambda x,c:\
    x-(x.vmin.arg//c.arg)*c.arg if 0 < c.arg and 0 <= x.vmin.arg and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
-  # mod mod
-  ((NOp.var('x') % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c1 if c0.arg % c1.arg == 0 else None),
   # (x%c)+(x//c)*c = x
   (NOp.var('x')%NOp.cvar('c')+(NOp.var('x')//NOp.cvar('c'))*NOp.cvar('c'), lambda x,c: x),
   # ** combine terms **

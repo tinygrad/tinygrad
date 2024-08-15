@@ -319,3 +319,27 @@ class Embedding:
     if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).reshape(arange_shp)
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1,)).expand(big_shp), self.weight.reshape(weight_shp).expand(big_shp)
     return (arange == idx).mul(vals).sum(2, acc_dtype=vals.dtype)
+
+class LSTMCell:
+  """
+  A long short-term memory (LSTM) cell.
+
+  Args:
+    input_size: The number of expected features in the input `x`
+    hidden_size: The number of features in the hidden state `h`
+    bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`
+  """
+  def __init__(self, input_size:int, hidden_size:int, bias:bool=True):
+    stdv = 1.0 / math.sqrt(hidden_size)
+    self.weight_ih = Tensor.uniform(hidden_size*4, input_size, low=-stdv, high=stdv)
+    self.weight_hh = Tensor.uniform(hidden_size*4, hidden_size, low=-stdv, high=stdv)
+    self.bias_ih, self.bias_hh = (Tensor.zeros(hidden_size*4), Tensor.zeros(hidden_size*4)) if bias else (None, None)
+
+  def __call__(self, x:Tensor, hc:Optional[Tuple[Tensor, Tensor]]=None) -> Tuple[Tensor, Tensor]:
+    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device),)*2
+    gates = x.linear(self.weight_ih.T, self.bias_ih) + hc[0].linear(self.weight_hh.T, self.bias_hh)
+    i, f, g, o = gates.chunk(4, dim=1)
+    i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()
+    new_c = f * hc[1] + i * g
+    new_h = o * new_c.tanh()
+    return (new_h.contiguous(), new_c.contiguous())

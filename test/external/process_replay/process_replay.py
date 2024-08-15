@@ -88,10 +88,11 @@ def get_step_times(data) -> Dict[str, float]:
 
 def process_replay():
   # *** speed diff (for benchmarks)
-  if REF == "update_benchmark":
+  # TODO: fix this for testqualcommbenchmark
+  if REF == "update_benchmark" and os.environ["GITHUB_JOB"] != "testqualcommbenchmark":
     name = {"testmacbenchmark": "Mac", "testnvidiabenchmark": "tinybox green", "testmorenvidiabenchmark": "tinybox green Training",
             "testamdbenchmark": "tinybox red", "testmoreamdbenchmark": "tinybox red Training",
-            "testqualcommbenchmark": "comma Benchmark"}[os.environ["GITHUB_JOB"]]
+            "testqualcommbenchmark": "comma"}[os.environ["GITHUB_JOB"]]
     compare_jobs = requests.get(f"{BASE_URL}/actions/runs/{RUN_ID}/jobs", headers=GH_HEADERS).json()["jobs"]
     compare_job = next(j for j in compare_jobs if j["name"] == f"{name} Benchmark")
     ref_runs = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master&status=success", headers=GH_HEADERS).json()
@@ -146,4 +147,5 @@ if __name__ == "__main__":
     exit(0)
   try: process_replay()
   except Exception as e:
+    # TODO: catch specific Exception
     if ASSERT_DIFF: raise e
