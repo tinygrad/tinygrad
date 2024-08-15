@@ -18,7 +18,7 @@ class TestConvShapetracker(unittest.TestCase):
     # run it again to get the kernels
     sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen) if si.ast.op is MetaOps.KERNEL]
     assert len(sched) == 1, f"conv should only have one kernel, getting {len(sched)}"
-    for st in [x.arg.st for x in sched[0].ast.lazyops if x.op is BufferOps.LOAD]:
+    for st in [x.arg.st for x in sched[0].ast.parents if x.op is BufferOps.LOAD]:
       assert len(st.views) == 1
 
   def test_conv_2x2_backward_one_view(self):
@@ -27,7 +27,7 @@ class TestConvShapetracker(unittest.TestCase):
     conv(X).mean().backward()
     si = X.grad.schedule()[-1]
     print(si)
-    ldb = [x for x in si.ast.lazyops if x.op is BufferOps.LOAD][0]
+    ldb = [x for x in si.ast.parents if x.op is BufferOps.LOAD][0]
     st: ShapeTracker = ldb.arg.st.simplify()
     # NOTE: st.real_size() is broken
     print(si.inputs[0].size)
