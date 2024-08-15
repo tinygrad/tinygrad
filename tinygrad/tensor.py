@@ -1968,7 +1968,7 @@ class Tensor:
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
       if mode == "nearest":
-        index = (scale*arr).floor().clip(0, self.shape[i]-1).cast(dtypes.int)
+        index = (scale*arr).floor().cast(dtypes.int)
         x = x[tuple(index if i + x.ndim == dim else slice(None) for dim in range(x.ndim))]
       else:
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
