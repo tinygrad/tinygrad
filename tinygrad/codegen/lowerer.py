@@ -111,10 +111,6 @@ class IndependentLowerer:
 
     ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
 
-    # @functools.lru_cache(None)
-    # def find_rops(op): return [r for x in op.src for r in find_rops(x)] + ([op] if op.op in ReduceOps else [])
-    reduceops = [x for x in ast.parents if x.op in ReduceOps]
-
     # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = ast.full_shape
     first_upcasted = len(full_shape)-ki.upcasted
