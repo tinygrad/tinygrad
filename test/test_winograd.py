@@ -24,7 +24,7 @@ class TestWinograd(unittest.TestCase):
 
     for i,s in enumerate(sched):
       if s.ast.op is not MetaOps.KERNEL: continue
-      ops = s.ast.lazyops
+      ops = s.ast.parents
       with Timing(f"linearize {i} with {len(ops):4d} ops: "):
         l = Kernel(s.ast)
         l.hand_coded_optimizations()
