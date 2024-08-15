@@ -41,7 +41,7 @@ class CStyleLanguage(Renderer):
 
   # returns a str expression of the vectorized xs with the given type
   def render_vectorize(self, x:List[str], var_dtype:DType) -> str:
-    assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count} ({x=}) ({var_dtype=})"
+    assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
     return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}" + (f"{{{','.join(x)}}}" if self.device == "CLANG" else f"({','.join(x)})")
 
