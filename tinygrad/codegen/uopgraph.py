@@ -261,6 +261,8 @@ constant_folder = PatternMatcher([
   (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
   (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
+  (NOp.var('x') & NOp.cvar('c'), lambda x,c: x if c.arg else c),
+  (NOp.var('x') | NOp.cvar('c'), lambda x,c: c if c.arg else x),
   # ** zero folding **
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
