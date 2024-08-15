@@ -128,6 +128,8 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1).reshape(1,1)
     lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
+      if Device.DEFAULT not in {"METAL"}:
+        assert sum(1 if u.op is UOps.SPECIAL else 0 for u in l.uops)-l.global_dims-l.local_dims <= 1, "shouldn't be more than 1 explicit local dim"
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
         if i == 0: continue
@@ -189,6 +191,8 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
+      if Device.DEFAULT not in {"METAL"}:
+        assert sum(1 if u.op is UOps.SPECIAL else 0 for u in l.uops)-l.global_dims-l.local_dims <= 1, "shouldn't be more than 1 explicit local dim"
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
         if i == 0: continue
@@ -258,6 +262,8 @@ class TestLinearizer(unittest.TestCase):
     ]
     lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
+      if Device.DEFAULT not in {"METAL"}:
+        assert sum(1 if u.op is UOps.SPECIAL else 0 for u in l.uops)-l.global_dims-l.local_dims <= 2, "shouldn't be more than 2 explicit local dims"
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
         if i < 2: continue

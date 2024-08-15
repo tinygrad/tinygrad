@@ -110,7 +110,6 @@ class IndependentLowerer:
     self.output_count = len(ast.src)
 
     ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
-
     # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = ast.full_shape
     first_upcasted = len(full_shape)-ki.upcasted
