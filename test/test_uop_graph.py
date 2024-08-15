@@ -566,7 +566,7 @@ class TestIFUOps(TestUOps):
     sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 4))
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
-    gate = valid*(lidx.ne(2))
+    gate = valid&(lidx.ne(2))
     idx = UOp.const(dtypes.int, 0)
     st = UOp(UOps.STORE, None, (sbuf, idx, UOp.const(dtypes.float, 42)))
     barrier = UOp(UOps.BARRIER, None, (st,))
@@ -585,7 +585,7 @@ class TestIFUOps(TestUOps):
     sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 16))
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 4)).lt(1)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
-    gate = valid*(lidx.ne(2))
+    gate = valid&(lidx.ne(2))
     st = UOp(UOps.STORE, None, (sbuf, lidx, UOp.const(dtypes.float, 42)))
     barrier = UOp(UOps.BARRIER, None, (st,))
     lbufs = [UOp(UOps.LOAD, dtypes.float, (sbuf, UOp.const(dtypes.int, i), barrier)) for i in range(4)]
@@ -604,7 +604,7 @@ class TestIFUOps(TestUOps):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
-    gate = valid*(lidx.ne(2))
+    gate = valid&(lidx.ne(2))
     stores = [UOp(UOps.STORE, None, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(UOps.SINK, None, tuple(stores))
     sink = gate_rewrite(sink)
