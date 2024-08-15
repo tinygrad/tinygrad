@@ -279,16 +279,16 @@ class Kernel:
 
   def _create_tc_opts(self, reduceop:LazyOp, tc:TensorCore, axis:int, opt_level:int) -> Optional[TensorCoreOptions]:
     has_cast = tc.dtype_in != tc.dtype_out
-    if has_cast and not(reduceop.src[0].op is UnaryOps.CAST and reduceop.src[0].arg == tc.dtype_out): return None
+    if has_cast and not(reduceop.src[0].op is UnaryOps.CAST and reduceop.src[0].dtype == tc.dtype_out): return None
 
     mul_op = reduceop.src[0].src[0] if has_cast else reduceop.src[0]
     if mul_op.op is not BinaryOps.MUL: return None
 
     def buf_index(src: LazyOp) -> Optional[int]:
       # TODO: apply tc even if the sources are not from LOAD
-      if src.op is BufferOps.LOAD and src.arg.dtype == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.arg))
+      if src.op is BufferOps.LOAD and src.dtype == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.arg))
       try:
-        if opt_level >= 1 and src.op is UnaryOps.CAST and src.arg == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.src[0].arg))
+        if opt_level >= 1 and src.op is UnaryOps.CAST and src.dtype == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.src[0].arg))
       except ValueError: return None
       return None
     if (buf0:=buf_index(mul_op.src[0])) is None or (buf1:=buf_index(mul_op.src[1])) is None: return None
@@ -746,7 +746,7 @@ class Kernel:
 
     # group non-local MemBuffers by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
-    mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
+    mem_bytes = sum(max(x.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.parents if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
     return Program(ansiname, src, self.opts.device, self.uops.uops, mem_estimate=mem_bytes,

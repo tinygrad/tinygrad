@@ -214,7 +214,7 @@ def type_verify(uops):
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
     if uop in {UOps.CONST, UOps.DEFINE_ACC}:
       if uop is UOps.CONST:
-        assert dtype is not None and dtype == dtype.scalar(), f"consts should be scalar, got {dtype}"
+        assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
         assert type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop is UOps.DEFINE_ACC: assert dtype is not None and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
     if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
