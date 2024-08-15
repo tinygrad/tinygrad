@@ -334,7 +334,10 @@ class Kernel:
             if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
           for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
         elif self.opts.device in {"CUDA", "NV"}:
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
+          if tc.dtype_in == dtypes.f8e4m3:
+            self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 16), append_opt=False)
+          else:
+            self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
           # NOTE: LOCALS and UPCAST can be swapped here. it doesn't seem faster
           self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
@@ -364,6 +367,7 @@ class Kernel:
     if not self.opts.tensor_cores and use_tensor_cores != 2:return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
+      return True
       if (tc_opts:=self.tensor_core_opts) is not None:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
@@ -673,13 +677,15 @@ class Kernel:
           elif self.opts.device in {"CUDA", "NV"}:
             if dtype is not dtypes.f8e4m3:
               reduce_axes, upcast_axes = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
+              # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
+              fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
+                ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
+              fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
+                ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
             else: # dtype is floating point 8, each lane loads 16 for matrix A, 8 for matrix B, 4 for accum
-              reduce_axes, upcast_axes = [0, 1], [[(0, 8), (1, 2)], [(2, 2), (3, 2), (4, 2)], [(2, 2), (3, 2)]]
-            # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
-            fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
-              ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
-            fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
-              ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
+              reduce_axes, upcast_axes = [0, 1], [[(0, 16)], [(2, 2), (3, 2), (4, 2)], [(2, 2), (3, 2)]]
+              fix_st1 = None
+              fix_st2 = None
           else:
             raise RuntimeError("unsupported device for tensor cores")
 
