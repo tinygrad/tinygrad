@@ -10,7 +10,7 @@ from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.tensor import Tensor
-from tinygrad.shape.symbolic import sym_infer
+from tinygrad.shape.symbolic import Variable, sym_infer
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer import Program
 
@@ -35,7 +35,8 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, factor
 
-def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):
+def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:List[Buffer], early_stop:Optional[float]=None,
+                  max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> List[float]:
   factor = 1
   if p.global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(p.global_size, max_global_size, var_vals)
@@ -139,7 +140,7 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True,
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
+    var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:
@@ -197,7 +198,7 @@ def time_linearizer(lin:Kernel, rawbufs:List[Buffer], allow_test_size=True, max_
   assert dev.compiler is not None
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
-  var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
+  var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   p = lin.to_program()
   tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
                       max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))
