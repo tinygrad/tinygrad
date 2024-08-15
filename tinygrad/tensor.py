@@ -1945,7 +1945,7 @@ class Tensor:
     """
     return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device, dtype=dtypes.bool).where(0, self).cast(self.dtype)
 
-  def interpolate(self, size:Tuple[int, ...], mode:Literal["linear", "nearest"], align_corners:bool=False) -> Tensor:
+  def interpolate(self, size:Tuple[int, ...], mode:Literal["linear", "nearest", "nearest-exact"], align_corners:bool=False) -> Tensor:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
 
@@ -1967,9 +1967,10 @@ class Tensor:
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-      if mode == "nearest":
-        index = (scale*arr).floor().cast(dtypes.int)
-        x = x[tuple(index if i + x.ndim == dim else slice(None) for dim in range(x.ndim))]
+      if mode in {"nearest", "nearest-exact"}:
+        index = (scale * arr).floor() if mode == "nearest" else (scale*(arr+0.5)-0.5).round()
+        # TODO: not sure if fastest idx selection method looping like dis
+        x = x[tuple(index.cast(dtypes.int) if i + x.ndim == dim else slice(None) for dim in range(x.ndim))]
       elif mode == "linear":
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
         reshape[i] = expand[i] = size[i]
