@@ -62,7 +62,7 @@ class TestCStyleFailures(unittest.TestCase):
 
     uops = [g, c0, c4, acc0, r0, alu0, phi0, cast0, er0, gate0, if0, store0, eif0]
     ret = _test_uop_result([Tensor([1])], uops)[0]
-    self.assertEqual(ret[0], 14)
+    self.assertEqual(ret[0], np.int32(14).astype(np.int64))
 
 if __name__ == '__main__':
   unittest.main()
