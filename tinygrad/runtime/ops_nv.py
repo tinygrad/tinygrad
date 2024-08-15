@@ -279,8 +279,7 @@ class NVProgram(HCQProgram):
     self.max_threads = ((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    super().__init__(NVArgsState, self.device, self.name,
-                     kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8), kernargs_args_offset=0x160)
+    super().__init__(NVArgsState, self.device, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8))
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
