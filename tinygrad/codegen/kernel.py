@@ -423,7 +423,7 @@ class Kernel:
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
-      check(len(self.reduceops) == 1, "can't group with multiple reduces")
+      # check(len(self.reduceops) == 1, "can't group with multiple reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
@@ -516,7 +516,8 @@ class Kernel:
         for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
             try: # may fail due to excessive smem usage
-              self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+              if len(self.reduceops) < 2: 
+                self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
               break
             except KernelOptError: pass
 
@@ -704,12 +705,17 @@ class Kernel:
           return LazyOp(op.op, (ret,), new_reduce_axes) if (new_reduce_axes:=tuple(i for i in arg if i-self.first_upcast not in reduce_axes)) else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
-          local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces] + \
-            (1,) * (self.first_upcast - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
-          local_buffer = MemBuffer(-1, start.dtype, ShapeTracker.from_shape(local_shape))
+          local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
+            tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
+              for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
+            (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
+          local_buffer = MemBuffer(-self.reduceops.index(op)-1, start.dtype, ShapeTracker.from_shape(local_shape))
           local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
           local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
-          return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+          grouped_reduce =  LazyOp(op.op, (local_load,), tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) \
+                                                               if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
+          if op is self.reduceops[-1]: return grouped_reduce
+          return LazyOp(BufferOps.LOAD, (LazyOp(BufferOps.STORE, (grouped_reduce,), local_buffer),), local_buffer)
       elif op.op is MetaOps.KERNEL:
         arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       else:

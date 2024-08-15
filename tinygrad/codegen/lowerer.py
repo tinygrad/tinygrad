@@ -110,15 +110,21 @@ class IndependentLowerer:
     self.output_count = len(ast.src)
 
     ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
+
+    # @functools.lru_cache(None)
+    # def find_rops(op): return [r for x in op.src for r in find_rops(x)] + ([op] if op.op in ReduceOps else [])
+    reduceops = [x for x in ast.parents if x.op in ReduceOps]
+
     # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = ast.full_shape
     first_upcasted = len(full_shape)-ki.upcasted
     # if there's no reduce, this is first_upcasted
     first_reduce = [x!=y for x,y in zip(ast.src[0].arg.st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
-    local_loads = [x for x in ast.parents if x.op is BufferOps.LOAD and x.arg.idx == -1]
+    local_loads = [x for x in ast.parents if x.op is BufferOps.LOAD and x.arg.idx < 0]
     # NOTE: this is taking the first one...there may be subtlelies here with multireduces
-    group_for_reduces = sum([x!=y for x,y in zip(
-      local_loads[0].arg.st.shape[first_reduce:first_upcasted], ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
+    group_for_reduces = sum([any(j!=y for j in x) for x,y in zip(
+      [[l.arg.st.shape[i] for l in local_loads] for i in range(first_reduce,first_upcasted)],
+      ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
     global_dims = first_reduce-ki.local_dims
 
     if opts.has_local:
@@ -159,8 +165,8 @@ class IndependentLowerer:
 
   def _to_uop(self, x:LazyOp) -> UOp:
     if x.op in BufferOps:
-      idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs,
-        x.dtype.base if isinstance(x.dtype, ImageDType) and (not isinstance(x.arg, MemBuffer) or x.arg.idx == -1) else x.dtype)
+      idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx < 0 else self.idxs,
+        x.dtype.base if isinstance(x.dtype, ImageDType) and (not isinstance(x.arg, MemBuffer) or x.arg.idx < 0) else x.dtype)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
@@ -180,9 +186,26 @@ class IndependentLowerer:
           vec_load = UOp(UOps.LOAD, load_dtype.vec(4), (buf, idx) + ((UOp.const(load_dtype.vec(4), 0), valid) if has_valid else ()) + barrier)
           return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load_dtype, (vec_load,), i)),
                                   range(4), UOp.const(load_dtype, float('nan')))
+        # NOTE: if there's a following reduceop we need to load the result of this reduceop back into every thread
+        # this matches the pattern LOAD -> REDUCE -> STORE -> LOAD
+        load_back = len(x.src) == 1 and x.src[0].op is BufferOps.STORE and \
+          x.src[0].src[0].op in ReduceOps and len(x.src[0].src[0].arg) > 0 and \
+            x.src[0].src[0].src[0].op is BufferOps.LOAD and x.src[0].src[0].src[0].arg.idx < 0
+        if load_back:
+          # zero out the indecies that have been reduced
+          zero = UOp(op=UOps.CONST, dtype=dtypes.int32, src=(), arg=0)
+          idx, _ = st_to_uops(x.arg.st, [zero if i in x.src[0].src[0].arg else u for i,u in enumerate(self.ridxs)], x.arg.dtype)
+          return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
         return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)
-      if x.arg.idx >= 0:
+      store_back = \
+        x.arg.idx < 0 and \
+        x.src[0].op in [ReduceOps.SUM, ReduceOps.MAX] and \
+        x.src[0].src[0].op is BufferOps.LOAD and \
+        x.src[0].src[0].arg.idx < 0
+      zero = UOp(op=UOps.CONST, dtype=dtypes.int32, src=(), arg=0)
+      if store_back: idx, _ = st_to_uops(x.arg.st, [zero if i in x.src[0].arg else u for i,u in enumerate(self.idxs)], x.arg.dtype)
+      if x.arg.idx >= 0 or store_back:
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
         has_valid = valid.op is not UOps.CONST or valid.arg is not True
