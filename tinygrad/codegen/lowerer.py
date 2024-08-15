@@ -110,7 +110,6 @@ class IndependentLowerer:
     self.output_count = len(ast.src)
 
     ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
-
     # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = ast.full_shape
     first_upcasted = len(full_shape)-ki.upcasted
@@ -183,14 +182,12 @@ class IndependentLowerer:
           return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load_dtype, (vec_load,), i)),
                                   range(4), UOp.const(load_dtype, float('nan')))
         # NOTE: if there's a following reduceop we need to load the result of this reduceop back into every thread
-        # this matches the pattern LOAD -> REDUCE -> STORE -> LOAD
+        # NOTE: this matches the pattern LOAD -> REDUCE -> STORE -> LOAD
         load_back = len(x.src) == 1 and x.src[0].op is BufferOps.STORE and \
           x.src[0].src[0].op in ReduceOps and len(x.src[0].src[0].arg) > 0 and \
             x.src[0].src[0].src[0].op is BufferOps.LOAD and x.src[0].src[0].src[0].arg.idx < 0
         if load_back:
-          # zero out the indecies that have been reduced
-          zero = UOp(op=UOps.CONST, dtype=dtypes.int32, src=(), arg=0)
-          idx, _ = st_to_uops(x.arg.st, [zero if i in x.src[0].src[0].arg else u for i,u in enumerate(self.ridxs)], x.arg.dtype)
+          idx, _ = st_to_uops(x.arg.st, [UOp.const(u.dtype, 0) if i in x.src[0].src[0].arg else u for i,u in enumerate(self.ridxs)], x.arg.dtype)
           return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
         return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)

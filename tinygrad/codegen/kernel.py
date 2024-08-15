@@ -423,7 +423,7 @@ class Kernel:
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
-      # check(len(self.reduceops) == 1, "can't group with multiple reduces")
+      check(len(reduce_axes:=[i for r in self.reduceops for i in r.arg]) == len(set(reduce_axes)), "can't group with parellel reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
@@ -516,8 +516,7 @@ class Kernel:
         for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
             try: # may fail due to excessive smem usage
-              if len(self.reduceops) < 2:
-                self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+              if len(self.reduceops) < 2: self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
               break
             except KernelOptError: pass
 
