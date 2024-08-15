@@ -49,7 +49,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
   def test_var_becomes_num(self):
-    assert isinstance(Variable("a", 2, 2), NumNode)
+    self.helper_test_variable(Variable("a", 2, 2), 2, 2, "2")
 
   def test_equality(self):
     idx1 = Variable("idx1", 0, 3)

@@ -84,16 +84,19 @@ def _get_add_chain(x:UOp):
   else: yield x
 
 def mod_folding(x:UOp, c:int) -> Optional[UOp]:
-  # simplify x in x % c
+  # simplify x % c
   # None means no change
   remainder, something_changed = [], False
   for u in _get_add_chain(x):
     if (factor:=u.const_factor())%c != factor:
       remainder.append(u.divides(factor)*(factor%c))
       something_changed = True
+    elif u.op is UOps.ALU and u.arg is BinaryOps.MOD and (s1:=u.src[1]).op is UOps.CONST and s1.arg%c == 0:
+      remainder.append(u.src[0])
+      something_changed = True
     else: remainder.append(u)
   if not something_changed: return None
-  return functools.reduce(operator.add, remainder) if remainder else x.const(0)
+  return functools.reduce(operator.add, remainder)%c if remainder else x.const(0)
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
@@ -183,6 +186,9 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
+  (UPat(UOps.ALU, BinaryOps.ADD, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
+  (UPat(UOps.ALU, BinaryOps.MUL, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
   # VECTORIZE/GEP
   (NOp(UOps.GEP, src=(NOp(UOps.VECTORIZE, name="cast"),), name="gep"), lambda gep, cast: cast.src[gep.arg]),
   *[(NOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(NOp(UOps.GEP, dtypes.float,
@@ -255,7 +261,8 @@ constant_folder = PatternMatcher([
   (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
   (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
-  (NOp.var('x') / NOp.cvar('c'), lambda x,c: x*exec_alu(UnaryOps.RECIP, c.dtype, [c.arg])),    # x/c -> x*(1/c)
+  (NOp.var('x', dtype=dtypes.bool) & NOp.cvar('c'), lambda x,c: x if c.arg else c),
+  (NOp.var('x', dtype=dtypes.bool) | NOp.cvar('c'), lambda x,c: c if c.arg else x),
   # ** zero folding **
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
@@ -263,7 +270,8 @@ constant_folder = PatternMatcher([
   (NOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # x-x -> 0
   (NOp.var('x') - NOp.var('x'), lambda x: x.const(0)),
-  (UPat(UOps.ALU, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
+  # min==max -> CONST
+  (UPat({UOps.ALU, UOps.DEFINE_VAR}, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
   # ** load/store folding **
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.load(NOp.var("buf"), NOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
@@ -277,23 +285,21 @@ constant_folder = PatternMatcher([
   # mul add lt
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
    lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
+  # generic lt folding (use div)
+  (NOp.var('x').lt(NOp.cvar('c')), lambda x,c: newx.src[0].lt(newx.src[1]) if 0 < c.arg and dtypes.is_int(x.dtype) and \
+   not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV else None),
   # ** div **
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
    newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
-  # mul add div
-  (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')) // NOp.cvar('c1'), lambda x,x2,c0,c1:\
-   x*(c0.arg//g)//(c1.arg//g) if c0.arg > 0 and c1.arg > 0 and (g:=math.gcd(c0.arg,c1.arg)) > 1 and g > x2.vmax.arg and x2.vmin.arg >= 0 else None),
   # ** mod **
-  # apply mod to mod input
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx%c if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # mod folding
+  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # remove mod
   (NOp.var('x') % NOp.cvar('c'), lambda x,c:\
    x-(x.vmin.arg//c.arg)*c.arg if 0 < c.arg and 0 <= x.vmin.arg and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
-  # mod mod
-  ((NOp.var('x') % NOp.cvar('c0')) % NOp.cvar('c1'), lambda x,c0,c1: x % c1 if c0.arg % c1.arg == 0 else None),
   # (x%c)+(x//c)*c = x
   (NOp.var('x')%NOp.cvar('c')+(NOp.var('x')//NOp.cvar('c'))*NOp.cvar('c'), lambda x,c: x),
   # ** combine terms **

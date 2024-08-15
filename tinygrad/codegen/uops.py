@@ -43,15 +43,6 @@ class UOp:
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
-  def cached_eq(self, x:UOp, context:Dict[Tuple[int, int], bool]) -> bool:
-    if id(self) == id(x): return True
-    if self.op != x.op or self.dtype != x.dtype or self.arg != x.arg or len(self.src) != len(x.src): return False
-    if (key := (id(self), id(x))) in context: return context[key]
-    return context.setdefault(key, all(a.cached_eq(b, context) for a,b in zip(self.src, x.src)))
-  def __eq__(self, x): return self.cached_eq(x, context={})
-  @functools.cached_property
-  def hash(self): return hash((self.op, self.dtype, self.src, self.arg))
-  def __hash__(self): return self.hash
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
   # *** uop syntactic sugar
   def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
@@ -123,7 +114,7 @@ class UOp:
   @functools.cached_property
   def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is UOps.DEFINE_VAR: return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else None
+    if self.op is UOps.DEFINE_VAR and self.src: return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else None
     if self.op is UOps.RANGE: return self.src[0], self.const(self.src[1].arg-1) if isinstance(self.src[1].arg, int) else None
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
@@ -223,7 +214,7 @@ def type_verify(uops):
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
     if uop in {UOps.CONST, UOps.DEFINE_ACC}:
       if uop is UOps.CONST:
-        assert dtype is not None and dtype == dtype.scalar(), f"consts should be scalar, got {dtype}"
+        assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
         assert type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop is UOps.DEFINE_ACC: assert dtype is not None and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
     if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg

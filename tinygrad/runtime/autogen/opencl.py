@@ -610,17 +610,17 @@ CL_KHRONOS_VENDOR_ID_CODEPLAY = 0x10004 # macro
 CL_VERSION_MAJOR_BITS = (10) # macro
 CL_VERSION_MINOR_BITS = (10) # macro
 CL_VERSION_PATCH_BITS = (12) # macro
-# CL_VERSION_MAJOR_MASK = ((1<<(10)) # macro
-# CL_VERSION_MINOR_MASK = ((1<<(10)) # macro
-# CL_VERSION_PATCH_MASK = ((1<<(12)) # macro
-# def CL_VERSION_MAJOR(version):  # macro
-#    return ((version)>>((10)+(12)))
-# def CL_VERSION_MINOR(version):  # macro
-#    return (((version)>>(12))&((1<<(10)))
-# def CL_VERSION_PATCH(version):  # macro
-#    return ((version)&((1<<(12)))
-# def CL_MAKE_VERSION(major, minor, patch):  # macro
-#    return ((((major)&((1<<(10)))<<((10)+(12)))|(((minor)&((1<<(10)))<<(12))|((patch)&((1<<(12))))
+CL_VERSION_MAJOR_MASK = ((1<<(10))-1) # macro
+CL_VERSION_MINOR_MASK = ((1<<(10))-1) # macro
+CL_VERSION_PATCH_MASK = ((1<<(12))-1) # macro
+def CL_VERSION_MAJOR(version):  # macro
+   return ((version)>>((10)+(12)))
+def CL_VERSION_MINOR(version):  # macro
+   return (((version)>>(12))&((1<<(10))-1))
+def CL_VERSION_PATCH(version):  # macro
+   return ((version)&((1<<(12))-1))
+def CL_MAKE_VERSION(major, minor, patch):  # macro
+   return ((((major)&((1<<(10))-1))<<((10)+(12)))|(((minor)&((1<<(10))-1))<<(12))|((patch)&((1<<(12))-1)))
 class struct__cl_platform_id(Structure):
     pass
 

@@ -1,5 +1,5 @@
 from typing import Optional, Tuple, Any, List
-import unittest, math, time
+import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
@@ -11,7 +11,7 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.uops import UOps, NOp, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
-from test.helpers import is_dtype_supported
+from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
 def _uops_to_prg(uops_list, print_uops=False):
   uops = UOpGraph(uops_list)
@@ -357,39 +357,7 @@ class TestUOpCompare(unittest.TestCase):
     mul = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.MUL)
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
-  def test_uop_eq_fields(self):
-    a = UOp(UOps.CONST, dtypes.float, (), 2.0)
-    b = UOp(UOps.CONST, dtypes.float, (), 2.0)
-    self.assertEqual(a, b)
-
-  def test_uop_ne_fields(self):
-    a = UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), UOp.const(dtypes.pyint, 1)), (1, False))
-    b = UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), UOp.const(dtypes.pyint, 2)), (1, False))
-    self.assertNotEqual(a, b)
-
-  def test_recursive_eq_src(self):
-    st = time.perf_counter()
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
-    idx = UOp.const(dtypes.int, 0)
-    a = UOp(UOps.LOAD, dtypes.float, (buf, idx))
-    for _ in range(24): a += a
-    b = UOp(UOps.LOAD, dtypes.float, (buf, idx))
-    for _ in range(24): b += b
-    self.assertEqual(a, b)
-    self.assertLess(time.perf_counter()-st, 1e-2)
-
-  # NOTE: NOp uses the dataclass compare, this is fine
-  def test_nop_ne(self):
-    a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
-    b = NOp(UOps.CONST, dtypes.float, (), 2.0, name="b")
-    self.assertNotEqual(a, b)
-
-  def test_nop_eq(self):
-    a1 = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
-    a2 = NOp(UOps.CONST, dtypes.float, (), 2.0, name="a")
-    self.assertEqual(a1, a2)
-
-class TestUOpStr(unittest.TestCase):
+class TestUOpStr(TestEqUOps):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
     for _ in range(20): a = a + a
@@ -401,11 +369,50 @@ class TestUOpStr(unittest.TestCase):
     # nice big complicated uop
     with Context(NOOPT=1):
       sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
-    self.assertEqual(sink, eval(str(sink)))
+    self.assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
     assert str(eval(str(a))) == str(a)
+
+class TestIndexingOrdering(unittest.TestCase):
+  # NOTE: these tests skip type_verify since they add dtype to STORE
+  @unittest.expectedFailure
+  def test_simple_order(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
+    st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
+    uops = UOpGraph([st1, st0]).linearize(skip_check=True)
+    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
+
+  @unittest.expectedFailure
+  def test_ordering_multi_output(self):
+    buf0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    buf1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
+    st0_0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf0, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
+    st1_0 = UOp(UOps.STORE, dtypes.float, (buf0, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
+    st0_1 = UOp(UOps.STORE, dtypes.float.vec(4), (buf1, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
+    st1_1 = UOp(UOps.STORE, dtypes.float, (buf1, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
+    uops = UOpGraph([st0_0, st1_0, st0_1, st1_1]).linearize(skip_check=True)
+    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    print("\n".join(map(str, stores)))
+    # buf0 stores come first
+    self.assertEqual(stores[0].src[0].arg, stores[1].src[0].arg)
+    # buf1 stores come next
+    self.assertEqual(stores[2].src[0].arg, stores[3].src[0].arg)
+    # both stores are aligned based on idx
+    assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
+    assert stores[2].src[1] < stores[3].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
+
+  def test_simple_order_with_special(self):
+    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
+    st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
+    st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
+    uops = UOpGraph([st1, st0]).linearize(skip_check=True)
+    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
