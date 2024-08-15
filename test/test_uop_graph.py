@@ -102,7 +102,7 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.arg, 3.0)
 
   def test_where_same_fold(self):
-    v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('tmp', 0, 1))
+    v = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp(UOps.CONST, dtypes.int, (), 0), UOp(UOps.CONST, dtypes.int, (), 1)), arg=Variable('tmp', 0, 1))
     c0 = UOp(UOps.CONST, dtypes.int, arg=0)
     vc = UOp(UOps.ALU, dtypes.bool, (v, c0), BinaryOps.CMPNE)
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
