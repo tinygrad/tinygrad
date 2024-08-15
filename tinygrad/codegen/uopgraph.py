@@ -84,7 +84,7 @@ def _get_add_chain(x:UOp):
   else: yield x
 
 def mod_folding(x:UOp, c:int) -> Optional[UOp]:
-  # simplify x in x % c
+  # simplify x % c
   # None means no change
   remainder, something_changed = [], False
   for u in _get_add_chain(x):
@@ -96,7 +96,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
       something_changed = True
     else: remainder.append(u)
   if not something_changed: return None
-  return functools.reduce(operator.add, remainder) if remainder else x.const(0)
+  return functools.reduce(operator.add, remainder)%c if remainder else x.const(0)
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
@@ -287,8 +287,8 @@ constant_folder = PatternMatcher([
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
    newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
   # ** mod **
-  # apply mod to mod input
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx%c if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # mod folding
+  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # remove mod
   (NOp.var('x') % NOp.cvar('c'), lambda x,c:\
    x-(x.vmin.arg//c.arg)*c.arg if 0 < c.arg and 0 <= x.vmin.arg and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
