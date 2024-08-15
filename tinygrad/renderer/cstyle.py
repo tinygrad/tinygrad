@@ -41,7 +41,7 @@ class CStyleLanguage(Renderer):
 
   # returns a str expression of the vectorized xs with the given type
   def render_vectorize(self, x:List[str], var_dtype:DType) -> str:
-    assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
+    assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count} ({x=}) ({var_dtype=})"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
     return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}" + (f"{{{','.join(x)}}}" if self.device == "CLANG" else f"({','.join(x)})")
 
@@ -168,7 +168,7 @@ class CStyleLanguage(Renderer):
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
           else: val = self.render_vectorize([r[x] for x in src], dtype)
-          if child_count[u] <= 1: r[u] = val
+          if child_count[u] - len([x.op is UOps.IF and len(x.src) > 1 and u in x.src[1:] for x in u.parents]) <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
           kk(self.render_local(args[0], dtype, args[1]))
