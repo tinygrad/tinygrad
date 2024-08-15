@@ -43,7 +43,7 @@ class TestCStyleFailures(unittest.TestCase):
     self.assertEqual(ret[0], 1)
 
   # simplified version of test_padto_where_multireduce
-  def test_oos_fails(self):
+  def test_cast_out_of_scope(self):
     g = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     c0 = UOp.const(dtypes.int, 0)
     c4 = UOp.const(dtypes.int, 4)
@@ -54,6 +54,8 @@ class TestCStyleFailures(unittest.TestCase):
     cast0 = UOp(UOps.CAST, dtypes.int64, (acc0,))
     er0 = UOp(UOps.ENDRANGE, None, (r0,))
     gate0 = UOp(UOps.ALU, dtypes.bool, (acc0, c0), BinaryOps.CMPNE)
+    # we want to have the IF come after the cast, but not actually dependent on it
+    # (i.e we don't want to have the cast have multiple deps and thus become a var inside the range loop)
     if0 = UOp(UOps.IF, None, (gate0, cast0))
     store0 = UOp.store(g, c0, cast0)
     eif0 = UOp(UOps.ENDIF, None, (if0,))
