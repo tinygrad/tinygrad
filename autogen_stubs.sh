@@ -7,7 +7,7 @@ if [[ ! $(clang2py -V) ]]; then
   sudo apt-get install -y --no-install-recommends clang
   pip install --upgrade pip setuptools
   pip install clang==14.0.6
-  git clone https://github.com/geohot/ctypeslib.git
+  git clone https://github.com/nimlgen/ctypeslib.git
   cd ctypeslib
   pip install --user .
   clang2py -V
@@ -37,56 +37,6 @@ def _try_dlopen_$name():
     except OSError: pass
   raise RuntimeError("library $name not found")
 EOF
-}
-
-process_cdefines() {
-  local input_file="$1"
-  local output_file="$2"
-
-  sed -E '
-    # Remove single-line comments
-    s/[[:space:]]*\/\*.*\*\///g
-
-    # Remove multi-line comments
-    /\/\*/,/\*\//d
-
-    /.*DT_MIPS_NUM.*/d
-
-    # Remove lines ending with backslash (multi-line macros)
-    /\\$/d
-
-    # Convert C integer literals (remove U suffix)
-    s/\b([0-9]+)U\b/\1/g
-
-    # Convert C types to Python ctypes
-    s/\bunsigned char\b/ctypes.c_ubyte/g
-    s/\bsigned char\b/ctypes.c_byte/g
-    s/\bunsigned short\b/ctypes.c_ushort/g
-    s/\bshort\b/ctypes.c_short/g
-    s/\bunsigned int\b/ctypes.c_uint/g
-    s/\bint\b/ctypes.c_int/g
-    s/\bunsigned long\b/ctypes.c_ulong/g
-    s/\blong\b/ctypes.c_long/g
-    s/\bfloat\b/ctypes.c_float/g
-    s/\bdouble\b/ctypes.c_double/g
-
-    # Function-like macros with parameters
-    /^#define[[:space:]]+([[:alnum:]_]+)[[:space:]]*\(([^)]*)\)[[:space:]]+(.+)/ {
-      s//def \1(\2): return \3/
-      p
-      d
-    }
-
-    # Simple #define statements (including those with parentheses)
-    /^#define[[:space:]]+([[:alnum:]_]+)[[:space:]]+(.+)/ {
-      s//\1 = \2/
-      p
-      d
-    }
-
-    # Drop all other lines
-    d
-  ' "$input_file" >> "$output_file"
 }
 
 generate_opencl() {
@@ -126,11 +76,7 @@ generate_comgr() {
 
 generate_kfd() {
   clang2py /usr/include/linux/kfd_ioctl.h -o $BASE/kfd.py -k cdefstum
-  awk '/^#define AMDKFD_IOC_/ { if ($0 ~ /\\$/) { getline nextline; $0 = $0 nextline }
-    if (match($0, /AMDKFD_IOC_([A-Z_]+).*AMDKFD_(IOW?R?)\(0x([0-9A-F]+),.*struct ([a-z_]+)/, arr)) {
-      print "AMDKFD_IOC_" arr[1] " = (\"" arr[2] "\", 0x" arr[3] ", struct_" arr[4] ")"
-    }
-  }' /usr/include/linux/kfd_ioctl.h >> $BASE/kfd.py
+
   fixup $BASE/kfd.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
@@ -164,7 +110,7 @@ generate_nv() {
     popd
   fi
 
-  clang2py \
+  clang2py -k cdefstum \
     extra/nv_gpu_driver/clc6c0qmd.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
@@ -191,7 +137,7 @@ generate_nv() {
     $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlcb33.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrla06c.h \
     --clang-args="-include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
-    -o $BASE/nv_gpu.py -k cdefstum
+    -o $BASE/nv_gpu.py
   fixup $BASE/nv_gpu.py
   sed -i "s\(0000000001)\1\g" $BASE/nv_gpu.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/nv_gpu.py
@@ -211,22 +157,14 @@ nv_status_codes = {}
 
 generate_amd() {
   # clang2py broken when pass -x c++ to prev headers
-  clang2py extra/hip_gpu_driver/sdma_registers.h \
+  clang2py -k cdefstum \
+    extra/hip_gpu_driver/sdma_registers.h \
+    extra/hip_gpu_driver/nvd.h \
+    extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h \
+    extra/hip_gpu_driver/gc_11_0_0_offset.h \
+    extra/hip_gpu_driver/gc_10_3_0_offset.h \
     --clang-args="-I/opt/rocm/include -x c++" \
     -o $BASE/amd_gpu.py
-
-  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/nvd.h >> $BASE/amd_gpu.py # comments
-  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h >> $BASE/amd_gpu.py # comments
-  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/gc_11_0_0_offset.h >> $BASE/amd_gpu.py # comments
-  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/gc_10_3_0_offset.h >> $BASE/amd_gpu.py # comments
-  sed -i 's/^\/\//#/' $BASE/amd_gpu.py # // -> #
-  sed -i 's/#\s*define\s*\([^ \t]*\)(\([^)]*\))\s*\(.*\)/def \1(\2): return \3/' $BASE/amd_gpu.py # #define name(x) (smth) -> def name(x): return (smth)
-  sed -i '/#\s*define\s\+\([^ \t]\+\)\s\+\([^ ]\+\)/s//\1 = \2/' $BASE/amd_gpu.py # #define name val -> name = val
-
-  # sed -e '/^reg/s/^\(reg[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
-  #   -e '/^ix/s/^\(ix[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
-  #   -e '/^[ \t]/d' \
-  #   extra/hip_gpu_driver/gc_11_0_0.reg >> $BASE/amd_gpu.py
 
   fixup $BASE/amd_gpu.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/amd_gpu.py
@@ -252,27 +190,22 @@ generate_hsa() {
 }
 
 generate_io_uring() {
-  clang2py \
+  clang2py -k cdefstum \
     /usr/include/liburing.h \
     /usr/include/linux/io_uring.h \
     -o $BASE/io_uring.py
 
-  # clang2py can't parse defines
   sed -r '/^#define __NR_io_uring/ s/^#define __(NR_io_uring[^ ]+) (.*)$/\1 = \2/; t; d' /usr/include/asm-generic/unistd.h >> $BASE/io_uring.py # io_uring syscalls numbers
-  sed -r '/^#define\s+([^ \t]+)\s+([^ \t]+)/ s/^#define\s+([^ \t]+)\s*([^/]*).*$/\1 = \2/; s/1U/1/g; s/0ULL/0/g; t; d' /usr/include/linux/io_uring.h >> $BASE/io_uring.py # #define name (val) -> name = val
-
   fixup $BASE/io_uring.py
 }
 
 generate_libc() {
-  clang2py \
+  clang2py -k cdefstum \
     $(dpkg -L libc6-dev | grep sys/mman.h) \
     $(dpkg -L libc6-dev | grep sys/syscall.h) \
     /usr/include/elf.h \
     /usr/include/unistd.h \
     -o $BASE/libc.py
-
-  process_cdefines "/usr/include/elf.h" "$BASE/libc.py"
 
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
   sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
