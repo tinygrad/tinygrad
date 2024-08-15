@@ -614,8 +614,10 @@ class UOpGraph:
         assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
         # TODO: this should be enabled, and the valid clause should be removed
         # NOTE: multiple identical stores to DEFINE_LOCAL is okay
-        assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \
-          == len(dedup(all_stores)), "repeated stores in uops"
+        # NOTE: for PTX you have to propogate through some the calculations to determine if it is a store to DEFINE_LOCAL
+        def _islocalbuf(u: UOp): return u.op is UOps.DEFINE_LOCAL or any(_islocalbuf(x) for x in u.src if u.op in [UOps.ALU, UOps.CAST])
+        assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE and not _islocalbuf(x.src[0])]) \
+            == len(dedup(all_stores)), "repeated stores in uops: "
       except AssertionError as e:
         self.print()
         if not CI: self.graph()
