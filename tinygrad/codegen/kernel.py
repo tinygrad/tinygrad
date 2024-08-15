@@ -68,14 +68,14 @@ class Kernel:
       raise e
 
     @functools.lru_cache(None)
-    def ordered_lazyops(op): return dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
-    self.reduceops = dedup([x for x in ordered_lazyops(self.ast) if x.op in ReduceOps])
+    def ordered_parents(op): return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
+    self.reduceops = dedup([x for x in ordered_parents(self.ast) if x.op in ReduceOps])
 
     self.vars = self.ast.vars()
-    self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.ast.lazyops if x.op in BufferOps])
+    self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.ast.parents if x.op in BufferOps])
 
     # get earlybufs, before any reduceops
-    earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
+    earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.parents if x.op in BufferOps]
     self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
     # NOTE: full_shape can be wrong if there's a tree of reduces
 
@@ -465,7 +465,7 @@ class Kernel:
       # ok to pad SUM if all parent ops have f(0) = 0
       if self.first_reduce <= axis:
         check((r:=cast(LazyOp, self.reduceop)).op is ReduceOps.SUM and \
-            all(op.op not in UNSAFE_PAD_OPS for sop in r.src for op in sop.lazyops), "cannot pad")
+            all(op.op not in UNSAFE_PAD_OPS for sop in r.src for op in sop.parents), "cannot pad")
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] == 1: continue  # reduced
@@ -621,7 +621,7 @@ class Kernel:
   @functools.cached_property
   def name(self) -> str:
     # kernel name (before late upcast)
-    name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.ast.lazyops) else "E")) + \
+    name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.ast.parents) else "E")) + \
                  (f"{len(self.ast.src)}_" if len(self.ast.src) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
@@ -690,7 +690,7 @@ class Kernel:
                               for i,s in enumerate(self.full_shape))
               srcs = []
               for i,(src,fix_st_fxn) in enumerate(zip(rsrc.src, [fix_st1, fix_st2])):
-                st_load = [self.sts[self.bufs.index(op.arg)].real_strides() for op in src.lazyops if op.op is BufferOps.LOAD]
+                st_load = [self.sts[self.bufs.index(op.arg)].real_strides() for op in src.parents if op.op is BufferOps.LOAD]
                 local_shape = tuple(s if max(cast(int, x[i]) for x in st_load) != 0 else 1 for i,s in enumerate(ex_shape))
                 membuf = MemBuffer(-1-i, tc.dtype_in, ShapeTracker.from_shape(local_shape).expand(ex_shape))
                 srcs.append(LazyOp(BufferOps.LOAD, (fixup_ast(LazyOp(BufferOps.STORE, (src,), membuf), fix_st_fxn),), membuf))
@@ -747,7 +747,7 @@ class Kernel:
     # group non-local MemBuffers by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.arg.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
-      itertools.groupby([x for x in self.ast.lazyops if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
+      itertools.groupby([x for x in self.ast.parents if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
     return Program(ansiname, src, self.opts.device, self.uops.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
