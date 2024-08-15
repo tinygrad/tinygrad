@@ -773,6 +773,44 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       Tensor.einsum('ij,jk->ij', a)
 
+  def test_rearrange_consistency_numpy(self):
+    shape = [1, 2, 3, 5, 7, 11]
+    x = Tensor(np.arange(np.prod(shape)).reshape(shape))
+    for pattern in [
+        "a b c d e f -> a b c d e f",
+        "b a c d e f -> a b d e f c",
+        "a b c d e f -> f e d c b a",
+        "a b c d e f -> (f e) d (c b a)",
+        "a b c d e f -> (f e d c b a)",
+    ]:
+      result = Tensor.rearrange(x, pattern).numpy()
+      assert len(np.setdiff1d(x.numpy(), result)) == 0
+      # assert result.dtype == x.dtype
+
+    result = Tensor.rearrange(x, "a b c d e f -> a (b) (c d e) f")
+    assert np.array_equal(x.flatten().numpy(), result.flatten().numpy())
+
+      # result = Tensor.rearrange(x, "a aa aa1 a1a1 aaaa a11 -> a aa aa1 a1a1 aaaa a11")
+      # assert np.array_equal(x, result)
+
+    result1 = Tensor.rearrange(x, "a b c d e f -> f e d c b a").numpy()
+    result2 = Tensor.rearrange(x, "f e d c b a -> a b c d e f").numpy()
+    assert np.array_equal(result1, result2)
+
+    # result = Tensor.rearrange(rearrange(x, "a b c d e f -> (f d) c (e b) a"), "(f d) c (e b) a -> a b c d e f", b=2, d=5)
+    # assert np.array_equal(x, result)
+
+    # sizes = dict(zip("abcdef", shape))
+    # temp = Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a", **sizes).numpy()
+    # result = Tensor.rearrange(temp, "(f d) c (e b) a -> a b c d e f", **sizes).numpy()
+    # assert np.array_equal(x, result)
+
+    x2 = Tensor.arange(2 * 3 * 4).reshape([2, 3, 4])
+    result = Tensor.rearrange(x2, "a b c -> b c a").numpy()
+    print(x2.shape, result.shape)
+    assert x2[1, 2, 3].numpy() == result[2, 3, 1]
+    assert x2[0, 1, 2].numpy() == result[1, 2, 0]
+
   @unittest.skipIf(IMAGE>0, "no 1d dot for images")
   def test_dot_1d(self):
     helper_test_op([(65), (65)], lambda x,y: x.matmul(y), Tensor.dot)

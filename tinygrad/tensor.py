@@ -1299,6 +1299,37 @@ class Tensor:
     dim = self._resolve_dim(dim)
     return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
 
+  @staticmethod
+  def rearrange(x: Tensor, formula: str) -> Tensor:
+    formula = formula.replace(" ", "")
+    assert "->" in formula
+    input, output = formula.split("->")
+    rhs_parts, group, inside_group = [], [], False
+    for char in output.strip():
+      if char == '(':
+        assert inside_group == False, "Can't nest merged dimensions"
+        inside_group = True
+      elif char == ')':
+        assert inside_group == True, "Unmatched parenthesis"
+        inside_group = False
+        rhs_parts.append(group)
+        group = []
+      elif inside_group:
+        group.append(char)
+      else:
+        rhs_parts.append(char)
+    assert inside_group == False, "Unmatched parenthesis"
+    flat_out = list(itertools.chain(*rhs_parts))
+    lhs = {s: i for i, s in enumerate(input)}
+    rhs = {i: s for i, s in enumerate(flat_out)}
+    rhs_keys = {s: i for i, s in enumerate(flat_out)}
+    permute_order = [lhs[rhs[i]] for i in range(x.ndim)]
+    print("permute_order", permute_order)
+    x = x.permute(permute_order)
+    out_shape = [functools.reduce(lambda s, s2: s * x.shape[rhs_keys[s2]], out, 1) if
+                 isinstance(out, list) else x.shape[rhs_keys[out]] for out in rhs_parts]
+    return x.reshape(out_shape)
+
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False) -> Tensor:
