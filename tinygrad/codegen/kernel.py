@@ -11,7 +11,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import sint
+from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.codegen.lowerer import lazyop_to_uop
@@ -64,18 +64,18 @@ class Kernel:
     try: lazyop_sts_map = verify_lazyop(self.ast)
     except AssertionError as e:
       print("INVALID AST")
-      for op in ast: print(op)
+      print(self.ast)
       raise e
 
     @functools.lru_cache(None)
-    def ordered_parents(op): return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
+    def ordered_parents(op:LazyOp) -> List[LazyOp]: return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
     self.reduceops = dedup([x for x in ordered_parents(self.ast) if x.op in ReduceOps])
 
-    self.vars = self.ast.vars()
+    self.vars: List[Variable] = self.ast.vars()
     self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.ast.parents if x.op in BufferOps])
 
     # get earlybufs, before any reduceops
-    earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.parents if x.op in BufferOps]
+    earlybufs: List[Union[MemBuffer, ConstBuffer]] = [x.arg for reduceop in self.reduceops for x in reduceop.parents if x.op in BufferOps]
     self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
     # NOTE: full_shape can be wrong if there's a tree of reduces
 
