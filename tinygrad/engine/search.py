@@ -2,10 +2,10 @@ from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
 from dataclasses import replace
+from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Device, Buffer, Compiler
-from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import DType, ImageDType
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.uopgraph import UOpGraph
@@ -90,11 +90,12 @@ def _ensure_buffer_alloc(bufs:List[Buffer]) -> List[Buffer]: return [buf.ensure_
 
 # get (scrap) buffers for timing the linearizer
 def bufs_from_lin(lin:Kernel, allocate:bool=True) -> List[Buffer]:
-  bufsts: DefaultDict[int, List[MemBuffer]] = defaultdict(list)
-  for x in lin.membufs: bufsts[x.idx].append(x)
+  bufsts: DefaultDict[int, List[UOp]] = defaultdict(list)
+  for x in lin.bufs:
+    if x.src[0].op is UOps.DEFINE_GLOBAL: bufsts[x.src[0].arg].append(x)
   rawbufs: List[Optional[Buffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
-    buf_size = prod(dtype.shape) if isinstance(dtype:=lx[0].dtype, ImageDType) else max(y.st.real_size() for y in lx)
+    buf_size = prod(dtype.shape) if isinstance(dtype:=cast(DType,lx[0].src[0].dtype), ImageDType) else max(y.src[-1].arg.real_size() for y in lx)
     if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
     rawbufs[k] = Buffer(lin.opts.device, buf_size, dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, dtype)
   assert all(r is not None for r in rawbufs)
@@ -140,7 +141,7 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True,
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
+    var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:
@@ -198,7 +199,7 @@ def time_linearizer(lin:Kernel, rawbufs:List[Buffer], allow_test_size=True, max_
   assert dev.compiler is not None
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
-  var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
+  var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.variables()}
   p = lin.to_program()
   tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
                       max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))

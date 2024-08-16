@@ -1,7 +1,7 @@
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
-from tinygrad.helpers import Profiling, Timing, getenv, dedup
-from tinygrad.ops import MetaOps
+from tinygrad.codegen.uops import UOps
+from tinygrad.helpers import Profiling, Timing, getenv
 from tinygrad.codegen.kernel import Kernel
 
 if __name__ == "__main__":
@@ -20,7 +20,7 @@ if __name__ == "__main__":
       with Timing("***** model schedule in "):
         sched = out.schedule()
 
-    asts = dedup([x.ast for x in sched if x.ast.op is MetaOps.KERNEL])
+    asts = {x.ast.key:x.ast for x in sched if x.ast.op is UOps.SINK}.values()
     uops = []
     with Profiling(PROFILE):
       with Timing("***** model uops in "):
