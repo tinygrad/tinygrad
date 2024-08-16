@@ -3,7 +3,8 @@ import time, pprint
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
-from tinygrad.ops import MetaOps, LazyOp
+from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.ops import MetaOps
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -14,7 +15,7 @@ from tinygrad.engine.schedule import ScheduleItem
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
+def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
   if DEBUG >= 5:
     print(ast)
   k = Kernel(ast, opts=renderer).required_optimizations()
@@ -146,11 +147,11 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: Dict[Tuple[str, LazyOp, int, int, bool], CompiledRunner] = {}
-def get_runner(dname:str, ast:LazyOp) -> CompiledRunner:
-  ckey = (dname, ast, BEAM.value, NOOPT.value, False)
+method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
+def get_runner(dname:str, ast:UOp) -> CompiledRunner:
+  ckey = (dname, ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (dname.split(":")[0], ast, BEAM.value, NOOPT.value, True)
+  bkey = (dname.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
@@ -187,8 +188,8 @@ class ExecItem:
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or (si.ast.op is MetaOps.EXT and si.ast.arg[0] is MetaOps.COPY) or getenv("USE_COPY_KERNEL")
-  if si.ast.op is MetaOps.KERNEL:
+  assert len(set(x.device for x in si.bufs)) == 1 or (si.ast.op is UOps.EXT and si.ast.arg[0] is MetaOps.COPY)
+  if si.ast.op is UOps.SINK:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
   out, (op, arg) = si.outputs[0], si.ast.arg
@@ -264,5 +265,5 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
   assigned = _internal_memory_planner([si.bufs for si in schedule],
-                                      noopt_buffers={b for si in schedule if si.ast.op is not MetaOps.KERNEL for b in si.bufs})
+                                      noopt_buffers={b for si in schedule if si.ast.op is not UOps.SINK for b in si.bufs})
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs), si.metadata) for si in schedule]
