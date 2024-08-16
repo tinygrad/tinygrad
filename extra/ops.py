@@ -3,10 +3,9 @@ from typing import Dict, Union, Tuple, Any, List
 import functools, hashlib
 from enum import Enum, auto
 from dataclasses import dataclass
-from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.helpers import dedup, pretty_print, prod
-from tinygrad.ops import ReduceOps, UnaryOps, BinaryOps, TernaryOps, reduce_st
-from tinygrad.dtype import PtrDType, dtypes, DType, ConstType
+from tinygrad.ops import ReduceOps, UnaryOps, BinaryOps, TernaryOps, reduce_st, UOp, UOps
+from tinygrad.dtype import ImageDType, PtrDType, dtypes, DType, ConstType
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -117,10 +116,11 @@ def to_uop(*a) -> UOp:
   def create_uop(lop:LazyOp) -> UOp:
     if lop.op in BufferOps:
       idx, valid = UOp.from_st(lop.arg.st)
-      dtype = lop.arg.dtype
+      membuf_dtype: DType = lop.arg.dtype
+      dtype = membuf_dtype.base if isinstance(membuf_dtype, ImageDType) else membuf_dtype
       if lop.op is BufferOps.CONST:
         return UOp(UOps.CONST, dtype, (UOp(UOps.CONST, dtype, (valid,), 0), valid), lop.arg.val)
-      buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), (), lop.arg.idx)
+      buf = UOp(UOps.DEFINE_GLOBAL, membuf_dtype if isinstance(membuf_dtype, ImageDType) else PtrDType(membuf_dtype), (), lop.arg.idx)
       if lop.op is BufferOps.LOAD: return UOp(UOps.LOAD, dtype, (buf, idx, valid))
       return UOp(UOps.STORE, None, (buf, idx, create_uop(lop.src[0]), valid))
     src = tuple(create_uop(x) for x in lop.src)

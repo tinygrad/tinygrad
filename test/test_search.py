@@ -2,7 +2,7 @@ import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.uops import UOps
+from tinygrad.ops import UOps
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer

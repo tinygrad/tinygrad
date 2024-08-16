@@ -1,10 +1,9 @@
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, cast, Literal, Callable
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp
 from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):

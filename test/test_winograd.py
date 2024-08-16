@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, GlobalCounters
-from tinygrad.codegen.uops import UOps
+from tinygrad.ops import UOps
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule

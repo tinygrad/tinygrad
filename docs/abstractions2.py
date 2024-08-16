@@ -39,8 +39,7 @@ DEVICE = "CLANG"   # NOTE: you can change this!
 import struct
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import BinaryOps, MetaOps
-from tinygrad.codegen.uops import UOp, UOps
+from tinygrad.ops import BinaryOps, MetaOps, UOp, UOps
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values

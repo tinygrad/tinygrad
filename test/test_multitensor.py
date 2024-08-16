@@ -1,8 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.codegen.uops import UOps
-from tinygrad.ops import MetaOps, ReduceOps, BinaryOps
+from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule

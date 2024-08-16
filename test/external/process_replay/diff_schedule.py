@@ -3,7 +3,7 @@ import shutil, importlib, uuid, os, logging
 from collections import defaultdict
 from typing import DefaultDict, List, Set, Tuple
 from test.external.process_replay.utils import print_diff
-from tinygrad.codegen.uops import UOp
+from tinygrad.ops import UOp
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
 from tinygrad.helpers import DEBUG, Context, colored, dedup, diskcache_put, fetch, getenv
 from tinygrad.lazy import LazyBuffer
