@@ -899,7 +899,7 @@ class TestOps(unittest.TestCase):
     for n_arrays in [1, 2, 5]:
       shapes = [[], [1], [1, 1], [2, 3, 5, 7], [1] * 6]
       for shape in shapes:
-        arrays1 = [np.arange(i, i + np.prod(shape)).reshape(shape) for i in range(n_arrays)]
+        arrays1 = [np.arange(i, i + np.prod(shape), dtype=np.float32).reshape(shape) for i in range(n_arrays)]
         arrays2 = [Tensor(array) for array in arrays1]
         result0 = np.asarray(arrays1)
         result2 = Tensor.rearrange(arrays2, "...->...").numpy()

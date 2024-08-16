@@ -1658,8 +1658,7 @@ class Tensor:
     assert formula.count("->") == 1, 'need exactly one "->" in formula'
     (lhs, unflatten_groups), (rhs, flatten_groups) = map(parse_formula, formula.split("->"))
 
-    assert sorted(lhs) == sorted(rhs), f"name mismatch in {formula}"
-    assert all(name.isalnum() or name == "..." for name in flatten((lhs, rhs))), "names must be alphanumeric"
+    assert sorted(lhs) == sorted(rhs) and all(name.isalnum() or name == "..." for name in flatten((lhs, rhs))), f"name mismatch in {formula}"
     assert "..." not in flatten(unflatten_groups), "cannot have collapsed ellipsis (...) in input formula"
     assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
 
