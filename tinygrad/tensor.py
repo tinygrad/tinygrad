@@ -1317,8 +1317,8 @@ class Tensor:
           group = None
         elif group: group.append(token)
         else:
-            assert token.isalnum() or token == "...", "Only alphanumeric characters"
-            res.append(token)
+          assert token.isalnum() or token == "...", "Only alphanumeric characters"
+          res.append(token)
       assert group is None, "Unmatched parenthesis"
       return res
     left, right = parse_expr(inp), parse_expr(output)
@@ -1326,13 +1326,12 @@ class Tensor:
     if ("..." in left):
       ellipsis_axes = x.ndim - (len(left) - 1)
       left[left.index("..."):left.index("...")+1] = [f"_{i}" for i in range(ellipsis_axes)]
-      for i, tok in enumerate(right):
-        if isinstance(tok, list) and "..." in tok:
-            tok[tok.index("..."):tok.index("...")+1] = [f"_{i}" for i in range(ellipsis_axes)]
-        elif tok == "...": right[i:i+1] = [f"_{i}" for i in range(ellipsis_axes)]
+      for i, token in enumerate(right):
+        if isinstance(token, list) and "..." in token:
+            token[token.index("..."):token.index("...")+1] = [f"_{i}" for i in range(ellipsis_axes)]
+        elif token == "...": right[i:i+1] = [f"_{i}" for i in range(ellipsis_axes)]
     assert len(left) == x.ndim, f"Number of dimensions on left side doesn't match input {x.ndim}"
-    unsqueeze_axes = set()   
-    left_shape = {}
+    unsqueeze_axes, left_shape = set(), {}
     # find unknown dimensions
     for i, token in enumerate(left):
       if isinstance(token, list):
@@ -1345,7 +1344,7 @@ class Tensor:
             unsqueeze_axes.add(tok)
           else:
             assert unk_axis is None, "Can't have multiple unknown axes in collapsed block"
-            shape = x.shape[i]
+            shape = cast(int, x.shape[i]) # might be bad
             unk_axis = tok
         if unk_axis: left_shape[unk_axis] = shape // divisor
       else: left_shape[token] = x.shape[i]

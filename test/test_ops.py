@@ -778,7 +778,6 @@ class TestOps(unittest.TestCase):
     Tensor.rearrange(x, "a b c d ... ->  a b c ... d")
     with self.assertRaises(AssertionError):
         Tensor.rearrange(x, "a b c d (...) ->  a b c ... d")
-
     Tensor.rearrange(x, "... ->  (...)")
     with self.assertRaises(AssertionError):
         Tensor.rearrange(x, "(...) -> (...)")
@@ -796,28 +795,21 @@ class TestOps(unittest.TestCase):
       result = Tensor.rearrange(x, pattern)
       assert result.dtype == x.dtype
       assert len(np.setdiff1d(x.numpy(), result.numpy())) == 0
-
     result = Tensor.rearrange(x, "a b c d e f -> a (b) (c d e) f")
     assert np.array_equal(x.flatten().numpy(), result.flatten().numpy())
-
     result = Tensor.rearrange(x, "a aa aa1 a1a1 aaaa a11 -> a aa aa1 a1a1 aaaa a11").numpy()
     assert np.array_equal(x.numpy(), result)
-
     result1 = Tensor.rearrange(x, "a b c d e f -> f e d c b a").numpy()
     result2 = Tensor.rearrange(x, "f e d c b a -> a b c d e f").numpy()
     assert np.array_equal(result1, result2)
-
     result = Tensor.rearrange(Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a"), "(f d) c (e b) a -> a b c d e f", b=2, d=5)
     assert np.array_equal(x.numpy(), result.numpy())
-
     sizes = dict(zip("abcdef", shape))
     temp = Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a", **sizes)
     result = Tensor.rearrange(temp, "(f d) c (e b) a -> a b c d e f", **sizes).numpy()
     assert np.array_equal(x.numpy(), result)
-
     x2 = Tensor.arange(2 * 3 * 4).reshape([2, 3, 4])
     result = Tensor.rearrange(x2, "a b c -> b c a").numpy()
-    print(x2.shape, result.shape)
     assert x2[1, 2, 3].numpy() == result[2, 3, 1]
     assert x2[0, 1, 2].numpy() == result[1, 2, 0]
 
@@ -855,7 +847,6 @@ class TestOps(unittest.TestCase):
       right_expression = " ".join("i" + str(axis) for axis in permutation)
       expression = left_expression + " -> " + right_expression
       result = Tensor.rearrange(Tensor(input), expression).numpy()
-
       for pick in np.random.randint(0, 2, [10, n_axes]):
         assert input[tuple(pick)] == result[tuple(pick[permutation])]
 
