@@ -3,8 +3,7 @@ from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps
-from tinygrad.codegen.uops import UOps, UOp, NOp, PatternMatcher
+from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps, UOps, UOp, NOp, PatternMatcher
 from tinygrad.codegen.uopgraph import UOpGraph, graph_rewrite, expander, reducer, constant_folder, float4_folding
 
 simple_pm = PatternMatcher([

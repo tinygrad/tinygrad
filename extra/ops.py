@@ -3,9 +3,8 @@ from typing import Dict, Union, Tuple, Any, List
 import functools, hashlib
 from enum import Enum, auto
 from dataclasses import dataclass
-from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.helpers import dedup, pretty_print, prod
-from tinygrad.ops import ReduceOps, UnaryOps, BinaryOps, TernaryOps, reduce_st
+from tinygrad.ops import ReduceOps, UnaryOps, BinaryOps, TernaryOps, reduce_st, UOp, UOps
 from tinygrad.dtype import ImageDType, PtrDType, dtypes, DType, ConstType
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker

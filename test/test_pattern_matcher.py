@@ -1,8 +1,7 @@
 import unittest, itertools
 from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
-from tinygrad.ops import BinaryOps, TernaryOps, ReduceOps, UnaryOps # noqa: F401
-from tinygrad.codegen.uops import UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import UOps, UOp, PatternMatcher, UPat, BinaryOps, TernaryOps, ReduceOps, UnaryOps # noqa: F401
 from tinygrad.codegen.uopgraph import constant_folder
 
 class TestPatternMatcher(TestUOps):

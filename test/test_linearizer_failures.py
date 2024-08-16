@@ -3,7 +3,7 @@ import unittest, random
 import numpy as np
 from tinygrad.codegen.kernel import KernelOptError
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.uops import UOps
+from tinygrad.ops import UOps
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI
