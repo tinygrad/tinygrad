@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Any, Set, cast, List, Union, DefaultDict, Callable, Dict
-import functools, itertools, math
+import functools, itertools, math, operator
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -90,6 +90,8 @@ class UOp:
   def parents(self) -> Dict[UOp, None]: return merge_dicts([{x:None for x in self.src}]+[x.parents for x in self.src])
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
+  @functools.cached_property
+  def add_chain(self) -> List[UOp]: return list(_get_add_chain(self))
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def const_factor(self) -> int:
     """largest known int that divides self"""
@@ -107,6 +109,58 @@ class UOp:
         if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
+  @functools.lru_cache(None)
+  def mod_folding(self, c:int) -> Optional[UOp]:
+    # simplify self % c, None means no change
+    # simple cancel mod case
+    if 0 < c and 0 <= self.vmin.arg and (quotient:=self.vmin.arg//c) == self.vmax.arg//c: return self-quotient*c
+    remainder, something_changed = [], False
+    for u in self.add_chain:
+      if (factor:=u.const_factor())%c != factor:
+        remainder.append(cast(UOp, u.divides(factor))*(factor%c))
+        something_changed = True
+      elif u.op is UOps.ALU and u.arg is BinaryOps.MOD and (s1:=u.src[1]).op is UOps.CONST and s1.arg%c == 0:
+        remainder.append(u.src[0])
+        something_changed = True
+      else: remainder.append(u)
+    if not something_changed: return None
+    return functools.reduce(operator.add, remainder)%c if remainder else self.const(0)
+  @functools.lru_cache(None)
+  def div_folding(self, c:int) -> Optional[UOp]:
+    # simplify self // c, None means no change
+    # simple cancel div case
+    if 0 <= self.vmin.arg and self.vmax.arg < c: return self.const(0)
+    quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
+    for u in self.add_chain:
+      if u.op is UOps.CONST:
+        # add all const together first
+        if rem_const != 0: something_changed = True
+        rem_const += u.arg
+      elif (factor:=u.const_factor())%c == 0:
+        if factor: quotient.append(u.divides(c))
+        something_changed = True
+      else:
+        # divisor is the smallest common divisor of all MULs
+        if u.op is UOps.ALU and u.arg is BinaryOps.MUL and factor > 1 and c % factor == 0 and (divisor == 1 or divisor > factor): divisor = factor
+        remainder.append(u)
+        gcd = math.gcd(gcd, factor)
+
+    # handle the const
+    if rem_const%c != rem_const:
+      something_changed = True
+      quotient.append(self.const(rem_const//c))
+      rem_const = rem_const%c
+    if rem_const != 0: remainder.append(self.const(rem_const))
+
+    # x // c -> quotient + (remainder // div) // (c // div)
+    div = gcd if gcd > 1 else divisor
+
+    if not something_changed: return newx//(c//div) if 1 < div < c and (newx:=self.div_folding(div)) is not None else None
+    rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
+    quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
+    if quo is None: return self.const(0) if rem is None else cast(UOp, rem.div_folding(div))//(c//div)
+    return quo if rem is None else cast(UOp, rem.div_folding(div))//(c//div)+quo
+
   @functools.cached_property
   def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None and not math.isnan(x.arg) else self.sconst(dtypes.min(cast(DType, self.dtype)))
   @functools.cached_property
@@ -176,6 +230,11 @@ class UPat:
       return form % (None if x.op is None else ('(%s)'%', '.join(map(str, x.op))), x.arg, repr(x.name),
         set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and len(x.src)>1 else "(%s)")
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
+
+def _get_add_chain(x:UOp):
+  if x.op is UOps.ALU and x.arg is BinaryOps.ADD:
+    for s in x.src: yield from _get_add_chain(s)
+  else: yield x
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \

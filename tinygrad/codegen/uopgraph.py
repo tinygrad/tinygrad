@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
-import functools, itertools, heapq, math, operator
+import functools, itertools, heapq, math
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu
@@ -76,68 +76,6 @@ float4_folding = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   (UPat(UOps.VECTORIZE, src=UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}), name="vec"), vectorize_alu),
 ])
-
-# ***** mod *****
-
-def _get_add_chain(x:UOp):
-  if x.op is UOps.ALU and x.arg is BinaryOps.ADD:
-    for s in x.src: yield from _get_add_chain(s)
-  else: yield x
-
-def mod_folding(x:UOp, c:int) -> Optional[UOp]:
-  # simplify x % c, None means no change
-
-  # simple cancel mod case
-  if 0 < c and 0 <= x.vmin.arg and (quotient:=x.vmin.arg//c) == x.vmax.arg//c: return x-quotient*c
-
-  remainder, something_changed = [], False
-  for u in _get_add_chain(x):
-    if (factor:=u.const_factor())%c != factor:
-      remainder.append(u.divides(factor)*(factor%c))
-      something_changed = True
-    elif u.op is UOps.ALU and u.arg is BinaryOps.MOD and (s1:=u.src[1]).op is UOps.CONST and s1.arg%c == 0:
-      remainder.append(u.src[0])
-      something_changed = True
-    else: remainder.append(u)
-  if not something_changed: return None
-  return functools.reduce(operator.add, remainder)%c if remainder else x.const(0)
-
-def div_folding(x:UOp, c:int) -> Optional[UOp]:
-  # simplify x // c, None means no change
-
-  # simple cancel div case
-  if 0 <= x.vmin.arg and x.vmax.arg < c: return x.const(0)
-
-  quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
-  for u in _get_add_chain(x):
-    if u.op is UOps.CONST:
-      # add all const together first
-      if rem_const != 0: something_changed = True
-      rem_const += u.arg
-    elif (factor:=u.const_factor())%c == 0:
-      if factor: quotient.append(u.divides(c))
-      something_changed = True
-    else:
-      # divisor is the smallest common divisor of all MULs
-      if u.op is UOps.ALU and u.arg is BinaryOps.MUL and factor > 1 and c % factor == 0 and (divisor == 1 or divisor > factor): divisor = factor
-      remainder.append(u)
-      gcd = math.gcd(gcd, factor)
-
-  # handle the const
-  if rem_const%c != rem_const:
-    something_changed = True
-    quotient.append(x.const(rem_const//c))
-    rem_const = rem_const%c
-  if rem_const != 0: remainder.append(x.const(rem_const))
-
-  # x // c -> quotient + (remainder // div) // (c // div)
-  div = gcd if gcd > 1 else divisor
-
-  if not something_changed: return newx//(c//div) if 1 < div < c and (newx:=div_folding(x, div)) is not None else None
-  rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
-  quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
-  return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
 
 # ***** transcendental *****
 
@@ -290,16 +228,16 @@ constant_folder = PatternMatcher([
   # mul add lt
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
    lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
-  # generic lt folding (use div)
-  (NOp.var('x').lt(NOp.cvar('c')), lambda x,c: newx.src[0].lt(newx.src[1]) if 0 < c.arg and dtypes.is_int(x.dtype) and \
-   not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV else None),
+  # generic lt folding (using div folding)
+  (NOp.var('x').lt(NOp.cvar('c')), lambda x,c: ret.src[0].lt(ret.src[1]) if 0 < c.arg and dtypes.is_int(x.dtype) and \
+   not dtypes.is_unsigned(x.dtype) and (ret:=x.div_folding(c.arg)) is not None and ret.op is UOps.ALU and ret.arg is BinaryOps.IDIV else None),
   # ** div **
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
-   newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
+   ret if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (ret:=x.div_folding(c.arg)) is not None else None),
   # ** mod **
   # mod folding
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  (NOp.var('x') % NOp.cvar('c'), lambda x,c: ret if 0 < c.arg and (ret:=x.mod_folding(c.arg)) is not None else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
   # (x%c)+(x//c)*c = x
