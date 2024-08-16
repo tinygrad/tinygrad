@@ -1308,7 +1308,7 @@ class Tensor:
       for token in expr.split():
         if token.startswith('(') and token.endswith(')'): res.append([token[1:-1]]) # edge case
         elif token.startswith("("):
-          assert group is None, "Can't nest dimensions"
+          assert group is None, "Can't nest parens"
           group = [token[1:]]
         elif token.endswith(")"):
           assert group is not None, "Unmatched parenthesis"
@@ -1321,49 +1321,41 @@ class Tensor:
             res.append(token)
       assert group is None, "Unmatched parenthesis"
       return res
-    unsqueeze_axes = set()
-    def lhs_shape(i, tokens) -> Dict[str, int]:
-      if isinstance(tokens, list):
+    left, right = parse_expr(inp), parse_expr(output)
+     # could move into assign on if condition but need to think about this in terms of errors
+    if ("..." in left):
+      ellipsis_axes = x.ndim - (len(left) - 1)
+      left[left.index("..."):left.index("...")+1] = [f"_{i}" for i in range(ellipsis_axes)]
+      for i, tok in enumerate(right):
+        if isinstance(tok, list) and "..." in tok:
+            tok[tok.index("..."):tok.index("...")+1] = [f"_{i}" for i in range(ellipsis_axes)]
+        elif tok == "...": right[i:i+1] = [f"_{i}" for i in range(ellipsis_axes)]
+    assert len(left) == x.ndim, f"Number of dimensions on left side doesn't match input {x.ndim}"
+    unsqueeze_axes = set()   
+    left_shape = {}
+    # find unknown dimensions
+    for i, token in enumerate(left):
+      if isinstance(token, list):
         shape, divisor, unk_axis = 0, 1, None
-        for tok in tokens:
+        for tok in token:
           assert tok != "...", "Can't collapse ellipsis on LHS"
           if tok in axes_lengths:
-            divisor *= axes_lengths[tok]
+            divisor *= (axes_lengths[tok])
+            left_shape[tok] = axes_lengths[tok]
             unsqueeze_axes.add(tok)
           else:
             assert unk_axis is None, "Can't have multiple unknown axes in collapsed block"
             shape = x.shape[i]
             unk_axis = tok
-        if unk_axis: return {unk_axis: shape // divisor}
-      elif tokens not in axes_lengths: return {tokens: x.shape[i]}
-      return {}
-    def replace_ellipsis(tokens, n):
-        result = []
-        for tok in tokens:
-            if isinstance(tok, list):
-                for j, sub_tok in enumerate(tok):
-                  if sub_tok == "...": tok[j:j+1] = [f"_{i}" for i in range(n)]
-                result.append(tok)
-            elif tok == "...": result.extend([f"_{i}" for i in range(n)])
-            else: result.append(tok)
-        return result
-    left, right = parse_expr(inp), parse_expr(output)
-    ellipsis_axes = x.ndim - (len(left) - 1)
-    if "..." in left:
-        # can't nest ellipsis in parens on left side,
-        if ellipsis_axes > 0:
-            for i in range(ellipsis_axes): left.insert(left.index("..."), f"_{i}")
-        left.remove("...")
-        right = replace_ellipsis(right, ellipsis_axes)
-    assert len(left) == x.ndim, f"Number of dimensions on LHS doesn't match input {x.ndim}"
+        if unk_axis: left_shape[unk_axis] = shape // divisor
+      else: left_shape[token] = x.shape[i]
     flat_left = fully_flatten(left)
-    out_axes: Dict[str, int] = merge_dicts([lhs_shape(i, part) for i, part in enumerate(left)] + [axes_lengths])
     left_order = {s: i for i, s in enumerate(flat_left)}
     right_order = dict(enumerate(fully_flatten(right)))
-    out_shape = [functools.reduce(lambda s, s2: s * out_axes[s2], out, 1) if
-                 isinstance(out, list) else out_axes[out] for out in right]
+    out_shape = [functools.reduce(lambda s, s2: s * left_shape[s2], out, 1) if
+                 isinstance(out, list) else left_shape[out] for out in right]
     for axes in unsqueeze_axes: x = x.unsqueeze(left_order[axes])
-    if flat_left != left: x = x.reshape([out_axes[i] for i in flat_left])
+    if flat_left != left: x = x.reshape([left_shape[i] for i in flat_left])
     order = [left_order[right_order[i]] for i in range(len(right_order))]
     return x.permute(order).reshape(out_shape)
 
