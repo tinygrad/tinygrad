@@ -1808,7 +1808,7 @@ class TestOps(unittest.TestCase):
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest-exact"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest-exact"))
-    # TODO: fails... here's link of impl I copied if someone wants to try https://github.com/pytorch/pytorch/pull/64501
+    # TODO: fails... gotta investigate
     # for in_sz, out_sz in [((5,2,8),(3,6,4))]:
     #   helper_test_op([(2,3)+in_sz],
     #     lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest-exact"),

@@ -1950,7 +1950,7 @@ class Tensor:
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
 
     The interpolation algorithm is selected with `mode`
-    Supported modes: 'linear' | 'nearest'
+    Supported modes: `linear` | `nearest` | `nearest-exact`
     To run `bilinear` or `trilinear`, pass in a 2D or 3D size with mode set as `linear`.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1964,18 +1964,24 @@ class Tensor:
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
     assert not (mode == "nearest" and align_corners), 'align_corners option can only be set with the mode="linear"'
     x, expand = self, list(self.shape)
+    if mode in {"nearest", "nearest-exact"}:
+      arrs = (Tensor.arange(s, dtype=dtypes.int32, device=self.device) for s in size)
+      scales = (self.shape[i] / size[i] for i in range(-len(size), 0))
+      idxs = [(scale*arr).floor().cast(dtypes.int) if mode == "nearest" else (scale*(arr+0.5)-0.5).round().cast(dtypes.int) for arr, scale in zip(arrs, scales)]
+      # pre-expanded shape to fit idx selection in 1 kernel lol
+      idxs = [idx.reshape(*(-1 if i == i_ else 1 for i_ in range(len(size)))).expand(*(-1 if i == i_ else size[i_] for i_ in range(len(size)))) for i,idx in enumerate(idxs)]
+      return x[*(slice(None) for _ in range(x.ndim - len(size))), *idxs]
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
-      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-      if mode in {"nearest", "nearest-exact"}:
-        index = (scale * arr).floor() if mode == "nearest" else (scale*(arr+0.5)-0.5).round()
-        # TODO: not sure if fastest idx selection method looping like dis
-        x = x[tuple(index.cast(dtypes.int) if i + x.ndim == dim else slice(None) for dim in range(x.ndim))]
-      elif mode == "linear":
+      arr, reshape = Tensor.arange(size[i], dtype=dtypes.int32, device=self.device), [1] * self.ndim
+      if mode == "linear":
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
         reshape[i] = expand[i] = size[i]
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      # elif mode in {"nearest", "nearest-exact"}:
+      #   index = (scale*arr).floor() if mode == "nearest" else (scale*(arr+0.5)-0.5).round()
+      #   x = x[tuple(index if i + x.ndim == dim else slice(None) for dim in range(x.ndim))]
       else: raise ValueError(f"{mode=} is not supported")
     return x
 
