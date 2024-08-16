@@ -14,7 +14,7 @@ def process_replay(outs:List[LazyBuffer], graph:DefaultDict[LBScheduleItem, List
   ref_schedule = getenv("REF_COMMIT_HASH", "master")
   fp = __file__.replace("diff_schedule", "master_schedule")
   if not os.path.isfile(fp):
-    shutil.copyfile(fetch(f"https://raw.githubusercontent.com/tinygrad/tinygrad/{ref_schedule}/tinygrad/engine/schedule.py"), fp)
+    shutil.copyfile(fetch(f"https://raw.githubusercontent.com/tinygrad/tinygrad/{ref_schedule}/tinygrad/engine/schedule.py", allow_caching=False), fp)
   # create the reference graph
   ref_graph, ref_in_degree = importlib.import_module("test.external.process_replay.master_schedule")._graph_schedule(outs, set())
   # compare
@@ -29,7 +29,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
   changed = 0
   seen_diffs: Set[Tuple[UOp, ...]] = set()
   for buf, si in si_for_buf.items():
-    asts = tuple(dedup([x.ast for x in si]))
+    asts = tuple(({x.ast.key:x.ast for x in si}.values()))
     # kernels didn't change
     if len(si) > 1 and len(asts) == 1: continue
     if asts in seen_diffs: continue
