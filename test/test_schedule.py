@@ -162,7 +162,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
     schedule = check_schedule(out, 2)
-    reduceops = [x for si in schedule for x in si.ast.lazyops if x.op in ReduceOps]
+    reduceops = [x for si in schedule for x in si.ast.parents if x.op in ReduceOps]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -173,7 +173,7 @@ class TestSchedule(unittest.TestCase):
     out0 = r0 + y
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 4)
-    reduceops = [x for si in schedule for x in si.ast.lazyops if x.op in ReduceOps]
+    reduceops = [x for si in schedule for x in si.ast.parents if x.op in ReduceOps]
     assert len(reduceops) == 2
 
   def test_fold_double_unary(self):

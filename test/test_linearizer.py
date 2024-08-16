@@ -894,7 +894,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL")) and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
@@ -1577,7 +1577,7 @@ def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs:Dict[int,Ten
     return LazyOp(op.op, tuple(_deep_replace(x, offset) for x in op.src), arg)
   # limitation: r0 and r1 cannot share inputs.
   op0 = _deep_replace(op0, 0)
-  op0_loads = len([x for x in op0.lazyops if x.op is BufferOps.LOAD])
+  op0_loads = len([x for x in op0.parents if x.op is BufferOps.LOAD])
   out = merge(op0, _deep_replace(op1, op0_loads))
   # limitation: only tests single output
   op = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, s0[-1].ast.src[-1].arg.dtype, s0[-1].ast.src[-1].arg.st))

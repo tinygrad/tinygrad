@@ -81,10 +81,10 @@ class LazyOp:
   def hash(self): return hash((self.op, self.src, self.arg))
   def __hash__(self): return self.hash
   @functools.cached_property
-  def lazyops(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
+  def parents(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.parents])
   def vars(self) -> List[Variable]:
-    extract_vars = [x.arg.st.vars() for x in self.lazyops if x.op in BufferOps]
-    const_vars = [x.arg.val for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
+    extract_vars = [x.arg.st.vars() for x in self.parents if x.op in BufferOps]
+    const_vars = [x.arg.val for x in self.parents if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
     return sorted(set.union(*extract_vars, set(const_vars)), key=lambda v: v.expr)
 
   # TODO: support non-lazyop
