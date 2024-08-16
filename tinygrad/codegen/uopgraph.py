@@ -20,13 +20,11 @@ def fold_expanded(ex, buf):
   # first, extract all the relevant offsets
   offsets_rootsrc: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
-    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype != dtypes.int.vec(3)): continue
-    idx = s.src[1] if not is_image else s.src[1].src[2]  # only id4 for image
+    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype.count == 2): continue
+    idx = s.src[1]
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    # add idx and idy for image
-    if is_image: root_src = (s.src[1].src[0:2], root_src)
     # add gates for gated
     if len(s.src) >= 4: root_src = (s.src[3], root_src)
     assert arg not in offsets_rootsrc[root_src]
@@ -40,9 +38,10 @@ def fold_expanded(ex, buf):
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
-          if not is_image and not new_src[1].divides(fold_length): continue
-          # for images, we rewrite the index
-          if is_image: new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_src[1].src[0], new_src[1].src[1]))
+          if not new_src[1].divides(fold_length): continue
+          # for images, we rewrite the index. it must evenly divide 4 from the above check
+          if is_image:
+            new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((new_src[1] // 4) % buf.dtype.shape[1], (new_src[1] // (4 * buf.dtype.shape[1]))))
           # vectorize the store/loadconst
           if not is_load or len(new_src) >= 4:
             new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
@@ -61,13 +60,26 @@ def fold_expanded(ex, buf):
 
 def vectorize_reduce(vec:UOp):
   if all_same(vec.src): return None  # don't REDUCE the same thing multiple times
-  if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None
+  if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None    # must have the same reduce ranges
+  if not vec.dtype or vec.dtype.scalar() not in {dtypes.float, dtypes.half}: return None  # only fold float/half like this
   return UOp(UOps.REDUCE, vec.dtype, (UOp(UOps.VECTORIZE, vec.dtype, tuple(x.src[0] for x in vec.src)),) + vec.src[0].src[1:], vec.src[0].arg)
 
 def vectorize_alu(vec:UOp):
   if not all_same([x.arg for x in vec.src]): return None
   return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
                                              tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
+
+def fix_unfoldable_image_load(load:UOp, buf:UOp):
+  if not isinstance(buf.dtype, ImageDType) or cast(DType, load.src[1].dtype).count == 2: return None
+  id4 = load.src[1] % 4
+  new_src = list(load.src)
+  # TODO: copied logic from above
+  new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((load.src[1] // 4) % buf.dtype.shape[1], (load.src[1] // (4 * buf.dtype.shape[1]))))
+  if len(new_src) >= 4:
+    new_src[2] = UOp(UOps.VECTORIZE, cast(DType, new_src[2].dtype).vec(4), tuple(new_src[2] for _ in range(4)))
+  vec_load = UOp(UOps.LOAD, cast(DType, load.dtype).vec(4), tuple(new_src))
+  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)),
+                          range(4), UOp.const(load.dtype, float('nan')))
 
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
@@ -84,8 +96,11 @@ def _get_add_chain(x:UOp):
   else: yield x
 
 def mod_folding(x:UOp, c:int) -> Optional[UOp]:
-  # simplify x % c
-  # None means no change
+  # simplify x % c, None means no change
+
+  # simple cancel mod case
+  if 0 < c and 0 <= x.vmin.arg and (quotient:=x.vmin.arg//c) == x.vmax.arg//c: return x-quotient*c
+
   remainder, something_changed = [], False
   for u in _get_add_chain(x):
     if (factor:=u.const_factor())%c != factor:
@@ -100,6 +115,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
+
   # simple cancel div case
   if 0 <= x.vmin.arg and x.vmax.arg < c: return x.const(0)
 
@@ -186,6 +202,9 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
+  (UPat(UOps.ALU, BinaryOps.ADD, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
+  (UPat(UOps.ALU, BinaryOps.MUL, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
   # VECTORIZE/GEP
   (NOp(UOps.GEP, src=(NOp(UOps.VECTORIZE, name="cast"),), name="gep"), lambda gep, cast: cast.src[gep.arg]),
   *[(NOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(NOp(UOps.GEP, dtypes.float,
@@ -258,6 +277,8 @@ constant_folder = PatternMatcher([
   (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
   (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
+  (NOp.var('x', dtype=dtypes.bool) & NOp.cvar('c'), lambda x,c: x if c.arg else c),
+  (NOp.var('x', dtype=dtypes.bool) | NOp.cvar('c'), lambda x,c: c if c.arg else x),
   # ** zero folding **
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
@@ -265,7 +286,8 @@ constant_folder = PatternMatcher([
   (NOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # x-x -> 0
   (NOp.var('x') - NOp.var('x'), lambda x: x.const(0)),
-  (UPat(UOps.ALU, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
+  # min==max -> CONST
+  (UPat({UOps.ALU, UOps.DEFINE_VAR}, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
   # ** load/store folding **
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.load(NOp.var("buf"), NOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
@@ -289,9 +311,6 @@ constant_folder = PatternMatcher([
   # ** mod **
   # mod folding
   (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
-  # remove mod
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c:\
-   x-(x.vmin.arg//c.arg)*c.arg if 0 < c.arg and 0 <= x.vmin.arg and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
   # (x%c)+(x//c)*c = x
@@ -471,6 +490,8 @@ reducer = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
+  # late fixup of unfoldable image loads
+  (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
 # *** uop graph ***

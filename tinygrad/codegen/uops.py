@@ -1,30 +1,33 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Any, Set, cast, List, Union, DefaultDict, Callable, Dict
-import functools, itertools, math
+import functools, itertools, math, hashlib
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.dtype import ConstType, dtypes, DType
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint, Variable
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import merge_dicts, prod, pretty_print
+from tinygrad.ops import ReduceOps, UnaryOps, BinaryOps, TernaryOps, exec_alu, reduce_st
+from tinygrad.helpers import merge_dicts, prod, pretty_print, dedup
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
+  SINK = auto(); EXT = auto(); EXPAND = auto(); CONTRACT = auto(); ST_IDX = auto(); ST_VALID = auto()  # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); GEP = auto() # noqa: E702
   # math ops
   CAST = auto(); BITCAST = auto(); VECTORIZE = auto() # noqa: E702
-  ALU = auto(); REDUCE = auto(); WMMA = auto() # noqa: E702
+  ALU = auto(); REDUCE = auto(); REDUCE_AXIS = auto(); WMMA = auto() # noqa: E702
   # memory/assignment ops
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   # control flow ops
   BARRIER = auto(); IF = auto(); RANGE = auto() # noqa: E702
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
+
+BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
 
@@ -43,7 +46,11 @@ class UOp:
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
-  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.arg}, src=(%s))")
+  @functools.cached_property
+  def key(self) -> bytes:
+    return hashlib.sha256(functools.reduce(lambda x,y: x+y, [s.key for s in self.src], str((self.op, self.dtype, self.arg)).encode())).digest()
+  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
+  def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop syntactic sugar
   def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
@@ -90,7 +97,18 @@ class UOp:
   def parents(self) -> Dict[UOp, None]: return merge_dicts([{x:None for x in self.src}]+[x.parents for x in self.src])
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
+  @staticmethod
+  def from_st(st:ShapeTracker) -> Tuple[UOp, UOp]: return UOp(UOps.ST_IDX, dtypes.pyint, (), st), UOp(UOps.ST_VALID, dtypes.bool, (), st)
+  @functools.cached_property
+  def full_shape(self) -> Tuple[sint, ...]:
+    if self.op in {UOps.ST_IDX, UOps.ST_VALID}: return self.arg.shape
+    # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
+    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL}]))
+  # TODO: these two should merge
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
+  def variables(self) -> List[Variable]:
+    st_vars: List[Set[Variable]] = [x.src[-1].arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
+    return sorted(set.union(*st_vars, set([x.arg for x in self.sparents if x.op is UOps.DEFINE_VAR])), key=lambda v: v.expr)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -114,7 +132,7 @@ class UOp:
   @functools.cached_property
   def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is UOps.DEFINE_VAR: return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else None
+    if self.op is UOps.DEFINE_VAR and self.src: return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else None
     if self.op is UOps.RANGE: return self.src[0], self.const(self.src[1].arg-1) if isinstance(self.src[1].arg, int) else None
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
@@ -214,7 +232,7 @@ def type_verify(uops):
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
     if uop in {UOps.CONST, UOps.DEFINE_ACC}:
       if uop is UOps.CONST:
-        assert dtype is not None and dtype == dtype.scalar(), f"consts should be scalar, got {dtype}"
+        assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
         assert type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop is UOps.DEFINE_ACC: assert dtype is not None and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
     if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
@@ -289,5 +307,32 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
       assert u.arg[1] is not None
-      flops += 2 * prod(u.arg[1]) // 32 * mults
+      flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
   return flops, mem
+
+# the living definition of UOps.ST_IDX and UOps.ST_VALID
+def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
+  assert ast.op is UOps.SINK and all(x.op is UOps.STORE for x in ast.src), "must be SINK"
+  sts: Dict[UOp, ShapeTracker] = {}
+  def assert_valid(op:UOp, st:ShapeTracker):
+    if op in sts or op.op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
+    # restore globals from the two stage reduce
+    if op.op is UOps.LOAD and op.src[0].op is UOps.DEFINE_LOCAL:
+      assert_valid(local_reduce:=op.src[1].src[2], op.src[-1].arg)
+      return sts.setdefault(op, sts[local_reduce])
+    for x in op.src: assert_valid(x, st)
+    # only reduceop is allowed to change shape, limited to turning n to 1
+    if op.op is UOps.REDUCE_AXIS: st = ShapeTracker.from_shape(reduce_st(sts[op.src[0]], op.arg[1][-1] if op.arg[0] is ReduceOps.WMMA else op.arg[1]))
+    else:
+      # movementops are pushed to the edges with ST_IDX, ST_VALID
+      # elementwise inherits shape
+      st = op.arg if op.op in {UOps.ST_IDX, UOps.ST_VALID} else sts[op.src[-1]]
+      for x in (op.src[1:] if op.op in BUFFER_UOPS else op.src):
+        if sts[x].shape != st.shape:
+          if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op.op} {sts[x].shape} != {st.shape}")
+          raise AssertionError(f"found implicit expand {x.op} {sts[x].shape} != {op.op} {st.shape} {prod(sts[x].shape)} != {prod(st.shape)}")
+    sts[op] = st
+  for out in ast.src: assert_valid(out, out.src[-1].arg)
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
+  assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
+  return sts

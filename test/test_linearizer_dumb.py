@@ -6,7 +6,7 @@ import unittest
 from tinygrad import Device, dtypes
 from tinygrad.codegen.uops import UOps
 from tinygrad.helpers import getenv
-from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps # noqa: F401 # pylint: disable=unused-import
+from extra.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps # noqa: F401 # pylint: disable=unused-import
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel

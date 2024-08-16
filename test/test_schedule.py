@@ -8,9 +8,10 @@ from typing import List, Optional, Union, cast
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps, verify_lazyop
+from tinygrad.ops import BinaryOps, MetaOps, UnaryOps
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.uops import UOps, verify_ast
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported, Context
@@ -25,7 +26,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
   if to_prerealize:
     for pre in to_prerealize: pre.schedule()
   sched = create_schedule(outs)
-  if filter_sink: sched = [s for s in sched if s.ast.op is MetaOps.KERNEL]
+  if filter_sink: sched = [s for s in sched if s.ast.op is UOps.SINK]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
@@ -34,7 +35,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
   if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (sink) ops linearize
   for s in sched:
-    if s.ast.op is not MetaOps.KERNEL: continue
+    if s.ast.op is not UOps.SINK: continue
     l = Kernel(s.ast)
     l.hand_coded_optimizations()
     l.linearize()
@@ -162,7 +163,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
     schedule = check_schedule(out, 2)
-    reduceops = [x for si in schedule for x in si.ast.lazyops if x.op in ReduceOps]
+    reduceops = [x for si in schedule for x in si.ast.parents if x.op is UOps.REDUCE_AXIS]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -173,7 +174,7 @@ class TestSchedule(unittest.TestCase):
     out0 = r0 + y
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 4)
-    reduceops = [x for si in schedule for x in si.ast.lazyops if x.op in ReduceOps]
+    reduceops = [x for si in schedule for x in si.ast.parents if x.op is UOps.REDUCE_AXIS]
     assert len(reduceops) == 2
 
   def test_fold_double_unary(self):
@@ -1025,7 +1026,7 @@ class TestSchedule(unittest.TestCase):
     b = r.sum(0) * 4
     c = r.sum(1) * 2
     schedule = check_schedule([b, c], 3)
-    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_simple_chase(self):
@@ -1036,7 +1037,7 @@ class TestSchedule(unittest.TestCase):
     c = r.sum(1) + 12
     np_r = (a.numpy() + (a.numpy().sum(0) + 6)).sum(0) * 2
     # schedule = check_schedule([b,c], 3)
-    # self.assertIs(schedule[0].ast[0].src[0].op, BinaryOps.MUL)
+    # self.assertIs(schedule[0].ast[0].src[0].arg, BinaryOps.MUL)
     schedule = check_schedule([b,c], 4)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), np_r.sum(0) + 8, atol=1e-4, rtol=1e-4)
@@ -1049,7 +1050,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * d
     schedule = check_schedule([d, e], 3)
-    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_push_permute_chase(self):
@@ -1060,7 +1061,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * (d + a).sum(2)
     schedule = check_schedule([d, e], 3) # make sure it doesn't fuse
-    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(d.numpy(), (a.numpy().sum(2) + b.numpy()).T * 4, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), (a.numpy().sum(2) + b.numpy()) * (d.numpy() + a.numpy()).sum(2), atol=1e-4, rtol=1e-4)
@@ -1072,7 +1073,7 @@ class TestSchedule(unittest.TestCase):
     r = a.sum(1) + c
     d = r[:4] * b
     schedule = check_schedule(d, 2)
-    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_push_shrink_chase(self):
@@ -1085,7 +1086,7 @@ class TestSchedule(unittest.TestCase):
     out = r[:4] * b + d.sum(1)[:4]
     # schedule = check_schedule(out, 2)
     schedule = check_schedule(out, 3)
-    self.assertIs(schedule[0].ast.src[0].src[0].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(out.numpy(), (a.numpy().sum(1) + c.numpy())[:4] * b.numpy() + d.numpy().sum(1)[:4], atol=1e-4, rtol=1e-4)
 
@@ -1093,7 +1094,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(16, 16)
     b = (a.sum(0) + a.max(1)) + 2
     schedule = check_schedule(b, 2)
-    self.assertIs(schedule[0].ast.src[0].src[0].op, ReduceOps.MAX)
+    self.assertIs(schedule[0].ast.src[0].src[2].op, UOps.REDUCE_AXIS)
 
   # multireduce spec
   def test_multireduce_midreduce_nochase(self):
@@ -1102,7 +1103,7 @@ class TestSchedule(unittest.TestCase):
     b = (a.sum(0)+a.max(0) + a.max(1)+a.sum(1)) + 2
     # schedule = check_schedule(b, 2)
     schedule = check_schedule(b, 4)
-    self.assertIs(schedule[0].ast.src[0].src[0].op, ReduceOps.MAX)
+    self.assertIs(schedule[0].ast.src[0].src[2].op, UOps.REDUCE_AXIS)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), a.numpy().sum(0)+a.numpy().max(0) + a.numpy().max(1)+a.numpy().sum(1)+2, atol=1e-4, rtol=1e-4)
 
@@ -1292,8 +1293,8 @@ class TestConvBW(unittest.TestCase):
   def check_schedule(self, xt, cnt:int, flops=None):
     with Context(FUSE_CONV_BW=getenv("FUSE_CONV_BW", 1), NOOPT=flops is not None):
       s = create_schedule(flatten([r.lazydata.lbs for r in xt]))
-      kernels = [si for si in s if si.ast.op is MetaOps.KERNEL]
-      for si in kernels: verify_lazyop(si.ast)
+      kernels = [si for si in s if si.ast.op is UOps.SINK]
+      for si in kernels: verify_ast(si.ast)
       GlobalCounters.reset()
       run_schedule(s)
       if flops is not None: assert GlobalCounters.global_ops <= flops, f"too many ops {GlobalCounters.global_ops}"
@@ -1351,8 +1352,8 @@ class TestIndexing(unittest.TestCase):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
       lst = [xt] if isinstance(xt, Tensor) else xt
       s = Tensor.schedule(*lst)
-      kernels = [si for si in s if si.ast.op is MetaOps.KERNEL]
-      for si in kernels: verify_lazyop(si.ast)
+      kernels = [si for si in s if si.ast.op is UOps.SINK]
+      for si in kernels: verify_ast(si.ast)
       run_schedule(s)
       if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
 

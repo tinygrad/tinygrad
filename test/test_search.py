@@ -2,10 +2,11 @@ import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.uops import UOps
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
-from tinygrad.ops import LazyOp, MetaOps, BufferOps, ReduceOps, BinaryOps, MemBuffer, ConstBuffer
+from extra.ops import LazyOp, BufferOps, ReduceOps, BinaryOps, MemBuffer, ConstBuffer
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import Context, GlobalCounters
@@ -15,15 +16,15 @@ from tinygrad.shape.view import View
 
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
-    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is MetaOps.KERNEL][0]
+    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is UOps.SINK][0]
     out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
-    memops = {x.arg.idx:x.arg.st.real_size() for x in si.ast.lazyops if x.op is BufferOps.LOAD}
+    memops = {x.src[0].arg:x.src[-1].arg.real_size() for x in si.ast.parents if x.op is UOps.LOAD}
     rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
     tm = time_linearizer(Kernel(si.ast), rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
     assert tm > 0 and tm != float('inf')
 
   def test_bufs_from_lin(self):
-    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is MetaOps.KERNEL][0]
+    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is UOps.SINK][0]
     rawbufs = bufs_from_lin(lin:=Kernel(si.ast))
     assert len(rawbufs) == len(lin.membufs)
     assert all(r is not None for r in rawbufs)
