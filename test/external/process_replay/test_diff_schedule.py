@@ -6,7 +6,6 @@ from tinygrad.helpers import Context
 from tinygrad.engine.schedule import _graph_schedule
 from tinygrad.lazy import LazyBuffer
 
-@unittest.skip("TODO: uop compare")
 class TestDiffSchedule(unittest.TestCase):
   def test_diff_arange(self):
     # diff a single arange kernel
