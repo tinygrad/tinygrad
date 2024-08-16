@@ -1,12 +1,13 @@
 import unittest
 from typing import List, cast
 import numpy as np
+from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Buffer, Device
 from tinygrad.dtype import PtrDType, DType, dtypes
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, flatten
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.ops import BinaryOps, UOp, UOps
+from tinygrad.ops import BinaryOps
 from tinygrad.renderer import Program
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.lazy import LazyBuffer

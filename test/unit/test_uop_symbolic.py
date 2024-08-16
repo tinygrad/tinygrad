@@ -9,8 +9,9 @@ from typing import Tuple
 
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType, ConstType
+from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.codegen.uopgraph import UOpGraph
-from tinygrad.ops import BinaryOps, UOp, UOps
+from tinygrad.ops import BinaryOps
 import functools
 
 def render(self) -> Tuple[str, ConstType, ConstType]:

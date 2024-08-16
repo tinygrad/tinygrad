@@ -1,6 +1,6 @@
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
-from tinygrad.ops import UOps
+from tinygrad.codegen.uops import UOps
 from tinygrad.helpers import Profiling, Timing, getenv, dedup
 from tinygrad.codegen.kernel import Kernel
 
