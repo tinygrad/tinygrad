@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.codegen.uops import UOps
+from tinygrad.ops import UOps
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.engine.schedule import create_schedule

@@ -1,7 +1,7 @@
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
-from tinygrad.codegen.uops import UOps
 from tinygrad.helpers import Profiling, Timing, getenv
+from tinygrad.ops import UOps
 from tinygrad.codegen.kernel import Kernel
 
 if __name__ == "__main__":
