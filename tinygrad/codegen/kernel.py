@@ -335,7 +335,8 @@ class Kernel:
           for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
         elif self.opts.device in {"CUDA", "NV"}:
           if tc.dtype_in == dtypes.f8e4m3:
-            self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 16), append_opt=False)
+            self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
+            self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
           else:
             self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
@@ -663,7 +664,11 @@ class Kernel:
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in pattern_1] + list(range(wd+len(warp_dims), tcd)) + \
                                          [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
-            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
+            
+            ret = st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
+            print("shapetracker!", ret)
+            print("permute axis!", permaxis)
+            return ret
 
           if self.opts.device in {"AMD", "HIP"}:
             reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
@@ -683,9 +688,21 @@ class Kernel:
               fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
                 ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
             else: # dtype is floating point 8, each lane loads 16 for matrix A, 8 for matrix B, 4 for accum
-              reduce_axes, upcast_axes = [0, 1], [[(0, 16)], [(2, 2), (3, 2), (4, 2)], [(2, 2), (3, 2)]]
-              fix_st1 = None
-              fix_st2 = None
+              # # r_2_2_2_2_2_8_2_2_2
+              #     0 1 2 3 4 5 6 7 8
+              #               0 1 2 3
+              #               red upc
+
+              # # r_2_2_2_2_2_2_2_2_2_2_2
+              #     0 1 2 3 4 5 6 7 8 9 0
+              #     0 1 2 3 4 0 1 2 3 4 5
+              #               red     upc
+              reduce_axes, upcast_axes = [0, 1, 2], [[(0, 8), (1, 2)], [(0, 8)], [(3, 2), (4, 2)]]
+              fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2,2), (2,2,2,2,2,2,2),
+                ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
+              fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2,2), (2,2,2,2,2,2,2),
+                ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
+              fix_st2 = fix_st1 = None
           else:
             raise RuntimeError("unsupported device for tensor cores")
 
