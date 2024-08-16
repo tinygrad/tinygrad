@@ -305,7 +305,9 @@ class AMDAllocator(HCQAllocator):
     if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
     return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
 
-  def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
+  def _free(self, opaque, options:BufferOptions):
+    self.device.synchronize()
+    self.device._gpu_free(opaque)
 
   def map(self, buf:HCQBuffer): self.device._gpu_map(buf._base if hasattr(buf, '_base') else buf)
 
