@@ -777,10 +777,10 @@ class TestOps(unittest.TestCase):
     x = Tensor.zeros([1, 1, 1, 1, 1])
     Tensor.rearrange(x, "a b c d ... ->  a b c ... d")
     with self.assertRaises(AssertionError):
-        Tensor.rearrange(x, "a b c d (...) ->  a b c ... d")
+      Tensor.rearrange(x, "a b c d (...) ->  a b c ... d")
     Tensor.rearrange(x, "... ->  (...)")
     with self.assertRaises(AssertionError):
-        Tensor.rearrange(x, "(...) -> (...)")
+      Tensor.rearrange(x, "(...) -> (...)")
 
   def test_rearrange_consistency_numpy(self):
     shape = [1, 2, 3, 5, 7, 11]

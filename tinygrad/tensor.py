@@ -1328,7 +1328,7 @@ class Tensor:
       left[left.index("..."):left.index("...")+1] = [f"_{i}" for i in range(ellipsis_axes)]
       for i, token in enumerate(right):
         if isinstance(token, list) and "..." in token:
-            token[token.index("..."):token.index("...")+1] = [f"_{i}" for i in range(ellipsis_axes)]
+          token[token.index("..."):token.index("...")+1] = [f"_{i}" for i in range(ellipsis_axes)]
         elif token == "...": right[i:i+1] = [f"_{i}" for i in range(ellipsis_axes)]
     assert len(left) == x.ndim, f"Number of dimensions on left side doesn't match input {x.ndim}"
     unsqueeze_axes, left_shape = set(), {}
