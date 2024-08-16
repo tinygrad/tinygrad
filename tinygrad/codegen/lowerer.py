@@ -4,7 +4,7 @@ import functools
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import BufferOps, LazyOp, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer, BinaryOps
+from tinygrad.ops import BufferOps, LazyOp, ReduceOps, UnaryOps, MetaOps, KernelInfo, BinaryOps
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, get_contraction, prod, partition, flatten
@@ -33,7 +33,7 @@ def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   return iexpr, vexpr
 
 # TODO: change this once UOps is ready to replace symbolic
-def st_to_uops(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
+def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
   idx, valid = _uop_view(st.views[-1], idxs, UOp.const(dtypes.bool, True))
   for view in reversed(st.views[0:-1]):
     view = view.minify()
@@ -43,8 +43,6 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
       idxs.append((idx//acc)%d)
       acc *= d
     idx, valid = _uop_view(view, idxs[::-1], valid)
-  if isinstance(dtype, ImageDType):
-    idx = UOp(UOps.VECTORIZE, dtypes.int.vec(3), ((idx // 4) % dtype.shape[1], (idx // (4 * dtype.shape[1])), idx % 4))
   return idx, valid
 
 def _limit_dims(dims:Tuple[sint, ...], max_sizes:Tuple[int, ...]):
@@ -127,8 +125,7 @@ class IndependentLowerer:
 
   def _to_uop(self, x:LazyOp) -> UOp:
     if x.op in BufferOps:
-      idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs,
-        x.dtype.base if isinstance(x.dtype, ImageDType) and (not isinstance(x.arg, MemBuffer) or x.arg.idx == -1) else x.dtype)
+      idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
@@ -142,12 +139,6 @@ class IndependentLowerer:
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
         load_dtype = x.dtype.scalar()
-        if idx.dtype == dtypes.int.vec(3):
-          # this should all simplify if there's consts for id4. if not, w/e
-          idx, id4 = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx.src[0], idx.src[1])), idx.src[2]
-          vec_load = UOp(UOps.LOAD, load_dtype.vec(4), (buf, idx) + ((UOp.const(load_dtype.vec(4), 0), valid) if has_valid else ()) + barrier)
-          return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load_dtype, (vec_load,), i)),
-                                  range(4), UOp.const(load_dtype, float('nan')))
         return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)
       if x.arg.idx >= 0:
