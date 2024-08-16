@@ -782,6 +782,7 @@ class TestLinearizer(unittest.TestCase):
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
+  @unittest.skipIf(CI and Device.DEFAULT in {"PTX"}, "ocelot/remu doesn't have multiple wave syncs yet")
   def test_load_cache_const_bufs(self):
     # make sure const buffers are differentiated from local and mem buffers
     ST, DT = ShapeTracker(views=(View(shape=((1,)), strides=(0, 0), offset=0, mask=None, contiguous=False),)), dtypes.int
