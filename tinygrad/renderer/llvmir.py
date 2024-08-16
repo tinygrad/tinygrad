@@ -92,16 +92,12 @@ class LLVMRenderer(Renderer):
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.STORE:
         element = cast(bb, lvars[src[2]], src[2].dtype, src[0].dtype)
-        bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
-        # if len(src) > 3:
-        #   with bb[-1].if_then(lvars[src[3].src[0]]):
-        #     bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
-        # else:
-        #   bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
-      elif uop is UOps.IF:
-        bb[-1].if_then(lvars[src[0]])
-      elif uop is UOps.ENDIF:
-        bb.append(ir.IRBuilder(func.append_basic_block("endif")))
+        if len(src) > 3:
+          with bb[-1].if_then(lvars[src[3].src[0]]):
+            bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+        else:
+          bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+      elif uop is UOps.IF or uop is UOps.ENDIF: continue
       elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[src[0]], ir.Constant(ir.IntType(32), 1))
@@ -110,7 +106,7 @@ class LLVMRenderer(Renderer):
         bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{len(loop_blocks)}")))
         bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[src[0].src[1]]), loop_entry_bb, bb[-1].block)
       else:
-        assert dtype is not None or uop is UOps.IF, f"None dtype for uop {uop}"
+        assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE:
           bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
           bb[-2].branch(bb[-1].block)
