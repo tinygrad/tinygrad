@@ -7,12 +7,12 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin, kern_str_to_
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.uops import UOp
+from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
-from tinygrad.ops import LazyOp, UnaryOps, BufferOps
+from tinygrad.ops import UnaryOps
 from test.helpers import is_dtype_supported
 
 def tuplize_uops(uops:List[UOp]) -> Tuple:
@@ -86,7 +86,7 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
 
   if var_vals is None:
     # TODO: handle symbolic max case
-    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast.vars()}
+    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast.variables()}
 
   if ground_truth is None and not has_bf16:
     unoptimized = Kernel(lin.ast)
@@ -124,7 +124,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
   print(lin.colored_shape())
   seen_uops = {}
   last_lins = [lin]
-  failures:DefaultDict[str, List[Tuple[Tuple[LazyOp,...],List[Opt]]]] = defaultdict(list)
+  failures:DefaultDict[str, List[Tuple[Tuple[UOp,...],List[Opt]]]] = defaultdict(list)
   rawbufs, var_vals, ground_truth = None, None, None
 
   FUZZ_ALL_ACTIONS = getenv("FUZZ_ALL_ACTIONS", 0)
@@ -185,8 +185,8 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
 
 def _is_simple(lin: Kernel) -> bool:
   if len(lin.ast.src) > 1: return False
-  ast:LazyOp = lin.ast.src[0]
-  if ast.src[0] and ast.src[0].op is UnaryOps.CAST and ast.src[0].src[0] and ast.src[0].src[0].op is BufferOps.LOAD: return True
+  ast:UOp = lin.ast.src[0]
+  if ast.src[0] and ast.src[0].arg is UnaryOps.CAST and ast.src[0].src[0] and ast.src[0].src[0].op is UOps.LOAD: return True
   return False
 
 if __name__ == "__main__":
