@@ -1322,7 +1322,6 @@ class Tensor:
       assert group is None, "Unmatched parenthesis"
       return res
     left, right = parse_expr(inp), parse_expr(output)
-     # could move into assign on if condition but need to think about this in terms of errors
     if ("..." in left):
       ellipsis_axes = x.ndim - (len(left) - 1)
       left[left.index("..."):left.index("...")+1] = [f"_{i}" for i in range(ellipsis_axes)]
@@ -1332,7 +1331,6 @@ class Tensor:
         elif token == "...": right[i:i+1] = [f"_{i}" for i in range(ellipsis_axes)]
     assert len(left) == x.ndim, f"Number of dimensions on left side doesn't match input {x.ndim}"
     unsqueeze_axes, left_shape = set(), {}
-    # find unknown dimensions
     for i, token in enumerate(left):
       if isinstance(token, list):
         shape, divisor, unk_axis = 0, 1, None
@@ -1348,14 +1346,14 @@ class Tensor:
             unk_axis = tok
         if unk_axis: left_shape[unk_axis] = shape // divisor
       else: left_shape[token] = x.shape[i]
-    flat_left = fully_flatten(left)
-    left_order = {s: i for i, s in enumerate(flat_left)}
-    right_order = dict(enumerate(fully_flatten(right)))
+    left_flat, right_flat = fully_flatten(left), fully_flatten(right)
+    assert len(left_flat) == len(right_flat), "Identifiers only on one side of expression (should be on both)"
+    left_order = {s: i for i, s in enumerate(left_flat)}
     out_shape = [functools.reduce(lambda s, s2: s * left_shape[s2], out, 1) if
                  isinstance(out, list) else left_shape[out] for out in right]
     for axes in unsqueeze_axes: x = x.unsqueeze(left_order[axes])
-    if flat_left != left: x = x.reshape([left_shape[i] for i in flat_left])
-    order = [left_order[right_order[i]] for i in range(len(right_order))]
+    if left_flat != left: x = x.reshape([left_shape[i] for i in left_flat])
+    order = [left_order[r] for r in right_flat]
     return x.permute(order).reshape(out_shape)
 
   # ***** reduce ops *****
