@@ -1973,6 +1973,7 @@ class Tensor:
       return x[*(slice(None) for _ in range(x.ndim - len(size))), *idxs]
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
+<<<<<<< HEAD
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.int32, device=self.device), [1] * self.ndim
       if mode == "linear":
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
@@ -1984,6 +1985,14 @@ class Tensor:
       #   x = x[tuple(index if i + x.ndim == dim else slice(None) for dim in range(x.ndim))]
       else: raise ValueError(f"{mode=} is not supported")
     return x
+=======
+      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
+      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+      reshape[i] = expand[i] = size[i]
+      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+      x = x.gather(i, low).lerp(x.gather(i, high), perc)
+    return x.cast(self.dtype)
+>>>>>>> master
 
   # ***** unary ops *****
 
