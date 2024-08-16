@@ -93,7 +93,7 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> List[Buffer]:
   bufsts: DefaultDict[int, List[UOp]] = defaultdict(list)
   for x in lin.bufs:
     if x.src[0].op is UOps.DEFINE_GLOBAL: bufsts[x.src[0].arg].append(x)
-  rawbufs:List[Optional[Buffer]] = [None]*len(bufsts)
+  rawbufs: List[Optional[Buffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
     buf_size = prod(dtype.shape) if isinstance(dtype:=cast(DType,lx[0].src[0].dtype), ImageDType) else max(y.src[-1].arg.real_size() for y in lx)
     if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
@@ -141,7 +141,7 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True,
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals: Dict[Variable, int] = {k.arg:(k.arg.max+k.arg.min)//2 for k in lin.ast.vars()}
+    var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:
@@ -199,7 +199,7 @@ def time_linearizer(lin:Kernel, rawbufs:List[Buffer], allow_test_size=True, max_
   assert dev.compiler is not None
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
-  var_vals: Dict[Variable, int] = {k.arg:(k.arg.max+k.arg.min)//2 for k in lin.ast.vars()}
+  var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.variables()}
   p = lin.to_program()
   tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
                       max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))

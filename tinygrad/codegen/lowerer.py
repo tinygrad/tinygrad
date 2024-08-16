@@ -161,21 +161,21 @@ class IndependentLowerer:
 
   def _to_uop(self, x:UOp) -> UOp:
     if x.op in BUFFER_UOPS:
-      idx, valid = st_to_uops(x.src[-1].arg, self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs, cast(DType,x.dtype))
+      idx, valid = st_to_uops(x.src[-1].arg, self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs,
+        cast(DType, x.dtype if x.op is UOps.CONST else x.src[0].dtype))
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is UOps.CONST: return valid.where(UOp.const(x.dtype, x.arg), UOp.const(x.dtype, 0))
       buf = x.src[0]
       if x.op is UOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[1]),)),) if x.src[0].op is UOps.DEFINE_LOCAL else ()
-        load_dtype = cast(DType,x.dtype).scalar()
         if idx.dtype == dtypes.int.vec(3):
           # this should all simplify if there's consts for id4. if not, w/e
           idx, id4 = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (idx.src[0], idx.src[1])), idx.src[2]
-          vec_load = UOp(UOps.LOAD, load_dtype.vec(4), (buf, idx) + ((UOp.const(load_dtype.vec(4), 0), valid) if has_valid else ()) + barrier)
-          return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load_dtype, (vec_load,), i)),
-                                  range(4), UOp.const(load_dtype, float('nan')))
-        return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
+          vec_load = UOp(UOps.LOAD, dt:=cast(DType, x.dtype).vec(4), (buf, idx) + ((UOp.const(dt, 0), valid) if has_valid else ()) + barrier)
+          return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, x.dtype, (vec_load,), i)),
+                                  range(4), UOp.const(x.dtype, float('nan')))
+        return UOp(UOps.LOAD, x.dtype, (buf, idx) + ((UOp.const(x.dtype, 0), valid) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)
       if x.src[0].op is UOps.DEFINE_GLOBAL:
         for oidx, ridx in zip(self.idxs, self.ridxs):

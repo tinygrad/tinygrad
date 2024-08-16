@@ -71,7 +71,7 @@ class Kernel:
     def ordered_parents(op:UOp) -> List[UOp]: return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
     self.reduceops = dedup([x for x in ordered_parents(self.ast) if x.op is UOps.REDUCE_AXIS])
 
-    self.vars: List[Variable] = dedup([x.arg for x in self.ast.vars()])
+    self.vars: List[Variable] = self.ast.variables()
     self.bufs: List[UOp] = [x for x in self.ast.parents if x.op in BUFFER_UOPS]
 
     # get earlybufs, before any reduceops
@@ -481,7 +481,7 @@ class Kernel:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
   def required_optimizations(self) -> Kernel:
-    if self.bufs[0].dtype.__class__ is ImageDType:
+    if isinstance(self.membufs[0].dtype, ImageDType):
       unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
       assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[0]}"
       if len(unit_stride_axes_mul_4) and all(x < self.first_upcast for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:  # noqa: E501
@@ -692,7 +692,7 @@ class Kernel:
                               for i,s in enumerate(self.full_shape))
               srcs = []
               for i,(src,fix_st_fxn) in enumerate(zip(rsrc.src, [fix_st1, fix_st2])):
-                st_load = [self.sts[self.bufs.index(op)].real_strides() for op in src.parents if op.op is UOps.LOAD]
+                st_load = [self.sts[self.bufs.index(op)].real_strides() for op in rsrc.parents if op.op is UOps.LOAD]
                 local_shape = tuple(s if max(cast(int, x[i]) for x in st_load) != 0 else 1 for i,s in enumerate(ex_shape))
                 idx, valid = UOp.from_st(ShapeTracker.from_shape(local_shape).expand(ex_shape))
                 membuf = UOp(UOps.DEFINE_LOCAL, PtrDType(tc.dtype_in), (), (f"temp{-(-1-i)}", idx.arg.real_size()))

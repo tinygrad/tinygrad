@@ -96,8 +96,8 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   if buf.op in {MetaOps.CONTIGUOUS, MetaOps.ASSIGN}:
     assert buf in outputs, f"{buf.op} must be writable"
     return in_ops[0]
-  if buf.op is UnaryOps.CAST: return cache.setdefault((buf, st), UOp(UOps.CAST, buf.arg.scalar(), in_ops))
-  if buf.op is UnaryOps.BITCAST: return cache.setdefault((buf, st), UOp(UOps.BITCAST, buf.arg.scalar(), in_ops))
+  if buf.op is UnaryOps.CAST: return cache.setdefault((buf, st), UOp(UOps.CAST, dtype, in_ops))
+  if buf.op is UnaryOps.BITCAST: return cache.setdefault((buf, st), UOp(UOps.BITCAST, dtype, in_ops))
   return cache.setdefault((buf, st), UOp(UOps.ALU, dtype, in_ops, buf.op))
 
 def _permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:

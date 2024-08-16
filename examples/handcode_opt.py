@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 from extra.models.resnet import ResNet50
 from extra.mcts_search import mcts_search
 from examples.mlperf.helpers import get_mlperf_bert_model
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     rawbufs = bufs_from_lin(Kernel(si.ast))
 
     # "linearize" the op into uops in different ways
-    lins:List[Kernel] = []
+    lins: List[Tuple[Kernel, str]] = []
 
     # always try hand coded opt
     lin = Kernel(si.ast, opts=device.renderer)
@@ -109,10 +109,10 @@ if __name__ == "__main__":
 
     # benchmark the programs
     choices = []
-    for (lin, nm) in lins:
+    for lin, nm in lins:
       tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
       ops = (prg:=lin.to_program()).op_estimate
-      gflops = sym_infer(ops, {k:k.min for k in lin.ast.vars()})*1e-9/tm
+      gflops = sym_infer(ops, {k:k.min for k in lin.ast.variables()})*1e-9/tm
       choices.append((tm, gflops, lin, prg, nm))
 
     sorted_choices = sorted(choices, key=lambda x: x[0])
