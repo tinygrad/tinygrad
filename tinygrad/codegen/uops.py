@@ -307,7 +307,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   return flops, mem
 
 # the living definition of UOps.ST_IDX and UOps.ST_VALID
-def verify_shapetrackers(ast:UOp) -> Dict[UOp, ShapeTracker]:
+def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   assert ast.op is UOps.SINK and all(x.op is UOps.STORE for x in ast.src), "must be SINK"
   sts: Dict[UOp, ShapeTracker] = {}
   def assert_valid(op:UOp, st:ShapeTracker):

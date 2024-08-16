@@ -204,4 +204,4 @@ class IndependentLowerer:
       return UOp(UOps.REDUCE, dtype, (ret,) + tuple(reduce_range), alu_op) if len(reduce_range) else ret
     return replace(x, src=in_uops)
 
-def index_shapetrackers(ast:UOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)
+def ast_to_uop(ast:UOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)

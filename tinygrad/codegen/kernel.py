@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Literal, Optional, List, Tuple, Union, cast, Dict, Final, DefaultDict
 
-from tinygrad.codegen.uops import BUFFER_UOPS, UOp, UOps, verify_shapetrackers
+from tinygrad.codegen.uops import BUFFER_UOPS, UOp, UOps, verify_ast
 from tinygrad.ops import BinaryOps, ReduceOps, UNSAFE_PAD_OPS, KernelInfo
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
@@ -12,10 +12,10 @@ from tinygrad.dtype import DType, ImageDType, PtrDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import sint
+from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.uopgraph import UOpGraph
-from tinygrad.codegen.lowerer import index_shapetrackers
+from tinygrad.codegen.lowerer import ast_to_uop
 from enum import Enum, auto
 
 class OptOps(Enum):
@@ -61,21 +61,21 @@ class Kernel:
       self.ast = to_uop(ast)
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    try: lazyop_sts_map = verify_shapetrackers(self.ast)
+    try: uop_sts_map = verify_ast(self.ast)
     except AssertionError as e:
       print("INVALID AST")
       print(self.ast)
       raise e
 
     @functools.lru_cache(None)
-    def ordered_uops(op:UOp) -> List[UOp]: return dedup([item for x in op.src for item in ordered_uops(x)] + [op])
-    self.reduceops = dedup([x for x in ordered_uops(self.ast) if x.op is UOps.REDUCE_AXIS])
+    def ordered_parents(op:UOp) -> List[UOp]: return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
+    self.reduceops = dedup([x for x in ordered_parents(self.ast) if x.op is UOps.REDUCE_AXIS])
 
-    self.vars = self.ast.vars()
+    self.vars: List[Variable] = dedup([x.arg for x in self.ast.vars()])
     self.bufs: List[UOp] = [x for x in self.ast.parents if x.op in BUFFER_UOPS]
 
     # get earlybufs, before any reduceops
-    earlybufs = [x for reduceop in self.reduceops for x in reduceop.parents if x.op in BUFFER_UOPS]
+    earlybufs: List[UOp] = [x for reduceop in self.reduceops for x in reduceop.parents if x.op in BUFFER_UOPS]
     self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
     # NOTE: full_shape can be wrong if there's a tree of reduces
 
@@ -85,8 +85,8 @@ class Kernel:
     # add the shapetrackers for each reduce
     # we use this to track which axes are reduced in each reduce
     for x in self.reduceops:
-      self.sts.append(lazyop_sts_map[x])
-      self.sts.append(lazyop_sts_map[x.src[0]])
+      self.sts.append(uop_sts_map[x])
+      self.sts.append(uop_sts_map[x.src[0]])
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
@@ -279,7 +279,6 @@ class Kernel:
 
   def _create_tc_opts(self, reduceop:UOp, tc:TensorCore, axis:int, opt_level:int) -> Optional[TensorCoreOptions]:
     has_cast = tc.dtype_in != tc.dtype_out
-    # TODO: is this rewrite rules?
     if has_cast and not(reduceop.src[0].op is UOps.CAST and reduceop.src[0].dtype == tc.dtype_out): return None
 
     mul_op = reduceop.src[0].src[0] if has_cast else reduceop.src[0]
@@ -409,7 +408,7 @@ class Kernel:
     else: amt = -1
 
     if self.reduceop and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
-      acc_sz = dt.base.itemsize if isinstance((dt:=cast(DType,self.reduceop.dtype)), ImageDType) else dt.itemsize
+      acc_sz = dt.base.itemsize if isinstance((dt:=cast(DType, self.reduceop.dtype)), ImageDType) else dt.itemsize
       upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
       local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
       smem_sz = amt*acc_sz*upcast_sz*local_sz
@@ -444,8 +443,7 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCASTMID:                  # white
-      # TODO: this is pretty wrong acutally, what if you have multiple outputs?
-      check(cast(DType,self.bufs[0].src[2].dtype).name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces != 0 and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce")  # noqa: E501
+      check(cast(DType, self.bufs[0].src[2].dtype).name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces != 0 and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce")  # noqa: E501
       axes = self.sts[0].unit_stride_axes()
       check(len(axes) == 1, f"wrong number of stride 1 axis : {axes}")
       check(axes[0] == axis, "wrong axis")
@@ -523,7 +521,6 @@ class Kernel:
             except KernelOptError: pass
 
       # are we upcasting in mid reduce? (only for images)
-      # TODO: dtypes.void!
       if cast(DType, self.bufs[0].src[2].dtype).name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:  # noqa: E501
         axes = self.sts[0].unit_stride_axes()
         assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
@@ -624,7 +621,7 @@ class Kernel:
   @functools.cached_property
   def name(self) -> str:
     # kernel name (before late upcast)
-    name = ("r" if self.reduceop else ("C" if all(x.op in BUFFER_UOPS for x in self.ast.sparents) else "E")) + \
+    name = ("r" if self.reduceop else ("C" if all(x.op in BUFFER_UOPS for x in self.ast.parents) else "E")) + \
                  (f"{len(self.ast.src)}_" if len(self.ast.src) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
@@ -642,13 +639,12 @@ class Kernel:
       if op.op in BUFFER_UOPS:
         # for locals, we use the ShapeTracker that's in the srcs
         st = op.src[-1].arg if op.src[0].op is UOps.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
-        if op.op is UOps.CONST: return replace(op, src=(UOp(UOps.ST_VALID, arg=st if apply_to_st is None else apply_to_st(st)),))
         idx, valid = UOp.from_st(st if apply_to_st is None else apply_to_st(st))
-        if op.op is UOps.STORE: return replace(op, src=(op.src[0], idx, fixup_ast(op.src[2]), valid))
-        return replace(op, src=tuple(fixup_ast(x) for x in op.src[:-2])+(idx, valid))
+        if op.op is UOps.CONST: return replace(op, src=(valid,))
+        if op.op is UOps.STORE: return replace(op, src=(op.src[0], idx, fixup_ast(op.src[2], apply_to_st), valid))
+        return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src[:-2])+(idx, valid))
       if op.op is UOps.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
-        dtype = cast(DType,op.dtype)
         reduceop: Union[Literal[ReduceOps.SUM], Literal[ReduceOps.MAX]] = op.arg[0]
         axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
@@ -686,7 +682,6 @@ class Kernel:
             raise RuntimeError("unsupported device for tensor cores")
 
           assert apply_to_st is None, "double tensor core? not supported"
-          # TODO: does this need dtypes in arg?
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device,
                       tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axes),
                       tuple(self.first_upcast+ax for ax in reduce_axes))
@@ -713,16 +708,14 @@ class Kernel:
           new_reduce_axes = tuple(i for i in axis if i-self.first_upcast not in reduce_axes)
           return replace(op, src=(ret,), arg=(reduceop, new_reduce_axes)) if new_reduce_axes else ret
         if self.group_for_reduces:
-          start = UOp(UOps.REDUCE_AXIS, dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(op.arg[0], axis))
+          start = UOp(UOps.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(op.arg[0], axis))
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces] + \
             (1,) * (self.first_upcast - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           idx, valid = UOp.from_st(ShapeTracker.from_shape(local_shape))
-          local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(dtype), (), ("temp1", idx.arg.real_size()))
-          local_store = UOp(UOps.STORE, dtype, (local_buffer, idx, start, valid))
-          # question: where should local_store go?
-          local_load = UOp(UOps.LOAD, dtype, (local_buffer, local_store, idx, valid))
+          local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(cast(DType, op.dtype)), (), ("temp1", idx.arg.real_size()))
+          local_load = UOp(UOps.LOAD, op.dtype, (local_buffer, UOp.store(local_buffer, idx, start, valid), idx, valid))
           second_axis = tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces))
-          return UOp(UOps.REDUCE_AXIS, dtype, (local_load,), arg=(op.arg[0], second_axis))
+          return UOp(UOps.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
         arg = (reduceop, axis)
       elif op.op is UOps.SINK:
         arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
@@ -739,10 +732,10 @@ class Kernel:
       if getenv("RAWAST"): print(self.ast)
       print(modified_ast)
       print(self.applied_opts)
-    verify_shapetrackers(modified_ast)
+    verify_ast(modified_ast)
 
     # generate the UOpGraph
-    self.uops:UOpGraph = UOpGraph(index_shapetrackers(modified_ast, self.opts), self.opts)
+    self.uops:UOpGraph = UOpGraph(ast_to_uop(modified_ast, self.opts), self.opts)
     if DEBUG >= 5: self.uops.print()
     if getenv("GRAPHUOPS"): self.uops.graph()
     return self
@@ -758,8 +751,8 @@ class Kernel:
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
-    mem_bytes = sum(max(cast(DType,x.dtype if x.op is UOps.LOAD else x.src[2].dtype).itemsize * x.src[-1].arg.real_size() for x in group)
-      for _, group in itertools.groupby([x for x in self.ast.parents if x.op in {UOps.LOAD, UOps.STORE} and x.src[0].op is UOps.DEFINE_GLOBAL],
+    mem_bytes = sum(max(cast(DType, x.dtype if x.op is UOps.LOAD else x.src[2].dtype).itemsize * x.src[-1].arg.real_size() for x in group)
+      for _, group in itertools.groupby([x for x in self.ast.parents if x.op in BUFFER_UOPS and x.src[0].op is UOps.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
     return Program(ansiname, src, self.opts.device, self.uops.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)

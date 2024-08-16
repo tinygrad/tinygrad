@@ -11,7 +11,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UnaryOps
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.uops import UOps, verify_shapetrackers
+from tinygrad.codegen.uops import UOps, verify_ast
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported, Context
@@ -1294,7 +1294,7 @@ class TestConvBW(unittest.TestCase):
     with Context(FUSE_CONV_BW=getenv("FUSE_CONV_BW", 1), NOOPT=flops is not None):
       s = create_schedule(flatten([r.lazydata.lbs for r in xt]))
       kernels = [si for si in s if si.ast.op is UOps.SINK]
-      for si in kernels: verify_shapetrackers(si.ast)
+      for si in kernels: verify_ast(si.ast)
       GlobalCounters.reset()
       run_schedule(s)
       if flops is not None: assert GlobalCounters.global_ops <= flops, f"too many ops {GlobalCounters.global_ops}"
@@ -1353,7 +1353,7 @@ class TestIndexing(unittest.TestCase):
       lst = [xt] if isinstance(xt, Tensor) else xt
       s = Tensor.schedule(*lst)
       kernels = [si for si in s if si.ast.op is UOps.SINK]
-      for si in kernels: verify_shapetrackers(si.ast)
+      for si in kernels: verify_ast(si.ast)
       run_schedule(s)
       if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
 
