@@ -3,9 +3,8 @@ import shutil, importlib, uuid, os, logging
 from collections import defaultdict
 from typing import DefaultDict, List, Set, Tuple
 from test.external.process_replay.utils import print_diff
-from tinygrad.codegen.uops import UOp
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
-from tinygrad.helpers import DEBUG, Context, colored, dedup, diskcache_put, fetch, getenv
+from tinygrad.helpers import DEBUG, Context, colored, diskcache_put, fetch, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 
@@ -27,15 +26,15 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
       for buf in lsi.outputs:
         si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
   changed = 0
-  seen_diffs: Set[Tuple[UOp, ...]] = set()
+  seen_diffs: Set[Tuple[bytes, ...]] = set()
   for buf, si in si_for_buf.items():
-    asts = tuple(({x.ast.key:x.ast for x in si}.values()))
+    asts = tuple({x.ast.key:x.ast for x in si})
     # kernels didn't change
     if len(si) > 1 and len(asts) == 1: continue
     if asts in seen_diffs: continue
     seen_diffs.add(asts)
     changed += 1
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), asts))
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), [x.ast for x in si]))
     if len(asts) == 1:
       print(f"{buf} folded in the second schedule")
     else: print_si_diff(si[0], si[1])
