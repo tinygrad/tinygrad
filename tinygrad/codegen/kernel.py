@@ -735,18 +735,16 @@ class Kernel:
     verify_lazyop(modified_ast)
 
     # generate the UOpGraph
-    self.uops:UOpGraph = UOpGraph(lazyop_to_uop(modified_ast, self.opts), self.opts)
+    self.uops:List[UOp] = UOpGraph(lazyop_to_uop(modified_ast, self.opts), self.opts).linearize(self.opts.extra_matcher)
+    if DEBUG >= 5: print_uops(self.uops)
+    if getenv("GRAPHUOPS"):
+      from tinygrad.engine.graph import graph_uops
+      graph_uops(self.uops)
     return self
 
   def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
-    uops: List[UOp] = self.uops.linearize(self.opts.extra_matcher)
-    if DEBUG >= 5: print_uops(uops)
-    if getenv("GRAPHUOPS"):
-      from tinygrad.engine.graph import graph_uops
-      graph_uops(uops)
-
-    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), uops)
+    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{getenv('GITHUB_RUN_ATTEMPT')}"
@@ -757,5 +755,5 @@ class Kernel:
     mem_bytes = sum(max(x.dtype.itemsize * x.arg.st.real_size() for x in group) for _, group in
       itertools.groupby([x for x in self.ast.parents if x.op in BufferOps and isinstance(x.arg, MemBuffer) and x.arg.idx >= 0],
                         key=lambda x: (x.op, x.arg.idx)))
-    return Program(ansiname, src, self.opts.device, uops, mem_estimate=mem_bytes,
+    return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)

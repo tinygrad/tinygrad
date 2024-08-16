@@ -21,18 +21,17 @@ if __name__ == "__main__":
         sched = out.schedule()
 
     asts = dedup([x.ast for x in sched if x.ast.op is MetaOps.KERNEL])
-    uops = []
+    kernels = []
     with Profiling(PROFILE):
       with Timing("***** model uops in "):
         for ast in asts:
           k = Kernel(ast)
           k.hand_coded_optimizations()
-          k.linearize()
-          uops.append((k.name, k.uops))
+          kernels.append(k)
 
     with Profiling(PROFILE, fn="/tmp/schedule.prof"):
       with Timing("***** model linearize in "):
-        for _,u in uops: u.linearize()
+        for k in kernels: k.linearize()
 
     #renderer = Device[Device.DEFAULT].renderer
     #with Profiling(PROFILE, fn="/tmp/schedule.prof"):

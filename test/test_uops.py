@@ -366,7 +366,7 @@ class TestUOpStr(TestEqUOps):
     t = t + t * Tensor.rand(10)
     # nice big complicated uop
     with Context(NOOPT=1):
-      sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
+      sink = UOp(UOps.SINK, None, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
     self.assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):

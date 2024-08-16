@@ -39,7 +39,7 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   k = Kernel(realized_ast)
   k.apply_tensor_cores(1, axis=axis, tc_opt=tc_opt)
   k.linearize()
-  assert len([uop for uop in k.uops.linearize() if uop.op is UOps.WMMA]) > 0, "tensor core not triggered"
+  assert len([uop for uop in k.uops if uop.op is UOps.WMMA]) > 0, "tensor core not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   np_c = np_a @ np_b
   if dtype_out == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
@@ -55,7 +55,7 @@ def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, d
   k = Kernel(realized_ast)
   k.apply_tensor_cores(1, axis=axis, tc_opt=tc_opt)
   k.linearize()
-  wmmas = len([uop for uop in k.uops.linearize() if uop.op is UOps.WMMA])
+  wmmas = len([uop for uop in k.uops if uop.op is UOps.WMMA])
   tcs = len([x for x in k.applied_opts if x.op is OptOps.TC])
   if ensure_triggered:
     assert wmmas > 0, "tensor core not triggered"
@@ -695,7 +695,7 @@ class TestLinearizer(unittest.TestCase):
     load_t = Tensor.full(load.st.shape, 1).contiguous().realize()
     k = helper_linearizer_ast(ast, [load_t], wanna_output=[load_t.numpy().sum()])[1]
     self.assertEqual(k.uops[-1].op, UOps.ENDIF)
-    self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.op is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
+    self.assertLess(k.uops.index([x for x in k.uops if x.op is UOps.STORE][-1]), k.uops.index(k.uops[-1]))
 
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -798,8 +798,8 @@ class TestLinearizer(unittest.TestCase):
     lin = Kernel(ast)
     lin.linearize()
 
-    assert len(lin.uops.uops) <= 7, "too many uops"
-    a_bufs = [u.op for u in lin.uops.uops[-1].src[2].src]
+    assert len(lin.uops) <= 7, "too many uops"
+    a_bufs = [u.op for u in lin.uops[-1].src[2].src]
     assert a_bufs == [UOps.LOAD, UOps.CONST]
 
   def test_upcast_cse(self):
@@ -999,7 +999,7 @@ class TestLinearizer(unittest.TestCase):
       # children of PHI are placed after ENDRANGE
       if any(x.op is UOps.PHI for x in u.src):
         end_range = [i for i, x in enumerate(k.uops) if x.op is UOps.ENDRANGE][0]
-        assert end_range < k.uops.uops.index(u)
+        assert end_range < k.uops.index(u)
 
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
