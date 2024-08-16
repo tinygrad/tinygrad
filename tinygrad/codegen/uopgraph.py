@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
+from typing import Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
@@ -528,13 +528,12 @@ class UOpGraph:
     self.folder = constant_folder + transcendental_folding({} if TRANSCENDENTAL >= 2 or opts is None else opts.code_for_op.keys())
 
   def __reduce__(self): return self.__class__, (self.sink, self.opts)
-  def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
   @property
   def uops(self) -> List[UOp]:
-    if self._uops is None: self.linearize()
-    return cast(List[UOp], self._uops)
+    assert self._uops is not None, "you need to linearize first"
+    return self._uops
 
   def graph(self):
     from tinygrad.engine.graph import graph_uops

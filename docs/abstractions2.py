@@ -58,10 +58,10 @@ k = LazyOp(MetaOps.KERNEL, (st_0,))
 # convert the computation to a "linearized" format (print the format)
 from tinygrad.engine.realize import get_kernel, CompiledRunner
 kernel = get_kernel(Device[DEVICE].renderer, k).linearize()
-kernel.uops.print()
 
 # compile a program (and print the source)
 fxn = CompiledRunner(kernel.to_program())
+kernel.uops.print()
 print(fxn.p.src)
 # NOTE: fxn.clprg is the ClangProgram
 
