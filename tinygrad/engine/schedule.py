@@ -70,9 +70,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
         val, var_val = val.unbind()
         var_vals[val] = var_val
       else: assert isinstance(val, get_args(ConstType)), f"cannot create ConstBuffer with value {val}"
-      #return valid.where(UOp.const(dtype, val), UOp.const(dtype, 0))
-      # TODO: make WHERE work
-      return UOp(UOps.CONST, dtype, (UOp(UOps.CONST, dtype, (valid,), 0), valid), val)
+      return UOp(UOps.CONST, dtype, (valid,), val)
     # otherwise, it's a load and we add it to the inputs
     if buf in assign_targets and not (unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and \
         ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask))):
@@ -89,9 +87,9 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
     rsrc = _recursive_uop(buf.srcs[0], st:=(rinfo[0] if rinfo else st), outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
     # if we are merging the reduce, skip it
     if rinfo is None:
-      assert rsrc.op is UOps.REDUCE_AXIS and rsrc.arg[0] is buf.op, f"can't merge reduceop {buf.op} with {rsrc.arg[0]}\n{st}"
+      assert rsrc.op is UOps.REDUCE_AXIS and rsrc.arg[0] is buf.op, f"can't merge reduceop {buf.op} with {rsrc}\n{st}"
       return rsrc
-    return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, rsrc.dtype, (rsrc,), (buf.op, rinfo[1])))
+    return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (buf.op, rinfo[1])))
 
   # elementwise ops pass shapetracker
   in_ops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache) for x in buf.srcs)

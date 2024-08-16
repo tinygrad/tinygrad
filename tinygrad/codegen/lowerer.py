@@ -78,7 +78,7 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
 
     cmp_symbolic, cmp_graph = render(symbolic_idx, symbolic_valid), render(graph_idx, graph_valid)
     if cmp_symbolic != cmp_graph: print(ocdiff.console_diff(f"SYMBOLIC {len(cmp_symbolic)}\n"+cmp_symbolic, f"GRAPH {len(cmp_graph)}\n"+cmp_graph))
-  return st_to_uops_graph(st, idxs, dtype) if getenv("UOP_IS_SYMBOLIC") else st_to_uops_symbolic(st, idxs, dtype)
+  return st_to_uops_graph(st, idxs, dtype) if getenv("UOP_IS_SYMBOLIC", 1) else st_to_uops_symbolic(st, idxs, dtype)
 
 def _limit_dims(dims:Tuple[sint, ...], max_sizes:Tuple[int, ...]):
   # TODO: symbolic shape
@@ -114,10 +114,10 @@ class IndependentLowerer:
     # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = ast.full_shape
     first_upcasted = len(full_shape)-ki.upcasted
-    first_output_st = ast.src[0].src[-1].arg
+    first_output_st: ShapeTracker = ast.src[0].src[-1].arg
     # if there's no reduce, this is first_upcasted
     first_reduce = [x!=y for x,y in zip(first_output_st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
-    local_loads = [x for x in ast.sparents if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL]
+    local_loads = [x for x in ast.parents if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL]
     # NOTE: this is taking the first one...there may be subtlelies here with multireduces
     group_for_reduces = sum([x!=y for x,y in zip(
       local_loads[0].src[-1].arg.shape[first_reduce:first_upcasted], first_output_st.shape[first_reduce:first_upcasted])]) if local_loads else 0
@@ -164,7 +164,7 @@ class IndependentLowerer:
       idx, valid = st_to_uops(x.src[-1].arg, self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs, cast(DType,x.dtype))
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
-      if x.op is UOps.CONST: return valid.where(UOp.const(x.dtype, x.arg), UOp.const(x.dtype, 0))
+      if x.op is UOps.CONST: return valid.where(replace(x, src=()), UOp.const(x.dtype, 0))
       buf = x.src[0]
       if x.op is UOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[1]),)),) if x.src[0].op is UOps.DEFINE_LOCAL else ()
@@ -185,23 +185,22 @@ class IndependentLowerer:
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
     if x.op is UOps.REDUCE_AXIS:
-      dtype = cast(DType,x.dtype)
       if x.arg[0] is ReduceOps.WMMA:
         upcast_axes = x.arg[1][-2]
         wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
-        ret = UOp(UOps.WMMA, dtype=dtype.vec(wmma_sz[2]), src=(
+        ret = UOp(UOps.WMMA, dtype=cast(DType, x.dtype).vec(wmma_sz[2]), src=(
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=upcast_axes[0]),
           UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=upcast_axes[1]),
-          UOp.const(dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg[1])
-        return UOp(UOps.EXPAND, dtype, tuple(UOp(UOps.GEP, dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axes[2])
+          UOp.const(cast(DType, x.dtype).vec(wmma_sz[2]), 0.0)), arg=x.arg[1])
+        return UOp(UOps.EXPAND, x.dtype, tuple(UOp(UOps.GEP, x.dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axes[2])
       # NOTE: always using ridxs is fine here
       reduce_range, reduce_expand = partition([self.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)
       alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, x.arg[0])]
       ret = in_uops[0]
       if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
-        ret = UOp(UOps.CONTRACT, dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
+        ret = UOp(UOps.CONTRACT, cast(DType, x.dtype).vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
         ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(cast(DType, ret.dtype).count)])
-      return UOp(UOps.REDUCE, dtype, (ret,) + tuple(reduce_range), alu_op) if len(reduce_range) else ret
+      return UOp(UOps.REDUCE, x.dtype, (ret,) + tuple(reduce_range), alu_op) if len(reduce_range) else ret
     return replace(x, src=in_uops)
 
 def ast_to_uop(ast:UOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)
