@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 import functools
+import einops
 
 if CI:
   import warnings
@@ -1190,6 +1191,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,4)], lambda x: x[1:3][1:2])
     helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
     helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
+
+  def test_rearrange(self):
+    helper_test_op([(7,5,10,9)], lambda x: einops.rearrange(x, 'b h w c -> (b h) w c'), lambda x: x.rearrange([[0, 1], 2, 3]))
+    helper_test_op([(7,5,10,9)], lambda x: einops.rearrange(x, 'b h w c -> h (b w) c'), lambda x: x.rearrange([1,[0,2],3]))
+    helper_test_op([(7,5,10,9)], lambda x: einops.rearrange(x, 'b h w c -> b c h w'), lambda x: x.rearrange([0,3,1,2]))
+    helper_test_op([(7,5,10,9)], lambda x: einops.rearrange(x, 'b h w c -> b (c h w)'), lambda x: x.rearrange([0,[3,1,2]]))
 
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))

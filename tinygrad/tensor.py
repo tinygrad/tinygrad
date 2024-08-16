@@ -494,6 +494,26 @@ class Tensor:
     return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
+  def rearrange(self,axes):
+    order = []
+    shape = []
+    for i in range(len(axes)):
+        if(type(axes[i]) == int):
+            order.append(axes[i])
+            shape.append(self.shape[axes[i]])
+        else:
+            shape.append(self.shape[axes[i][0]])
+            order.append(axes[i][0])
+            for j in range(1,len(axes[i])):
+                shape[-1]*=self.shape[axes[i][j]]
+                order.append(axes[i][j])
+    for a in range(len(order)):
+        while(order[a] != a):
+            self = self.transpose(order[a],order[order[a]])
+            order[order[a]], order[a] = order[a], order[order[a]]
+    return self.reshape(*shape)
+
+  @staticmethod
   def arange(start, stop=None, step=1, **kwargs):
     """
     Returns a 1-D tensor of size `ceil((stop - start) / step)` with values from `[start, stop)`, with spacing between values given by `step`.
