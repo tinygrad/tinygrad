@@ -79,8 +79,8 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
       # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                            +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-    ubuf = UOp(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (), \
-        outputs.index(assign_targets[buf]) if buf in assign_targets else len(outputs)+inputs.setdefault(buf, len(inputs)))
+    ubuf = UOp(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
+               outputs.index(assign_targets[buf]) if buf in assign_targets else len(outputs)+inputs.setdefault(buf, len(inputs)))
     return UOp(UOps.LOAD, dtype, (ubuf, idx, valid))
 
   # reduce ops change ShapeTracker
@@ -98,7 +98,6 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   if buf.op in {MetaOps.CONTIGUOUS, MetaOps.ASSIGN}:
     assert buf in outputs, f"{buf.op} must be writable"
     return in_ops[0]
-  # TODO: this cache stuff needs to be cleaned up
   if buf.op is UnaryOps.CAST: return cache.setdefault((buf, st), UOp(UOps.CAST, buf.arg.scalar(), in_ops))
   if buf.op is UnaryOps.BITCAST: return cache.setdefault((buf, st), UOp(UOps.BITCAST, buf.arg.scalar(), in_ops))
   return cache.setdefault((buf, st), UOp(UOps.ALU, dtype, in_ops, buf.op))
@@ -177,14 +176,14 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
   inputs: Dict[LazyBuffer, int] = {}
   for i, out in enumerate(outs):
     output_st = ShapeTracker.from_shape(reduce_st(*deque(reduce_info.values(), 1).pop()) if reduce_info else out.shape)
-    lop = _recursive_uop(out, output_st, tuple(outs), var_vals, inputs, realizes, assign_targets, reduce_info, cache=cache)
+    src = _recursive_uop(out, output_st, tuple(outs), var_vals, inputs, realizes, assign_targets, reduce_info, cache=cache)
     if out.op is MetaOps.ASSIGN and out.arg:
       assert out.arg[0].shape == out.shape, f"ASSIGN must not override output shape {out.arg[0].shape} != {out.shape}"
       output_st = out.arg[0].reshape(output_st.shape)
     output_st, vv = output_st.simplify().unbind()
     if vv: var_vals.update(vv)
     ubuf = UOp(UOps.DEFINE_GLOBAL, out.dtype if isinstance(out.dtype, ImageDType) else PtrDType(out.dtype), (), i)
-    ast.append(UOp(UOps.STORE, None, (ubuf, UOp(UOps.ST_IDX, dtypes.pyint, (), output_st), lop, UOp(UOps.ST_VALID, dtypes.bool, (), output_st))))
+    ast.append(UOp(UOps.STORE, None, (ubuf, UOp(UOps.ST_IDX, dtypes.pyint, (), output_st), src, UOp(UOps.ST_VALID, dtypes.bool, (), output_st))))
   return LBScheduleItem(UOp(UOps.SINK, None, tuple(ast)), outs, list(inputs), var_vals,
                         dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))
 
