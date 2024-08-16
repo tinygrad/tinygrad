@@ -64,7 +64,6 @@ s = UOp(UOps.SINK, None, (st_0,))
 from tinygrad.engine.realize import get_kernel, CompiledRunner
 kernel = get_kernel(Device[DEVICE].renderer, s).linearize()
 
-
 # compile a program (and print the source)
 fxn = CompiledRunner(kernel.to_program())
 print(fxn.p.src)
