@@ -20,13 +20,11 @@ def fold_expanded(ex, buf):
   # first, extract all the relevant offsets
   offsets_rootsrc: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
-    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype != dtypes.int.vec(3)): continue
-    idx = s.src[1] if not is_image else s.src[1].src[2]  # only id4 for image
+    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype.count == 2): continue
+    idx = s.src[1]
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    # add idx and idy for image
-    if is_image: root_src = (s.src[1].src[0:2], root_src)
     # add gates for gated
     if len(s.src) >= 4: root_src = (s.src[3], root_src)
     assert arg not in offsets_rootsrc[root_src]
@@ -40,9 +38,10 @@ def fold_expanded(ex, buf):
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
-          if not is_image and not new_src[1].divides(fold_length): continue
-          # for images, we rewrite the index
-          if is_image: new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_src[1].src[0], new_src[1].src[1]))
+          if not new_src[1].divides(fold_length): continue
+          # for images, we rewrite the index. it must evenly divide 4 from the above check
+          if is_image:
+            new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((new_src[1] // 4) % buf.dtype.shape[1], (new_src[1] // (4 * buf.dtype.shape[1]))))
           # vectorize the store/loadconst
           if not is_load or len(new_src) >= 4:
             new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
@@ -69,6 +68,18 @@ def vectorize_alu(vec:UOp):
   if not all_same([x.arg for x in vec.src]): return None
   return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
                                              tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
+
+def fix_unfoldable_image_load(load:UOp, buf:UOp):
+  if not isinstance(buf.dtype, ImageDType) or cast(DType, load.src[1].dtype).count == 2: return None
+  id4 = load.src[1] % 4
+  new_src = list(load.src)
+  # TODO: copied logic from above
+  new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((load.src[1] // 4) % buf.dtype.shape[1], (load.src[1] // (4 * buf.dtype.shape[1]))))
+  if len(new_src) >= 4:
+    new_src[2] = UOp(UOps.VECTORIZE, cast(DType, new_src[2].dtype).vec(4), tuple(new_src[2] for _ in range(4)))
+  vec_load = UOp(UOps.LOAD, cast(DType, load.dtype).vec(4), tuple(new_src))
+  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)),
+                          range(4), UOp.const(load.dtype, float('nan')))
 
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
@@ -479,6 +490,8 @@ reducer = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
+  # late fixup of unfoldable image loads
+  (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
 # *** uop graph ***

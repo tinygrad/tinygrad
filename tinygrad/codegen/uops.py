@@ -104,6 +104,7 @@ class UOp:
     if self.op in {UOps.ST_IDX, UOps.ST_VALID}: return self.arg.shape
     # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
     return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL}]))
+  # TODO: these two should merge
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.src[-1].arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
@@ -306,7 +307,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
       assert u.arg[1] is not None
-      flops += 2 * prod(u.arg[1]) // 32 * mults
+      flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
   return flops, mem
 
 # the living definition of UOps.ST_IDX and UOps.ST_VALID
