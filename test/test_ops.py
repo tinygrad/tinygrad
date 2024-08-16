@@ -790,20 +790,20 @@ class TestOps(unittest.TestCase):
     result = Tensor.rearrange(x, "a b c d e f -> a (b) (c d e) f")
     assert np.array_equal(x.flatten().numpy(), result.flatten().numpy())
 
-      # result = Tensor.rearrange(x, "a aa aa1 a1a1 aaaa a11 -> a aa aa1 a1a1 aaaa a11")
-      # assert np.array_equal(x, result)
+    result = Tensor.rearrange(x, "a aa aa1 a1a1 aaaa a11 -> a aa aa1 a1a1 aaaa a11").numpy()
+    assert np.array_equal(x.numpy(), result)
 
     result1 = Tensor.rearrange(x, "a b c d e f -> f e d c b a").numpy()
     result2 = Tensor.rearrange(x, "f e d c b a -> a b c d e f").numpy()
     assert np.array_equal(result1, result2)
 
-    # result = Tensor.rearrange(rearrange(x, "a b c d e f -> (f d) c (e b) a"), "(f d) c (e b) a -> a b c d e f", b=2, d=5)
-    # assert np.array_equal(x, result)
+    result = Tensor.rearrange(Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a"), "(f d) c (e b) a -> a b c d e f", b=2, d=5)
+    assert np.array_equal(x.numpy(), result.numpy())
 
-    # sizes = dict(zip("abcdef", shape))
-    # temp = Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a", **sizes).numpy()
-    # result = Tensor.rearrange(temp, "(f d) c (e b) a -> a b c d e f", **sizes).numpy()
-    # assert np.array_equal(x, result)
+    sizes = dict(zip("abcdef", shape))
+    temp = Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a", **sizes)
+    result = Tensor.rearrange(temp, "(f d) c (e b) a -> a b c d e f", **sizes).numpy()
+    assert np.array_equal(x.numpy(), result)
 
     x2 = Tensor.arange(2 * 3 * 4).reshape([2, 3, 4])
     result = Tensor.rearrange(x2, "a b c -> b c a").numpy()

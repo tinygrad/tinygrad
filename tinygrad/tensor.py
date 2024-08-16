@@ -1300,35 +1300,74 @@ class Tensor:
     return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
 
   @staticmethod
-  def rearrange(x: Tensor, formula: str) -> Tensor:
-    formula = formula.replace(" ", "")
+  def rearrange(x: Tensor, formula: str, **axes_lengths) -> Tensor:
+    # can't ignore whitespace! it's a delimiter in rearrange
+    # formula = formula.replace(" ", "")
     assert "->" in formula
     input, output = formula.split("->")
-    rhs_parts, group, inside_group = [], [], False
-    for char in output.strip():
-      if char == '(':
-        assert inside_group == False, "Can't nest merged dimensions"
-        inside_group = True
-      elif char == ')':
-        assert inside_group == True, "Unmatched parenthesis"
-        inside_group = False
-        rhs_parts.append(group)
-        group = []
-      elif inside_group:
-        group.append(char)
-      else:
-        rhs_parts.append(char)
-    assert inside_group == False, "Unmatched parenthesis"
-    flat_out = list(itertools.chain(*rhs_parts))
-    lhs = {s: i for i, s in enumerate(input)}
+    def parse_expr(expr):
+      parts, group, curr = [], None, ""
+      # TODO much redundancy
+      for char in expr.strip():
+        if char == '(':
+          assert group is None, "Can't nest dimensions"
+          if curr:
+              parts.append(curr)
+              curr = ""
+          group = []
+        elif char == ')':
+          assert group is not None, "Unmatched parenthesis"
+          if curr:
+              group.append(curr)
+              curr = ""
+          parts.append(group)
+          group = None
+        elif char.isspace():
+            if curr: group.append(curr) if isinstance(group, list) else parts.append(curr)
+            curr = ""
+        else: curr += char
+      if curr: parts.append(curr)
+      assert group is None, "Unmatched parenthesis"
+      return parts
+    rhs_parts = parse_expr(output)
+    lhs_parts = parse_expr(input)
+    # flatten is flattening multiple characters, only want to flatten lists
+    # fully_flatten circumvents this
+    flat_in = fully_flatten(lhs_parts)
+    flat_out = fully_flatten(rhs_parts)
+    # As we flatten a sublist we track if the current character is in axes arguments
+    # if so add that to our divisor, if not we've found the element we need to find
+    unsqueeze_axes = set()
+    def lhs_shape(i, lhs_part) -> Dict[str, int]:
+        shape, divisor, real_char= 0, 1, ""
+        if isinstance(lhs_part, list):
+            for part in lhs_part:
+                if part in axes_lengths:
+                    divisor *= axes_lengths[part]
+                    unsqueeze_axes.add(part)
+                else: shape = x.shape[i]; real_char = part
+            if real_char: return {real_char: shape // divisor}
+        elif lhs_part not in axes_lengths: return {lhs_part: x.shape[i]}
+        return {} # disgusting
+
+    # FIXME hacky
+    axes_lengths: Dict[str, int] = merge_dicts([lhs_shape(i, part) for i, part in enumerate(lhs_parts)] + [axes_lengths])
+    lhs = {s: i for i, s in enumerate(flat_in)}
     rhs = {i: s for i, s in enumerate(flat_out)}
-    rhs_keys = {s: i for i, s in enumerate(flat_out)}
-    permute_order = [lhs[rhs[i]] for i in range(x.ndim)]
-    print("permute_order", permute_order)
-    x = x.permute(permute_order)
-    out_shape = [functools.reduce(lambda s, s2: s * x.shape[rhs_keys[s2]], out, 1) if
-                 isinstance(out, list) else x.shape[rhs_keys[out]] for out in rhs_parts]
-    return x.reshape(out_shape)
+    permute_order = [lhs[rhs[i]] for i in range(len(rhs))]
+    out_shape = [functools.reduce(lambda s, s2: s * axes_lengths[s2], out, 1) if
+                 isinstance(out, list) else axes_lengths[out] for out in rhs_parts]
+
+    for axes in unsqueeze_axes: x = x.unsqueeze(lhs[axes])
+    if flat_in != lhs_parts: x = x.reshape([axes_lengths[i] for i in flat_in])
+    x = x
+    # need to rearrange to the LHS look like what is described
+    # but with all parenthesis unsqueezed.
+    #
+    # For example (f d) c (e b) a -> a b c d e f
+    # should rearrange like this:
+    # (f d) c (e b) a -> (f d) 1 c (e b) 1 a -> f d c e b a -> a b c d e f
+    return x.permute(permute_order).reshape(out_shape)
 
   # ***** reduce ops *****
 
