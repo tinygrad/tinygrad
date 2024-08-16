@@ -751,7 +751,7 @@ class Kernel:
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
-    mem_bytes = sum(max(cast(DType, x.dtype if x.op is UOps.LOAD else x.src[2].dtype).itemsize * x.src[-1].arg.real_size() for x in group)
+    mem_bytes = sum(max(cast(DType, x.src[0].dtype).itemsize * x.src[-1].arg.real_size() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.parents if x.op in BUFFER_UOPS and x.src[0].op is UOps.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
     return Program(ansiname, src, self.opts.device, self.uops.uops, mem_estimate=mem_bytes,
