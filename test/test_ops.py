@@ -773,6 +773,16 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       Tensor.einsum('ij,jk->ij', a)
 
+  def test_collapsed_ellipsis_errors_out(self):
+    x = Tensor.zeros([1, 1, 1, 1, 1])
+    Tensor.rearrange(x, "a b c d ... ->  a b c ... d")
+    with self.assertRaises(AssertionError):
+        Tensor.rearrange(x, "a b c d (...) ->  a b c ... d")
+
+    Tensor.rearrange(x, "... ->  (...)")
+    with self.assertRaises(AssertionError):
+        Tensor.rearrange(x, "(...) -> (...)")
+
   def test_rearrange_consistency_numpy(self):
     shape = [1, 2, 3, 5, 7, 11]
     x = Tensor(np.arange(np.prod(shape)).reshape(shape))
@@ -811,32 +821,43 @@ class TestOps(unittest.TestCase):
     assert x2[1, 2, 3].numpy() == result[2, 3, 1]
     assert x2[0, 1, 2].numpy() == result[1, 2, 0]
 
+  def test_ellipsis_ops_numpy(self):
+    identity_patterns = [
+      "...->...",
+      "a b c d e-> a b c d e",
+      "a b c d e ...-> ... a b c d e",
+      "a b c d e ...-> a ... b c d e",
+      "... a b c d e -> ... a b c d e",
+      "a ... e-> a ... e",
+      "a ... -> a ... ",
+      "a ... c d e -> a (...) c d e",
+    ]
+    equivalent_rearrange_patterns = [
+      ("a b c d e -> (a b) c d e", "a b ... -> (a b) ... "),
+      ("a b c d e -> a b (c d) e", "... c d e -> ... (c d) e"),
+      ("a b c d e -> a b c d e", "... -> ... "),
+      ("a b c d e -> (a b c d e)", "... ->  (...)"),
+      ("a b c d e -> b (c d e) a", "a b ... -> b (...) a"),
+      ("a b c d e -> b (a c d) e", "a b ... e -> b (a ...) e"),
+    ]
+    x = Tensor.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
+    for pattern in identity_patterns:
+      assert np.array_equal(x.numpy(), Tensor.rearrange(x, pattern).numpy()), pattern
+    for pattern1, pattern2 in equivalent_rearrange_patterns:
+      assert np.array_equal(Tensor.rearrange(x, pattern1).numpy(), Tensor.rearrange(x, pattern2).numpy())
+
   def test_rearrange_permutations_numpy(self):
     # tests random permutation of axes against two independent numpy ways
-      for n_axes in range(1, 10):
-        input = np.arange(2**n_axes).reshape([2] * n_axes)
-        permutation = np.random.permutation(n_axes)
-        left_expression = " ".join("i" + str(axis) for axis in range(n_axes))
-        right_expression = " ".join("i" + str(axis) for axis in permutation)
-        expression = left_expression + " -> " + right_expression
-        result = Tensor.rearrange(Tensor(input), expression).numpy()
+    for n_axes in range(1, 10):
+      input = np.arange(2**n_axes).reshape([2] * n_axes)
+      permutation = np.random.permutation(n_axes)
+      left_expression = " ".join("i" + str(axis) for axis in range(n_axes))
+      right_expression = " ".join("i" + str(axis) for axis in permutation)
+      expression = left_expression + " -> " + right_expression
+      result = Tensor.rearrange(Tensor(input), expression).numpy()
 
-        for pick in np.random.randint(0, 2, [10, n_axes]):
-          assert input[tuple(pick)] == result[tuple(pick[permutation])]
-
-      # I don't think this test will work as intended
-      # for n_axes in range(1, 10):
-      #   input = np.arange(2**n_axes).reshape([2] * n_axes)
-      #   permutation = np.random.permutation(n_axes)
-      #   left_expression = " ".join("i" + str(axis) for axis in range(n_axes)[::-1])
-      #   right_expression = " ".join("i" + str(axis) for axis in permutation[::-1])
-      #   expression = left_expression + " -> " + right_expression
-      #   result = Tensor.rearrange(Tensor(input), expression)
-      #   assert result.shape == input.shape
-      #   expected_result = np.zeros_like(input)
-      #   for original_axis, result_axis in enumerate(permutation):
-      #     expected_result |= ((input >> original_axis) & 1) << result_axis
-      #     assert np.array_equal(result.numpy(), expected_result)
+      for pick in np.random.randint(0, 2, [10, n_axes]):
+        assert input[tuple(pick)] == result[tuple(pick[permutation])]
 
   @unittest.skipIf(IMAGE>0, "no 1d dot for images")
   def test_dot_1d(self):

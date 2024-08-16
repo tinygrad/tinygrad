@@ -1305,7 +1305,6 @@ class Tensor:
     inp, output = formula.split("->")
     def parse_expr(expr):
       res, group = [], None
-      print(expr.split())
       for token in expr.split():
         if token.startswith('(') and token.endswith(')'): res.append([token[1:-1]]) # edge case
         elif token.startswith("("):
@@ -1317,44 +1316,55 @@ class Tensor:
           res.append(group)
           group = None
         elif group: group.append(token)
-        else: res.append(token)
+        else:
+            assert token.isalnum() or token == "...", "Only alphanumeric characters"
+            res.append(token)
       assert group is None, "Unmatched parenthesis"
       return res
-    # As we flatten a sublist we track if the current character is in axes arguments
-    # if so add that to our divisor, if not we've found the element we need to find
     unsqueeze_axes = set()
     def lhs_shape(i, tokens) -> Dict[str, int]:
       if isinstance(tokens, list):
-        shape, divisor, unk_dim= 0, 1, ""
-        for part in tokens:
-          if part in axes_lengths:
-            divisor *= axes_lengths[part]
-            unsqueeze_axes.add(part)
+        shape, divisor, unk_axis = 0, 1, None
+        for tok in tokens:
+          assert tok != "...", "Can't collapse ellipsis on LHS"
+          if tok in axes_lengths:
+            divisor *= axes_lengths[tok]
+            unsqueeze_axes.add(tok)
           else:
+            assert unk_axis is None, "Can't have multiple unknown axes in collapsed block"
             shape = x.shape[i]
-            unk_dim = part
-        if unk_dim: return {unk_dim: shape // divisor}
+            unk_axis = tok
+        if unk_axis: return {unk_axis: shape // divisor}
       elif tokens not in axes_lengths: return {tokens: x.shape[i]}
-      return {} # don't like
-    # TODO Ellipsis complicates everything a lot
-    # leaving it for now
-    lhs_parts, rhs_parts = parse_expr(inp), parse_expr(output)
-    flat_in = fully_flatten(lhs_parts)
-    out_axes: Dict[str, int] = merge_dicts([lhs_shape(i, part) for i, part in enumerate(lhs_parts)] + [axes_lengths])
-    lhs = {s: i for i, s in enumerate(flat_in)}
-    rhs = dict(enumerate(fully_flatten(rhs_parts)))
-    order = [lhs[rhs[i]] for i in range(len(rhs))]
-
+      return {}
+    def replace_ellipsis(tokens, n):
+        result = []
+        for tok in tokens:
+            if isinstance(tok, list):
+                for j, sub_tok in enumerate(tok):
+                  if sub_tok == "...": tok[j:j+1] = [f"_{i}" for i in range(n)]
+                result.append(tok)
+            elif tok == "...": result.extend([f"_{i}" for i in range(n)])
+            else: result.append(tok)
+        return result
+    left, right = parse_expr(inp), parse_expr(output)
+    ellipsis_axes = x.ndim - (len(left) - 1)
+    if "..." in left:
+        # can't nest ellipsis in parens on left side,
+        if ellipsis_axes > 0:
+            for i in range(ellipsis_axes): left.insert(left.index("..."), f"_{i}")
+        left.remove("...")
+        right = replace_ellipsis(right, ellipsis_axes)
+    assert len(left) == x.ndim, f"Number of dimensions on LHS doesn't match input {x.ndim}"
+    flat_left = fully_flatten(left)
+    out_axes: Dict[str, int] = merge_dicts([lhs_shape(i, part) for i, part in enumerate(left)] + [axes_lengths])
+    left_order = {s: i for i, s in enumerate(flat_left)}
+    right_order = dict(enumerate(fully_flatten(right)))
     out_shape = [functools.reduce(lambda s, s2: s * out_axes[s2], out, 1) if
-                 isinstance(out, list) else out_axes[out] for out in rhs_parts]
-    for axes in unsqueeze_axes: x = x.unsqueeze(lhs[axes])
-    if flat_in != lhs_parts: x = x.reshape([out_axes[i] for i in flat_in])
-    # need to rearrange to the LHS look like what is described
-    # but with all parenthesis unsqueezed.
-    #
-    # For example (f d) c (e b) a -> a b c d e f
-    # should rearrange like this:
-    # (f d) c (e b) a -> (f d) 1 c (e b) 1 a -> f d c e b a -> a b c d e f
+                 isinstance(out, list) else out_axes[out] for out in right]
+    for axes in unsqueeze_axes: x = x.unsqueeze(left_order[axes])
+    if flat_left != left: x = x.reshape([out_axes[i] for i in flat_left])
+    order = [left_order[right_order[i]] for i in range(len(right_order))]
     return x.permute(order).reshape(out_shape)
 
   # ***** reduce ops *****
