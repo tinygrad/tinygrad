@@ -1970,7 +1970,7 @@ class Tensor:
       reshape[i] = expand[i] = size[i]
       low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
       x = x.gather(i, low).lerp(x.gather(i, high), perc)
-    return x
+    return x.cast(self.dtype)
 
   # ***** unary ops *****
 
