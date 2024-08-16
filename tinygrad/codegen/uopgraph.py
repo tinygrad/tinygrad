@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
+from typing import Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
@@ -521,33 +521,13 @@ class UOpGraph:
   def __init__(self, sink:Union[UOp, List[UOp]], opts:Optional[Renderer]=None):
     self.sink: UOp = sink if isinstance(sink, UOp) else UOp(UOps.SINK, None, tuple(sink))
     assert self.sink.op is UOps.SINK, f"sink isn't sink, it's {self.sink.op}"
-    # used by linearizer
-    self._uops: Optional[List[UOp]] = None
     self.opts = opts
     self.folder = constant_folder + transcendental_folding({} if TRANSCENDENTAL >= 2 or opts is None else opts.code_for_op.keys())
 
-  def __reduce__(self): return self.__class__, (self.sink, self.opts)
-  def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
-  def __getitem__(self, index) -> UOp: return self.uops[index]
-
-  @property
-  def uops(self) -> List[UOp]:
-    if self._uops is None: self.linearize()
-    return cast(List[UOp], self._uops)
-
-  def graph(self):
-    from tinygrad.engine.graph import graph_uops
-    graph_uops(self.uops)
-
-  def print(self): print_uops(self.uops)
-
   cnt = 0
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None, skip_check=False) -> UOpGraph:
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, skip_check=False) -> List[UOp]:
     global acc_number
     acc_number = 0
-
-    # NOTE: relinearizering should be okay
-    #assert self._uops is None, "already linearized"
 
     # do graph rewrite
     sink = graph_rewrite(self.sink, self.folder)
@@ -598,15 +578,15 @@ class UOpGraph:
       if in_degree[u] == 0: push(u)
 
     scope_end: Dict[UOp, UOp] = {}
-    self._uops = []
+    _uops: List[UOp] = []
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(f"{p:5d}",x)
       if x in scope_children: scope_end[x] = x
       if x.op is UOps.DEFINE_ACC:
-        idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
-        self._uops.insert(idx, x)
-      else: self._uops.append(x)
+        idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
+        _uops.insert(idx, x)
+      else: _uops.append(x)
       for u, ss in scope_children.items():
         if x in ss:
           ss.remove(x)
@@ -616,24 +596,25 @@ class UOpGraph:
         if in_degree[u] == 0: push(u)
 
     # end scopes in toposort order
-    for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+    for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     if not skip_check:
-      bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
+      bad_ops = dedup([x.op for x in _uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
       try:
-        type_verify(self.uops)
-        assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
+        type_verify(_uops)
+        assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
         assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
         # TODO: this should be enabled, and the valid clause should be removed
         # NOTE: multiple identical stores to DEFINE_LOCAL is okay
-        assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \
+        assert len(all_stores := [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \
           == len(dedup(all_stores)), "repeated stores in uops"
       except AssertionError as e:
-        self.print()
-        if not CI: self.graph()
+        print_uops(_uops)
+        if not CI:
+          from tinygrad.engine.graph import graph_uops
+          graph_uops(_uops)
         raise e
 
     # strip the SINK
-    self._uops = self._uops[:-1]
-    return self
+    return _uops[:-1]

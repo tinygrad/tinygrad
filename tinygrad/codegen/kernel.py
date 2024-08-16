@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Literal, Optional, List, Tuple, Union, cast, Dict, Final, DefaultDict
 
-from tinygrad.ops import BinaryOps, ReduceOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, verify_ast
+from tinygrad.ops import BinaryOps, ReduceOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, verify_ast, print_uops
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import DType, ImageDType, PtrDType
@@ -738,15 +738,16 @@ class Kernel:
     verify_ast(modified_ast)
 
     # generate the UOpGraph
-    self.uops:UOpGraph = UOpGraph(ast_to_uop(modified_ast, self.opts), self.opts)
-    if DEBUG >= 5: self.uops.print()
-    if getenv("GRAPHUOPS"): self.uops.graph()
+    self.uops:List[UOp] = UOpGraph(ast_to_uop(modified_ast, self.opts), self.opts).linearize(self.opts.extra_matcher)
+    if DEBUG >= 5: print_uops(self.uops)
+    if getenv("GRAPHUOPS"):
+      from tinygrad.engine.graph import graph_uops
+      graph_uops(self.uops)
     return self
 
   def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
-    self.uops.linearize(self.opts.extra_matcher)
-    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops.uops)
+    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{getenv('GITHUB_RUN_ATTEMPT')}"
@@ -757,5 +758,5 @@ class Kernel:
     mem_bytes = sum(max(cast(DType, x.src[0].dtype).itemsize * x.src[-1].arg.real_size() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.parents if x.op in BUFFER_UOPS and x.src[0].op is UOps.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
-    return Program(ansiname, src, self.opts.device, self.uops.uops, mem_estimate=mem_bytes,
+    return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)

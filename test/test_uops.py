@@ -12,13 +12,11 @@ from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_ker
 from tinygrad.codegen.uopgraph import UOpGraph
 from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
-def _uops_to_prg(uops_list, print_uops=False):
-  uops = UOpGraph(uops_list)
-  uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
-  src = Device[Device.DEFAULT].renderer.render("test", uops.uops)
-  if print_uops: uops.print()
+def _uops_to_prg(uops_list):
+  uops = UOpGraph(uops_list).linearize(Device[Device.DEFAULT].renderer.extra_matcher)
+  src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops.uops,
+  return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -61,7 +59,7 @@ def _test_uops_result(output_dtype, uops, res):
   # res = output_fn(uops)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg([out], print_uops=True)
+  prg = _uops_to_prg([out])
   prg.exec([buf])
   ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
@@ -328,11 +326,10 @@ class TestAssembly(unittest.TestCase):
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
-    uops = UOpGraph([a1,a2])
-    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
+    uops = UOpGraph([a1,a2]).linearize(Device[Device.DEFAULT].renderer.extra_matcher)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHL)
-    self.assertEqual(uops.uops[-2].arg, BinaryOps.MUL)
+    self.assertEqual(uops[-1].arg, BinaryOps.SHL)
+    self.assertEqual(uops[-2].arg, BinaryOps.MUL)
 
   def test_bitshift_right(self):
     g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 0)
@@ -341,11 +338,10 @@ class TestAssembly(unittest.TestCase):
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
-    uops = UOpGraph([a1,a2])
-    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
+    uops = UOpGraph([a1,a2]).linearize(Device[Device.DEFAULT].renderer.extra_matcher)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHR)
-    self.assertEqual(uops.uops[-2].arg, BinaryOps.IDIV)
+    self.assertEqual(uops[-1].arg, BinaryOps.SHR)
+    self.assertEqual(uops[-2].arg, BinaryOps.IDIV)
 
 class TestUOpCompare(unittest.TestCase):
   def test_alu_same_src_different_arg(self):
@@ -367,7 +363,7 @@ class TestUOpStr(TestEqUOps):
     t = t + t * Tensor.rand(10)
     # nice big complicated uop
     with Context(NOOPT=1):
-      sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
+      sink = UOp(UOps.SINK, None, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
     self.assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
@@ -382,7 +378,7 @@ class TestIndexingOrdering(unittest.TestCase):
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
     uops = UOpGraph([st1, st0]).linearize(skip_check=True)
-    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
   @unittest.expectedFailure
@@ -394,7 +390,7 @@ class TestIndexingOrdering(unittest.TestCase):
     st0_1 = UOp(UOps.STORE, dtypes.float.vec(4), (buf1, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1_1 = UOp(UOps.STORE, dtypes.float, (buf1, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
     uops = UOpGraph([st0_0, st1_0, st0_1, st1_1]).linearize(skip_check=True)
-    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    stores = [st for st in uops if st.op is UOps.STORE]
     print("\n".join(map(str, stores)))
     # buf0 stores come first
     self.assertEqual(stores[0].src[0].arg, stores[1].src[0].arg)
@@ -410,7 +406,7 @@ class TestIndexingOrdering(unittest.TestCase):
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
     uops = UOpGraph([st1, st0]).linearize(skip_check=True)
-    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
 if __name__ == '__main__':

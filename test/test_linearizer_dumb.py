@@ -31,7 +31,6 @@ class TestLinearizerDumb(unittest.TestCase):
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
-    k.uops.print()
     print(prg.src)
     Device[Device.DEFAULT].compiler.compile_cached(prg.src)
     with self.assertRaises(AssertionError):
