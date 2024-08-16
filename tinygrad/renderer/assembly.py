@@ -1,9 +1,8 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct, math
 from collections import defaultdict
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp, PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOps, UOp, PatternMatcher, UPat
 from tinygrad.renderer import Renderer, TensorCore
 
 def render_val(x, dtype):

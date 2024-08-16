@@ -1,9 +1,10 @@
 import unittest, pickle
 import numpy as np
+from test.helpers import TestUOps
 from tinygrad import Tensor, TinyJit, Variable
 from tinygrad.engine.schedule import create_schedule
 
-class TestPickle(unittest.TestCase):
+class TestPickle(TestUOps):
   def test_pickle_realized_tensor(self):
     t = Tensor.rand(10, 10).realize()
     st = pickle.dumps(t)
@@ -63,7 +64,7 @@ class TestPickle(unittest.TestCase):
     sched = create_schedule([out.lazydata])
     pk = pickle.dumps(sched)
     sched_pk = pickle.loads(pk)
-    assert sched_pk[-1].ast == sched[-1].ast
+    self.assert_equiv_uops(sched_pk[-1].ast, sched[-1].ast)
 
 class TestPickleJIT(unittest.TestCase):
   @classmethod

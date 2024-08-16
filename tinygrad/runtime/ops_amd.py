@@ -269,7 +269,7 @@ class AMDProgram(HCQProgram):
     if DEBUG >= 6: print(disasm(lib))
 
     image, sections, _ = elf_loader(self.lib)
-    self.lib_gpu = self.device._gpu_alloc(round_up(image.nbytes, 0x1000), kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
+    self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000), BufferOptions(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
     entry_point = min(sh.header.sh_addr for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC)
@@ -296,7 +296,7 @@ class AMDProgram(HCQProgram):
     super().__init__(AMDArgsState, self.device, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): cast(AMDDevice, self.device)._gpu_free(self.lib_gpu)
+    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True, nolru=True))
 
 class AMDAllocator(HCQAllocator):
   def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
@@ -305,7 +305,9 @@ class AMDAllocator(HCQAllocator):
     if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
     return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
 
-  def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
+  def _free(self, opaque, options:BufferOptions):
+    self.device.synchronize()
+    self.device._gpu_free(opaque)
 
   def map(self, buf:HCQBuffer): self.device._gpu_map(buf._base if hasattr(buf, '_base') else buf)
 
