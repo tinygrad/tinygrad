@@ -119,9 +119,17 @@ class Union(ctypes.Union, AsDictMixin):
 
 
 import fcntl, functools
+libc = ctypes.CDLL(ctypes.util.find_library("libc"))
 
-def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, **kwargs):
-  ret = fcntl.ioctl(__fd, (__idir<<30) | (ctypes.sizeof(made := __user_struct(**kwargs))<<16) | (__base<<8) | __nr, made)
+def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, *args, **kwargs):
+  __force_as_val = kwargs.pop("__force_as_val") if "__force_as_val" in kwargs else False
+  made = __user_struct(*args, **kwargs)
+#   ret = fcntl.ioctl(__fd, (__idir<<30) | (ctypes.sizeof(made := __user_struct(*args, **kwargs))<<16) | (__base<<8) | __nr, made)
+  req = (__idir<<30) | (ctypes.sizeof(made)<<16) | (__base<<8) | __nr
+  # print(hex(ctypes.addressof(made)))
+  # print(__force_as_val, made if __force_as_val else ctypes.addressof(made))
+  # print(ctypes.c_void_p(made if __force_as_val else ctypes.addressof(made)))
+  ret = libc.ioctl(ctypes.c_int(__fd), ctypes.c_ulong(req), ctypes.c_void_p(made.value if __force_as_val else ctypes.addressof(made)))
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
   return made
 
