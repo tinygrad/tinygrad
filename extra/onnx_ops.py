@@ -457,7 +457,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   x_out = Tensor.arange(output_shape[-1], dtype=dtypes.default_float)
   y_out = Tensor.arange(output_shape[-2], dtype=dtypes.default_float)
   if mode == "nearest":
-    if nearest_mode == "floor" and coordinate_transformation_mode != "align_corners": return X.interpolate(output_shape, mode="nearest") 
+    if nearest_mode == "floor" and coordinate_transformation_mode != "align_corners": return X.interpolate(output_shape, mode="nearest")
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-2])
