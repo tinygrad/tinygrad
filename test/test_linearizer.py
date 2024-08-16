@@ -5,7 +5,7 @@ from dataclasses import replace
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.codegen.uops import UOp, UOps
+from tinygrad.ops import UOp, UOps
 from tinygrad.device import Device, Buffer
 from extra.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, MetaOps, TernaryOps, ReduceOps, UnaryOps, to_uop
 from tinygrad.shape.shapetracker import ShapeTracker

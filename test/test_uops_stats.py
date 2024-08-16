@@ -3,9 +3,8 @@ from tinygrad import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
-from tinygrad.codegen.uops import flops_mem, UOps, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
-from tinygrad.ops import BinaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, TernaryOps, flops_mem, UOps, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 

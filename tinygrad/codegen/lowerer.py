@@ -5,8 +5,7 @@ import functools
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes, DType
-from tinygrad.ops import ReduceOps, KernelInfo, BinaryOps
-from tinygrad.codegen.uops import BUFFER_UOPS, UOp, UOps
+from tinygrad.ops import ReduceOps, KernelInfo, BinaryOps, BUFFER_UOPS, UOp, UOps
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, get_contraction, prod, partition, flatten
 

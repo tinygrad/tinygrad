@@ -1,6 +1,6 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.codegen.uops import UOps
+from tinygrad.ops import UOps
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import CI
 import numpy as np
