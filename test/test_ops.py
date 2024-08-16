@@ -794,12 +794,12 @@ class TestOps(unittest.TestCase):
 
     y = Tensor.zeros([8, 1])
     Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=2, a2=2)
-    with self.assertRaises(ValueError):
+    with self.assertRaises(RuntimeError):
       ## should fail as not enough dimensions specified
       Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=2)
     with self.assertRaises(ValueError):
-      ## should fail as 3 does not divide 8
-      Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=3)
+      ## should fail as 6 does not divide 8
+      Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=3, a2=2)
 
   def test_rearrange_ellipsis_ops(self):
     identity_patterns = [
