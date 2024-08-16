@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import BufferOps, LazyOp, ReduceOps, UnaryOps, MetaOps, KernelInfo, MemBuffer, BinaryOps
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, all_int, get_contraction, prod, partition, flatten
+from tinygrad.helpers import all_int, get_contraction, prod, partition, flatten
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -33,7 +33,7 @@ def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   return iexpr, vexpr
 
 # TODO: change this once UOps is ready to replace symbolic
-def st_to_uops_graph(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
+def st_to_uops(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
   idx, valid = _uop_view(st.views[-1], idxs, UOp.const(dtypes.bool, True))
   for view in reversed(st.views[0:-1]):
     view = view.minify()
@@ -46,38 +46,6 @@ def st_to_uops_graph(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp,
   if isinstance(dtype, ImageDType):
     idx = UOp(UOps.VECTORIZE, dtypes.int.vec(3), ((idx // 4) % dtype.shape[1], (idx // (4 * dtype.shape[1])), idx % 4))
   return idx, valid
-
-# TODO: this is the old one, delete when ready
-def st_to_uops_symbolic(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
-  fake_idxs = [Variable(f"__idx{i}", 0, s-1) for i,s in enumerate(st.shape)]
-  idx, valid = st.expr_idxs(fake_idxs)
-  ctx = dict(zip(fake_idxs, idxs))
-  uvalid = valid.render(render_ops, ctx)
-  if isinstance(dtype, ImageDType):
-    image_idxs = (idx // 4) % dtype.shape[1], (idx // (4 * dtype.shape[1])), idx % 4
-    uidx = UOp(UOps.VECTORIZE, dtypes.int.vec(3), tuple(x.render(render_ops, ctx) for x in image_idxs))
-  else:
-    uidx = idx.render(render_ops, ctx)
-  if uvalid.op is UOps.CONST: uvalid = UOp.const(dtypes.bool, uvalid.arg)
-  assert uvalid.dtype == dtypes.bool
-  return uidx, uvalid
-
-def st_to_uops(st:ShapeTracker, idxs:List[UOp], dtype:DType) -> Tuple[UOp, UOp]:
-  if getenv("SYMBOLIC_DIFF"):
-    symbolic_idx, symbolic_valid = st_to_uops_symbolic(st, idxs, dtype)
-    graph_idx, graph_valid = st_to_uops_graph(st, idxs, dtype)
-    import ocdiff
-    from tinygrad.codegen.uopgraph import UOpGraph
-    from tinygrad.renderer.cstyle import OpenCLRenderer
-
-    def render(s1, s2):
-      glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg="idxs")
-      st = tuple(UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, i), s)) for i,s in enumerate([s1,s2]))
-      return OpenCLRenderer().render("indexing", UOpGraph(UOp(UOps.SINK, None, st)).linearize(skip_check=True).uops)
-
-    cmp_symbolic, cmp_graph = render(symbolic_idx, symbolic_valid), render(graph_idx, graph_valid)
-    if cmp_symbolic != cmp_graph: print(ocdiff.console_diff(f"SYMBOLIC {len(cmp_symbolic)}\n"+cmp_symbolic, f"GRAPH {len(cmp_graph)}\n"+cmp_graph))
-  return st_to_uops_graph(st, idxs, dtype) if getenv("UOP_IS_SYMBOLIC", 1) else st_to_uops_symbolic(st, idxs, dtype)
 
 def _limit_dims(dims:Tuple[sint, ...], max_sizes:Tuple[int, ...]):
   # TODO: symbolic shape
