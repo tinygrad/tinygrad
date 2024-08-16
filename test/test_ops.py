@@ -1755,6 +1755,12 @@ class TestOps(unittest.TestCase):
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"))
 
+  def test_interpolate_bilinear_uint8(self):
+    out_sz = (10, 10)
+    helper_test_op([(2,3,64,64)],
+      lambda x: torch.nn.functional.interpolate((100*x).type(torch.uint8), size=out_sz, mode="bilinear"),
+      lambda x: Tensor.interpolate((100*x).cast('uint8'), size=out_sz, mode="linear"))
+
   def test_interpolate_linear_corners_aligned(self):
     for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
       helper_test_op([(2,3)+in_sz],
