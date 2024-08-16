@@ -20,13 +20,11 @@ def fold_expanded(ex, buf):
   # first, extract all the relevant offsets
   offsets_rootsrc: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
-    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype != dtypes.int.vec(3)): continue
-    idx = s.src[1] if not is_image else s.src[1].src[2]  # only id4 for image
+    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype.count == 2): continue
+    idx = s.src[1]
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    # add idx and idy for image
-    if is_image: root_src = (s.src[1].src[0:2], root_src)
     # add gates for gated
     if len(s.src) >= 4: root_src = (s.src[3], root_src)
     assert arg not in offsets_rootsrc[root_src]
@@ -40,9 +38,11 @@ def fold_expanded(ex, buf):
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
-          if not is_image and not new_src[1].divides(fold_length): continue
+          if not new_src[1].divides(fold_length): continue
           # for images, we rewrite the index
-          if is_image: new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_src[1].src[0], new_src[1].src[1]))
+          if is_image:
+            # switch to image indexing here. it must evenly divide 4 from the above check
+            new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((new_src[1] // 4) % buf.dtype.shape[1], (new_src[1] // (4 * buf.dtype.shape[1]))))
           # vectorize the store/loadconst
           if not is_load or len(new_src) >= 4:
             new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
