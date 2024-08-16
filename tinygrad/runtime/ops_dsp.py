@@ -12,6 +12,8 @@ from tinygrad.runtime.autogen import libc, ion, msm_ion, adsprpc
 ION_IOC_ALLOC = 0
 ION_IOC_FREE = 1
 ION_IOC_SHARE = 4
+ION_IOC_SYNC = 7
+ION_IOC_CLEAN_INV_CACHES = 2
 
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
@@ -26,11 +28,13 @@ class DSPProgram:
       self.handle = ctypes.c_int64(-1)
       fp = f"file:///{output_file.name}?entry&_modver=1.0&_dom=cdsp"
       adsp.remote_handle64_open(ctypes.create_string_buffer(fp.encode()), ctypes.byref(self.handle))
-      print(len(lib), fp, self.handle.value)
+      # print("OPEN", self.handle.value)
       assert self.handle.value != -1, "load failed"
 
   def __del__(self):
-    if self.handle.value != -1: adsp.remote_handle64_close(self.handle)
+    if self.handle.value != -1:
+      x = adsp.remote_handle64_close(self.handle)
+      assert x == 0, "CLOSE failed"
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     assert len(vals) == 0
@@ -47,12 +51,13 @@ class DSPProgram:
       pra[i+2].dma.fd = b[2].fd
       pra[i+2].dma.len = b[1]
     ret = adsp.remote_handle64_invoke(self.handle, (1<<24) | (1<<16) | (1<<8) | len(bufs), pra)
+    # print("invoke", ret)
     assert ret == 0, f"!!! invoke returned {ret}"
     #return time_est.value / 19_200_000
     return time_est.value / 1e6
 
-def ion_iowr(fd, nr, args):
-  ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord(ion.ION_IOC_MAGIC) & 0xFF) << 8 | (nr & 0xFF), args)
+def ion_iowr(fd, nr, args, magc=ion.ION_IOC_MAGIC):
+  ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord(magc) & 0xFF) << 8 | (nr & 0xFF), args)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
 
 class DSPAllocator(Allocator):
@@ -65,6 +70,7 @@ class DSPAllocator(Allocator):
     ion_iowr(self.ion_fd, ION_IOC_ALLOC, arg3)
     ion_iowr(self.ion_fd, ION_IOC_SHARE, arg2:=ion.struct_ion_fd_data(handle=arg3.handle))
     res = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, arg2.fd, 0)
+    # ion_iowr(self.ion_fd, ION_IOC_CLEAN_INV_CACHES, msm_ion.struct_ion_flush_data(handle=arg3.handle, fd=arg2.fd, vaddr=res, len=size), magc='M')
     return (res, size, arg2)
 
   def _free(self, opaque, options:BufferOptions):
@@ -72,8 +78,19 @@ class DSPAllocator(Allocator):
     os.close(opaque[2].fd)
     ion_iowr(self.ion_fd, ION_IOC_FREE, ion.struct_ion_handle_data(handle=opaque[2].handle))
 
-  def copyin(self, dest, src:memoryview): ctypes.memmove(dest[0], from_mv(src), dest[1])
-  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src[0], src[1])
+  def copyin(self, dest, src:memoryview): ctypes.memmove(dest[0], from_mv(src), src.nbytes)
+  def copyout(self, dest:memoryview, src):
+    res, size, arg2 = src
+    # print(hex(res), hex(size), arg2.handle, arg2.fd)
+    # ION_IOC_SYNC
+    # ion_iowr(self.ion_fd, ION_IOC_CLEAN_INV_CACHES, msm_ion.struct_ion_flush_data(handle=arg2.handle, fd=arg2.fd, vaddr=res, length=size), magc='M')
+    # ion_iowr(self.ion_fd, ION_IOC_SYNC, arg2)
+    # ion_iowr(self.ion_fd, ION_IOC_CLEAN_INV_CACHES, msm_ion.struct_ion_flush_data(handle=arg2.handle, fd=arg2.fd, vaddr=res, length=size), magc='M')
+    # ion_iowr(self.ion_fd, ION_IOC_SYNC, arg2)
+    # print(hex(res), hex(size), arg2.handle, arg2.fd)
+    # res2 = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, arg2.fd, 0)
+    # print(hex(res2), hex(res))
+    ctypes.memmove(from_mv(dest), res, dest.nbytes)
 
 class DSPRenderer(CStyleLanguage):
   device = "DSP"
@@ -135,7 +152,8 @@ class DSPRenderer(CStyleLanguage):
     msrc.append("  end = HAP_perf_get_time_us();")
     #msrc.append('  asm volatile ("%0 = C15:14" : "=r"(end));')
     msrc.append("  *(unsigned long long *)(pra[1].buf.pv) = end - start;")
-    #msrc += [f'  HAP_munmap(buf_{i}, ((int*)pra[0].buf.pv)[{i}]);' for i in range(len(bufs))]
+    msrc += [f'  HAP_munmap(buf_{i}, ((int*)pra[0].buf.pv)[{i}]);' for i in range(len(bufs))]
+    # msrc.append("return ((int*)buf_0)[0];")
     msrc.append("}")
     msrc.append("return 0;")
     msrc.append("}")
@@ -146,5 +164,5 @@ class DSPDevice(Compiled):
     compiler = ClangCompiler("compile_dsp", args=["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",
                                                   "-mhvx=v65", "-mhvx-length=128b",
                                                   #"-fvectorize", "-Rpass=loop-vectorize",
-                                                  "-I/data/openpilot/tinygrad_repo/extra/dsp/include"])
+                                                  "-I/data/home/nimlgen/tinygrad/extra/dsp/include"])
     super().__init__(device, DSPAllocator(), DSPRenderer(), compiler, DSPProgram)
