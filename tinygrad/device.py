@@ -437,9 +437,8 @@ class HCQArgsState:
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
 class HCQProgram:
-  def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
-    self.args_state_t, self.device, self.name = args_state_t, device, name
-    self.kernargs_alloc_size, self.kernargs_args_offset = kernargs_alloc_size, kernargs_args_offset
+  def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int):
+    self.args_state_t, self.device, self.name, self.kernargs_alloc_size = args_state_t, device, name, kernargs_alloc_size
 
   def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
     """

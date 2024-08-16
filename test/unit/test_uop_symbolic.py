@@ -89,7 +89,7 @@ class TestSymbolic(unittest.TestCase):
   def test_ge_divides_and(self):
     expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
                       create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)])
-    self.helper_test_variable(expr, 0, 1, {"((idx1<128) and (idx2<128))", "((idx1<128)*(idx2<128))"})
+    self.helper_test_variable(expr, 0, 1, {"((idx1<128) and (idx2<128))", "((idx1<128)&(idx2<128))"})
     # # bool divided by int is not allowed
     # expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
     #                   create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7), 512)])
@@ -102,8 +102,8 @@ class TestSymbolic(unittest.TestCase):
   def test_div_reduction(self):
     self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
-  #def test_var_becomes_num(self):
-  #  assert isinstance(Variable("a", 2, 2), NumNode)
+  def test_var_becomes_num(self):
+    self.helper_test_variable(Variable("a", 2, 2), 2, 2, "2")
 
   @unittest.expectedFailure
   def test_equality(self):
