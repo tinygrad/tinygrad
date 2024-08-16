@@ -234,6 +234,7 @@ generate_qcom() {
   clang2py -k cdefstum \
     extra/dsp/ion.h \
     extra/dsp/msm_ion.h \
+    extra/dsp/adsprpc_shared.h \
     -o $BASE/qcom_dsp.py
 
   fixup $BASE/qcom_dsp.py
