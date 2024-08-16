@@ -1632,7 +1632,7 @@ class Tensor:
     return (-self).argmax(axis=axis, keepdim=keepdim)
 
   @staticmethod
-  def rearrange(arg: Union[Tensor, List[Tensor]], formula:str, **sizes) -> Tensor:
+  def rearrange(arg: Union[Tensor, List[Tensor]], formula: str, **sizes) -> Tensor:
     """
     Rearranges input according to formula
 
@@ -1644,18 +1644,18 @@ class Tensor:
     ```
     """
     if isinstance(arg, list): return Tensor.rearrange(Tensor.stack(*arg), formula, **sizes)
-    def replace_ellipsis(l, n): return l[:(i:=l.index("..."))] + [f"...{j}" for j in range(n)] + l[i+1:] if "..." in l else l
+    def replace_ellipsis(l, n): return l[: (i := l.index("..."))] + [f"...{j}" for j in range(n)] + l[i + 1 :] if "..." in l else l
     def parse_formula(formula: str):
-        lparens, rparens = map(lambda x: [i for i, ch in enumerate(formula) if ch==x], ("(", ")"))
-        assert len(lparens) == len(rparens) and sorted(flatten(pairs := list(zip(lparens, rparens)))) == flatten(pairs), "bracket mismatch"
-        return formula.replace("(", "").replace(")", "").split(), [formula[o+1:c].split() for o, c in pairs]
+      lparens, rparens = map(lambda x: [i for i, ch in enumerate(formula) if ch == x], ("(", ")"))
+      assert len(lparens) == len(rparens) and sorted(flatten(pairs := list(zip(lparens, rparens)))) == flatten(pairs), "bracket mismatch"
+      return formula.replace("(", "").replace(")", "").split(), [formula[o + 1 : c].split() for o, c in pairs]
     def get_group_dims(dim_number, group, shape):
-        dims = [sizes[name] if name in sizes else -1 for name in group]
-        if dims.count(-1) == 1: dims[dims.index(-1)] = shape[dim_number]//math.prod(dim for dim in dims if dim != -1)
-        if -1 in dims: raise ValueError("not enough dimensions given")
-        return tuple(dims)
+      dims = [sizes[name] if name in sizes else -1 for name in group]
+      if dims.count(-1) == 1: dims[dims.index(-1)] = shape[dim_number] // math.prod(dim for dim in dims if dim != -1)
+      if -1 in dims: raise ValueError("not enough dimensions given")
+      return tuple(dims)
 
-    assert formula.count("->") == 1, "need exactly one \"->\" in formula"
+    assert formula.count("->") == 1, 'need exactly one "->" in formula'
     (lhs, unflatten_groups), (rhs, flatten_groups) = map(parse_formula, formula.split("->"))
 
     assert sorted(lhs) == sorted(rhs), f"name mismatch in {formula}"
@@ -1663,14 +1663,14 @@ class Tensor:
     assert "..." not in flatten(unflatten_groups), "cannot have collapsed ellipsis (...) in input formula"
     assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
 
-    #resolve ellipsis
+    # resolve ellipsis
     ellipsis_len = len(arg.shape) - len(lhs) + 1 + sum(len(group) - 1 for group in unflatten_groups) if "..." in lhs else 0
-    lhs, rhs, *flatten_groups= map(lambda l: replace_ellipsis(l, ellipsis_len), (lhs, rhs, *flatten_groups))
+    lhs, rhs, *flatten_groups = map(lambda l: replace_ellipsis(l, ellipsis_len), (lhs, rhs, *flatten_groups))
 
-    #apply movement ops in order unflatten -> permute -> flatten
-    t = functools.reduce(lambda x, group: x.unflatten(d:=lhs.index(group[0]), get_group_dims(d, group, x.shape)), unflatten_groups, arg)
+    # apply movement ops in order unflatten -> permute -> flatten
+    t = functools.reduce(lambda x, group: x.unflatten(d := lhs.index(group[0]), get_group_dims(d, group, x.shape)), unflatten_groups, arg)
     t = t.permute([lhs.index(name) for name in rhs])
-    return functools.reduce(lambda x, group: x.flatten(d:=rhs.index(group[0]), d + len(group) - 1), reversed(flatten_groups), t)
+    return functools.reduce(lambda x, group: x.flatten(d := rhs.index(group[0]), d + len(group) - 1), reversed(flatten_groups), t)
 
   @staticmethod
   def einsum(formula:str, *raw_xs, acc_dtype:Optional[DTypeLike]=None) -> Tensor:

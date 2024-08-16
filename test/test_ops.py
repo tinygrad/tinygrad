@@ -774,33 +774,35 @@ class TestOps(unittest.TestCase):
       Tensor.einsum('ij,jk->ij', a)
 
   def test_rearrange_errors(self):
-      x = Tensor.zeros([1, 1, 1, 1, 1])
-      Tensor.rearrange(x, "a b c d ... ->  a b c ... d")
-      bad_patterns = ["a b c d (...) ->  a b c ... d",  #collapsed ellipsis on input
-                      "a b (c d ... ->  a b c ... d",   #unbalanced brackets
-                      "a b* c d ... ->  a b c ... d",   #not alphanumeric
-                      "a b c d ->  a b c d -> a b c d", #two "->"
-                      "a ... c ... ->  ... a ... c",    #two "..."
-                      "a b c d e -> f b c d e"]         #name mismatch
-      for pattern in bad_patterns:
-        with self.assertRaises(AssertionError):
-          Tensor.rearrange(x, pattern)
-
-      Tensor.rearrange(x, "... ->  (...)")
+    x = Tensor.zeros([1, 1, 1, 1, 1])
+    Tensor.rearrange(x, "a b c d ... ->  a b c ... d")
+    bad_patterns = [
+      "a b c d (...) ->  a b c ... d", # collapsed ellipsis on input
+      "a b (c d ... ->  a b c ... d",  # unbalanced brackets
+      "a b* c d ... ->  a b c ... d",  # not alphanumeric
+      "a b c d ->  a b c d -> a b c d",# two "->"
+      "a ... c ... ->  ... a ... c",   # two "..."
+      "a b c d e -> f b c d e",        # name mismatch
+    ]
+    for pattern in bad_patterns:
       with self.assertRaises(AssertionError):
-        Tensor.rearrange(x, "(...) -> (...)")
+        Tensor.rearrange(x, pattern)
 
-      y = Tensor.zeros([8, 1])
-      Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=2, a2=2)
-      with self.assertRaises(ValueError):
-        ## should fail as not enough dimensions specified
-        Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=2)
-      with self.assertRaises(ValueError):
-        ## should fail as 3 does not divide 8
-        Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=3)
+    Tensor.rearrange(x, "... ->  (...)")
+    with self.assertRaises(AssertionError):
+      Tensor.rearrange(x, "(...) -> (...)")
+
+    y = Tensor.zeros([8, 1])
+    Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=2, a2=2)
+    with self.assertRaises(ValueError):
+      ## should fail as not enough dimensions specified
+      Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=2)
+    with self.assertRaises(ValueError):
+      ## should fail as 3 does not divide 8
+      Tensor.rearrange(y, "(a1 a2 a3) b -> b a3 a2 a1", a1=3)
 
   def test_rearrange_ellipsis_ops(self):
-      identity_patterns = [
+    identity_patterns = [
       "...->...",
       "a b c d e-> a b c d e",
       "a b c d e ...-> ... a b c d e",
@@ -808,106 +810,108 @@ class TestOps(unittest.TestCase):
       "... a b c d e -> ... a b c d e",
       "a ... e-> a ... e",
       "a ... -> a ... ",
-      "a ... c d e -> a (...) c d e"]
+      "a ... c d e -> a (...) c d e",
+    ]
 
-      equivalent_rearrange_patterns = [
+    equivalent_rearrange_patterns = [
       ("a b c d e -> (a b) c d e", "a b ... -> (a b) ... "),
       ("a b c d e -> a b (c d) e", "... c d e -> ... (c d) e"),
       ("a b c d e -> a b c d e", "... -> ... "),
       ("a b c d e -> (a b c d e)", "... ->  (...)"),
       ("a b c d e -> b (c d e) a", "a b ... -> b (...) a"),
-      ("a b c d e -> b (a c d) e", "a b ... e -> b (a ...) e")]
+      ("a b c d e -> b (a c d) e", "a b ... e -> b (a ...) e"),
+    ]
 
-      xnp = np.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
-      x = Tensor(xnp)
-      for pattern in identity_patterns:
-          assert np.array_equal(xnp, Tensor.rearrange(x, pattern).numpy()), pattern
+    xnp = np.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
+    x = Tensor(xnp)
+    for pattern in identity_patterns:
+      assert np.array_equal(xnp, Tensor.rearrange(x, pattern).numpy()), pattern
 
-      for pattern1, pattern2 in equivalent_rearrange_patterns:
-          assert np.array_equal(Tensor.rearrange(x, pattern1).numpy(), Tensor.rearrange(x, pattern2).numpy())
+    for pattern1, pattern2 in equivalent_rearrange_patterns:
+      assert np.array_equal(Tensor.rearrange(x, pattern1).numpy(), Tensor.rearrange(x, pattern2).numpy())
 
   def test_rearrange_consistency(self):
-      shape = [1, 2, 3, 5, 7, 11]
-      xnp = np.arange(np.prod(shape)).reshape(shape)
-      x = Tensor(xnp)
-      for pattern in [
-          "a b c d e f -> a b c d e f",
-          "b a c d e f -> a b d e f c",
-          "a b c d e f -> f e d c b a",
-          "a b c d e f -> (f e) d (c b a)",
-          "a b c d e f -> (f e d c b a)",
-      ]:
-          result = Tensor.rearrange(x, pattern).numpy()
-          assert len(np.setdiff1d(xnp, result)) == 0
-          assert result.dtype == xnp.dtype
+    shape = [1, 2, 3, 5, 7, 11]
+    xnp = np.arange(np.prod(shape)).reshape(shape)
+    x = Tensor(xnp)
+    for pattern in [
+      "a b c d e f -> a b c d e f",
+      "b a c d e f -> a b d e f c",
+      "a b c d e f -> f e d c b a",
+      "a b c d e f -> (f e) d (c b a)",
+      "a b c d e f -> (f e d c b a)",
+    ]:
+      result = Tensor.rearrange(x, pattern).numpy()
+      assert len(np.setdiff1d(xnp, result)) == 0
+      assert result.dtype == xnp.dtype
 
-      result = Tensor.rearrange(x, "a b c d e f -> a (b) (c d e) f").numpy()
-      assert np.array_equal(xnp.flatten(), result.flatten())
+    result = Tensor.rearrange(x, "a b c d e f -> a (b) (c d e) f").numpy()
+    assert np.array_equal(xnp.flatten(), result.flatten())
 
-      result = Tensor.rearrange(x, "a aa aa1 a1a1 aaaa a11 -> a aa aa1 a1a1 aaaa a11").numpy()
-      assert np.array_equal(xnp, result)
+    result = Tensor.rearrange(x, "a aa aa1 a1a1 aaaa a11 -> a aa aa1 a1a1 aaaa a11").numpy()
+    assert np.array_equal(xnp, result)
 
-      result1 = Tensor.rearrange(x, "a b c d e f -> f e d c b a").numpy()
-      result2 = Tensor.rearrange(x, "f e d c b a -> a b c d e f").numpy()
-      assert np.array_equal(result1, result2)
+    result1 = Tensor.rearrange(x, "a b c d e f -> f e d c b a").numpy()
+    result2 = Tensor.rearrange(x, "f e d c b a -> a b c d e f").numpy()
+    assert np.array_equal(result1, result2)
 
-      result = Tensor.rearrange(Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a"), "(f d) c (e b) a -> a b c d e f", b=2, d=5).numpy()
-      assert np.array_equal(xnp, result)
+    result = Tensor.rearrange(Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a"), "(f d) c (e b) a -> a b c d e f", b=2, d=5).numpy()
+    assert np.array_equal(xnp, result)
 
-      sizes = dict(zip("abcdef", shape))
-      temp = Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a", **sizes)
-      result = Tensor.rearrange(temp, "(f d) c (e b) a -> a b c d e f", **sizes).numpy()
-      assert np.array_equal(xnp, result)
+    sizes = dict(zip("abcdef", shape))
+    temp = Tensor.rearrange(x, "a b c d e f -> (f d) c (e b) a", **sizes)
+    result = Tensor.rearrange(temp, "(f d) c (e b) a -> a b c d e f", **sizes).numpy()
+    assert np.array_equal(xnp, result)
 
-      x2 = np.arange(2 * 3 * 4).reshape([2, 3, 4])
-      result = Tensor.rearrange(Tensor(x2), "a b c -> b c a").numpy()
-      assert x2[1, 2, 3] == result[2, 3, 1]
-      assert x2[0, 1, 2] == result[1, 2, 0]
+    x2 = np.arange(2 * 3 * 4).reshape([2, 3, 4])
+    result = Tensor.rearrange(Tensor(x2), "a b c -> b c a").numpy()
+    assert x2[1, 2, 3] == result[2, 3, 1]
+    assert x2[0, 1, 2] == result[1, 2, 0]
 
   def test_rearrange_permutations(self):
-      # tests random permutation of axes against two independent numpy ways
-      for n_axes in range(1, 10):
-          x = np.arange(2**n_axes).reshape([2] * n_axes)
-          permutation = np.random.permutation(n_axes)
-          left_expression = " ".join("i" + str(axis) for axis in range(n_axes))
-          right_expression = " ".join("i" + str(axis) for axis in permutation)
-          expression = left_expression + " -> " + right_expression
-          result = Tensor.rearrange(Tensor(x), expression).numpy()
+    # tests random permutation of axes against two independent numpy ways
+    for n_axes in range(1, 10):
+      x = np.arange(2**n_axes).reshape([2] * n_axes)
+      permutation = np.random.permutation(n_axes)
+      left_expression = " ".join("i" + str(axis) for axis in range(n_axes))
+      right_expression = " ".join("i" + str(axis) for axis in permutation)
+      expression = left_expression + " -> " + right_expression
+      result = Tensor.rearrange(Tensor(x), expression).numpy()
 
-          for pick in np.random.randint(0, 2, [10, n_axes]):
-              assert x[tuple(pick)] == result[tuple(pick[permutation])]
+      for pick in np.random.randint(0, 2, [10, n_axes]):
+        assert x[tuple(pick)] == result[tuple(pick[permutation])]
 
-      for n_axes in range(1, 10):
-          x = np.arange(2**n_axes).reshape([2] * n_axes)
-          permutation = np.random.permutation(n_axes)
-          left_expression = " ".join("i" + str(axis) for axis in range(n_axes)[::-1])
-          right_expression = " ".join("i" + str(axis) for axis in permutation[::-1])
-          expression = left_expression + " -> " + right_expression
-          result = Tensor.rearrange(Tensor(x), expression).numpy()
-          assert result.shape == x.shape
-          expected_result = np.zeros_like(x)
-          for original_axis, result_axis in enumerate(permutation):
-              expected_result |= ((x >> original_axis) & 1) << result_axis
+    for n_axes in range(1, 10):
+      x = np.arange(2**n_axes).reshape([2] * n_axes)
+      permutation = np.random.permutation(n_axes)
+      left_expression = " ".join("i" + str(axis) for axis in range(n_axes)[::-1])
+      right_expression = " ".join("i" + str(axis) for axis in permutation[::-1])
+      expression = left_expression + " -> " + right_expression
+      result = Tensor.rearrange(Tensor(x), expression).numpy()
+      assert result.shape == x.shape
+      expected_result = np.zeros_like(x)
+      for original_axis, result_axis in enumerate(permutation):
+        expected_result |= ((x >> original_axis) & 1) << result_axis
 
-          assert np.array_equal(result, expected_result)
+      assert np.array_equal(result, expected_result)
 
   def test_rearrange_concatenations_and_stacking(self):
-      for n_arrays in [1, 2, 5]:
-          shapes = [[], [1], [1, 1], [2, 3, 5, 7], [1] * 6]
-          for shape in shapes:
-              arrays1 = [np.arange(i, i + np.prod(shape)).reshape(shape) for i in range(n_arrays)]
-              arrays2 = [Tensor(array) for array in arrays1]
-              result0 = np.asarray(arrays1)
-              result2 = Tensor.rearrange(arrays2, "...->...").numpy()
-              assert np.array_equal(result0, result2)
+    for n_arrays in [1, 2, 5]:
+      shapes = [[], [1], [1, 1], [2, 3, 5, 7], [1] * 6]
+      for shape in shapes:
+        arrays1 = [np.arange(i, i + np.prod(shape)).reshape(shape) for i in range(n_arrays)]
+        arrays2 = [Tensor(array) for array in arrays1]
+        result0 = np.asarray(arrays1)
+        result2 = Tensor.rearrange(arrays2, "...->...").numpy()
+        assert np.array_equal(result0, result2)
 
   def test_rearrange_list_inputs(self):
-      x = Tensor.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
+    x = Tensor.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
 
-      assert np.array_equal(
-          Tensor.rearrange(list(x), "... -> (...)").numpy(),
-          Tensor.rearrange(x, "... -> (...)").numpy(),
-      )
+    assert np.array_equal(
+      Tensor.rearrange(list(x), "... -> (...)").numpy(),
+      Tensor.rearrange(x, "... -> (...)").numpy(),
+    )
 
   @unittest.skipIf(IMAGE>0, "no 1d dot for images")
   def test_dot_1d(self):
