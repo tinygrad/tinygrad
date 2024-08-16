@@ -793,9 +793,9 @@ class TestOps(unittest.TestCase):
         "a b c d e f -> (f e) d (c b a)",
         "a b c d e f -> (f e d c b a)",
     ]:
-      result = Tensor.rearrange(x, pattern).numpy()
-      assert len(np.setdiff1d(x.numpy(), result)) == 0
-      # assert result.dtype == x.dtype
+      result = Tensor.rearrange(x, pattern)
+      assert result.dtype == x.dtype
+      assert len(np.setdiff1d(x.numpy(), result.numpy())) == 0
 
     result = Tensor.rearrange(x, "a b c d e f -> a (b) (c d e) f")
     assert np.array_equal(x.flatten().numpy(), result.flatten().numpy())
