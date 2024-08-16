@@ -13,13 +13,11 @@ from tinygrad.codegen.uops import UOps, NOp, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
 from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
-def _uops_to_prg(uops_list, print_uops=False):
-  uops = UOpGraph(uops_list)
-  uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
-  src = Device[Device.DEFAULT].renderer.render("test", uops.uops)
-  if print_uops: uops.print()
+def _uops_to_prg(uops_list):
+  uops = UOpGraph(uops_list).linearize(Device[Device.DEFAULT].renderer.extra_matcher)
+  src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops.uops,
+  return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -62,7 +60,7 @@ def _test_uops_result(output_dtype, uops, res):
   # res = output_fn(uops)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg([out], print_uops=True)
+  prg = _uops_to_prg([out])
   prg.exec([buf])
   ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
@@ -411,7 +409,7 @@ class TestIndexingOrdering(unittest.TestCase):
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
     uops = UOpGraph([st1, st0]).linearize(skip_check=True)
-    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
 if __name__ == '__main__':

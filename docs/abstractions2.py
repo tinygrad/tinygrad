@@ -61,7 +61,6 @@ kernel = get_kernel(Device[DEVICE].renderer, k).linearize()
 
 # compile a program (and print the source)
 fxn = CompiledRunner(kernel.to_program())
-kernel.uops.print()
 print(fxn.p.src)
 # NOTE: fxn.clprg is the ClangProgram
 
