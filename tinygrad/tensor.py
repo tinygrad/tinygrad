@@ -1631,8 +1631,7 @@ class Tensor:
     """
     return (-self).argmax(axis=axis, keepdim=keepdim)
 
-  @staticmethod
-  def rearrange(arg: Union[Tensor, List[Tensor]], formula: str, **sizes) -> Tensor:
+  def rearrange(self, formula: str, **sizes) -> Tensor:
     """
     Rearranges input according to formula
 
@@ -1643,8 +1642,7 @@ class Tensor:
     print(Tensor.rearrange(x, "batch channel -> (batch channel)).numpy())
     ```
     """
-    if isinstance(arg, list): return Tensor.rearrange(Tensor.stack(*arg), formula, **sizes)
-    def replace_ellipsis(l, n): return l[: (i := l.index("..."))] + [f"...{j}" for j in range(n)] + l[i + 1 :] if "..." in l else l
+    def replace_ellipsis(l, n): return l[: (i := l.index("..."))] + [f"...{j}" for j in range(n)] + l[i + 1:] if "..." in l else l
     def parse_formula(formula: str):
       lparens, rparens = map(lambda x: [i for i, ch in enumerate(formula) if ch == x], ("(", ")"))
       assert len(lparens) == len(rparens) and sorted(flatten(pairs := list(zip(lparens, rparens)))) == flatten(pairs), "bracket mismatch"
@@ -1658,11 +1656,11 @@ class Tensor:
     assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
 
     # resolve ellipsis
-    ellipsis_len = len(arg.shape) - len(lhs) + 1 + sum(len(group) - 1 for group in unflatten_groups) if "..." in lhs else 0
+    ellipsis_len = len(self.shape) - len(lhs) + 1 + sum(len(group) - 1 for group in unflatten_groups) if "..." in lhs else 0
     lhs, rhs, *flatten_groups = map(lambda l: replace_ellipsis(l, ellipsis_len), (lhs, rhs, *flatten_groups))
 
     # apply movement ops in order unflatten -> permute -> flatten
-    t = functools.reduce(lambda x, group: x.unflatten(lhs.index(group[0]), tuple(sizes.get(name, -1) for name in group)), unflatten_groups, arg)
+    t = functools.reduce(lambda x, group: x.unflatten(lhs.index(group[0]), tuple(sizes.get(name, -1) for name in group)), unflatten_groups, self)
     t = t.permute([lhs.index(name) for name in rhs])
     return functools.reduce(lambda x, group: x.flatten(d := rhs.index(group[0]), d + len(group) - 1), reversed(flatten_groups), t)
 
