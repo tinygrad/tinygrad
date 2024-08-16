@@ -10,9 +10,12 @@ libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_i
 libc.mmap.restype = ctypes.c_void_p
 
 def ioctls_from_header():
-  hdrpy = (pathlib.Path(__file__).parent.parent.parent.parent / "tinygrad" / "runtime" / "autogen" / "kfd.py").read_text()
-  pattern = r'# (AMDKFD_IOC_[A-Z0-9_]+)\s=\s_(IOW?R?).*\(( 0x[0-9a-fA-F]+) ,\s+struct\s([A-Za-z0-9_]+)\s+\)'
-  matches = re.findall(pattern, hdrpy, re.MULTILINE)
+  # hdrpy = (pathlib.Path(__file__).parent.parent.parent.parent / "tinygrad" / "runtime" / "autogen" / "kfd.py").read_text()
+  # pattern = r'# (AMDKFD_IOC_[A-Z0-9_]+)\s=\s_(IOW?R?).*\(( 0x[0-9a-fA-F]+) ,\s+struct\s([A-Za-z0-9_]+)\s+\)'
+  # matches = re.findall(pattern, hdrpy, re.MULTILINE)
+  hdr = (pathlib.Path(__file__).parent.parent.parent / "hip_gpu_driver" / "kfd_ioctl.h").read_text().replace("\\\n", "")
+  pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_(IOW?R?)\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
+  matches = re.findall(pattern, hdr, re.MULTILINE)
   return type("KFD_IOCTLS", (object, ), {name: int(nr, 0x10) for name, _, nr, _ in matches}), \
          {int(nr, 0x10): getattr(kfd, "struct_"+sname) for name, idir, nr, sname in matches}
 kfd_ioctls, kfd_headers = ioctls_from_header()

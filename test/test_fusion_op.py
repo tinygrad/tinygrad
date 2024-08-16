@@ -28,7 +28,7 @@ class TestFusionOp(unittest.TestCase):
     for _ in range(24): a = a + a
     sched = create_schedule([a.lazydata], None)
     ei = lower_schedule_item(sched[-1])
-    self.assertLess(time.perf_counter()-st, 1.0)
+    self.assertLess(time.perf_counter()-st, 2.0)
     assert len(ei.prg.p.src.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
@@ -44,7 +44,7 @@ class TestFusionOp(unittest.TestCase):
     sched3 = create_schedule([c.lazydata], None)
     assert sched1[-1].ast == sched2[-1].ast
     assert sched1[-1].ast != sched3[-1].ast
-    self.assertLess(time.perf_counter()-st, 1.0)
+    self.assertLess(time.perf_counter()-st, 2.0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

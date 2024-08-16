@@ -1965,12 +1965,12 @@ class Tensor:
     x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
-      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32), [1] * self.ndim
+      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
       index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
       reshape[i] = expand[i] = size[i]
       low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
       x = x.gather(i, low).lerp(x.gather(i, high), perc)
-    return x
+    return x.cast(self.dtype)
 
   # ***** unary ops *****
 
@@ -2173,7 +2173,7 @@ class Tensor:
     ```
     """
     return self*self
-  def clip(self, min_=None, max_=None):
+  def clamp(self, min_=None, max_=None):
     """
     Clips (clamps) the values in the tensor between `min_` and `max_` element-wise.
     If `min_` is `None`, there is no lower bound. If `max_` is None, there is no upper bound.
@@ -2185,6 +2185,11 @@ class Tensor:
     if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
     ret = self.maximum(min_) if min_ is not None else self
     return ret.minimum(max_) if max_ is not None else ret
+  def clip(self, min_=None, max_=None):
+    """
+    Alias for `Tensor.clamp`.
+    """
+    return self.clamp(min_, max_)
   def sign(self):
     """
     Returns the sign of the tensor element-wise.
@@ -3062,7 +3067,14 @@ class Tensor:
     ```
     """
     if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
-    return F.Cast.apply(self, dtype=dt, bitcast=True) if self.dtype != (dt:=to_dtype(dtype)) else self
+    dt = to_dtype(dtype)
+    if (not isinstance(self.device, str) or not self.device.startswith("DISK")) and (ns:=dt.itemsize) != (os:=self.dtype.itemsize):
+      if not (self.shape[-1]*os) % ns == 0: raise RuntimeError("unsupported size in bitcast")
+      new_uint, old_uint = to_dtype(f"uint{8*ns}"), to_dtype(f"uint{8*os}")
+      tmp = self.bitcast(old_uint)
+      if ns > os: return functools.reduce(Tensor.__add__, (tmp[...,i::ns//os].cast(new_uint) << 8*i*os for i in range(ns//os))).bitcast(dtype)
+      return Tensor.stack(*(tmp>>8*i*ns for i in range(os//ns)), dim=-1).flatten(-2).cast(new_uint).bitcast(dtype)
+    return F.Cast.apply(self, dtype=dt, bitcast=True) if self.dtype != dt else self
 
   def float(self) -> Tensor:
     """

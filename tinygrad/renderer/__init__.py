@@ -1,8 +1,9 @@
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup
 from tinygrad.codegen.uops import UOps, UOp, flops_mem
+from tinygrad.ops import Op
 from tinygrad.shape.symbolic import sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
@@ -81,5 +82,6 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
+  code_for_op: Dict[Op, Callable] = {}
 
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")
