@@ -1301,73 +1301,61 @@ class Tensor:
 
   @staticmethod
   def rearrange(x: Tensor, formula: str, **axes_lengths) -> Tensor:
-    # can't ignore whitespace! it's a delimiter in rearrange
-    # formula = formula.replace(" ", "")
     assert "->" in formula
-    input, output = formula.split("->")
+    inp, output = formula.split("->")
     def parse_expr(expr):
-      parts, group, curr = [], None, ""
-      # TODO much redundancy
-      for char in expr.strip():
-        if char == '(':
+      res, group = [], None
+      print(expr.split())
+      for token in expr.split():
+        if token.startswith('(') and token.endswith(')'): res.append([token[1:-1]]) # edge case
+        elif token.startswith("("):
           assert group is None, "Can't nest dimensions"
-          if curr:
-              parts.append(curr)
-              curr = ""
-          group = []
-        elif char == ')':
+          group = [token[1:]]
+        elif token.endswith(")"):
           assert group is not None, "Unmatched parenthesis"
-          if curr:
-              group.append(curr)
-              curr = ""
-          parts.append(group)
+          group.append(token[:-1])
+          res.append(group)
           group = None
-        elif char.isspace():
-            if curr: group.append(curr) if isinstance(group, list) else parts.append(curr)
-            curr = ""
-        else: curr += char
-      if curr: parts.append(curr)
+        elif group: group.append(token)
+        else: res.append(token)
       assert group is None, "Unmatched parenthesis"
-      return parts
-    rhs_parts = parse_expr(output)
-    lhs_parts = parse_expr(input)
-    # flatten is flattening multiple characters, only want to flatten lists
-    # fully_flatten circumvents this
-    flat_in = fully_flatten(lhs_parts)
-    flat_out = fully_flatten(rhs_parts)
+      return res
     # As we flatten a sublist we track if the current character is in axes arguments
     # if so add that to our divisor, if not we've found the element we need to find
     unsqueeze_axes = set()
-    def lhs_shape(i, lhs_part) -> Dict[str, int]:
-        shape, divisor, real_char= 0, 1, ""
-        if isinstance(lhs_part, list):
-            for part in lhs_part:
-                if part in axes_lengths:
-                    divisor *= axes_lengths[part]
-                    unsqueeze_axes.add(part)
-                else: shape = x.shape[i]; real_char = part
-            if real_char: return {real_char: shape // divisor}
-        elif lhs_part not in axes_lengths: return {lhs_part: x.shape[i]}
-        return {} # disgusting
-
-    # FIXME hacky
-    axes_lengths: Dict[str, int] = merge_dicts([lhs_shape(i, part) for i, part in enumerate(lhs_parts)] + [axes_lengths])
+    def lhs_shape(i, tokens) -> Dict[str, int]:
+      if isinstance(tokens, list):
+        shape, divisor, unk_dim= 0, 1, ""
+        for part in tokens:
+          if part in axes_lengths:
+            divisor *= axes_lengths[part]
+            unsqueeze_axes.add(part)
+          else:
+            shape = x.shape[i]
+            unk_dim = part
+        if unk_dim: return {unk_dim: shape // divisor}
+      elif tokens not in axes_lengths: return {tokens: x.shape[i]}
+      return {} # don't like
+    # TODO Ellipsis complicates everything a lot
+    # leaving it for now
+    lhs_parts, rhs_parts = parse_expr(inp), parse_expr(output)
+    flat_in = fully_flatten(lhs_parts)
+    out_axes: Dict[str, int] = merge_dicts([lhs_shape(i, part) for i, part in enumerate(lhs_parts)] + [axes_lengths])
     lhs = {s: i for i, s in enumerate(flat_in)}
-    rhs = {i: s for i, s in enumerate(flat_out)}
-    permute_order = [lhs[rhs[i]] for i in range(len(rhs))]
-    out_shape = [functools.reduce(lambda s, s2: s * axes_lengths[s2], out, 1) if
-                 isinstance(out, list) else axes_lengths[out] for out in rhs_parts]
+    rhs = dict(enumerate(fully_flatten(rhs_parts)))
+    order = [lhs[rhs[i]] for i in range(len(rhs))]
 
+    out_shape = [functools.reduce(lambda s, s2: s * out_axes[s2], out, 1) if
+                 isinstance(out, list) else out_axes[out] for out in rhs_parts]
     for axes in unsqueeze_axes: x = x.unsqueeze(lhs[axes])
-    if flat_in != lhs_parts: x = x.reshape([axes_lengths[i] for i in flat_in])
-    x = x
+    if flat_in != lhs_parts: x = x.reshape([out_axes[i] for i in flat_in])
     # need to rearrange to the LHS look like what is described
     # but with all parenthesis unsqueezed.
     #
     # For example (f d) c (e b) a -> a b c d e f
     # should rearrange like this:
     # (f d) c (e b) a -> (f d) 1 c (e b) 1 a -> f d c e b a -> a b c d e f
-    return x.permute(permute_order).reshape(out_shape)
+    return x.permute(order).reshape(out_shape)
 
   # ***** reduce ops *****
 

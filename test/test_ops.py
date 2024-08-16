@@ -811,6 +811,33 @@ class TestOps(unittest.TestCase):
     assert x2[1, 2, 3].numpy() == result[2, 3, 1]
     assert x2[0, 1, 2].numpy() == result[1, 2, 0]
 
+  def test_rearrange_permutations_numpy(self):
+    # tests random permutation of axes against two independent numpy ways
+      for n_axes in range(1, 10):
+        input = np.arange(2**n_axes).reshape([2] * n_axes)
+        permutation = np.random.permutation(n_axes)
+        left_expression = " ".join("i" + str(axis) for axis in range(n_axes))
+        right_expression = " ".join("i" + str(axis) for axis in permutation)
+        expression = left_expression + " -> " + right_expression
+        result = Tensor.rearrange(Tensor(input), expression).numpy()
+
+        for pick in np.random.randint(0, 2, [10, n_axes]):
+          assert input[tuple(pick)] == result[tuple(pick[permutation])]
+
+      # I don't think this test will work as intended
+      # for n_axes in range(1, 10):
+      #   input = np.arange(2**n_axes).reshape([2] * n_axes)
+      #   permutation = np.random.permutation(n_axes)
+      #   left_expression = " ".join("i" + str(axis) for axis in range(n_axes)[::-1])
+      #   right_expression = " ".join("i" + str(axis) for axis in permutation[::-1])
+      #   expression = left_expression + " -> " + right_expression
+      #   result = Tensor.rearrange(Tensor(input), expression)
+      #   assert result.shape == input.shape
+      #   expected_result = np.zeros_like(input)
+      #   for original_axis, result_axis in enumerate(permutation):
+      #     expected_result |= ((input >> original_axis) & 1) << result_axis
+      #     assert np.array_equal(result.numpy(), expected_result)
+
   @unittest.skipIf(IMAGE>0, "no 1d dot for images")
   def test_dot_1d(self):
     helper_test_op([(65), (65)], lambda x,y: x.matmul(y), Tensor.dot)
