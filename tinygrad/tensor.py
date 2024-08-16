@@ -1644,14 +1644,14 @@ class Tensor:
     ```
     """
     if isinstance(arg, list): return Tensor.rearrange(Tensor.stack(*arg), formula, **sizes)
-    def replace_ellipsis(l: list, n: int): return l[:(i:=l.index("..."))] + [f"...{j}" for j in range(n)] + l[i+1:] if "..." in l else l
+    def replace_ellipsis(l, n): return l[:(i:=l.index("..."))] + [f"...{j}" for j in range(n)] + l[i+1:] if "..." in l else l
     def parse_formula(formula: str):
         lparens, rparens = map(lambda x: [i for i, ch in enumerate(formula) if ch==x], ("(", ")"))
         assert len(lparens) == len(rparens) and sorted(flatten(pairs := list(zip(lparens, rparens)))) == flatten(pairs), "bracket mismatch"
         return formula.replace("(", "").replace(")", "").split(), [formula[o+1:c].split() for o, c in pairs]
-    def get_group_dims(dim_number: int, group: list[str], x: Tensor) -> tuple[int]:
+    def get_group_dims(dim_number, group, shape):
         dims = [sizes[name] if name in sizes else -1 for name in group]
-        if dims.count(-1) == 1: dims[dims.index(-1)] = x.shape[dim_number]//math.prod(dim for dim in dims if dim != -1)
+        if dims.count(-1) == 1: dims[dims.index(-1)] = shape[dim_number]//math.prod(dim for dim in dims if dim != -1)
         if -1 in dims: raise ValueError("not enough dimensions given")
         return tuple(dims)
 
@@ -1668,7 +1668,7 @@ class Tensor:
     lhs, rhs, *flatten_groups= map(lambda l: replace_ellipsis(l, ellipsis_len), (lhs, rhs, *flatten_groups))
 
     #apply movement ops in order unflatten -> permute -> flatten
-    t = functools.reduce(lambda x, group: x.unflatten(d:=lhs.index(group[0]), get_group_dims(d, group, x)), unflatten_groups, arg)
+    t = functools.reduce(lambda x, group: x.unflatten(d:=lhs.index(group[0]), get_group_dims(d, group, x.shape)), unflatten_groups, arg)
     t = t.permute([lhs.index(name) for name in rhs])
     return functools.reduce(lambda x, group: x.flatten(d:=rhs.index(group[0]), d + len(group) - 1), reversed(flatten_groups), t)
 
