@@ -61,7 +61,8 @@ def fold_expanded(ex, buf):
 
 def vectorize_reduce(vec:UOp):
   if all_same(vec.src): return None  # don't REDUCE the same thing multiple times
-  if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None
+  if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None    # must have the same reduce ranges
+  if not vec.dtype or vec.dtype.scalar() not in {dtypes.float, dtypes.half}: return None  # only fold float/half like this
   return UOp(UOps.REDUCE, vec.dtype, (UOp(UOps.VECTORIZE, vec.dtype, tuple(x.src[0] for x in vec.src)),) + vec.src[0].src[1:], vec.src[0].arg)
 
 def vectorize_alu(vec:UOp):
