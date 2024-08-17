@@ -7,10 +7,9 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate
+from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate, UOps, UOp
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer
+from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -88,10 +87,9 @@ class PythonProgram:
         elif uop is UOps.SPECIAL:
           if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
           elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
-        elif uop is UOps.CONST:
-          ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
+        elif uop is UOps.CONST: ul[i] = [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
-          ul[i] = [[inp[0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
+          ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is UOps.RANGE:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
@@ -175,6 +173,14 @@ class PythonProgram:
             # (i, j), C, D (4 elements on 32 threads)
             def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
             ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+          elif arg[4] == "INTEL":
+            # A (16 elements on 8 threads)
+            def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]
+            # B (16 elements on 8 threads)
+            def b_elem(x, i, j, goff): return x[j][goff+i]
+            # C, D (8 elements on 8 threads)
+            def c_map(lane, elem): return (lane, elem)
+            ul[i] = wmma_helper(8, 16, 16, 16, 8, a_elem, b_elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
@@ -190,6 +196,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
+    if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
 
   def render(self, name:str, uops:List[UOp]) -> str:
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]

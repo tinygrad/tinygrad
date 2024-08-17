@@ -167,7 +167,8 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
     def __setstate__(self, state): self.tensor = state[0]
 
   deserialized_objects: Dict[str, Any] = {}
-  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16, "IntStorage": dtypes.int32,
+  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16,
+               "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool,
                "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2, "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass

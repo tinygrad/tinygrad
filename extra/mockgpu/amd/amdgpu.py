@@ -11,7 +11,7 @@ SUB = PACKET3_SET_SH_REG_START - BASE_ADDR
 
 regCOMPUTE_PGM_LO = 0x1bac - SUB
 regCOMPUTE_USER_DATA_0 = 0x1be0 - SUB
-regCOMPUTE_START_X = 0x1ba4 - SUB
+regCOMPUTE_NUM_THREAD_X = 0x1ba7 - SUB
 
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
 
@@ -62,7 +62,7 @@ class AMDQueue():
     self.wptr = to_mv(wptr, 8).cast("Q")
 
 class PM4Executor(AMDQueue):
-  def __init__(self, gpu, base, size, rptr, wptr): 
+  def __init__(self, gpu, base, size, rptr, wptr):
     self.gpu = gpu
     super().__init__(base, size, rptr, wptr)
 
@@ -79,7 +79,7 @@ class PM4Executor(AMDQueue):
       op = (header >> 8) & 0xFF
       n = (header >> 16) & 0x3FFF
       assert packet_type == 3, "Can parse only packet3"
-      if op == amd_gpu.PACKET3_SET_SH_REG: self._exec_set_sh_reg(n) 
+      if op == amd_gpu.PACKET3_SET_SH_REG: self._exec_set_sh_reg(n)
       elif op == amd_gpu.PACKET3_ACQUIRE_MEM: self._exec_acquire_mem(n)
       elif op == amd_gpu.PACKET3_RELEASE_MEM: self._exec_release_mem(n)
       elif op == amd_gpu.PACKET3_WAIT_REG_MEM: cont = self._exec_wait_reg_mem(n)
@@ -111,7 +111,7 @@ class PM4Executor(AMDQueue):
     if mem_data_sel == 1 or mem_data_sel == 2: ptr.cast('Q')[0] = val
     elif mem_data_sel == 3:
       if mem_event_type == CACHE_FLUSH_AND_INV_TS_EVENT: ptr.cast('Q')[0] = int(time.perf_counter() * 1e8)
-      else: raise RuntimeError(f"Unknown {mem_data_sel=} {mem_event_type=}") 
+      else: raise RuntimeError(f"Unknown {mem_data_sel=} {mem_event_type=}")
     else: raise RuntimeError(f"Unknown {mem_data_sel=}")
 
   def _exec_wait_reg_mem(self, n):
@@ -153,7 +153,7 @@ class PM4Executor(AMDQueue):
 
     prg_addr = (self.gpu.regs[regCOMPUTE_PGM_LO] + (self.gpu.regs[regCOMPUTE_PGM_LO + 1] << 32)) << 8
     args_addr = self.gpu.regs[regCOMPUTE_USER_DATA_0] + (self.gpu.regs[regCOMPUTE_USER_DATA_0 + 1] << 32)
-    lc = [self.gpu.regs[i] for i in range(regCOMPUTE_START_X+3, regCOMPUTE_START_X+6)]
+    lc = [self.gpu.regs[i] for i in range(regCOMPUTE_NUM_THREAD_X, regCOMPUTE_NUM_THREAD_X+3)]
 
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
@@ -180,7 +180,7 @@ class PM4Executor(AMDQueue):
     _ = self._next_dword() # do not emulate events for now
 
 class SDMAExecutor(AMDQueue):
-  def __init__(self, gpu, base, size, rptr, wptr): 
+  def __init__(self, gpu, base, size, rptr, wptr):
     self.gpu, self.base = gpu, base
     super().__init__(base, size, rptr, wptr)
 

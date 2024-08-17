@@ -8,9 +8,9 @@ from typing import List, Optional, Union, cast
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, MetaOps, ReduceOps, UnaryOps, verify_lazyop
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, flatten, getenv, SPLIT_REDUCEOP
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.ops import BinaryOps, MetaOps, UnaryOps, UOps
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
+from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported, Context
@@ -25,7 +25,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
   if to_prerealize:
     for pre in to_prerealize: pre.schedule()
   sched = create_schedule(outs)
-  if filter_sink: sched = [s for s in sched if s.ast.op is MetaOps.KERNEL]
+  if filter_sink: sched = [s for s in sched if s.ast.op is UOps.SINK]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
@@ -34,7 +34,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
   if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (sink) ops linearize
   for s in sched:
-    if s.ast.op is not MetaOps.KERNEL: continue
+    if s.ast.op is not UOps.SINK: continue
     l = Kernel(s.ast)
     l.hand_coded_optimizations()
     l.linearize()
@@ -162,7 +162,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
     schedule = check_schedule(out, 2)
-    reduceops = [x for si in schedule for x in si.ast.lazyops if x.op in ReduceOps]
+    reduceops = [x for si in schedule for x in si.ast.parents if x.op is UOps.REDUCE_AXIS]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -173,7 +173,7 @@ class TestSchedule(unittest.TestCase):
     out0 = r0 + y
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 4)
-    reduceops = [x for si in schedule for x in si.ast.lazyops if x.op in ReduceOps]
+    reduceops = [x for si in schedule for x in si.ast.parents if x.op is UOps.REDUCE_AXIS]
     assert len(reduceops) == 2
 
   def test_fold_double_unary(self):
@@ -220,30 +220,51 @@ class TestSchedule(unittest.TestCase):
           check_schedule(opt.schedule_step(), cnt)
 
   def test_fold_conv_relu_backward(self):
-    with Context(FUSE_CONV_BW=1):
-      c1 = nn.Conv2d(3,16,3, bias=False)
-      c1.weight.requires_grad = True
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
 
-      # run
-      img = Tensor.rand(2,3,64,64, requires_grad=True)
-      c1(img).relu().mean().backward()
-      check_schedule([img.grad, c1.weight.grad], 4)
+    # run
+    c1(img).relu().mean().backward()
+    assert img.grad is not None and c1.weight.grad is not None
+    run_schedule(check_schedule([img.grad, c1.weight.grad], 7, filter_sink=False))
 
-  # TODO: add cast
-  @unittest.expectedFailure
+    # compare
+    import torch
+    c1_torch = torch.nn.Conv2d(3,16,3, bias=False)
+    c1_torch.weight.requires_grad = True
+    c1_torch.weight = torch.nn.Parameter(torch.tensor(c1.weight.numpy(), dtype=torch.float32))
+    img_torch = torch.tensor(img.numpy(), requires_grad=True)
+    c1_torch(img_torch).relu().mean().backward()
+    assert img_torch.grad is not None and c1_torch.weight.grad is not None
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_fold_conv_relu_backward_half(self):
-    with Context(FUSE_CONV_BW=1):
-      old_float = dtypes.default_float
-      dtypes.default_float = dtypes.float16
+    old_float = dtypes.default_float
+    dtypes.default_float = dtypes.float16
 
-      c1 = nn.Conv2d(3,16,3, bias=False)
-      c1.weight.requires_grad = True
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
 
-      # run
-      img = Tensor.rand(2,3,64,64, requires_grad=True)
-      c1(img).relu().mean().backward()
-      dtypes.default_float = old_float
-      check_schedule([img.grad, c1.weight.grad], 4)
+    # run
+    c1(img).relu().mean().backward()
+    assert img.grad is not None and c1.weight.grad is not None
+    run_schedule(check_schedule([img.grad, c1.weight.grad], 7, filter_sink=False))
+    dtypes.default_float = old_float
+
+    # compare
+    import torch
+    c1_torch = torch.nn.Conv2d(3,16,3, bias=False, dtype=torch.half)
+    c1_torch.weight.requires_grad = True
+    c1_torch.weight = torch.nn.Parameter(torch.tensor(c1.weight.numpy(), dtype=torch.half))
+    img_torch = torch.tensor(img.numpy(), requires_grad=True)
+    c1_torch(img_torch).relu().mean().backward()
+    assert img_torch.grad is not None and c1_torch.weight.grad is not None
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
 
   def test_fold_batchnorm_backward(self):
     with Context(FUSE_CONV_BW=1):
@@ -1004,7 +1025,7 @@ class TestSchedule(unittest.TestCase):
     b = r.sum(0) * 4
     c = r.sum(1) * 2
     schedule = check_schedule([b, c], 3)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_simple_chase(self):
@@ -1015,7 +1036,7 @@ class TestSchedule(unittest.TestCase):
     c = r.sum(1) + 12
     np_r = (a.numpy() + (a.numpy().sum(0) + 6)).sum(0) * 2
     # schedule = check_schedule([b,c], 3)
-    # assert schedule[0].ast[0].src[0].op is BinaryOps.MUL
+    # self.assertIs(schedule[0].ast[0].src[0].arg, BinaryOps.MUL)
     schedule = check_schedule([b,c], 4)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), np_r.sum(0) + 8, atol=1e-4, rtol=1e-4)
@@ -1028,7 +1049,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * d
     schedule = check_schedule([d, e], 3)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_push_permute_chase(self):
@@ -1039,7 +1060,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * (d + a).sum(2)
     schedule = check_schedule([d, e], 3) # make sure it doesn't fuse
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(d.numpy(), (a.numpy().sum(2) + b.numpy()).T * 4, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), (a.numpy().sum(2) + b.numpy()) * (d.numpy() + a.numpy()).sum(2), atol=1e-4, rtol=1e-4)
@@ -1051,7 +1072,7 @@ class TestSchedule(unittest.TestCase):
     r = a.sum(1) + c
     d = r[:4] * b
     schedule = check_schedule(d, 2)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
 
   # multireduce spec
   def test_multireduce_push_shrink_chase(self):
@@ -1064,7 +1085,7 @@ class TestSchedule(unittest.TestCase):
     out = r[:4] * b + d.sum(1)[:4]
     # schedule = check_schedule(out, 2)
     schedule = check_schedule(out, 3)
-    assert schedule[0].ast.src[0].src[0].op is BinaryOps.ADD
+    self.assertIs(schedule[0].ast.src[0].src[2].arg, BinaryOps.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(out.numpy(), (a.numpy().sum(1) + c.numpy())[:4] * b.numpy() + d.numpy().sum(1)[:4], atol=1e-4, rtol=1e-4)
 
@@ -1072,7 +1093,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(16, 16)
     b = (a.sum(0) + a.max(1)) + 2
     schedule = check_schedule(b, 2)
-    assert schedule[0].ast.src[0].src[0].op is ReduceOps.MAX
+    self.assertIs(schedule[0].ast.src[0].src[2].op, UOps.REDUCE_AXIS)
 
   # multireduce spec
   def test_multireduce_midreduce_nochase(self):
@@ -1081,7 +1102,7 @@ class TestSchedule(unittest.TestCase):
     b = (a.sum(0)+a.max(0) + a.max(1)+a.sum(1)) + 2
     # schedule = check_schedule(b, 2)
     schedule = check_schedule(b, 4)
-    assert schedule[0].ast.src[0].src[0].op is ReduceOps.MAX
+    self.assertIs(schedule[0].ast.src[0].src[2].op, UOps.REDUCE_AXIS)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), a.numpy().sum(0)+a.numpy().max(0) + a.numpy().max(1)+a.numpy().sum(1)+2, atol=1e-4, rtol=1e-4)
 
@@ -1267,12 +1288,71 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
+class TestConvBW(unittest.TestCase):
+  def check_schedule(self, xt, cnt:int, flops=None):
+    with Context(FUSE_CONV_BW=getenv("FUSE_CONV_BW", 1), NOOPT=flops is not None):
+      s = create_schedule(flatten([r.lazydata.lbs for r in xt]))
+      kernels = [si for si in s if si.ast.op is UOps.SINK]
+      for si in kernels: verify_ast(si.ast)
+      GlobalCounters.reset()
+      run_schedule(s)
+      if flops is not None: assert GlobalCounters.global_ops <= flops, f"too many ops {GlobalCounters.global_ops}"
+      if FUSE_CONV_BW: self.assertEqual(len(kernels), cnt)
+
+  def test_fold_conv_relu_backward(self):
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
+
+    # run
+    c1(img).relu().mean().backward()
+    assert img.grad is not None and c1.weight.grad is not None
+    self.check_schedule([img.grad, c1.weight.grad], 4)
+
+    # compare
+    import torch
+    c1_torch = torch.nn.Conv2d(3,16,3, bias=False)
+    c1_torch.weight.requires_grad = True
+    c1_torch.weight = torch.nn.Parameter(torch.tensor(c1.weight.numpy(), dtype=torch.float32))
+    img_torch = torch.tensor(img.numpy(), requires_grad=True)
+    c1_torch(img_torch).relu().mean().backward()
+    assert img_torch.grad is not None and c1_torch.weight.grad is not None
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
+
+  @unittest.expectedFailure
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_fold_conv_relu_backward_half(self):
+    old_float = dtypes.default_float
+    dtypes.default_float = dtypes.float16
+
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+
+    # run
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
+    c1(img).relu().mean().backward()
+    dtypes.default_float = old_float
+    self.check_schedule([img.grad, c1.weight.grad], 4)
+
+    # compare
+    import torch
+    c1_torch = torch.nn.Conv2d(3,16,3, bias=False, dtype=torch.half)
+    c1_torch.weight.requires_grad = True
+    c1_torch.weight = torch.nn.Parameter(torch.tensor(c1.weight.numpy(), dtype=torch.half))
+    img_torch = torch.tensor(img.numpy(), requires_grad=True)
+    c1_torch(img_torch).relu().mean().backward()
+    assert img_torch.grad is not None and c1_torch.weight.grad is not None
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
+
 class TestIndexing(unittest.TestCase):
-  def check_schedule(self, xt:Tensor, cnt:int):
+  def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
-      s = xt.schedule()
-      kernels = [si for si in s if si.ast.op is MetaOps.KERNEL]
-      for si in kernels: verify_lazyop(si.ast)
+      lst = [xt] if isinstance(xt, Tensor) else xt
+      s = Tensor.schedule(*lst)
+      kernels = [si for si in s if si.ast.op is UOps.SINK]
+      for si in kernels: verify_ast(si.ast)
       run_schedule(s)
       if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
 
@@ -1439,9 +1519,10 @@ class TestIndexing(unittest.TestCase):
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000, "dtype":dtypes.half}
     fused = precompute_freqs_cis(**args)
     self.check_schedule(fused, 1)
-    ref = precompute_freqs_cis(**args)
-    run_schedule(check_schedule(ref, 3))
-    np.testing.assert_equal(fused.numpy(), ref.numpy())
+    if getenv("CHECK", 1):
+      ref = precompute_freqs_cis(**args)
+      run_schedule(check_schedule(ref, 3))
+      np.testing.assert_equal(fused.numpy(), ref.numpy())
 
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
@@ -1457,6 +1538,52 @@ class TestIndexing(unittest.TestCase):
     xref = np.zeros((4, 4), dtype=int)
     xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
     np.testing.assert_equal(x.numpy(), xref)
+
+  def test_sparse_categorical_crossentropy_simple(self):
+    X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
+    Y = Tensor([1, 2]).realize()
+    loss = X.sparse_categorical_crossentropy(Y)
+    self.check_schedule(loss, 5)
+    np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
+
+  def test_mnist_val(self):
+    from tinygrad.nn.datasets import mnist
+    import torch
+    _, Y_train, _, _ = mnist()
+    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1]))
+    yt = Tensor.randn(BS, 10)
+    with Context(SPLIT_REDUCEOP=0):
+      loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+      self.check_schedule(loss, 6)
+      loss_fused = loss.numpy()
+    loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
+    np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
+
+  def test_arange_fuse_grouped_children(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X+Tensor.arange(16).reshape(4, 4)).sum()
+    out0 = r+2
+    out1 = r+3
+    self.check_schedule([out0, out1], 1)
+    r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
+    np.testing.assert_allclose(out0.numpy(), r_ref+2, rtol=2e-7)
+    np.testing.assert_allclose(out1.numpy(), r_ref+3, rtol=2e-7)
+
+  @unittest.expectedFailure
+  def test_fold_arange_view(self):
+    X = Tensor.randn(4, 4).realize()
+    r = (X+Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
+    self.check_schedule([r], 1)
+    np.testing.assert_allclose(r.numpy(), (X.numpy()+np.arange(16).reshape(4, 4)).sum(1, keepdims=True))
+
+  @unittest.expectedFailure
+  def test_multiview_arange_children(self):
+    X = Tensor.randn(2,3,4,4).numpy()
+    with Context(FUSE_ARANGE=1):
+      compare = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
+    with Context(FUSE_ARANGE=0, GRAPH=0, SAVE_SCHEDULE=1):
+      ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
+    np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

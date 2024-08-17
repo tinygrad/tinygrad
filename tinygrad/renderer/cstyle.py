@@ -1,10 +1,9 @@
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, cast, Literal, Callable
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp
 from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
@@ -22,6 +21,8 @@ class CStyleLanguage(Renderer):
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
   type_map: Dict[DType, str] = {}
+  infinity: str = "INFINITY"
+  nan: str = "NAN"
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x,dtype: f"(!{x})" if dtype == dtypes.bool else f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
@@ -45,13 +46,13 @@ class CStyleLanguage(Renderer):
 
   # returns a str expression of the const with the given type
   def render_const(self, x:ConstType, dtype:DType) -> str:
-    if math.isnan(x): val = "NAN"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    elif dtype.scalar() == dtypes.bool: val = "1" if x else "0"
-    elif dtype.scalar() == dtypes.float: val = f"{x}f"
-    elif dtype.scalar() == dtypes.uint64: val = f"{x}ULL"
+    assert dtype.count == 1, f"consts should be scalar, got {dtype}"
+    if math.isnan(x): val = self.nan
+    elif math.isinf(x): val = ("-" if x < 0 else "") + self.infinity
+    elif dtype == dtypes.bool: val = "1" if x else "0"
+    elif dtype == dtypes.float: val = f"{x}f"
+    elif dtype == dtypes.uint64: val = f"{x}ULL"
     else: val = str(x)
-    if dtype.count > 1: return self.render_vectorize([val] * dtype.count, dtype)
     return (self.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
@@ -135,6 +136,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.ALU:
           # remove parens if ALU types are the same. TODO: can do more here
           if args in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == args else r[v]for v in src]
+          elif args is BinaryOps.MAX: operands = [self.render_cast(r[v], cast(DType, v.dtype)) if v.op is UOps.CONST else r[v] for v in src]
           else: operands = [r[v] for v in src]
           val = self.code_for_op[args](*operands, dtype)
           assert child_count[u] != 0, f"childless ALU op found {u}"
@@ -174,7 +176,7 @@ class CStyleLanguage(Renderer):
           bufs[u] = (nm:=f"data{args}", (dtype, False))
           r[u] = nm
         elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[src[0]]}, {r[src[1]]}, {r[src[2]]});")
-        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(src[0].arg, dtype)};")
+        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {r[src[0]]};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert src[0].dtype is not None
@@ -191,11 +193,19 @@ class ClangRenderer(CStyleLanguage):
   supports_float4 = False
   has_local = False
   global_max = None
+  infinity = "__builtin_inff()"
+  nan = '__builtin_nanf("")'
 
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+  code_for_op = {**({k:v for k,v in CStyleLanguage().code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
+                 UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
+                 BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    prefix = [_make_clang_dtype(self, dtype) for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
@@ -209,13 +219,31 @@ class OpenCLRenderer(CStyleLanguage):
   float4 = "(float4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   uses_vload = True
-  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
+  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong", dtypes.bfloat16: "ushort" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.render_dtype(var_dtype)}({x})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
+    if any(uop.dtype == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+
+class IntelRenderer(OpenCLRenderer):
+  device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]]  # noqa: E501
+  def render_dtype(self, var_dtype:DType) -> str:
+    return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
+  def render_cast(self, x, var_dtype, bitcast=False, from_dtype=None) -> str:
+    return f"intel_convert_bfloat16_as_ushort({x[0]})" if (var_dtype, from_dtype) == (dtypes.bfloat16, dtypes.float) else \
+      (f"intel_convert_as_bfloat16_float({x[0]})" if (var_dtype, from_dtype) == (dtypes.float, dtypes.bfloat16) else \
+      super().render_cast(x, var_dtype, bitcast))
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    prefix = []
+    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+      dt_in = ("ushort", "bf16") if arg[2] == dtypes.bfloat16 else (arg[2].name, "f16")
+      prefix.append(f"""{arg[3].name}8 __{arg[0]}({dt_in[0]}16 a, {dt_in[0]}16 b, {arg[3].name}8 c) {{
+    return intel_sub_group_{dt_in[1]}_{dt_in[1]}_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""")
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix or None)
 
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
@@ -261,9 +289,10 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
 _nms = "xyzwabcdefghijkl"
-def _make_cuda_dtype(base_type, cnt, align):
-  vec, elems, header = f"{base_type}{cnt}", ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
-  return f"struct __align__({align}) {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
+def _make_cuda_dtype(renderer:CStyleLanguage, dtype:DType) -> str:
+  vec, scal = renderer.render_dtype(dtype), renderer.render_dtype(dtype.scalar()),
+  elems, header = ', '.join(_nms[:dtype.count]), ', '.join([f"{scal} {x}" for x in _nms[:dtype.count]])
+  return f"struct __align__({dtype.itemsize}) {vec} {{ {scal} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
 
 def get_fp8_header(format_type: str):
@@ -343,10 +372,11 @@ class CUDARenderer(CStyleLanguage):
     if any(uop.dtype == dtypes.half for uop in uops):
       prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", x, x*2) for x in [4, 8]]
 
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops):
-      prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", x, x*2) for x in [4, 8]]
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.half, dtypes.bfloat16)):
+      prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
+    dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       n,m,k = arg[1][0], arg[1][1], arg[1][2]
       warpcnt = 32
