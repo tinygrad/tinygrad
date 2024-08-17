@@ -737,9 +737,9 @@ class Tensor:
   def _deepwalk(self):
     def _walk(node, visited):
       visited.add(node)
-      if (ctx := getattr(node, "_ctx", None)) is not None and len(ctx.parents) != 0: # if tensor is not leaf, reset grad
-        node.grad = None
-      if getattr(node, "_ctx", None):
+      # if tensor is not leaf, reset grad
+      if (ctx := getattr(node, "_ctx", None)) is not None and len(ctx.parents) != 0: node.grad = None
+      if ctx:
         for i in node._ctx.parents:
           if i not in visited: yield from _walk(i, visited)
         yield node
