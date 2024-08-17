@@ -2,11 +2,11 @@ from typing import List, Callable
 import functools, math
 import numpy as np
 from tinygrad import Tensor, nn, GlobalCounters, TinyJit
-from tinygrad.helpers import partition, trange
+from tinygrad.helpers import partition, trange, getenv
 from extra.lr_scheduler import OneCycleLR
 
 # from https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
-batchsize = 1024
+batchsize = getenv("BS", 1024)
 bias_scaler = 64
 hyp = {
   'opt': {
@@ -54,35 +54,34 @@ whiten_conv_depth = 3*hyp['net']['whitening']['kernel_size']**2
 
 class ConvGroup:
   def __init__(self, channels_in, channels_out):
-    self.layers: List[Callable[[Tensor], Tensor]] = [
-      nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False),
-      Tensor.max_pool2d,
-      nn.BatchNorm(channels_out, eps=1e-12, momentum=hyp['net']['batch_norm_momentum']),
-      Tensor.gelu,
-      nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False),
-      nn.BatchNorm(channels_out, eps=1e-12, momentum=hyp['net']['batch_norm_momentum']),
-      Tensor.gelu]
-  def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
+    self.conv1 = nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
+    self.norm1 = nn.BatchNorm(channels_out, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
+    self.norm2 = nn.BatchNorm(channels_out, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
+    self.norm1.weight.requires_grad = False
+    self.norm2.weight.requires_grad = False
+  def __call__(self, x:Tensor) -> Tensor:
+    x =    self.norm1(self.conv1(x).max_pool2d()).gelu()
+    return self.norm2(self.conv2(x)).gelu()
 
 class SpeedyConvNet:
   def __init__(self):
-    self.layers: List[Callable[[Tensor], Tensor]] = [
-      nn.Conv2d(3, 2*whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=False),
-      Tensor.gelu,
-      ConvGroup(2*whiten_conv_depth, depths['block1']),
-      ConvGroup(depths['block1'], depths['block2']),
-      ConvGroup(depths['block2'], depths['block3']),
-      functools.partial(Tensor.max, axis=(2,3)),
-      nn.Linear(depths['block3'], depths['num_classes'], bias=False),
-      lambda x: x / hyp['opt']['scaling_factor']]
-  def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
+    self.whiten = nn.Conv2d(3, 2*whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=False)
+    self.conv_group_1 = ConvGroup(2*whiten_conv_depth, depths['block1'])
+    self.conv_group_2 = ConvGroup(depths['block1'], depths['block2'])
+    self.conv_group_3 = ConvGroup(depths['block2'], depths['block3'])
+    self.linear = nn.Linear(depths['block3'], depths['num_classes'], bias=False)
+  def __call__(self, x:Tensor) -> Tensor:
+    x = self.whiten(x).gelu()
+    x = x.sequential([self.conv_group_1, self.conv_group_2, self.conv_group_3])
+    return self.linear(x.max(axis=(2,3))) / hyp['opt']['scaling_factor']
 
 if __name__ == "__main__":
   # *** dataset ***
   X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
   cifar10_std, cifar10_mean = X_train.std_mean(axis=(0, 2, 3))
-  X_train = ((X_train - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).half()
-  X_test = ((X_test - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).half()
+  X_train = (X_train - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)
+  X_test = (X_test - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)
   Y_train = Y_train.one_hot(depths['num_classes'])
   Y_test = Y_test.one_hot(depths['num_classes'])
 
