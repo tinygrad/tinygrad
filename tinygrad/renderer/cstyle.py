@@ -296,8 +296,8 @@ def _make_cuda_dtype(renderer:CStyleLanguage, dtype:DType) -> str:
 
 
 def get_fp8_header(format_type: str):
-  assert format_type in ['e4m3', 'e5m2'], "Invalid format type. Use 'e4m3' or 'e5m2'."
-
+  assert format_type in ['f8e4m3', 'f8e5m2'], "Invalid format type. Use 'e4m3' or 'e5m2'."
+  format_type = format_type[2:]
   return f"""
 #define DEFINE_FP8_BINARY_OP_{format_type.upper()}(op) \\
     __device__ __forceinline__ __nv_fp8_{format_type} operator op (const __nv_fp8_{format_type}& a, const __nv_fp8_{format_type}& b) {{ \\
@@ -360,23 +360,13 @@ class CUDARenderer(CStyleLanguage):
     dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"), dtypes.f8e4m3: ("__nv_fp8_e4m3", "e4m3" ) }
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
-    if any(uop.dtype == dtypes.f8e5m2 for uop in uops):
-      # need to include fp16 since there is no arithmetic intrinsics for fp8 in CUDA, so we cast to fp16, do the op and cast back if result is float.
-      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e5m2", x, x*2 if x != 2 else x) for x in [2, 4, 8]] + \
-        [get_fp8_header("e5m2")]
-    if any(uop.dtype == dtypes.f8e4m3 for uop in uops):
-      # need to include fp16 since there is no arithmetic intrinsics for fp8 in CUDA, so we cast to fp16, do the op and cast back if result is float.
-      prefix += ["#include <cuda_fp8.h>"] + ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("__nv_fp8_e4m3", x, x*2 if x != 2 else x) for x in [2, 4, 8, 16]] + \
-        [get_fp8_header("e4m3")]
-
-    if any(uop.dtype == dtypes.half for uop in uops):
-      prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", x, x*2) for x in [4, 8]]
-
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.half, dtypes.bfloat16)):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
 
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.f8e4m3, dtypes.f8e5m2)):
+      prefix += ["#include <cuda_fp8.h>", "#include <cuda_fp16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [2, 4, 8, 16]] + [get_fp8_header(dtype.name)]
+
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
-    dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       n,m,k = arg[1][0], arg[1][1], arg[1][2]
       warpcnt = 32
