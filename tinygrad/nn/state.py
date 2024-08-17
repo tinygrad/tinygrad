@@ -129,8 +129,6 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
-# tar
-
 def tar_extract(fn:os.PathLike) -> Dict[str, Tensor]:
   t = Tensor(pathlib.Path(fn))
   with tarfile.open(fn, "r") as tar:
