@@ -188,6 +188,9 @@ class CStyleLanguage(Renderer):
     # NOTE: this relies on bufs dict preserving order
     return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
+def _make_clang_dtype(self, dtype):
+  return f"typedef {self.render_dtype(dtype.scalar())} {self.render_dtype(dtype)} __attribute__((aligned({(sz:=dtype.itemsize)}),vector_size({sz})));"
+
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
   float4 = "(float4)"
@@ -338,11 +341,19 @@ class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]
+  tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.f8e4m3, dtype_out=dtypes.float)]
   def __init__(self, arch:str, driver_version:Tuple[int,int] = None):
-    self.tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])] if int(arch[3:]) >= 80 else []
-    #TODO -what to do with driver_version and NVRenderer??
-    can_use_fp8_tcs = (driver_version is None or (driver_version[0] > 12) or driver_version[0] == 12 and driver_version[1] >= 4) and (int(arch[3:]) >= 89) # driver version >= 12.4, sm_89 or higher
-    self.tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.f8e4m3, dtype_out=dtypes.float)] if can_use_fp8_tcs else []
+    arch_version = int(arch[3:])
+    self.tensor_cores = CUDARenderer.tensor_cores if arch_version >= 80 else []
+    if arch_version < 80:
+      self.tensor_cores = []
+    elif arch_version < 89:
+      self.tensor_cores = self.tensor_cores[:2]
+    can_use_fp8_tcs = (driver_version is None or (driver_version[0] > 12) or (driver_version[0] == 12 and driver_version[1] >= 4)) and (arch_version >= 89) # driver version >= 12.4, sm_89 or higher
+    if not can_use_fp8_tcs:
+      self.tensor_cores = [tc for tc in self.tensor_cores if tc.dims != (8,16,32)]
+
   # language options
   kernel_prefix = "extern \"C\" __global__ "
   smem_prefix = "__shared__ "
