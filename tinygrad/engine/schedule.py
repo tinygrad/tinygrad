@@ -1,7 +1,7 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict, get_args
+from typing import Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, \
@@ -67,7 +67,10 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
       if isinstance(val:=buf.arg, Variable):
         val, var_val = val.unbind()
         var_vals[val] = var_val
-        return UOp(UOps.DEFINE_VAR, dtype, (unbound_st.to_uop(),), val)
+        # TODO: what is the shape of these min/max consts?
+        vmin = UOp(UOps.CONST, dtype, (unbound_st.to_uop(),), val.min)
+        vmax = UOp(UOps.CONST, dtype, (unbound_st.to_uop(),), val.max)
+        return UOp(UOps.DEFINE_VAR, dtype, (unbound_st.to_uop(), vmin, vmax), val)
       assert isinstance(val, get_args(ConstType)), f"cannot create ConstBuffer with value {val}"
       return UOp(UOps.CONST, dtype, (unbound_st.to_uop(),), val)
     # otherwise, it's a load and we add it to the inputs
