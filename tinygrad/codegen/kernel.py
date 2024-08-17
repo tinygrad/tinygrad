@@ -79,7 +79,7 @@ class Kernel:
     # NOTE: full_shape can be wrong if there's a tree of reduces
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.src[-1].arg for x in self.bufs]
+    self.sts: List[ShapeTracker] = [x.st_arg for x in self.bufs]
 
     # add the shapetrackers for each reduce
     # we use this to track which axes are reduced in each reduce
@@ -520,7 +520,7 @@ class Kernel:
             except KernelOptError: pass
 
       # are we upcasting in mid reduce? (only for images)
-      if cast(DType, self.bufs[0].src[2].dtype).name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:  # noqa: E501
+      if cast(DType, self.bufs[0].src[0].dtype).name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:  # noqa: E501
         axes = self.sts[0].unit_stride_axes()
         assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
         if self.sts[0].shape[axes[0]]%4 == 0:
@@ -637,7 +637,7 @@ class Kernel:
       arg = op.arg
       if op.op in BUFFER_UOPS:
         # for locals, we use the ShapeTracker that's in the srcs
-        st = op.src[-1].arg if op.src[0].op is UOps.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
+        st = op.st_arg if op.src[0].op is UOps.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
         idx, valid = (st if apply_to_st is None else apply_to_st(st)).to_uops()
         if op.op is UOps.CONST: return replace(op, src=(valid,))
         if op.op is UOps.STORE: return replace(op, src=(op.src[0], idx, fixup_ast(op.src[2], apply_to_st), valid))
@@ -754,7 +754,7 @@ class Kernel:
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
-    mem_bytes = sum(max(cast(DType, x.src[0].dtype).itemsize * x.src[-1].arg.real_size() for x in group)
+    mem_bytes = sum(max(cast(DType, x.src[0].dtype).itemsize * x.st_arg.real_size() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.parents if x.op in BUFFER_UOPS and x.src[0].op is UOps.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
     return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
@@ -768,7 +768,7 @@ def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
     if op in sts or op.op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
     # restore globals from the two stage reduce
     if op.op is UOps.LOAD and op.src[0].op is UOps.DEFINE_LOCAL:
-      assert_valid(local_reduce:=op.src[1].src[2], op.src[-1].arg)
+      assert_valid(local_reduce:=op.src[1].src[2], op.st_arg)
       return sts.setdefault(op, sts[local_reduce])
     for x in op.src: assert_valid(x, st)
     # only reduceop is allowed to change shape, limited to turning n to 1
@@ -782,7 +782,7 @@ def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
           if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op.op} {sts[x].shape} != {st.shape}")
           raise AssertionError(f"found implicit expand {x.op} {sts[x].shape} != {op.op} {st.shape} {prod(sts[x].shape)} != {prod(st.shape)}")
     sts[op] = st
-  for out in ast.src: assert_valid(out, out.src[-1].arg)
+  for out in ast.src: assert_valid(out, out.st_arg)
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
   return sts
