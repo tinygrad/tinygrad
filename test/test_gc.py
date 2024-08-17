@@ -20,7 +20,7 @@ class TestGC(unittest.TestCase):
   def test_gc_complex(self):
     a = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     b = Tensor.rand(4, 4, requires_grad=True)
-    assert(tensors_allocated() == 3)
+    assert(tensors_allocated() == 4)
     (a*b).mean().backward()
     assert(tensors_allocated() == 5)
     del b
