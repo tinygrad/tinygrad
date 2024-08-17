@@ -61,7 +61,6 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   # buffer ops define ShapeTracker
   if buf.realized is not None or (buf in realizes and buf not in outputs):
     unbound_st, st_var_vals = st.simplify().unbind()
-    idx, valid = UOp(UOps.ST_IDX, dtypes.pyint, (), unbound_st), UOp(UOps.ST_VALID, dtypes.bool, (), unbound_st)
     var_vals.update(st_var_vals)
     # if it's a const, we generate it
     if buf.op is MetaOps.CONST:
@@ -69,7 +68,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
         val, var_val = val.unbind()
         var_vals[val] = var_val
       else: assert isinstance(val, get_args(ConstType)), f"cannot create ConstBuffer with value {val}"
-      return UOp(UOps.CONST, dtype, (valid,), val)
+      return UOp(UOps.CONST, dtype, (unbound_st.to_uop(),), val)
     # otherwise, it's a load and we add it to the inputs
     if buf in assign_targets and not (unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and \
         ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask))):
@@ -78,7 +77,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
                            +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
     ubuf = UOp(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
                outputs.index(assign_targets[buf]) if buf in assign_targets else len(outputs)+inputs.setdefault(buf, len(inputs)))
-    return UOp(UOps.LOAD, dtype, (ubuf, idx, valid))
+    return UOp(UOps.LOAD, dtype, (ubuf, unbound_st.to_uop()))
 
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
@@ -147,9 +146,9 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> LBScheduleItem:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
   if (out:=outs[0]).op is MetaOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
-    idx, valid = ShapeTracker.from_shape(out.arg).to_uops()
-    rd = UOp(UOps.LOAD, dtypes.uint8, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.uint8), (), 1), idx, valid))
-    wr = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(out.dtype), (), 0), idx, rd, valid))
+    st_uop = ShapeTracker.from_shape(out.arg).to_uop()
+    rd = UOp(UOps.LOAD, dtypes.uint8, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.uint8), (), 1), st_uop))
+    wr = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(out.dtype), (), 0), st_uop, rd))
     return LBScheduleItem(UOp(UOps.SINK, None, (wr,)), outs, [x.base for x in out.srcs])
   if out.op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
     return LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), outs, [x.base for x in out.srcs])
@@ -180,7 +179,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     output_st, vv = output_st.simplify().unbind()
     if vv: var_vals.update(vv)
     ubuf = UOp(UOps.DEFINE_GLOBAL, out.dtype if isinstance(out.dtype, ImageDType) else PtrDType(out.dtype), (), i)
-    ast.append(UOp(UOps.STORE, None, (ubuf, UOp(UOps.ST_IDX, dtypes.pyint, (), output_st), src, UOp(UOps.ST_VALID, dtypes.bool, (), output_st))))
+    ast.append(UOp(UOps.STORE, None, (ubuf, output_st.to_uop(), src)))
   return LBScheduleItem(UOp(UOps.SINK, None, tuple(ast)), outs, list(inputs), var_vals,
                         dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))
 

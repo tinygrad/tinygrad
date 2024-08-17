@@ -638,10 +638,10 @@ class Kernel:
       if op.op in BUFFER_UOPS:
         # for locals, we use the ShapeTracker that's in the srcs
         st = op.st_arg if op.src[0].op is UOps.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
-        idx, valid = (st if apply_to_st is None else apply_to_st(st)).to_uops()
-        if op.op is UOps.CONST: return replace(op, src=(valid,))
-        if op.op is UOps.STORE: return replace(op, src=(op.src[0], idx, fixup_ast(op.src[2], apply_to_st), valid))
-        return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src[:-2])+(idx, valid))
+        st_uop = (st if apply_to_st is None else apply_to_st(st)).to_uop()
+        if op.op is UOps.CONST: return replace(op, src=(st_uop,))
+        if op.op is UOps.STORE: return replace(op, src=(op.src[0], st_uop, fixup_ast(op.src[2], apply_to_st)))
+        return replace(op, src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is UOps.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
         reduceop: Union[Literal[ReduceOps.SUM], Literal[ReduceOps.MAX]] = op.arg[0]
@@ -697,10 +697,10 @@ class Kernel:
               for i,(src,fix_st_fxn) in enumerate(zip(rsrc.src, [fix_st1, fix_st2])):
                 st_load = [self.sts[self.bufs.index(op)].real_strides() for op in rsrc.parents if op.op is UOps.LOAD]
                 local_shape = tuple(s if max(cast(int, x[i]) for x in st_load) != 0 else 1 for i,s in enumerate(ex_shape))
-                idx, valid = ShapeTracker.from_shape(local_shape).expand(ex_shape).to_uops()
-                membuf = UOp(UOps.DEFINE_LOCAL, PtrDType(tc.dtype_in), (), (f"temp{-(-1-i)}", idx.arg.real_size()))
-                local_store = fixup_ast(UOp(UOps.STORE, tc.dtype_in, (membuf, idx, src, valid)), fix_st_fxn)
-                srcs.append(UOp(UOps.LOAD, tc.dtype_in, (membuf, local_store, idx, valid)))
+                st_uop = ShapeTracker.from_shape(local_shape).expand(ex_shape).to_uop()
+                membuf = UOp(UOps.DEFINE_LOCAL, PtrDType(tc.dtype_in), (), (f"temp{-(-1-i)}", st_uop.arg.real_size()))
+                local_store = fixup_ast(UOp(UOps.STORE, tc.dtype_in, (membuf, st_uop, src)), fix_st_fxn)
+                srcs.append(UOp(UOps.LOAD, tc.dtype_in, (membuf, st_uop, local_store)))
             else:
               # for TC=2, we can't do the shapetracker fixup
               srcs = [fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])]
@@ -714,9 +714,9 @@ class Kernel:
           start = UOp(UOps.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(op.arg[0], axis))
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces] + \
             (1,) * (self.first_upcast - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
-          idx, valid = ShapeTracker.from_shape(local_shape).to_uops()
-          local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(cast(DType, op.dtype)), (), ("temp1", idx.arg.real_size()))
-          local_load = UOp(UOps.LOAD, op.dtype, (local_buffer, UOp.store(local_buffer, idx, start, valid), idx, valid))
+          st_uop = ShapeTracker.from_shape(local_shape).to_uop()
+          local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(cast(DType, op.dtype)), (), ("temp1", st_uop.arg.real_size()))
+          local_load = UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, start)))
           second_axis = tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces))
           return UOp(UOps.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
         arg = (reduceop, axis)
@@ -760,7 +760,7 @@ class Kernel:
     return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
 
-# the living definition of UOps.ST_IDX and UOps.ST_VALID
+# the living definition of UOps.SHAPETRACKER
 def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   assert ast.op is UOps.SINK and all(x.op is UOps.STORE for x in ast.src), "must be SINK"
   sts: Dict[UOp, ShapeTracker] = {}
@@ -768,15 +768,15 @@ def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
     if op in sts or op.op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
     # restore globals from the two stage reduce
     if op.op is UOps.LOAD and op.src[0].op is UOps.DEFINE_LOCAL:
-      assert_valid(local_reduce:=op.src[1].src[2], op.st_arg)
+      assert_valid(local_reduce:=op.src[2].src[2], op.st_arg)
       return sts.setdefault(op, sts[local_reduce])
     for x in op.src: assert_valid(x, st)
     # only reduceop is allowed to change shape, limited to turning n to 1
     if op.op is UOps.REDUCE_AXIS: st = ShapeTracker.from_shape(sts[op.src[0]].reduce(op.arg[1][-1] if op.arg[0] is ReduceOps.WMMA else op.arg[1]))
     else:
-      # movementops are pushed to the edges with ST_IDX, ST_VALID
+      # movementops are pushed to the edges with SHAPETRACKER
       # elementwise inherits shape
-      st = op.arg if op.op in {UOps.ST_IDX, UOps.ST_VALID} else sts[op.src[-1]]
+      st = op.arg if op.op is UOps.SHAPETRACKER else sts[op.src[-1]]
       for x in (op.src[1:] if op.op in BUFFER_UOPS else op.src):
         if sts[x].shape != st.shape:
           if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op.op} {sts[x].shape} != {st.shape}")
