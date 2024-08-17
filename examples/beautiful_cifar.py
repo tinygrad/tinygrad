@@ -1,5 +1,4 @@
-from typing import List, Callable
-import functools, math
+import math, time
 import numpy as np
 from tinygrad import Tensor, nn, GlobalCounters, TinyJit
 from tinygrad.helpers import partition, trange, getenv
@@ -124,5 +123,6 @@ if __name__ == "__main__":
     tidxs = Tensor(idxs)[:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)
     for epoch_step in (t:=trange(num_steps_per_epoch)):
       GlobalCounters.reset()
-      loss = train_step(tidxs[epoch_step].contiguous())
-      t.set_description(f"loss: {loss.item():6.2f}")
+      st = time.perf_counter()
+      loss = train_step(tidxs[epoch_step].contiguous()).item()
+      t.set_description(f"loss: {loss:8.2f}   tm: {(et:=(time.perf_counter()-st))*1000:6.2f} ms {GlobalCounters.global_ops/(1e9*et):7.0f} GFLOPS")

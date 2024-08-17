@@ -1509,9 +1509,9 @@ class Tensor:
     """
     Calculates the standard deviation and mean over the dimensions specified by dim.
 
-    Syntactic sugar around `Tensor.mean` and `Tensor.std` to match `torch.std_mean`
+    Syntactic sugar around `Tensor.std` and `Tensor.mean` to match `torch.std_mean`. tinygrad backend shouldn't compute mean twice.
     """
-    return self.mean(axis, keepdim), self.std(axis, keepdim, correction)
+    return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
