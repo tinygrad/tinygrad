@@ -252,12 +252,13 @@ class TestSchedule(unittest.TestCase):
 
     c1 = nn.Conv2d(3,16,3, bias=False)
     c1.weight.requires_grad = True
-    img = Tensor.rand(2,3,64,64, requires_grad=True)
+    c1.weight.realize()
+    img = Tensor.rand(2,3,64,64, requires_grad=True).realize()
 
     # run
     c1(img).relu().mean().backward()
     assert img.grad is not None and c1.weight.grad is not None
-    run_schedule(check_schedule([img.grad, c1.weight.grad], 7, filter_sink=False))
+    run_schedule(check_schedule([img.grad, c1.weight.grad], 6, filter_sink=False))
     dtypes.default_float = old_float
 
     # compare
