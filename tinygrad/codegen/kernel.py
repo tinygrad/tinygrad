@@ -13,7 +13,7 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DE
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.uopgraph import UOpGraph
+from tinygrad.codegen.uopgraph import linearize_uop
 from tinygrad.codegen.lowerer import ast_to_uop
 from enum import Enum, auto
 
@@ -737,8 +737,7 @@ class Kernel:
       print(self.applied_opts)
     verify_ast(modified_ast)
 
-    # generate the UOpGraph
-    self.uops:List[UOp] = UOpGraph(ast_to_uop(modified_ast, self.opts), self.opts).linearize(self.opts.extra_matcher)
+    self.uops:List[UOp] = linearize_uop(ast_to_uop(modified_ast, self.opts), self.opts, extra_pm=self.opts.extra_matcher)
     if DEBUG >= 5: print_uops(self.uops)
     if getenv("GRAPHUOPS"):
       from tinygrad.engine.graph import graph_uops

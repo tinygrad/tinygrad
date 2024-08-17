@@ -517,104 +517,100 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
     return found
   return __inner_rewrite(sink)
 
-class UOpGraph:
-  def __init__(self, sink:Union[UOp, List[UOp]], opts:Optional[Renderer]=None):
-    self.sink: UOp = sink if isinstance(sink, UOp) else UOp(UOps.SINK, None, tuple(sink))
-    assert self.sink.op is UOps.SINK, f"sink isn't sink, it's {self.sink.op}"
-    self.opts = opts
-    self.folder = constant_folder + transcendental_folding({} if TRANSCENDENTAL >= 2 or opts is None else opts.code_for_op.keys())
+linearize_cnt = 0
+def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, extra_pm:Optional[PatternMatcher]=None, skip_check=False) -> List[UOp]:
+  global linearize_cnt, acc_number
+  sink: UOp = sink_in if isinstance(sink_in, UOp) else UOp(UOps.SINK, None, tuple(sink_in))
+  assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
+  folder = constant_folder + transcendental_folding({} if TRANSCENDENTAL >= 2 or opts is None else opts.code_for_op.keys())
 
-  cnt = 0
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None, skip_check=False) -> List[UOp]:
-    global acc_number
-    acc_number = 0
+  # do graph rewrite
+  acc_number = 0
+  sink = graph_rewrite(sink, folder)
 
-    # do graph rewrite
-    sink = graph_rewrite(self.sink, self.folder)
+  # rewrite pyint to int32
+  sink = graph_rewrite(sink, PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE}, dtype=dtypes.pyint, name="x"),
+    lambda x: UOp(x.op, dtypes.int32, x.src, x.arg))]))
 
-    # rewrite pyint to int32
-    sink = graph_rewrite(sink, PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE}, dtype=dtypes.pyint, name="x"),
-      lambda x: UOp(x.op, dtypes.int32, x.src, x.arg))]))
+  # expand
+  linearize_cnt += 1
+  if linearize_cnt != getenv("DEBUG_EXPAND", 0):
+    sink = graph_rewrite(sink, folder+expander+float4_folding if opts is not None and opts.supports_float4 else folder+expander)
+    sink = graph_rewrite(sink, folder+expander+reducer)
 
-    # expand
-    UOpGraph.cnt += 1
-    if UOpGraph.cnt != getenv("DEBUG_EXPAND", 0):
-      sink = graph_rewrite(sink, self.folder+expander+float4_folding if self.opts is not None and self.opts.supports_float4 else self.folder+expander)
-      sink = graph_rewrite(sink, self.folder+expander+reducer)
+  # for PTX only
+  if extra_pm: sink = graph_rewrite(sink, folder+extra_pm)
 
-    # for PTX only
-    if extra_pm: sink = graph_rewrite(sink, self.folder+extra_pm)
+  # filter nodes that don't link to a sink
+  # BFS toposort
+  children: Dict[UOp, List[UOp]] = {}
+  range_srcs: Dict[UOp, Dict[UOp, None]] = {}
+  in_degree: Dict[UOp, int] = {}
+  get_children_dfs(sink, children, range_srcs, in_degree)
 
-    # filter nodes that don't link to a sink
-    # BFS toposort
-    children: Dict[UOp, List[UOp]] = {}
-    range_srcs: Dict[UOp, Dict[UOp, None]] = {}
-    in_degree: Dict[UOp, int] = {}
-    get_children_dfs(sink, children, range_srcs, in_degree)
+  @functools.lru_cache(None)
+  def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
+    if x.op is UOps.SINK: return set()
+    return set.union({x} if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
 
-    @functools.lru_cache(None)
-    def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
-      if x.op is UOps.SINK: return set()
-      return set.union({x} if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
+  # scope children impact the toposort and END* insertion
+  scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
+  range_phi = {r:[p for p in scope_children[r] if p.op is UOps.PHI] for r in scope_children if r.op is UOps.RANGE}
 
-    # scope children impact the toposort and END* insertion
-    scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
-    range_phi = {r:[p for p in scope_children[r] if p.op is UOps.PHI] for r in scope_children if r.op is UOps.RANGE}
+  queue:List[Tuple[int, UOp]] = []
+  def push(u:UOp):
+    priority = 0
+    # prefer ranges that depend on the least number of independent ranges
+    if u.op is UOps.RANGE and u.arg[1]:
+      priority += u.arg[0]
+      for p in range_phi[u]:
+        priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
+    # prefer uops that are loop children
+    else:
+      priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
+    heapq.heappush(queue, (priority, u))
 
-    queue:List[Tuple[int, UOp]] = []
-    def push(u:UOp):
-      priority = 0
-      # prefer ranges that depend on the least number of independent ranges
-      if u.op is UOps.RANGE and u.arg[1]:
-        priority += u.arg[0]
-        for p in range_phi[u]:
-          priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
-      # prefer uops that are loop children
-      else:
-        priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
-      heapq.heappush(queue, (priority, u))
+  for u in children:
+    if in_degree[u] == 0: push(u)
 
-    for u in children:
+  scope_end: Dict[UOp, UOp] = {}
+  _uops: List[UOp] = []
+  while queue:
+    p,x = heapq.heappop(queue)
+    if DEBUG >= 7: print(f"{p:5d}",x)
+    if x in scope_children: scope_end[x] = x
+    if x.op is UOps.DEFINE_ACC:
+      idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
+      _uops.insert(idx, x)
+    else: _uops.append(x)
+    for u, ss in scope_children.items():
+      if x in ss:
+        ss.remove(x)
+        if len(ss) == 0: scope_end[u] = x
+    for u in children[x]:
+      in_degree[u] -= 1
       if in_degree[u] == 0: push(u)
 
-    scope_end: Dict[UOp, UOp] = {}
-    _uops: List[UOp] = []
-    while queue:
-      p,x = heapq.heappop(queue)
-      if DEBUG >= 7: print(f"{p:5d}",x)
-      if x in scope_children: scope_end[x] = x
-      if x.op is UOps.DEFINE_ACC:
-        idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
-        _uops.insert(idx, x)
-      else: _uops.append(x)
-      for u, ss in scope_children.items():
-        if x in ss:
-          ss.remove(x)
-          if len(ss) == 0: scope_end[u] = x
-      for u in children[x]:
-        in_degree[u] -= 1
-        if in_degree[u] == 0: push(u)
+  # end scopes in toposort order
+  for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
-    # end scopes in toposort order
-    for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+  # sanity checks (NOTE: these can cause things to be skipped in BEAM)
+  if not skip_check:
+    bad_ops = dedup([x.op for x in _uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
+    try:
+      type_verify(_uops)
+      assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
+      assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
+      # TODO: this should be enabled, and the valid clause should be removed
+      # NOTE: multiple identical stores to DEFINE_LOCAL is okay
+      assert len(all_stores := [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \
+        == len(dedup(all_stores)), "repeated stores in uops"
+    except AssertionError as e:
+      print_uops(_uops)
+      if not CI:
+        from tinygrad.engine.graph import graph_uops
+        graph_uops(_uops)
+      raise e
 
-    # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-    if not skip_check:
-      bad_ops = dedup([x.op for x in _uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
-      try:
-        type_verify(_uops)
-        assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
-        assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
-        # TODO: this should be enabled, and the valid clause should be removed
-        # NOTE: multiple identical stores to DEFINE_LOCAL is okay
-        assert len(all_stores := [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \
-          == len(dedup(all_stores)), "repeated stores in uops"
-      except AssertionError as e:
-        print_uops(_uops)
-        if not CI:
-          from tinygrad.engine.graph import graph_uops
-          graph_uops(_uops)
-        raise e
-
-    # strip the SINK
-    return _uops[:-1]
+  # strip the SINK
+  return _uops[:-1]
