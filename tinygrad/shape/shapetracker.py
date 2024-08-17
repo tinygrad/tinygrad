@@ -66,7 +66,9 @@ class ShapeTracker:
 
   def to_uops(self) -> Tuple[UOp, UOp]: return UOp(UOps.ST_IDX, dtypes.pyint, (), self), UOp(UOps.ST_VALID, dtypes.bool, (), self)
 
-  def to_indexed_uops(self, idxs:List[UOp]) -> Tuple[UOp, UOp]:
+  def to_indexed_uops(self, _idxs:Optional[List[UOp]]=None) -> Tuple[UOp, UOp]:
+    idxs = [UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), variable_to_uop(s)), i) for i,s in enumerate(self.shape)] \
+      if _idxs is None else _idxs
     idx, valid = _uop_view(self.views[-1], idxs, UOp.const(dtypes.bool, True))
     for view in reversed(self.views[0:-1]):
       view = view.minify()
@@ -80,13 +82,9 @@ class ShapeTracker:
 
   def real_size(self) -> int:
     if 0 in self.shape: return 0
-    idx, valid = self.expr_idxs()
-    if not valid: return 0
-    # TODO: it's possible that the real_size is smaller condition on valid being true
-    ret = idx.max
-    if not isinstance(ret, int): ret = ret.max  # might be represent by symbolic shape, take one more max for int max
-    assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
-    return ret+1
+    idx, valid = self.to_indexed_uops()
+    if not valid.vmax.arg: return 0
+    return idx.vmax.arg+1
 
   def vars(self) -> Set[Variable]: return set().union(*[v.vars() for v in self.views])
 
@@ -132,8 +130,8 @@ class ShapeTracker:
     return idx, valid
 
   def axis_is_masked(self, axis:int) -> bool:
-    _, valid = self.expr_idxs()
-    return f'idx{axis}' in [v.expr for v in valid.vars()]
+    _, valid = self.to_indexed_uops()
+    return axis in [x.arg for x in valid.sparents if x.op is UOps.RANGE]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
