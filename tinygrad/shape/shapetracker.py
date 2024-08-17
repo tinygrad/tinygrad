@@ -66,7 +66,9 @@ class ShapeTracker:
 
   def to_uops(self) -> Tuple[UOp, UOp]: return UOp(UOps.ST_IDX, dtypes.pyint, (), self), UOp(UOps.ST_VALID, dtypes.bool, (), self)
 
-  def to_indexed_uops(self, idxs:List[UOp]) -> Tuple[UOp, UOp]:
+  def to_indexed_uops(self, _idxs:Optional[List[UOp]]=None) -> Tuple[UOp, UOp]:
+    idxs = [UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), variable_to_uop(s)), i) for i,s in enumerate(self.shape)] \
+      if _idxs is None else _idxs
     idx, valid = _uop_view(self.views[-1], idxs, UOp.const(dtypes.bool, True))
     for view in reversed(self.views[0:-1]):
       view = view.minify()
@@ -132,8 +134,8 @@ class ShapeTracker:
     return idx, valid
 
   def axis_is_masked(self, axis:int) -> bool:
-    _, valid = self.expr_idxs()
-    return f'idx{axis}' in [v.expr for v in valid.vars()]
+    _, valid = self.to_indexed_uops()
+    return axis in [x.arg for x in valid.sparents if x.op is UOps.RANGE]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
