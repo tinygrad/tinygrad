@@ -773,8 +773,8 @@ class Tensor:
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
+      if len(t0._ctx.parents) is not 0: t0.grad = None # matches PyTorch behaviour. Do not accum grad if t0 is not a leaf
       if not retain_graph: del t0._ctx
-      t0.grad = None # we do not need the grad anymore. This matches PyTorch behaviour
     return self
 
   # ***** movement low level ops *****
