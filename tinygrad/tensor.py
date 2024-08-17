@@ -766,7 +766,6 @@ class Tensor:
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
       token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := t0._ctx.metadata) is not None else None)
       grads = t0._ctx.backward(t0.grad.lazydata)
-      t0.grad = None # we do not need the grad anymore. This matches PyTorch behaviour
       _METADATA.reset(token)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
@@ -775,6 +774,7 @@ class Tensor:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
       if not retain_graph: del t0._ctx
+      t0.grad = None # we do not need the grad anymore. This matches PyTorch behaviour
     return self
 
   # ***** movement low level ops *****
