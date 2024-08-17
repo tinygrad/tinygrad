@@ -367,38 +367,38 @@ class TestSimplifyingShapeTracker(unittest.TestCase):
     self.st = self.st.expand((10, 10))
     self.st = self.st.reshape((100,))
     print(self.st.views)
-    assert(len(self.st.views) == 2)
+    assert (len(self.st.views) == 2)
     self.st = self.st.reshape((10, 10))
     print(self.st.views)
 
     self.st = self.st.simplify()
     print(self.st.views)
-    assert(len(self.st.views) == 1)
+    assert (len(self.st.views) == 1)
 
   # multiview simplify
   def test_expand_contract_different_shape(self):
     self.st.expand((10, 10))
     self.st.reshape((100,))
     print(self.st.views)
-    assert(len(self.st.views) == 2)
+    assert (len(self.st.views) == 2)
     self.st.reshape((2, 5, 2, 5))
     print(self.st.views)
 
     self.st = self.st.simplify()
     print(self.st.views)
-    assert(len(self.st.views) == 1)
+    assert (len(self.st.views) == 1)
 
   # multiview simplify
   def test_expand_contract_still_complex(self):
     self.st.expand((10, 10))
     self.st.reshape((100,))
     print(self.st.views)
-    assert(len(self.st.views) == 2)
+    assert (len(self.st.views) == 2)
     self.st.reshape((5, 20))
 
     self.st = self.st.simplify()
     print(self.st.views)
-    assert(len(self.st.views) == 2)
+    assert (len(self.st.views) == 2)
 
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
