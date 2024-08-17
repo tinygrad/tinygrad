@@ -15,17 +15,17 @@ MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 RUN_ID = os.getenv("GITHUB_RUN_ID", "HEAD")
 TABLE_NAME = f"process_replay_{RUN_ID}_{getenv('GITHUB_RUN_ATTEMPT')}_{VERSION}"
 ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
-if REF == "master": ASSERT_DIFF = False
 COMPARE_SCHEDULE = getenv("COMPARE_SCHEDULE", int((k:="[compare_schedule]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")))
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+if REF == "master": SKIP_PROCESS_REPLAY = True
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 # *** github settings
 BASE_URL = f"https://api.github.com/repos/{os.getenv('GITHUB_REPOSITORY', 'tinygrad/tinygrad')}"
 GH_HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN', '')}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 
-def diff_kernel(offset:int, kernel_changed):
-  if early_stop.is_set(): return
+def diff_kernel(offset:int) -> bool:
+  if early_stop.is_set(): return True
   conn = db_connection()
   cur = conn.cursor()
   cur.execute(f"SELECT val FROM '{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
@@ -45,11 +45,10 @@ def diff_kernel(offset:int, kernel_changed):
       logging.info(ast)
       logging.info(applied_opts)
       logging.info(e)
-      kernel_changed.value = True
-      if ASSERT_DIFF: raise e
+      if ASSERT_DIFF: return True
       continue
     try: assert compare_src == good_src
-    except AssertionError as e:
+    except AssertionError:
       changed += 1
       logging.info("PROCESS REPLAY DETECTED CHANGE")
       logging.info(ast)
@@ -57,14 +56,14 @@ def diff_kernel(offset:int, kernel_changed):
       diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
       for line in diff:
         logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-      kernel_changed.value = True
-      if ASSERT_DIFF: raise e
+      if ASSERT_DIFF: return True
       if changed > MAX_DIFF_PCT:
         logging.warning(f"detected changes in over {MAX_DIFF_PCT}% of kernels. skipping further diff generation.")
         early_stop.set()
         break
   conn.commit()
   cur.close()
+  return bool(changed)
 
 def print_ast_diff(offset:int):
   conn = db_connection()
@@ -89,10 +88,11 @@ def get_step_times(data) -> Dict[str, float]:
 
 def process_replay():
   # *** speed diff (for benchmarks)
-  if REF == "update_benchmark":
+  # TODO: fix this for testqualcommbenchmark
+  if REF == "update_benchmark" and os.environ["GITHUB_JOB"] != "testqualcommbenchmark":
     name = {"testmacbenchmark": "Mac", "testnvidiabenchmark": "tinybox green", "testmorenvidiabenchmark": "tinybox green Training",
             "testamdbenchmark": "tinybox red", "testmoreamdbenchmark": "tinybox red Training",
-            "testqualcommbenchmark": "comma Benchmark"}[os.environ["GITHUB_JOB"]]
+            "testqualcommbenchmark": "comma"}[os.environ["GITHUB_JOB"]]
     compare_jobs = requests.get(f"{BASE_URL}/actions/runs/{RUN_ID}/jobs", headers=GH_HEADERS).json()["jobs"]
     compare_job = next(j for j in compare_jobs if j["name"] == f"{name} Benchmark")
     ref_runs = requests.get(f"{BASE_URL}/actions/workflows/benchmark.yml/runs?per_page=1&branch=master&status=success", headers=GH_HEADERS).json()
@@ -116,12 +116,13 @@ def process_replay():
       row_count = cur.execute(f"select count(*) from 'schedule_diff_{VERSION}'").fetchone()[0]
       conn.commit()
       cur.close()
-      processes = []
-      for i in tqdm(range(0, row_count, PAGE_SIZE)):
-        processes.append(p:=multiprocessing.Process(target=print_ast_diff, args=(i,)))
-        p.start()
-      for p in processes: p.join()
-      if ASSERT_DIFF: raise Exception("scheduler process replay detected changes")
+      with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=16) as pool:
+        inputs = list(range(0, row_count, PAGE_SIZE))
+        list(tqdm(pool.imap_unordered(print_ast_diff, inputs), total=len(inputs)))
+        pool.close()
+        pool.join()
+        pool.terminate()
+        if ASSERT_DIFF: raise Exception("kernel process replay detected changes")
 
   # *** kernel diff
   conn = db_connection()
@@ -132,13 +133,13 @@ def process_replay():
     exit(0)
   conn.commit()
   cur.close()
-  processes = []
-  changed = multiprocessing.Manager().Value('b', False)
-  for i in tqdm(range(0, row_count, PAGE_SIZE)):
-    processes.append(p:=multiprocessing.Process(target=diff_kernel, args=(i, changed)))
-    p.start()
-  for p in processes: p.join()
-  if changed.value and ASSERT_DIFF: raise Exception("kernel process replay detected changes")
+  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=16) as pool:
+    inputs = list(range(0, row_count, PAGE_SIZE))
+    changed = list(tqdm(pool.imap_unordered(diff_kernel, inputs), total=len(inputs)))
+    pool.close()
+    pool.join()
+    pool.terminate()
+    if any(changed) and ASSERT_DIFF: raise Exception("kernel process replay detected changes")
 
 if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
@@ -146,4 +147,5 @@ if __name__ == "__main__":
     exit(0)
   try: process_replay()
   except Exception as e:
+    # TODO: catch specific Exception
     if ASSERT_DIFF: raise e

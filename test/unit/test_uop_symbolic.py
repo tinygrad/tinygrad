@@ -9,22 +9,20 @@ from typing import Tuple
 
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType, ConstType
-from tinygrad.codegen.uops import UOp, UOps
-from tinygrad.codegen.uopgraph import UOpGraph
-from tinygrad.ops import BinaryOps
+from tinygrad.codegen.uopgraph import linearize_uop
+from tinygrad.ops import BinaryOps, UOp, UOps, print_uops
 import functools
 
 def render(self) -> Tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0)
-  graph = UOpGraph([UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, 0), self))])
-  graph.linearize()
-  if DEBUG>=5: graph.print()
+  uops = linearize_uop([UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, 0), self))])
+  if DEBUG>=5: print_uops(uops)
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
     code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
-  rewritten_uop = [uop for uop in graph.uops if uop.op is UOps.STORE][0].src[-1]
-  fxn = TestRenderer().render("", graph)
+  rewritten_uop = [uop for uop in uops if uop.op is UOps.STORE][0].src[-1]
+  fxn = TestRenderer().render("", uops)
   return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin.arg, rewritten_uop.vmax.arg
 
 def NumNode(val): return UOp.const(dtypes.int, val)
@@ -89,7 +87,7 @@ class TestSymbolic(unittest.TestCase):
   def test_ge_divides_and(self):
     expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
                       create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)])
-    self.helper_test_variable(expr, 0, 1, {"((idx1<128) and (idx2<128))", "((idx1<128)*(idx2<128))"})
+    self.helper_test_variable(expr, 0, 1, {"((idx1<128) and (idx2<128))", "((idx1<128)&(idx2<128))"})
     # # bool divided by int is not allowed
     # expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
     #                   create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7), 512)])
@@ -97,13 +95,13 @@ class TestSymbolic(unittest.TestCase):
 
   def test_lt_factors(self):
     expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
-    self.helper_test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)")
+    self.helper_test_variable(expr, 0, 1, {"(((idx1*4)+FLOAT4_INDEX)<512)", "(((FLOAT4_INDEX//4)+idx1)<128)"})
 
   def test_div_reduction(self):
     self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
-  #def test_var_becomes_num(self):
-  #  assert isinstance(Variable("a", 2, 2), NumNode)
+  def test_var_becomes_num(self):
+    self.helper_test_variable(Variable("a", 2, 2), 2, 2, "2")
 
   @unittest.expectedFailure
   def test_equality(self):
@@ -229,7 +227,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sum_lt_fold(self):
     self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]), 16), 0, 1, "(a<4)")
-    self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]), 16), 0, 1, "(((a*4)+b)<16)")
+    self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]), 16), 0, 1,
+                              {"(((a*4)+b)<16)", "(((b//4)+a)<4)"})
     # TODO: fix
     with self.assertRaises(AssertionError):
       self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
@@ -394,6 +393,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((((alu2+142)//(-32))+4), 0, 0, "0")
     self.helper_test_variable((((alu2+150)//(-32))+4), 0, 0, "0")
     self.helper_test_variable((((alu2+158)//(-32))+4), 0, 0, "0")
+
+  def test_div_mod_recombine(self):
+    gidx = Variable("gidx", 0, 124)
+    self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
+    self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
 
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):

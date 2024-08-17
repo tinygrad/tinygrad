@@ -37,11 +37,14 @@ class PtrDType(DType):
 
 class dtypes:
   @staticmethod
-  def is_float(x: DType) -> bool: return x.scalar() in (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
+  @functools.lru_cache(None)
+  def is_float(x: DType) -> bool: return x.scalar() in {dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64}
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
-  def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.pyint) or dtypes.is_unsigned(x)
+  @functools.lru_cache(None)
+  def is_int(x: DType) -> bool: return x.scalar() in {dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.pyint} or dtypes.is_unsigned(x)
   @staticmethod
-  def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
+  @functools.lru_cache(None)
+  def is_unsigned(x: DType) -> bool: return x.scalar() in {dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64}
   @staticmethod
   def from_py(x) -> DType:
     if x.__class__ is float: return dtypes.default_float
@@ -63,7 +66,7 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   # TODO: priority should be higher than bool
-  pyint: Final[DType] = DType(-1, 0, "pyint", None, 1)   # arbitrary precision integer
+  pyint: Final[DType] = DType(-1, 8, "pyint", None, 1)   # arbitrary precision integer, same itemsize to int64 so min/max works
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
   int8: Final[DType] = DType(1, 1, "char", 'b', 1)
   uint8: Final[DType] = DType(2, 1, "unsigned char", 'B', 1)

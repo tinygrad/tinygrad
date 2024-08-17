@@ -7,10 +7,9 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten, prod
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.codegen.uops import UOps, UOp
-from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate
+from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate, UOps, UOp
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, ClangRenderer
+from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -171,6 +170,14 @@ class PythonProgram:
             # (i, j), C, D (4 elements on 32 threads)
             def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
             ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+          elif arg[4] == "INTEL":
+            # A (16 elements on 8 threads)
+            def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]
+            # B (16 elements on 8 threads)
+            def b_elem(x, i, j, goff): return x[j][goff+i]
+            # C, D (8 elements on 8 threads)
+            def c_map(lane, elem): return (lane, elem)
+            ul[i] = wmma_helper(8, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CLANG":
             wmma_sz = [prod(x[1] for x in l) for l in arg[5]]
             def elem(x, i, j, _): return x[i+j][0]
@@ -191,6 +198,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
+    if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
 
   def render(self, name:str, uops:List[UOp]) -> str:
