@@ -426,7 +426,8 @@ class Tensor:
       return Tensor._metaop(MetaOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
 
     # threefry
-    if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
+    dtype = to_dtype(dtype or dtypes.default_float)
+    if (num := (prod((shape:=argfix(*shape))) * dtype.itemsize) // 4) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
     if not had_counter: Tensor._rng_counter.assign(Tensor._rng_counter + num)
     counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device))
     counts2 = counts1 + math.ceil(num / 2)
@@ -435,8 +436,13 @@ class Tensor:
     x = F.Threefry.apply(*x._broadcasted(Tensor._seed))
     counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
 
-    out = counts1.cat(counts2).rshift(8).cast(dtypes.float32).div(2 ** 24)[:num]
-    out = out.reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
+    _, nmant = dtypes.finfo(dtype)
+    bits = counts1.cat(counts2)[:num]
+    # bitcast to uint with same number of bits
+    bits = bits.bitcast({1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize])
+    bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(Tensor.ones_like(bits, dtype=dtype).bitcast({1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]))
+
+    out = bits.bitcast(dtype).sub(1).reshape(shape)
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
 
