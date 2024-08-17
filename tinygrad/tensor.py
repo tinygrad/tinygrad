@@ -1642,7 +1642,6 @@ class Tensor:
     print(Tensor.rearrange(x, "batch channel -> (batch channel)).numpy())
     ```
     """
-    def replace_ellipsis(l, n): return l[: (i := l.index("..."))] + [f"...{j}" for j in range(n)] + l[i + 1:] if "..." in l else l
     def parse_formula(formula: str):
       lparens, rparens = map(lambda x: [i for i, ch in enumerate(formula.split()) if ch == x], ("(", ")"))
       assert len(lparens) == len(rparens) and sorted(flatten(pairs := list(zip(lparens, rparens)))) == flatten(pairs), "bracket mismatch"
@@ -1658,7 +1657,7 @@ class Tensor:
 
     # resolve ellipsis
     ell_len = len(self.shape) - len(lhs) + 1 + sum(e - s - 1 for s, e in unflatten_dims) if "..." in lhs else 1
-    lhs, rhs = map(lambda l: replace_ellipsis(l, ell_len), (lhs, rhs))
+    lhs, rhs = map(lambda l: l[: (i := l.index("..."))] + [f"...{j}" for j in range(ell_len)] + l[i + 1:] if "..." in l else l, (lhs, rhs))
     unflatten_dims = [(s + (ell_len - 1 if "...0" in lhs[:s] else 0), e + (ell_len - 1 if "...0" in lhs[:e] else 0),) for s, e in unflatten_dims]
     flatten_dims = [(s + (ell_len - 1 if "...0" in rhs[:s] else 0), e + (ell_len - 1 if "...0" in rhs[:e] else 0),) for s, e in flatten_dims]
 
