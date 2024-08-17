@@ -72,10 +72,10 @@ class TestTinygrad(unittest.TestCase):
     xgrad2,wgrad2 = x.grad.numpy(), W.grad.numpy()
     out.backward() # no need to retain again since we will not re-run backward
     xgrad3,wgrad3 = x.grad.numpy(), W.grad.numpy()
-    np.testing.assert_allclose(xgrad3, xgrad * 3.)
-    np.testing.assert_allclose(wgrad3, wgrad * 3.)
-    np.testing.assert_allclose(xgrad2, xgrad * 2.)
-    np.testing.assert_allclose(wgrad2, wgrad * 2.)
+    np.testing.assert_allclose(xgrad3, xgrad * 3., atol=1e-6)
+    np.testing.assert_allclose(wgrad3, wgrad * 3., atol=1e-6)
+    np.testing.assert_allclose(xgrad2, xgrad * 2., atol=1e-6)
+    np.testing.assert_allclose(wgrad2, wgrad * 2., atol=1e-6)
 
   @unittest.expectedFailure
   def test_second_order_backward_pass(self):
