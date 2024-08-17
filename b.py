@@ -37,6 +37,6 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
 #helper_tc_allclose(8, 16, 16, dtypes.half, dtypes.float32)
-#helper_tc_allclose(8, 16, 32, dtypes.f8e4m3, dtypes.float32)
-for i in range(10):
-  helper_tc_allclose(16384, 16384, 2048, dtypes.f8e4m3, dtypes.float32)
+helper_tc_allclose(8, 16, 32, dtypes.f8e4m3, dtypes.float32)
+#for i in range(10):
+  #helper_tc_allclose(16384, 16384, 2048, dtypes.f8e4m3, dtypes.float32)

@@ -309,10 +309,11 @@ class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
-  tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.f8e4m3, dtype_out=dtypes.float)]
-  def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores #if int(arch[3:]) >= 80 else []
-
+  def __init__(self, arch:str, driver_version:Tuple[int,int] = None):
+    self.tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])] if int(arch[3:]) >= 80 else []
+    #TODO -what to do with driver_version and NVRenderer??
+    can_use_fp8_tcs = (driver_version is None or (driver_version[0] > 12) or driver_version[0] == 12 and driver_version[1] >= 4) and (int(arch[3:]) >= 89) # driver version >= 12.4, sm_89 or higher
+    self.tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.f8e4m3, dtype_out=dtypes.float)] if can_use_fp8_tcs else []
   # language options
   kernel_prefix = "extern \"C\" __global__ "
   smem_prefix = "__shared__ "

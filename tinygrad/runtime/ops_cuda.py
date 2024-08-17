@@ -113,7 +113,10 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
+    check(cuda.cuDriverGetVersion(ctypes.byref(cuda_version := ctypes.c_int())))
+    cu_version_major = cuda_version.value // 1000
+    cu_version_minor = cuda_version.value % cu_version_major
+    super().__init__(device, CUDAAllocator(self), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch, (cu_version_major, cu_version_minor)),
                      PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch), functools.partial(CUDAProgram, self), graph=CUDAGraph)
 
   def synchronize(self):
