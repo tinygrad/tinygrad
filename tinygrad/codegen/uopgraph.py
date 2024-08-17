@@ -584,7 +584,7 @@ def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, s
     if DEBUG >= 7: print(f"{p:5d}",x)
     if x in scope_children: scope_end[x] = x
     if domain is not None and x.op is UOps.STORE and domain.op is UOps.LOAD and x.src[0] is domain.src[0]:
-      if not any(x in ss for _,ss in scope_children.items()): self.uops.append(UOp(UOps.BARRIER, None, (domain,)))
+      if not any(x in ss for _,ss in scope_children.items()): _uops.append(UOp(UOps.BARRIER, None, (domain,)))
     if (x.op in {UOps.LOAD, UOps.STORE} and x.src[0].op is UOps.DEFINE_LOCAL) or x.op is UOps.BARRIER: domain = x
     if x.op is UOps.DEFINE_ACC:
       idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
