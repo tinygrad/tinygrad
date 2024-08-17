@@ -4,7 +4,7 @@ import functools, hashlib
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.helpers import dedup, pretty_print, prod
-from tinygrad.ops import ReduceOps, UnaryOps, BinaryOps, TernaryOps, reduce_st, UOp, UOps
+from tinygrad.ops import ReduceOps, UnaryOps, BinaryOps, TernaryOps, UOp, UOps
 from tinygrad.dtype import ImageDType, PtrDType, dtypes, DType, ConstType
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -86,7 +86,7 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
     if op.op in ReduceOps:
       axis = op.arg[-1] if op.op is ReduceOps.WMMA else op.arg
       assert isinstance(axis, tuple) and all(isinstance(i, int) for i in axis), f"reduceop must have axis {op.arg}"
-      st = ShapeTracker.from_shape(reduce_st(sts[op.src[0]], axis))
+      st = ShapeTracker.from_shape(sts[op.src[0]].reduce(axis))
     else:
       # movementops are pushed to the edges with LOAD
       # elementwise inherits shape
@@ -115,7 +115,7 @@ def to_uop(*a) -> UOp:
   @functools.lru_cache(None)
   def create_uop(lop:LazyOp) -> UOp:
     if lop.op in BufferOps:
-      idx, valid = UOp.from_st(lop.arg.st)
+      idx, valid = lop.arg.st.to_uops()
       membuf_dtype: DType = lop.arg.dtype
       dtype = membuf_dtype.base if isinstance(membuf_dtype, ImageDType) else membuf_dtype
       if lop.op is BufferOps.CONST:
