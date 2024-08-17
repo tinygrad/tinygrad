@@ -144,7 +144,7 @@ class TestProgressBar(unittest.TestCase):
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
-      bar = tinytqdm(iterable=None, total=total, desc="Test")
+      bar = tinytqdm(total=total, desc="Test")
       n = 0
       while n < total:
         time.sleep(0.01)
@@ -169,7 +169,7 @@ class TestProgressBar(unittest.TestCase):
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
-      bar = tinytqdm(iterable=None, total=0, desc="Test")
+      bar = tinytqdm(total=0, desc="Test")
       n = 0
       while n < total:
         time.sleep(0.01)
