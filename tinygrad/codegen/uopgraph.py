@@ -377,8 +377,7 @@ def _expand_arg_to_idx(args:Tuple[Tuple[int, int], ...], rpk:Dict[int, int]) -> 
   return idx
 
 def _choices_from_args(args:Tuple[Tuple[int, int], ...]) -> List[Dict[int, int]]:
-  ret = [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
-  return ret
+  return [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
 
 def do_expand(root:UOp):
   expands = [x for x in root.src if x.op is UOps.EXPAND]
@@ -440,7 +439,6 @@ def do_contract(con:UOp):
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   srcs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
-    # PROBLEM HERE
     lsrcs = [ex.src[_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})] for lrpk in _choices_from_args(con.arg)]
     srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(lsrcs)))
   return srcs[0] if len(srcs) == 1 else UOp(UOps.EXPAND, con.dtype, tuple(srcs), new_ex_args)

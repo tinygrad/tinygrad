@@ -42,7 +42,7 @@ class CStyleLanguage(Renderer):
   def render_vectorize(self, x:List[str], var_dtype:DType) -> str:
     assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
-    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
+    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}" + (f"{{{','.join(x)}}}" if self.device == "CLANG" else f"({','.join(x)})")
 
   # returns a str expression of the const with the given type
   def render_const(self, x:ConstType, dtype:DType) -> str:
@@ -182,7 +182,7 @@ class CStyleLanguage(Renderer):
           assert src[0].dtype is not None
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
           r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + \
-            (f"[{args}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) else f".{'xyzwabcd'[args]}")
+            (f"[{args}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) or self.device == 'CLANG' else f".{'xyzwabcd'[args]}")
         else: raise RuntimeError(f"failed to render {u}")
 
     # NOTE: this relies on bufs dict preserving order
@@ -190,7 +190,7 @@ class CStyleLanguage(Renderer):
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
-  supports_float4 = False
+  float4 = "(float4)"
   has_local = False
   global_max = None
   infinity = "__builtin_inff()"
