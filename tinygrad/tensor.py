@@ -417,6 +417,7 @@ class Tensor:
     print(t.numpy())
     ```
     """
+    if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
     if (had_counter := Tensor._rng_counter is None): Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     if not all(s >= 0 for s in argfix(*shape)): raise ValueError(f"cannot create tensor with negative dimension in {shape=}")
     if not THREEFRY.value:
@@ -426,7 +427,6 @@ class Tensor:
       return Tensor._metaop(MetaOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
 
     # threefry
-    dtype = to_dtype(dtype or dtypes.default_float)
     if (num := (prod((shape:=argfix(*shape))) * dtype.itemsize) // 4) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
     if not had_counter: Tensor._rng_counter.assign(Tensor._rng_counter + num)
     counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device))
