@@ -428,7 +428,7 @@ class Tensor:
 
     # threefry
     assert all_int(shape:=argfix(*shape)), f"symbolic shape not supported, {shape=}"
-    if (num := math.ceil((prod(shape) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
+    if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
     if not had_counter: Tensor._rng_counter.assign(Tensor._rng_counter + num)
     counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device))
     counts2 = counts1 + math.ceil(num / 2)
@@ -443,7 +443,7 @@ class Tensor:
     bits = bits.bitcast({1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize])
     bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(Tensor.ones_like(bits, dtype=dtype).bitcast({1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]))
 
-    out = bits.bitcast(dtype).sub(1).reshape(shape)
+    out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
 
