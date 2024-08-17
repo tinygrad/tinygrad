@@ -32,7 +32,7 @@ class TestTimeLinearizer(unittest.TestCase):
     assert all(r.size > 0 for r in rawbufs)
 
   def test_bufs_from_lin_alt(self):
-    a = Tensor.randn(4, 4)
+    a = Tensor.randn(4, 4).realize()
     b = a+a[0]
     si = [si for si in b.schedule() if si.ast.op is UOps.SINK][0]
     rawbufs = bufs_from_lin(k:=Kernel(si.ast))
