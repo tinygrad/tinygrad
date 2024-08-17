@@ -11,7 +11,8 @@ if TYPE_CHECKING: from tinygrad.renderer import Renderer
 # ***** float4/image store handling *****
 
 def fold_expanded(ex, buf):
-  if buf.dtype not in [PtrDType(x) for x in (dtypes.f8e4m3, dtypes.f8e4m3, dtypes.float, dtypes.half)] and not isinstance(buf.dtype, ImageDType): return None
+  if buf.dtype not in [PtrDType(x) for x in (dtypes.f8e4m3, dtypes.f8e4m3, dtypes.float, dtypes.half)] and not isinstance(buf.dtype, ImageDType):
+    return None
   new_srcs = dedup(list(ex.src))
   old_new_srcs = new_srcs[:]
   is_load, is_image = new_srcs[0].op is UOps.LOAD, isinstance(buf.dtype, ImageDType)

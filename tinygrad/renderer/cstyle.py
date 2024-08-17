@@ -341,16 +341,17 @@ class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]
-  tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.f8e4m3, dtypes.float), (dtypes.f8e5m2, dtypes.float)])]
-  def __init__(self, arch:str, driver_version:Tuple[int,int] = None):
-    arch_version = int(arch[3:])
-    self.tensor_cores = CUDARenderer.tensor_cores if arch_version >= 80 else []
-    if arch_version < 80:
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.half, dtypes.bfloat16)] # noqa: E501
+  tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.f8e4m3, dtypes.f8e5m2)] # noqa: E501
+  def __init__(self, arch:str, driver_version:None|Tuple[int,int] = None):
+    arch:int = int(arch[3:])
+    self.tensor_cores = CUDARenderer.tensor_cores if arch >= 80 else []
+    if arch < 80:
       self.tensor_cores = []
-    elif arch_version < 89:
+    elif arch < 89:
       self.tensor_cores = self.tensor_cores[:2]
-    can_use_fp8_tcs = (driver_version is None or (driver_version[0] > 12) or (driver_version[0] == 12 and driver_version[1] >= 4)) and (arch_version >= 89) # driver version >= 12.4, sm_89 or higher
+    # driver version >= 12.4, sm_89 or higher
+    can_use_fp8_tcs = (driver_version is None or (driver_version[0] > 12) or (driver_version[0] == 12 and driver_version[1] >= 4)) and (arch >= 89)
     if not can_use_fp8_tcs:
       self.tensor_cores = [tc for tc in self.tensor_cores if tc.dims != (8,16,32)]
 
@@ -368,14 +369,16 @@ class CUDARenderer(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     # TODO: refactor to render_dtype here
-    dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"), dtypes.f8e4m3: ("__nv_fp8_e4m3", "e4m3" ) }
+    dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"),
+     dtypes.f8e4m3: ("__nv_fp8_e4m3", "e4m3" ) }
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.half, dtypes.bfloat16)):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
 
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.f8e4m3, dtypes.f8e5m2)):
-      prefix += ["#include <cuda_fp8.h>", "#include <cuda_fp16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [2, 4, 8, 16]] + [get_fp8_header(dtype.name)]
+      prefix += ["#include <cuda_fp8.h>", "#include <cuda_fp16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [2, 4, 8, 16]]\
+       + [get_fp8_header(dtype.name)]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
