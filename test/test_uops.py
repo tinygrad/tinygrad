@@ -366,6 +366,19 @@ class TestUOpStr(TestEqUOps):
       sink = UOp(UOps.SINK, None, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
     self.assert_equiv_uops(sink, eval(str(sink)))
 
+  def test_uop_str_nocache(self):
+    c2 = UOp(UOps.CONST, dtypes.float, (), 2.0)
+    c3 = UOp(UOps.CONST, dtypes.float, (), 3.0)
+    st = str((c2+c3) + (c3+c2))
+    assert ":=" not in st
+
+  def test_uop_str_cache(self):
+    c2 = UOp(UOps.CONST, dtypes.float, (), 2.0)
+    c3 = UOp(UOps.CONST, dtypes.float, (), 3.0)
+    a = c2+c3
+    st = str(a + (c3+c2) + a)
+    assert ":=" in st
+
   def test_nop_str(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
     assert str(eval(str(a))) == str(a)
