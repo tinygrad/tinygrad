@@ -5,9 +5,8 @@ import math, operator, ctypes, struct, functools, hashlib, itertools
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.dtype import ConstType, dtypes, DType
-from tinygrad.helpers import dedup, merge_dicts, pretty_print, prod
+from tinygrad.helpers import merge_dicts, pretty_print, prod
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.shape.shapetracker import ShapeTracker
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -73,8 +72,6 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
       if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
 
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
-
-def reduce_st(st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(st.shape))
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -163,8 +160,6 @@ class UOp:
   def parents(self) -> Dict[UOp, None]: return merge_dicts([{x:None for x in self.src}]+[x.parents for x in self.src])
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
-  @staticmethod
-  def from_st(st:ShapeTracker) -> Tuple[UOp, UOp]: return UOp(UOps.ST_IDX, dtypes.pyint, (), st), UOp(UOps.ST_VALID, dtypes.bool, (), st)
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     if self.op in {UOps.ST_IDX, UOps.ST_VALID}: return self.arg.shape
@@ -374,30 +369,3 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       assert u.arg[1] is not None
       flops += 2 * prod(u.arg[1]) // 32 * mults
   return flops, mem
-
-# the living definition of UOps.ST_IDX and UOps.ST_VALID
-def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
-  assert ast.op is UOps.SINK and all(x.op is UOps.STORE for x in ast.src), "must be SINK"
-  sts: Dict[UOp, ShapeTracker] = {}
-  def assert_valid(op:UOp, st:ShapeTracker):
-    if op in sts or op.op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
-    # restore globals from the two stage reduce
-    if op.op is UOps.LOAD and op.src[0].op is UOps.DEFINE_LOCAL:
-      assert_valid(local_reduce:=op.src[1].src[2], op.src[-1].arg)
-      return sts.setdefault(op, sts[local_reduce])
-    for x in op.src: assert_valid(x, st)
-    # only reduceop is allowed to change shape, limited to turning n to 1
-    if op.op is UOps.REDUCE_AXIS: st = ShapeTracker.from_shape(reduce_st(sts[op.src[0]], op.arg[1][-1] if op.arg[0] is ReduceOps.WMMA else op.arg[1]))
-    else:
-      # movementops are pushed to the edges with ST_IDX, ST_VALID
-      # elementwise inherits shape
-      st = op.arg if op.op in {UOps.ST_IDX, UOps.ST_VALID} else sts[op.src[-1]]
-      for x in (op.src[1:] if op.op in BUFFER_UOPS else op.src):
-        if sts[x].shape != st.shape:
-          if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op.op} {sts[x].shape} != {st.shape}")
-          raise AssertionError(f"found implicit expand {x.op} {sts[x].shape} != {op.op} {st.shape} {prod(sts[x].shape)} != {prod(st.shape)}")
-    sts[op] = st
-  for out in ast.src: assert_valid(out, out.src[-1].arg)
-  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
-  assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
-  return sts

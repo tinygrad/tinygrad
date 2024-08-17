@@ -8,9 +8,9 @@ from typing import List, Optional, Union, cast
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, MetaOps, UnaryOps, UOps, verify_ast
+from tinygrad.ops import BinaryOps, MetaOps, UnaryOps, UOps
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported, Context

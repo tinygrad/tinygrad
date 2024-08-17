@@ -5,6 +5,8 @@ from typing import Tuple, List, Optional, Dict, Set, Iterable, cast
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.dtype import dtypes
+from tinygrad.ops import UOp, UOps
 
 @dataclass(frozen=True)
 class ShapeTracker:
@@ -36,6 +38,10 @@ class ShapeTracker:
 
   @property
   def size(self) -> int: return self.views[-1].size()
+
+  def reduce(self, axis:Tuple[int, ...]) -> Tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
+
+  def to_uops(self) -> Tuple[UOp, UOp]: return UOp(UOps.ST_IDX, dtypes.pyint, (), self), UOp(UOps.ST_VALID, dtypes.bool, (), self)
 
   def real_size(self) -> int:
     if 0 in self.shape: return 0
