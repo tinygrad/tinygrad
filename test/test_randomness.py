@@ -64,16 +64,15 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
-  @unittest.skipIf(THREEFRY.value, "broken with threefry")
   def test_rand_half(self):
     N = 128
     x = Tensor.rand((2, N, N), dtype=dtypes.half)
     assert x.dtype == dtypes.half
     x = x.numpy()
-    ones = np.take(x, np.where(x == 1))
-    zeros = np.take(x, np.where(x == 0))
-    self.assertTrue(ones.size == 0)
-    self.assertTrue(zeros.size > 0)
+    ones = x[x == 1]
+    zeros = x[x == 0]
+    assert ones.size == 0
+    assert zeros.size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
   @unittest.skipIf(not THREEFRY.value, "not using threefry")
