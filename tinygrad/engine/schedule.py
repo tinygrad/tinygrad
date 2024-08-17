@@ -67,7 +67,8 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
       if isinstance(val:=buf.arg, Variable):
         val, var_val = val.unbind()
         var_vals[val] = var_val
-      else: assert isinstance(val, get_args(ConstType)), f"cannot create ConstBuffer with value {val}"
+        return UOp(UOps.DEFINE_VAR, dtype, (unbound_st.to_uop(),), val)
+      assert isinstance(val, get_args(ConstType)), f"cannot create ConstBuffer with value {val}"
       return UOp(UOps.CONST, dtype, (unbound_st.to_uop(),), val)
     # otherwise, it's a load and we add it to the inputs
     if buf in assign_targets and not (unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and \
