@@ -1965,17 +1965,10 @@ class Tensor:
     assert not (mode == "nearest" and align_corners), 'align_corners option can only be set with the mode="linear"'
     x, expand = self, list(self.shape)
     if mode in {"nearest", "nearest-exact"}:
-      arrs = (Tensor.arange(s, dtype=dtypes.int32, device=self.device) for s in size)
+      arrs = (Tensor.arange(s, dtype=dtypes.int32, device=self.device) + (0.5 if mode == "nearest-exact" else 0) for s in size)
       scales = (self.shape[i] / size[i] for i in range(-len(size), 0))
-      # NOTE: for nearest-exact...
-      # https://github.com/pytorch/pytorch/commit/6adbe044e39c8e8db158d91e151aa6dead6e9aa4#diff-bf10b066c2c62c193fa16ea880093284cbb3e53a3406b702759cb31041e6ae91
-      #   // index_f32 = (output_index + 0.5) * scale - 0.5
-      # // input_index = round(index_f32)
-      # // Same as Pillow and Scikit-Image/Scipy ndi.zoom
-      # const int64_t src_index =
-      # std::min(static_cast<int64_t>(floorf((dst_index + 0.5) * scale)), input_size - 1);
-      idxs = [(arr*scale).floor().cast(dtypes.int) if mode == "nearest" else (((arr+0.5)*scale)).floor().cast(dtypes.int)
-              for arr, scale in zip(arrs, scales)]
+      # TODO: is this clip needed?
+      idxs = [(arr*scale).floor().cast(dtypes.int).clip(0, self.shape[i-len(size)]-1) for i, (arr, scale) in enumerate(zip(arrs, scales))]
       idxs = [idx.reshape(*(-1 if i == dim else 1 for i in range(len(size)))).expand(*(-1 if i == dim else size[i] for i in range(len(size))))
               for dim, idx in enumerate(idxs)]
       return x[..., *idxs]

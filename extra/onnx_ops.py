@@ -389,37 +389,25 @@ def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(axis, indices)
 
-# TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',
            cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch',
            mode='nearest', nearest_mode='round_prefer_floor'):
-  def _nearest_gather(X: Tensor, x_out, y_out): return X[:,:,y_out,:][:,:,:,x_out]
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
     if nearest_mode == "round_prefer_floor": ret = (x_resized - 0.5).ceil()
     elif nearest_mode == "round_prefer_ceil": ret = (x_resized + 0.5).floor()
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
     return ret.cast(dtypes.int32).clip(0, x_len-1)
-  def _coordinate_transformation(x_out, y_out, output_shape, scales_, roi=None):
-    if coordinate_transformation_mode == "half_pixel":
-      x_out = (x_out + 0.5) / scales_[-1] - 0.5
-      y_out = (y_out + 0.5) / scales_[-2] - 0.5
-    elif coordinate_transformation_mode == "align_corners":
-      x_out = x_out * (X.shape[-1] - 1) / (output_shape[-1] - 1)
-      y_out = y_out * (X.shape[-2] - 1) / (output_shape[-2] - 1)
-    elif coordinate_transformation_mode == "asymmetric":
-      x_out = x_out / scales_[-1]
-      y_out = y_out / scales_[-2]
-    elif coordinate_transformation_mode == "half_pixel_symmetric":
-      x_out = X.shape[-1] / 2 * (1 - int(output_shape[-1]) / output_shape[-1]) + (x_out + 0.5) / scales_[-1] - 0.5
-      y_out = X.shape[-2] / 2 * (1 - int(output_shape[-2]) / output_shape[-2]) + (y_out + 0.5) / scales_[-2] - 0.5
-    elif coordinate_transformation_mode == "pytorch_half_pixel":
-      x_out = (x_out + 0.5) / scales_[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0])
-      y_out = (y_out + 0.5) / scales_[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0])
-    elif coordinate_transformation_mode == "tf_crop_and_resize":
-      x_out = roi[-1][0] * (X.shape[-1] - 1) + x_out * ((roi[-1][1] - roi[-1][0]) * (X.shape[-1] - 1) / (output_shape[-1] - 1)) if output_shape[-1] > 1 else Tensor([0.5 * (roi[-1][0] + roi[-1][1]) * (X.shape[-1] - 1)])
-      y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1)) if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
-    return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
+  def _coordinate_transformation(indexes, output_shape, scales_, roi=None):
+    xform = {
+      "half_pixel": lambda i: (indexes[i] + 0.5) / scales_[i] - 0.5,
+      "align_corners": lambda i: indexes[i] * (X.shape[i] - 1) / (output_shape[i] - 1),
+      "asymmetric": lambda i: indexes[i] / scales_[i],
+      "half_pixel_symmetric": lambda i: X.shape[i] / 2 * (1 - int(output_shape[i]) / output_shape[i]) + (indexes[i] + 0.5) / scales_[i] - 0.5,
+      "pytorch_half_pixel": lambda i: (indexes[i] + 0.5) / scales_[i] - 0.5 if output_shape[i] > 1 else Tensor([0]),
+      "tf_crop_and_resize": lambda i: roi[i][0] * (X.shape[i] - 1) + indexes[i] * ((roi[i][1] - roi[i][0]) * (X.shape[i] - 1) / (output_shape[i] - 1))
+      if output_shape[i] > 1 else Tensor([0.5 * (roi[i][0] + roi[i][1]) * (X.shape[i] - 1)])}
+    return [xform[coordinate_transformation_mode](i).clip(0, X.shape[i] - 1) for i in range(-len(indexes), 0)]
   if roi is not None:
     roi = to_python_const(roi)
     roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
@@ -454,16 +442,16 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   scales_ = [os/xs for xs, os in zip(X.shape, output_shape)]
-  x_out = Tensor.arange(output_shape[-1], dtype=dtypes.default_float)
-  y_out = Tensor.arange(output_shape[-2], dtype=dtypes.default_float)
+  indexes = [Tensor.arange(output_shape[-2], dtype=dtypes.default_float), Tensor.arange(output_shape[-1], dtype=dtypes.default_float)]
+  # from Tensor interpolate
   if mode == "nearest":
-    if nearest_mode == "floor" and coordinate_transformation_mode != "align_corners": return X.interpolate(output_shape, mode="nearest")
-    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_, roi)
-    x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
-    y_out = _nearest_mode(y_out, nearest_mode, X.shape[-2])
-    return _nearest_gather(X, x_out, y_out)
+    indexes = _coordinate_transformation(indexes, output_shape, scales_, roi)
+    indexes = [_nearest_mode(indexes[i], nearest_mode, X.shape[i]) for i in range(-len(indexes), 0)]
+    indexes = [indexes[0].unsqueeze(1).expand(*output_shape[-2:]), indexes[1].unsqueeze(0).expand(*output_shape[-2:])]
+    return X[..., *indexes]
+  # TODO: do linear too
   if mode == "linear":
-    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales, roi)
+    y_out, x_out = _coordinate_transformation(indexes, output_shape_, scales, roi)
     ret = []
     for y in to_python_const(y_out):
       for x in to_python_const(x_out):
