@@ -15,7 +15,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup
-from tinygrad.dtype import DType, dtypes
+from tinygrad.dtype import DType, PtrDType, dtypes
 
 def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer]]:
   if isinstance(r, Tensor): r = [r]
@@ -84,14 +84,19 @@ class TestLinearizer(unittest.TestCase):
 
   def test_multioutput(self):
     dtype, st = dtypes.int, ShapeTracker.from_shape((8,))
-    a = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtype, st=st))
-    b = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtype, st=st))
-    out0 = LazyOp(BufferOps.STORE, (LazyOp(op=BinaryOps.ADD, src=(a,b)),), MemBuffer(idx=0, dtype=dtype, st=st))
-    out1 = LazyOp(BufferOps.STORE, (LazyOp(op=BinaryOps.MUL, src=(a,b)),), MemBuffer(idx=1, dtype=dtype, st=st))
+    buf_a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=2)
+    buf_b = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=3)
+    buf_out0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=0)
+    buf_out1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=1)
+    a = UOp(UOps.LOAD, dtype, (buf_a, st.to_uop()))
+    b = UOp(UOps.LOAD, dtype, (buf_b, st.to_uop()))
+    out0 = UOp(UOps.STORE, None, (buf_out0, st.to_uop(), a + b))
+    out1 = UOp(UOps.STORE, None, (buf_out1, st.to_uop(), a * b))
+    sink = UOp(UOps.SINK, src=(out0, out1))
 
     a_t = Tensor.full(st.shape, 2).contiguous().realize()
     b_t = Tensor.full(st.shape, 3).contiguous().realize()
-    lin = helper_linearizer_ast((out0, out1), [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
+    lin = helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
 
     stores = [u for u in lin.uops if u.op is UOps.STORE]
     mutable_bufs = dedup(flatten([[x for x in u.src[0].sparents if x.op is UOps.DEFINE_GLOBAL] for u in stores]))
