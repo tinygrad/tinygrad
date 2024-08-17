@@ -99,7 +99,7 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
   for i, out in enumerate(ast.src):
     assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
     assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
-    assert out.arg.st.size == ast.src[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
+    assert out.arg.st.size == ast.st_arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
     assert_valid(out, out.arg.st)
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
@@ -115,14 +115,14 @@ def to_uop(*a) -> UOp:
   @functools.lru_cache(None)
   def create_uop(lop:LazyOp) -> UOp:
     if lop.op in BufferOps:
-      idx, valid = lop.arg.st.to_uops()
+      st_uop = lop.arg.st.to_uop()
       membuf_dtype: DType = lop.arg.dtype
       dtype = membuf_dtype.base if isinstance(membuf_dtype, ImageDType) else membuf_dtype
       if lop.op is BufferOps.CONST:
-        return UOp(UOps.CONST, dtype, (UOp(UOps.CONST, dtype, (valid,), 0), valid), lop.arg.val)
+        return UOp(UOps.CONST, dtype, (st_uop,), lop.arg.val)
       buf = UOp(UOps.DEFINE_GLOBAL, membuf_dtype if isinstance(membuf_dtype, ImageDType) else PtrDType(membuf_dtype), (), lop.arg.idx)
-      if lop.op is BufferOps.LOAD: return UOp(UOps.LOAD, dtype, (buf, idx, valid))
-      return UOp(UOps.STORE, None, (buf, idx, create_uop(lop.src[0]), valid))
+      if lop.op is BufferOps.LOAD: return UOp(UOps.LOAD, dtype, (buf, st_uop))
+      return UOp(UOps.STORE, None, (buf, st_uop, create_uop(lop.src[0])))
     src = tuple(create_uop(x) for x in lop.src)
     if lop.op is MetaOps.KERNEL: return UOp(UOps.SINK, None, src)
     if lop.op in ReduceOps: return UOp(UOps.REDUCE_AXIS, src[0].dtype, src, (lop.op, lop.arg))
