@@ -1949,7 +1949,7 @@ class Tensor:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
 
-    The interpolation algorithm is selected with `mode` which supports `linear` and `nearest`.
+    The interpolation algorithm is selected with `mode` which supports `linear`, `nearest`, and `nearest-exact`.
     To run `bilinear` or `trilinear`, pass in a 2D or 3D size.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1961,7 +1961,7 @@ class Tensor:
     ```
     """
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
-    assert mode in ["linear", "nearest"], "only supports linear and nearest interpolation"
+    assert mode in ["linear", "nearest", "nearest-exact"], "only supports linear, nearest, and nearest-exact interpolation"
     if mode == "nearest" and align_corners: raise ValueError("align_corners option can only be set with interpolating mode linear")
     x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
@@ -1972,7 +1972,9 @@ class Tensor:
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
-      else: x = x.gather(i, (scale*arr).floor().reshape(reshape).expand(expand))
+      else:
+        index = (scale*arr).floor() if mode == "nearest" else (scale*(arr+0.5)).floor().cast(dtypes.int32)
+        x = x.gather(i, index.reshape(reshape).expand(expand))
     return x.cast(self.dtype)
 
   # ***** unary ops *****
