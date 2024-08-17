@@ -37,4 +37,4 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
 
 #helper_tc_allclose(8, 16, 16, dtypes.half, dtypes.float32)
 #helper_tc_allclose(8, 16, 32, dtypes.f8e4m3, dtypes.float32)
-helper_tc_allclose(8192, 8192, 4096, dtypes.f8e4m3, dtypes.float32)
+helper_tc_allclose(8192, 8192, 8192, dtypes.f8e4m3, dtypes.float32)

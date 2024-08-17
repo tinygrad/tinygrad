@@ -342,7 +342,7 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
   tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]
-  tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.f8e4m3, dtype_out=dtypes.float)]
+  tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.f8e4m3, dtypes.float), (dtypes.f8e5m2, dtypes.float)])]
   def __init__(self, arch:str, driver_version:Tuple[int,int] = None):
     arch_version = int(arch[3:])
     self.tensor_cores = CUDARenderer.tensor_cores if arch_version >= 80 else []
