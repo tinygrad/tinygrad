@@ -737,6 +737,8 @@ class Tensor:
   def _deepwalk(self):
     def _walk(node, visited):
       visited.add(node)
+      if (ctx := getattr(node, "_ctx", None)) is not None and len(ctx.parents) != 0: # if tensor is not leaf, reset grad
+        node.grad = None
       if getattr(node, "_ctx", None):
         for i in node._ctx.parents:
           if i not in visited: yield from _walk(i, visited)
@@ -754,6 +756,7 @@ class Tensor:
     print(t.grad.numpy())
     ```
     """
+    toposorted = self._deepwalk()
     if gradient is None:
       assert self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
       # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
@@ -762,7 +765,7 @@ class Tensor:
 
     assert self.shape == gradient.shape, f"grad shape must match tensor shape, {gradient.shape!r} != {self.shape!r}"
     self.grad = gradient
-    for t0 in reversed(self._deepwalk()):
+    for t0 in reversed(toposorted):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
       token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := t0._ctx.metadata) is not None else None)
       grads = t0._ctx.backward(t0.grad.lazydata)
@@ -773,7 +776,6 @@ class Tensor:
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
-      if len(t0._ctx.parents) != 0: t0.grad = None # matches PyTorch behaviour. Do not accum grad if t0 is not a leaf
       if not retain_graph: del t0._ctx
     return self
 
