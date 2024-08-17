@@ -451,19 +451,18 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif keep_aspect_ratio_policy == "not_smaller":
       scale = max(scales)
       sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
+  if nearest_mode == "floor" and coordinate_transformation_mode != "align_corners": return X.interpolate(sizes, mode="nearest")
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   scales_ = [os/xs for xs, os in zip(X.shape, output_shape)]
   x_out = Tensor.arange(output_shape[-1], dtype=dtypes.default_float)
   y_out = Tensor.arange(output_shape[-2], dtype=dtypes.default_float)
   if mode == "nearest":
-    if nearest_mode == "floor" and coordinate_transformation_mode != "align_corners": return X.interpolate(output_shape, mode="nearest")
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
     y_out = _nearest_mode(y_out, nearest_mode, X.shape[-2])
     return _nearest_gather(X, x_out, y_out)
   if mode == "linear":
-    if coordinate_transformation_mode == "align_corners" and scales is None: return X.interpolate(output_shape_, mode="linear", align_corners=True)
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales, roi)
     ret = []
     for y in to_python_const(y_out):
