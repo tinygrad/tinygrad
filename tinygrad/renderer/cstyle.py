@@ -344,14 +344,14 @@ class CUDARenderer(CStyleLanguage):
   tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.half, dtypes.bfloat16)] # noqa: E501
   tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.f8e4m3, dtypes.f8e5m2)] # noqa: E501
   def __init__(self, arch:str, driver_version:None|Tuple[int,int] = None):
-    arch:int = int(arch[3:])
+    archv:int = int(arch[3:])
     self.tensor_cores = CUDARenderer.tensor_cores if arch >= 80 else []
-    if arch < 80:
+    if archv < 80:
       self.tensor_cores = []
-    elif arch < 89:
+    elif archv < 89:
       self.tensor_cores = self.tensor_cores[:2]
     # driver version >= 12.4, sm_89 or higher
-    can_use_fp8_tcs = (driver_version is None or (driver_version[0] > 12) or (driver_version[0] == 12 and driver_version[1] >= 4)) and (arch >= 89)
+    can_use_fp8_tcs = (driver_version is None or (driver_version[0] > 12) or (driver_version[0] == 12 and driver_version[1] >= 4)) and (archv >= 89)
     if not can_use_fp8_tcs:
       self.tensor_cores = [tc for tc in self.tensor_cores if tc.dims != (8,16,32)]
 
@@ -370,7 +370,7 @@ class CUDARenderer(CStyleLanguage):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     # TODO: refactor to render_dtype here
     dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"),
-     dtypes.f8e4m3: ("__nv_fp8_e4m3", "e4m3" ) }
+     dtypes.f8e4m3: ("__nv_fp8_e4m3", "e4m3" ), dtypes.f8e5m2: ("__nv_fp8_e5m2", "e5m2" ) }
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.half, dtypes.bfloat16)):
