@@ -207,12 +207,16 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 19), (nn.optim.SGD, 17)]:
+    for optim, cnt in [(nn.optim.Adam, 17), (nn.optim.SGD, 15)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
           c1 = nn.Conv2d(3,32,3)
+          c1.weight.realize()
+          c1.bias.realize()
           bn = nn.BatchNorm2d(32, track_running_stats=False)
+          bn.weight.realize()
+          bn.bias.realize()
           opt = optim(nn.state.get_parameters([c1, bn]))
           img_bn = bn(c1(img)).elu().sum()
           opt.zero_grad()
@@ -221,13 +225,14 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_conv_relu_backward(self):
     c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.realize()
     c1.weight.requires_grad = True
-    img = Tensor.rand(2,3,64,64, requires_grad=True)
+    img = Tensor.rand(2,3,64,64, requires_grad=True).realize()
 
     # run
     c1(img).relu().mean().backward()
     assert img.grad is not None and c1.weight.grad is not None
-    run_schedule(check_schedule([img.grad, c1.weight.grad], 7, filter_sink=False))
+    run_schedule(check_schedule([img.grad, c1.weight.grad], 4, filter_sink=False))
 
     # compare
     import torch
@@ -917,70 +922,86 @@ class TestSchedule(unittest.TestCase):
     with Tensor.train():
       x = Tensor.empty(4, 64, 768)
       layer = nn.Linear(768, 768*4)
+      layer.weight.realize()
+      layer.bias.realize()
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 11)
+      check_schedule(opt.schedule_step(), 9)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,32,3)
+      c1.weight.realize()
+      c1.bias.realize()
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 11)
+      check_schedule(opt.schedule_step(), 9)
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
+      c1.weight.realize()
       c2 = nn.Conv2d(16,32,3,bias=False)
+      c2.weight.realize()
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 13)
+      check_schedule(opt.schedule_step(), 12)
 
   def test_sgd_conv_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,32,3)
+      c1.weight.realize()
+      c1.bias.realize()
       opt = nn.optim.SGD(nn.state.get_parameters(c1))
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 7)
+      check_schedule(opt.schedule_step(), 5)
 
   def test_sgd_2convs_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
+      c1.weight.realize()
       c2 = nn.Conv2d(16,32,3,bias=False)
+      c2.weight.realize()
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]))
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 7)
+      check_schedule(opt.schedule_step(), 6)
 
   def test_fold_2convs_sgd_nesterov_momentum_wd(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
+      c1.weight.realize()
       c2 = nn.Conv2d(16,32,3,bias=False)
+      c2.weight.realize()
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 9)
+      check_schedule(opt.schedule_step(), 8)
 
   def test_sgd_4convs_fuse(self):
     with Context(FUSE_CONV_BW=1):
       with Tensor.train():
         img = Tensor.empty(2,3,64,64)
         c1 = nn.Conv2d(3,4,3,bias=False)
+        c1.weight.realize()
         c2 = nn.Conv2d(4,8,3,bias=False)
+        c2.weight.realize()
         c3 = nn.Conv2d(8,16,3,bias=False)
+        c3.weight.realize()
         c4 = nn.Conv2d(16,32,3,bias=False)
+        c4.weight.realize()
         opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
         opt.zero_grad()
         c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-        check_schedule(opt.schedule_step(), 19)
+        check_schedule(opt.schedule_step(), 15)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
@@ -1302,12 +1323,13 @@ class TestConvBW(unittest.TestCase):
   def test_fold_conv_relu_backward(self):
     c1 = nn.Conv2d(3,16,3, bias=False)
     c1.weight.requires_grad = True
-    img = Tensor.rand(2,3,64,64, requires_grad=True)
+    c1.weight.realize()
+    img = Tensor.rand(2,3,64,64, requires_grad=True).realize()
 
     # run
     c1(img).relu().mean().backward()
     assert img.grad is not None and c1.weight.grad is not None
-    self.check_schedule([img.grad, c1.weight.grad], 4)
+    self.check_schedule([img.grad, c1.weight.grad], 3)
 
     # compare
     import torch
@@ -1419,18 +1441,18 @@ class TestIndexing(unittest.TestCase):
 
   def test_arange_transposed(self):
     Tensor.manual_seed(0)
-    x = Tensor.randint(4, 1)
+    x = Tensor.randint(4, 1).realize()
     a = (Tensor.arange(4,)*x).T
-    self.check_schedule(a, 2)
+    self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T)
 
   def test_arange_transposed_descendants(self):
     Tensor.manual_seed(0)
-    x = Tensor.randint(4, 1)
+    x = Tensor.randint(4, 1).realize()
     a = (Tensor.arange(4,)*x).T
     b = Tensor.randint(4, 4).realize()
     out = a+b
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 1)
     np.testing.assert_equal(out.numpy(), (np.arange(4)*x.numpy()).T+b.numpy())
 
   def test_arange_index(self):
@@ -1477,7 +1499,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_arange_group_childless_base(self):
     Tensor.manual_seed(0)
-    x = Tensor.randint(4)
+    x = Tensor.randint(4).realize()
     a = Tensor.arange(4)+x
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), np.arange(4)+x.numpy())
@@ -1550,8 +1572,8 @@ class TestIndexing(unittest.TestCase):
     from tinygrad.nn.datasets import mnist
     import torch
     _, Y_train, _, _ = mnist()
-    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1]))
-    yt = Tensor.randn(BS, 10)
+    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
+    yt = Tensor.randn(BS, 10).realize()
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
       self.check_schedule(loss, 6)
