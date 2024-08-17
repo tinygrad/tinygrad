@@ -763,6 +763,7 @@ class Kernel:
 # the living definition of UOps.SHAPETRACKER
 def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   assert ast.op is UOps.SINK and all(x.op is UOps.STORE for x in ast.src), "must be SINK"
+  assert len(set(x.st_arg.size for x in ast.src)) == 1, "outputs must be exactly the same size"
   sts: Dict[UOp, ShapeTracker] = {}
   def assert_valid(uop:UOp, st:ShapeTracker):
     if uop in sts: return
@@ -777,7 +778,7 @@ def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
     # only reduceuop is allowed to change shape, limited to turning n to 1
     if op is UOps.REDUCE_AXIS: st = ShapeTracker.from_shape(sts[src[0]].reduce(arg[1][-1] if arg[0] is ReduceOps.WMMA else arg[1]))
     else:
-      # movementuops are pushed to the edges with SHAPETRACKER
+      # movementops are pushed to the edges with SHAPETRACKER
       # elementwise inherits shape
       st = arg if op is UOps.SHAPETRACKER else sts[src[-1]]
       for x in (src[1:] if op in BUFFER_UOPS else src):
