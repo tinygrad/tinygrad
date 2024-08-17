@@ -4,9 +4,8 @@ from collections import defaultdict
 from typing import DefaultDict, List, Set, Tuple
 from test.external.process_replay.utils import print_diff
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
-from tinygrad.helpers import DEBUG, Context, colored, dedup, diskcache_put, fetch, getenv
+from tinygrad.helpers import DEBUG, Context, colored, diskcache_put, fetch, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.ops import LazyOp
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 
 def process_replay(outs:List[LazyBuffer], graph:DefaultDict[LBScheduleItem, List[LBScheduleItem]], in_degree:DefaultDict[LBScheduleItem, int]):
@@ -14,7 +13,7 @@ def process_replay(outs:List[LazyBuffer], graph:DefaultDict[LBScheduleItem, List
   ref_schedule = getenv("REF_COMMIT_HASH", "master")
   fp = __file__.replace("diff_schedule", "master_schedule")
   if not os.path.isfile(fp):
-    shutil.copyfile(fetch(f"https://raw.githubusercontent.com/tinygrad/tinygrad/{ref_schedule}/tinygrad/engine/schedule.py"), fp)
+    shutil.copyfile(fetch(f"https://raw.githubusercontent.com/tinygrad/tinygrad/{ref_schedule}/tinygrad/engine/schedule.py", allow_caching=False), fp)
   # create the reference graph
   ref_graph, ref_in_degree = importlib.import_module("test.external.process_replay.master_schedule")._graph_schedule(outs, set())
   # compare
@@ -27,15 +26,15 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
       for buf in lsi.outputs:
         si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
   changed = 0
-  seen_diffs: Set[Tuple[LazyOp, ...]] = set()
+  seen_diffs: Set[Tuple[bytes, ...]] = set()
   for buf, si in si_for_buf.items():
-    asts = tuple(dedup([x.ast for x in si]))
+    asts = tuple({x.ast.key:x.ast for x in si})
     # kernels didn't change
     if len(si) > 1 and len(asts) == 1: continue
     if asts in seen_diffs: continue
     seen_diffs.add(asts)
     changed += 1
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), asts))
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), [x.ast for x in si]))
     if len(asts) == 1:
       print(f"{buf} folded in the second schedule")
     else: print_si_diff(si[0], si[1])

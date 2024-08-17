@@ -1,11 +1,10 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
+from typing import Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import UnaryOps, BinaryOps, exec_alu
+from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify, print_uops
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same, partition
-from tinygrad.codegen.uops import UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify, print_uops
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -20,13 +19,11 @@ def fold_expanded(ex, buf):
   # first, extract all the relevant offsets
   offsets_rootsrc: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
-    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype != dtypes.int.vec(3)): continue
-    idx = s.src[1] if not is_image else s.src[1].src[2]  # only id4 for image
+    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype.count == 2): continue
+    idx = s.src[1]
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    # add idx and idy for image
-    if is_image: root_src = (s.src[1].src[0:2], root_src)
     # add gates for gated
     if len(s.src) >= 4: root_src = (s.src[3], root_src)
     assert arg not in offsets_rootsrc[root_src]
@@ -40,9 +37,10 @@ def fold_expanded(ex, buf):
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
-          if not is_image and not new_src[1].divides(fold_length): continue
-          # for images, we rewrite the index
-          if is_image: new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_src[1].src[0], new_src[1].src[1]))
+          if not new_src[1].divides(fold_length): continue
+          # for images, we rewrite the index. it must evenly divide 4 from the above check
+          if is_image:
+            new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((new_src[1] // 4) % buf.dtype.shape[1], (new_src[1] // (4 * buf.dtype.shape[1]))))
           # vectorize the store/loadconst
           if not is_load or len(new_src) >= 4:
             new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
@@ -61,13 +59,26 @@ def fold_expanded(ex, buf):
 
 def vectorize_reduce(vec:UOp):
   if all_same(vec.src): return None  # don't REDUCE the same thing multiple times
-  if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None
+  if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None    # must have the same reduce ranges
+  if not vec.dtype or vec.dtype.scalar() not in {dtypes.float, dtypes.half}: return None  # only fold float/half like this
   return UOp(UOps.REDUCE, vec.dtype, (UOp(UOps.VECTORIZE, vec.dtype, tuple(x.src[0] for x in vec.src)),) + vec.src[0].src[1:], vec.src[0].arg)
 
 def vectorize_alu(vec:UOp):
   if not all_same([x.arg for x in vec.src]): return None
   return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
                                              tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
+
+def fix_unfoldable_image_load(load:UOp, buf:UOp):
+  if not isinstance(buf.dtype, ImageDType) or cast(DType, load.src[1].dtype).count == 2: return None
+  id4 = load.src[1] % 4
+  new_src = list(load.src)
+  # TODO: copied logic from above
+  new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((load.src[1] // 4) % buf.dtype.shape[1], (load.src[1] // (4 * buf.dtype.shape[1]))))
+  if len(new_src) >= 4:
+    new_src[2] = UOp(UOps.VECTORIZE, cast(DType, new_src[2].dtype).vec(4), tuple(new_src[2] for _ in range(4)))
+  vec_load = UOp(UOps.LOAD, cast(DType, load.dtype).vec(4), tuple(new_src))
+  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)),
+                          range(4), UOp.const(load.dtype, float('nan')))
 
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
@@ -84,8 +95,11 @@ def _get_add_chain(x:UOp):
   else: yield x
 
 def mod_folding(x:UOp, c:int) -> Optional[UOp]:
-  # simplify x % c
-  # None means no change
+  # simplify x % c, None means no change
+
+  # simple cancel mod case
+  if 0 < c and 0 <= x.vmin.arg and (quotient:=x.vmin.arg//c) == x.vmax.arg//c: return x-quotient*c
+
   remainder, something_changed = [], False
   for u in _get_add_chain(x):
     if (factor:=u.const_factor())%c != factor:
@@ -100,6 +114,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
+
   # simple cancel div case
   if 0 <= x.vmin.arg and x.vmax.arg < c: return x.const(0)
 
@@ -295,9 +310,6 @@ constant_folder = PatternMatcher([
   # ** mod **
   # mod folding
   (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
-  # remove mod
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c:\
-   x-(x.vmin.arg//c.arg)*c.arg if 0 < c.arg and 0 <= x.vmin.arg and x.vmin.arg//c.arg == x.vmax.arg//c.arg else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
   # (x%c)+(x//c)*c = x
@@ -478,6 +490,8 @@ reducer = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
+  # late fixup of unfoldable image loads
+  (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
 # *** uop graph ***
@@ -508,33 +522,13 @@ class UOpGraph:
   def __init__(self, sink:Union[UOp, List[UOp]], opts:Optional[Renderer]=None):
     self.sink: UOp = sink if isinstance(sink, UOp) else UOp(UOps.SINK, None, tuple(sink))
     assert self.sink.op is UOps.SINK, f"sink isn't sink, it's {self.sink.op}"
-    # used by linearizer
-    self._uops: Optional[List[UOp]] = None
     self.opts = opts
     self.folder = constant_folder + transcendental_folding({} if TRANSCENDENTAL >= 2 or opts is None else opts.code_for_op.keys())
 
-  def __reduce__(self): return self.__class__, (self.sink, self.opts)
-  def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
-  def __getitem__(self, index) -> UOp: return self.uops[index]
-
-  @property
-  def uops(self) -> List[UOp]:
-    if self._uops is None: self.linearize()
-    return cast(List[UOp], self._uops)
-
-  def graph(self):
-    from tinygrad.engine.graph import graph_uops
-    graph_uops(self.uops)
-
-  def print(self): print_uops(self.uops)
-
   cnt = 0
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None, skip_check=False) -> UOpGraph:
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, skip_check=False) -> List[UOp]:
     global acc_number
     acc_number = 0
-
-    # NOTE: relinearizering should be okay
-    #assert self._uops is None, "already linearized"
 
     # do graph rewrite
     sink = graph_rewrite(self.sink, self.folder)
@@ -585,15 +579,19 @@ class UOpGraph:
       if in_degree[u] == 0: push(u)
 
     scope_end: Dict[UOp, UOp] = {}
-    self._uops = []
+    _uops: List[UOp] = []
+    domain: Union[None, UOp] = None
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(f"{p:5d}",x)
       if x in scope_children: scope_end[x] = x
+      if domain is not None and x.op is UOps.STORE and domain.op is UOps.LOAD and x.src[0] is domain.src[0]:
+        if not any(x in ss for _,ss in scope_children.items()): _uops.append(UOp(UOps.BARRIER, None, (domain,)))
+      if (x.op in {UOps.LOAD, UOps.STORE} and x.src[0].op is UOps.DEFINE_LOCAL) or x.op is UOps.BARRIER: domain = x
       if x.op is UOps.DEFINE_ACC:
-        idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
-        self._uops.insert(idx, x)
-      else: self._uops.append(x)
+        idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
+        _uops.insert(idx, x)
+      else: _uops.append(x)
       for u, ss in scope_children.items():
         if x in ss:
           ss.remove(x)
@@ -603,26 +601,27 @@ class UOpGraph:
         if in_degree[u] == 0: push(u)
 
     # end scopes in toposort order
-    for u, x in scope_end.items(): self._uops.insert(self._uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+    for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
 
     # sanity checks (NOTE: these can cause things to be skipped in BEAM)
     if not skip_check:
-      bad_ops = dedup([x.op for x in self._uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
+      bad_ops = dedup([x.op for x in _uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
       try:
-        type_verify(self.uops)
-        assert self._uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
+        type_verify(_uops)
+        assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
         assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
         # TODO: this should be enabled, and the valid clause should be removed
         # NOTE: multiple identical stores to DEFINE_LOCAL is okay
         # NOTE: for PTX you have to propogate through some the calculations to determine if it is a store to DEFINE_LOCAL
         def _islocalbuf(u: UOp): return u.op is UOps.DEFINE_LOCAL or any(_islocalbuf(x) for x in u.src if u.op in [UOps.ALU, UOps.CAST])
-        assert len(all_stores := [x.src[0:2]+x.src[3:] for x in self._uops if x.op is UOps.STORE and not _islocalbuf(x.src[0])]) \
-            == len(dedup(all_stores)), "repeated stores in uops: "
+        assert len(all_stores := [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and not _islocalbuf(x.src[0])]) \
+            == len(dedup(all_stores)), "repeated stores in uops"
       except AssertionError as e:
-        self.print()
-        if not CI: self.graph()
+        print_uops(_uops)
+        if not CI:
+          from tinygrad.engine.graph import graph_uops
+          graph_uops(_uops)
         raise e
 
     # strip the SINK
-    self._uops = self._uops[:-1]
-    return self
+    return _uops[:-1]
