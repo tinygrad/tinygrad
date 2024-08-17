@@ -343,9 +343,8 @@ class CUDARenderer(CStyleLanguage):
   shared_max = 49152
   tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.half, dtypes.bfloat16)] # noqa: E501
   tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.f8e4m3, dtypes.f8e5m2)] # noqa: E501
-  def __init__(self, arch:str, driver_version:None|Tuple[int,int] = None):
+  def __init__(self, arch:str, driver_version:Optional[Tuple[int,int]]= None):
     archv:int = int(arch[3:])
-    self.tensor_cores = CUDARenderer.tensor_cores if arch >= 80 else []
     if archv < 80:
       self.tensor_cores = []
     elif archv < 89:
