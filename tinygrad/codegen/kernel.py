@@ -704,6 +704,7 @@ class Kernel:
           return LazyOp(op.op, (ret,), new_reduce_axes) if (new_reduce_axes:=tuple(i for i in arg if i-self.first_upcast not in reduce_axes)) else ret
         if self.group_for_reduces:
           start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
+          # NOTE: if there's a grouped reduce, but no reduce axes for this reduce, we can skip it
           arg = tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) \
                       if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
           if len(arg) == 0: return start

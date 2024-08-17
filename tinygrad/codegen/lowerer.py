@@ -116,7 +116,7 @@ class IndependentLowerer:
     # if there's no reduce, this is first_upcasted
     first_reduce = [x!=y for x,y in zip(ast.src[0].arg.st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
     local_loads = [x for x in ast.parents if x.op is BufferOps.LOAD and x.arg.idx < 0]
-    # NOTE: this is taking the first one...there may be subtlelies here with multireduces
+    # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
     group_for_reduces = sum([any(j!=y for j in x) for x,y in zip(
       [[l.arg.st.shape[i] for l in local_loads] for i in range(first_reduce,first_upcasted)],
       ast.src[0].arg.st.shape[first_reduce:first_upcasted])]) if local_loads else 0
@@ -187,16 +187,18 @@ class IndependentLowerer:
           x.src[0].src[0].op in ReduceOps and len(x.src[0].src[0].arg) > 0 and \
             x.src[0].src[0].src[0].op is BufferOps.LOAD and x.src[0].src[0].src[0].arg.idx < 0
         if load_back:
+          # NOTE: If we're loading the reduced value back into each thread, need to zero-out the reduce axes
           idx, _ = st_to_uops(x.arg.st, [UOp.const(u.dtype, 0) if i in x.src[0].src[0].arg else u for i,u in enumerate(self.ridxs)], x.arg.dtype)
           return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
         return UOp(UOps.LOAD, load_dtype, (buf, idx) + ((UOp.const(load_dtype, 0), valid) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)
       store_back = \
         x.arg.idx < 0 and \
-        x.src[0].op in [ReduceOps.SUM, ReduceOps.MAX] and \
+        x.src[0].op in ReduceOps and \
         x.src[0].src[0].op is BufferOps.LOAD and \
         x.src[0].src[0].arg.idx < 0
       zero = UOp(op=UOps.CONST, dtype=dtypes.int32, src=(), arg=0)
+      # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduce axes
       if store_back: idx, _ = st_to_uops(x.arg.st, [zero if i in x.src[0].arg else u for i,u in enumerate(self.idxs)], x.arg.dtype)
       if x.arg.idx >= 0 or store_back:
         for oidx, ridx in zip(self.idxs, self.ridxs):
