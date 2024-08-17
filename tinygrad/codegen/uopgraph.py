@@ -454,11 +454,21 @@ def create_gate(root:UOp) -> Optional[UOp]:
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
-  return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
+  return None if len(root.src) == 3 or root.src[3].op is UOps.BARRIER or (ret:=_gate_srcs(root, root.src[3])) is root else ret
+
+def bar_load_store(root:UOp, buf:UOp, idx, val) -> Optional[UOp]:
+  @functools.lru_cache(None)
+  def _bar_load(u:UOp) -> UOp:
+    if u.op is UOps.LOAD and u.src[0] is buf and u.src[2].op not in {UOps.IF}: return [u]
+    if u.op is UOps.BARRIER or u.op is UOps.LOAD: return []
+    return [l for x in u.src for l in _bar_load(x)]
+  return UOp(root.op, root.dtype, root.src + (UOp(UOps.BARRIER, None, tuple(loads)),), root.arg) if len(loads:= _bar_load(root)) > 0 else None
 
 expander = PatternMatcher([
   # create gate MUST BE BEFORE expander
   (NOp(UOps.STORE, name="root"), create_gate),
+  # BARRIER LOAD-STORE
+  (NOp(UOps.STORE, src=(NOp(UOps.DEFINE_LOCAL, name="buf"), NOp.var("idx"), NOp.var("val")), name="root"), bar_load_store),
   # do expansion
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
@@ -578,14 +588,14 @@ def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, s
 
   scope_end: Dict[UOp, UOp] = {}
   _uops: List[UOp] = []
-  domain: Union[None, UOp] = None
+  # domain: Union[None, UOp] = None
   while queue:
     p,x = heapq.heappop(queue)
     if DEBUG >= 7: print(f"{p:5d}",x)
     if x in scope_children: scope_end[x] = x
-    if domain is not None and x.op is UOps.STORE and domain.op is UOps.LOAD and x.src[0] is domain.src[0]:
-      if not any(x in ss for _,ss in scope_children.items()): _uops.append(UOp(UOps.BARRIER, None, (domain,)))
-    if (x.op in {UOps.LOAD, UOps.STORE} and x.src[0].op is UOps.DEFINE_LOCAL) or x.op is UOps.BARRIER: domain = x
+    # if domain is not None and x.op is UOps.STORE and domain.op is UOps.LOAD and x.src[0] is domain.src[0]:
+    #   if not any(x in ss for _,ss in scope_children.items()): _uops.append(UOp(UOps.BARRIER, None, (domain,)))
+    # if (x.op in {UOps.LOAD, UOps.STORE} and x.src[0].op is UOps.DEFINE_LOCAL) or x.op is UOps.BARRIER: domain = x
     if x.op is UOps.DEFINE_ACC:
       idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
       _uops.insert(idx, x)
