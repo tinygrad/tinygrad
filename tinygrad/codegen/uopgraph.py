@@ -458,7 +458,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
 
 def bar_load_store(root:UOp, buf:UOp, idx, val) -> Optional[UOp]:
   @functools.lru_cache(None)
-  def _bar_load(u:UOp) -> UOp:
+  def _bar_load(u:UOp) -> List[UOp]:
     if u.op is UOps.LOAD and u.src[0] is buf and u.src[2].op not in {UOps.IF}: return [u]
     if u.op is UOps.BARRIER or u.op is UOps.LOAD: return []
     return [l for x in u.src for l in _bar_load(x)]
