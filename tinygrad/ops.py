@@ -1,12 +1,14 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast
+from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING
 import math, operator, ctypes, struct, functools, hashlib, itertools
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.helpers import merge_dicts, pretty_print, prod
 from tinygrad.shape.symbolic import Variable, sint
+if TYPE_CHECKING:
+  from tinygrad.shape.shapetracker import ShapeTracker
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -115,6 +117,12 @@ class UOp:
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop syntactic sugar
+  @property
+  def st_arg(self) -> ShapeTracker:
+    assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
+    ret = self.src[-1]
+    assert ret.op in {UOps.ST_IDX, UOps.ST_VALID}, f"st_arg trying to return {ret}"
+    return ret.arg
   def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
@@ -167,7 +175,7 @@ class UOp:
     return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL}]))
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
-    st_vars: List[Set[Variable]] = [x.src[-1].arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
+    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
     return sorted(set.union(*st_vars, set([x.arg for x in self.sparents if x.op is UOps.DEFINE_VAR])), key=lambda v: v.expr)
   def const_factor(self) -> int:
     """largest known int that divides self"""

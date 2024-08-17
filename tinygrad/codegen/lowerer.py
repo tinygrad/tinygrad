@@ -43,13 +43,13 @@ class IndependentLowerer:
     # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = ast.full_shape
     first_upcasted = len(full_shape)-ki.upcasted
-    first_output_st: ShapeTracker = ast.src[0].src[-1].arg
+    first_output_st: ShapeTracker = ast.src[0].st_arg
     # if there's no reduce, this is first_upcasted
     first_reduce = [x!=y for x,y in zip(first_output_st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
     local_loads = [x for x in ast.parents if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL]
     # NOTE: this is taking the first one...there may be subtlelies here with multireduces
     group_for_reduces = sum([x!=y for x,y in zip(
-      local_loads[0].src[-1].arg.shape[first_reduce:first_upcasted], first_output_st.shape[first_reduce:first_upcasted])]) if local_loads else 0
+      local_loads[0].st_arg.shape[first_reduce:first_upcasted], first_output_st.shape[first_reduce:first_upcasted])]) if local_loads else 0
     global_dims = first_reduce-ki.local_dims
 
     if opts.has_local:
@@ -90,7 +90,7 @@ class IndependentLowerer:
 
   def _to_uop(self, x:UOp) -> UOp:
     if x.op in BUFFER_UOPS:
-      idx, valid = x.src[-1].arg.to_indexed_uops(self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs)
+      idx, valid = x.st_arg.to_indexed_uops(self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is UOps.CONST: return valid.where(UOp.const(x.dtype, x.arg), UOp.const(x.dtype, 0))
