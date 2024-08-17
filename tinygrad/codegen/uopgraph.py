@@ -510,7 +510,7 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   in_degree[u] = len(u.src)
   return srcs[u]
 
-def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher=constant_folder) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
   replace: Dict[UOp, UOp] = {}
   def __inner_rewrite(n:UOp) -> UOp:
