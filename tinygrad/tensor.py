@@ -427,7 +427,8 @@ class Tensor:
       return Tensor._metaop(MetaOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
 
     # threefry
-    if (num := (prod((shape:=argfix(*shape))) * dtype.itemsize) // 4) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
+    assert all_int(shape), f"symbolic shape not supported, {shape=}"
+    if (num := math.ceil((prod((shape:=argfix(*shape))) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
     if not had_counter: Tensor._rng_counter.assign(Tensor._rng_counter + num)
     counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device))
     counts2 = counts1 + math.ceil(num / 2)
