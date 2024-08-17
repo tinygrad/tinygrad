@@ -1,7 +1,7 @@
 import math, functools
 from typing import Tuple, List
 from tinygrad.dtype import dtypes, DType
-from tinygrad.codegen.uops import UOp
+from tinygrad.ops import UOp
 
 TRANSCENDENTAL_SUPPORTED_DTYPES = {dtypes.float16, dtypes.float32, dtypes.float64}
 

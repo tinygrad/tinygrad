@@ -7,7 +7,6 @@ from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import Buffer, Device, CompileError
 from tinygrad.engine.search import _ensure_buffer_alloc, get_kernel_actions, _time_program
-from tinygrad.ops import LazyOp
 
 class MCTSNode:
   def __init__(self, kernel:Kernel, parent=None):
@@ -87,14 +86,14 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     return ret
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
-  var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
+  var_vals = {k:(k.max+k.min)//2 for k in lin.ast.variables()}
   dev = Device[lin.opts.device]
   root = MCTSNode(lin)
 
   st = time.perf_counter()
   best, best_idx, best_tm = lin, 0, math.inf
   seen_libs: Dict[bytes, MCTSNode] = {}
-  seen_asts: Dict[LazyOp, MCTSNode] = {}
+  seen_asts: Dict[bytes, MCTSNode] = {}
   compile_time, runtime_time = 0.0, 0.0
   for i in range(amt):
     node = sample_tree(root, best_tm)  # sample and expand
@@ -102,12 +101,12 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     node.i = i  # when was node explored
 
     opt_ast = node.kernel.get_optimized_ast()
-    if (sibling_node:=seen_asts.get(opt_ast, None)) is not None:
+    if (sibling_node:=seen_asts.get(opt_ast.key, None)) is not None:
       # early check for same optimized AST hit
       remove_node(node)
       tm = sibling_node.t
     else:
-      seen_asts[opt_ast] = node
+      seen_asts[opt_ast.key] = node
 
       # lowering (50% of the time)
       p = node.kernel.to_program(name_override="test")

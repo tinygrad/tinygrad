@@ -1,10 +1,9 @@
 import os, atexit, functools, contextlib
 from collections import defaultdict
 from typing import List, Any, DefaultDict
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps, UOps, UOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters
-from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.shape.symbolic import NumNode
 from tinygrad.lazy import LazyBuffer
 

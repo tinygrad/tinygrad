@@ -1,13 +1,12 @@
 import unittest
 from tinygrad import Device
-from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.helpers import Timing, Profiling
 
 class TestDeviceSpeed(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.dev = Device[Device.DEFAULT]
-    cls.empty = Device[Device.DEFAULT].renderer.render("test", UOpGraph([]))
+    cls.empty = Device[Device.DEFAULT].renderer.render("test", [])
 
   def test_empty_compile(self):
     with Timing("compiler "):

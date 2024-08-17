@@ -4,9 +4,9 @@
 
 import unittest
 from tinygrad import Device, dtypes
-from tinygrad.codegen.uops import UOps
+from tinygrad.ops import UOps
 from tinygrad.helpers import getenv
-from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps # noqa: F401 # pylint: disable=unused-import
+from extra.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
@@ -31,7 +31,6 @@ class TestLinearizerDumb(unittest.TestCase):
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
-    k.uops.print()
     print(prg.src)
     Device[Device.DEFAULT].compiler.compile_cached(prg.src)
     with self.assertRaises(AssertionError):
