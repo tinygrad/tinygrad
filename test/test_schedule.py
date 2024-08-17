@@ -258,7 +258,7 @@ class TestSchedule(unittest.TestCase):
     # run
     c1(img).relu().mean().backward()
     assert img.grad is not None and c1.weight.grad is not None
-    run_schedule(check_schedule([img.grad, c1.weight.grad], 6, filter_sink=False))
+    run_schedule(check_schedule([img.grad, c1.weight.grad], 4, filter_sink=False))
     dtypes.default_float = old_float
 
     # compare
