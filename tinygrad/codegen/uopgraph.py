@@ -297,8 +297,8 @@ constant_folder = PatternMatcher([
   # generic lt folding (use div)
   (NOp.var('x').lt(NOp.cvar('c')), lambda x,c: newx.src[0].lt(newx.src[1]) if 0 < c.arg and dtypes.is_int(x.dtype) and \
    not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV else None),
-  # unfactor const
-  (NOp.cvar('c') * (NOp.var('x') + NOp.var('y')), lambda c,x,y: None if math.isnan(c.arg) or math.isinf(c.arg) else (x*c+y*c)),
+  # unfactor const (only int)
+  (NOp.cvar('c') * (NOp.var('x') + NOp.var('y')), lambda c,x,y: (x*c+y*c) if dtypes.is_int(c.dtype) else None),
   # ** div **
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
