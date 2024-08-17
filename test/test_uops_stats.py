@@ -3,9 +3,8 @@ from tinygrad import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
-from tinygrad.codegen.uops import flops_mem, UOps, UOp
 from tinygrad.codegen.uopgraph import UOpGraph
-from tinygrad.ops import BinaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, TernaryOps, flops_mem, UOps, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 
@@ -117,7 +116,7 @@ class TestUOpsStats(unittest.TestCase):
     u4 = UOp(UOps.ALU, dtypes.int, (u1,u2,u3), TernaryOps.MULACC)
     uops_fma = UOpGraph([u4])
 
-    self.assertEqual(flops_mem(uops.uops), flops_mem(uops_fma.uops))
+    self.assertEqual(flops_mem(uops.linearize()), flops_mem(uops_fma.linearize()))
 
 N = 100
 @unittest.skipIf(getenv("PTX"), "wrong in PTX") # maybe?

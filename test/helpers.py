@@ -2,7 +2,7 @@ import sys, unittest
 from typing import Optional, Set, Tuple
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.codegen.uops import UOp
+from tinygrad.ops import UOp
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import DType
