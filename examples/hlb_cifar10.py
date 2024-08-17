@@ -277,7 +277,8 @@ def train_cifar():
 
   set_seed(getenv('SEED', hyp['seed']))
 
-  X_train, Y_train, X_test, Y_test = fetch_cifar()
+  #$X_train, Y_train, X_test, Y_test = fetch_cifar()
+  X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
   # load data and label into GPU and convert to dtype accordingly
   X_train, X_test = X_train.to(device=Device.DEFAULT).float(), X_test.to(device=Device.DEFAULT).float()
   Y_train, Y_test = Y_train.to(device=Device.DEFAULT), Y_test.to(device=Device.DEFAULT)
