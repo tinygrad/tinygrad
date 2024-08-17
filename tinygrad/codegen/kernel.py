@@ -763,6 +763,7 @@ class Kernel:
 # the living definition of UOps.SHAPETRACKER
 def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   assert ast.op is UOps.SINK and all(x.op is UOps.STORE for x in ast.src), "must be SINK"
+  assert len(set(x.st_arg.size for x in ast.src)) == 1, "outputs must be exactly the same size"
   sts: Dict[UOp, ShapeTracker] = {}
   def assert_valid(op:UOp, st:ShapeTracker):
     if op in sts or op.op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
