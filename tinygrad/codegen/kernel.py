@@ -769,7 +769,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   # restore globals from the two stage reduce
   if op is UOps.LOAD and src[0].op is UOps.DEFINE_LOCAL:
     _assert_valid_uop(local_reduce:=src[2].src[2], uop.st_arg, sts)
-    st = sts[local_reduce]
+    sts[uop] = sts[local_reduce]
     return
   for x in src: _assert_valid_uop(x, st, sts)
   # only reduceuop is allowed to change shape, limited to turning n to 1
