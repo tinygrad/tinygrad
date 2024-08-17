@@ -1,7 +1,7 @@
 from typing import List, Callable
 import functools, math
 import numpy as np
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, nn, GlobalCounters, TinyJit
 from tinygrad.helpers import partition, trange
 from extra.lr_scheduler import OneCycleLR
 
@@ -57,10 +57,10 @@ class ConvGroup:
     self.layers: List[Callable[[Tensor], Tensor]] = [
       nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False),
       Tensor.max_pool2d,
-      nn.BatchNorm(channels_out),
+      nn.BatchNorm(channels_out, eps=1e-12, momentum=hyp['net']['batch_norm_momentum']),
       Tensor.gelu,
       nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False),
-      nn.BatchNorm(channels_out),
+      nn.BatchNorm(channels_out, eps=1e-12, momentum=hyp['net']['batch_norm_momentum']),
       Tensor.gelu]
   def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
 
@@ -81,13 +81,12 @@ if __name__ == "__main__":
   # *** dataset ***
   X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
   cifar10_std, cifar10_mean = X_train.std_mean(axis=(0, 2, 3))
-  X_train = (X_train - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)
-  X_test = (X_test - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)
+  X_train = ((X_train - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).half()
+  X_test = ((X_test - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).half()
   Y_train = Y_train.one_hot(depths['num_classes'])
   Y_test = Y_test.one_hot(depths['num_classes'])
 
   # *** model ***
-  Tensor.training = True
   model = SpeedyConvNet()
   state_dict = nn.state.get_state_dict(model)
 
@@ -105,13 +104,11 @@ if __name__ == "__main__":
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr'],     pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps)
 
-  for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
-    # TODO: move to tinygrad
-    idxs = np.arange(X_train.shape[0])
-    np.random.shuffle(idxs)
-    tidxs = Tensor(idxs)[:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)
-    for epoch_step in (t:=trange(num_steps_per_epoch)):
-      X,Y = X_train[tidxs[epoch_step]], Y_train[tidxs[epoch_step]]
+  @TinyJit
+  def train_step(idxs) -> Tensor:
+    with Tensor.train():
+      opt.zero_grad()
+      X,Y = X_train[idxs], Y_train[idxs]
       out = model(X)
       loss_batchsize_scaler = 512/batchsize
       loss = out.cross_entropy(Y, reduction='none', label_smoothing=0.2).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
@@ -119,4 +116,14 @@ if __name__ == "__main__":
       opt.step()
       lr_sched_bias.step()
       lr_sched_non_bias.step()
+      return loss
+
+  for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
+    # TODO: move to tinygrad
+    idxs = np.arange(X_train.shape[0])
+    np.random.shuffle(idxs)
+    tidxs = Tensor(idxs)[:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)
+    for epoch_step in (t:=trange(num_steps_per_epoch)):
+      GlobalCounters.reset()
+      loss = train_step(tidxs[epoch_step].contiguous())
       t.set_description(f"loss: {loss.item():6.2f}")
