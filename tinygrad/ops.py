@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast
-import math, operator, ctypes, struct, functools, hashlib, itertools
+import math, operator, ctypes, struct, functools, itertools, hashlib
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.dtype import ConstType, dtypes, DType
@@ -109,9 +109,21 @@ class UOp:
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
+
+  def cached_compare(self, x, context):
+    if id(self) == id(x): return True
+    if self.op != x.op or self.dtype != x.dtype or self.arg != x.arg or len(self.src) != len(x.src): return False
+    if (key := (id(self), id(x))) in context: return context[key]
+    ret = context[key] = all(a.cached_compare(b, context) for a,b in zip(self.src, x.src))
+    return ret
+  def __eq__(self, x): return self.cached_compare(x, context={})
+  @functools.cached_property
+  def hash(self): return hash((self.op, self.dtype, self.src, self.arg))
+  def __hash__(self): return self.hash
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(functools.reduce(lambda x,y: x+y, [s.key for s in self.src], str((self.op, self.dtype, self.arg)).encode())).digest()
+
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop syntactic sugar
