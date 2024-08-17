@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys
 import itertools, urllib.request, subprocess, shutil, math, json, contextvars
 from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
@@ -146,19 +146,21 @@ class Profiling(contextlib.ContextDecorator):
   def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None, ts=1):
     self.enabled, self.sort, self.frac, self.fn, self.time_scale = enabled, sort, frac, fn, 1e3/ts
   def __enter__(self):
+    import cProfile
     self.pr = cProfile.Profile()
     if self.enabled: self.pr.enable()
   def __exit__(self, *exc):
     if self.enabled:
       self.pr.disable()
       if self.fn: self.pr.dump_stats(self.fn)
+      import pstats
       stats = pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort)
       for fcn in stats.fcn_list[0:int(len(stats.fcn_list)*self.frac)]:    # type: ignore[attr-defined]
         (_primitive_calls, num_calls, tottime, cumtime, callers) = stats.stats[fcn]    # type: ignore[attr-defined]
         scallers = sorted(callers.items(), key=lambda x: -x[1][2])
         print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
-              colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
-              colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
+              colored(_format_fcn(fcn).ljust(50), "yellow"),
+              colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if scallers else '')
 
 class ProfileLogger:
   writers: int = 0
