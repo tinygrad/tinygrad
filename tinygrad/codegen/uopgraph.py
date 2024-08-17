@@ -151,6 +151,7 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
 
 # ***** transcendental *****
 
+@functools.lru_cache(None)
 def transcendental_folding(ops):
   return PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=k), cast(Callable, v))
                          for k,v in ((UnaryOps.EXP2, xexp2), (UnaryOps.LOG2, xlog2), (UnaryOps.SIN, xsin)) if k not in ops])
@@ -493,6 +494,9 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
+no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE}, dtype=dtypes.pyint, name="x"),
+    lambda x: UOp(x.op, dtypes.int32, x.src, x.arg))])
+
 # *** uop graph ***
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
@@ -518,19 +522,18 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   return __inner_rewrite(sink)
 
 linearize_cnt = 0
-def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, extra_pm:Optional[PatternMatcher]=None, skip_check=False) -> List[UOp]:
+def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, skip_check=False) -> List[UOp]:
   global linearize_cnt, acc_number
   sink: UOp = sink_in if isinstance(sink_in, UOp) else UOp(UOps.SINK, None, tuple(sink_in))
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
-  folder = constant_folder + transcendental_folding({} if TRANSCENDENTAL >= 2 or opts is None else opts.code_for_op.keys())
+  folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
 
   # do graph rewrite
   acc_number = 0
   sink = graph_rewrite(sink, folder)
 
   # rewrite pyint to int32
-  sink = graph_rewrite(sink, PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE}, dtype=dtypes.pyint, name="x"),
-    lambda x: UOp(x.op, dtypes.int32, x.src, x.arg))]))
+  sink = graph_rewrite(sink, no_pyint)
 
   # expand
   linearize_cnt += 1
@@ -539,7 +542,7 @@ def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, e
     sink = graph_rewrite(sink, folder+expander+reducer)
 
   # for PTX only
-  if extra_pm: sink = graph_rewrite(sink, folder+extra_pm)
+  if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
 
   # filter nodes that don't link to a sink
   # BFS toposort
