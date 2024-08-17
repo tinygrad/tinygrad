@@ -7,7 +7,7 @@ class TestCompileFailures(unittest.TestCase):
     for _ in lower_schedule(out.schedule()): pass
 
   def test_interpolate_atari(self):
-    self.compile(Tensor.empty(210, 160, dtype='uint8').interpolate((64, 64)))
+    self.compile(Tensor.empty(210, 160, dtype='uint8').interpolate((64, 64), mode='linear'))
 
 if __name__ == '__main__':
   unittest.main()

@@ -1976,15 +1976,10 @@ class Tensor:
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.int32, device=self.device), [1] * self.ndim
-      if mode == "linear":
-        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-        reshape[i] = expand[i] = size[i]
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-        x = x.gather(i, low).lerp(x.gather(i, high), perc)
-      # elif mode in {"nearest", "nearest-exact"}:
-      #   index = (scale*arr).floor() if mode == "nearest" else (scale*(arr+0.5)-0.5).round()
-      #   x = x[tuple(index if i + x.ndim == dim else slice(None) for dim in range(x.ndim))]
-      else: raise ValueError(f"{mode=} is not supported")
+      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+      reshape[i] = expand[i] = size[i]
+      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+      x = x.gather(i, low).lerp(x.gather(i, high), perc)
     return x
 
   # ***** unary ops *****
