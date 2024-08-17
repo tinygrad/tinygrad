@@ -733,6 +733,13 @@ class TestShapeTracker(unittest.TestCase):
     self.test_expand()
     self.test_permute()
 
+  def test_axis_is_masked(self):
+    st = ShapeTracker.from_shape((100, 100, 100, 100)).pad(((0,1),(0,0),(2,0), (0,0)))
+    assert st.axis_is_masked(0)
+    assert not st.axis_is_masked(1)
+    assert st.axis_is_masked(2)
+    assert not st.axis_is_masked(3)
+
 class TestShapeTrackerSize(unittest.TestCase):
   def test_simple_size(self):
     st = ShapeTracker.from_shape((100, 100))
