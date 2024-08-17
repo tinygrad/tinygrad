@@ -368,7 +368,6 @@ class Kernel:
     if not self.opts.tensor_cores and use_tensor_cores != 2:return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
-      return True
       if (tc_opts:=self.tensor_core_opts) is not None:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
@@ -718,7 +717,7 @@ class Kernel:
               # strides=(2, 4, 0, 0, 0, 32, 16, 8, 64, 128, 0, 1),
               reduce_axes, upcast_axes = [0, 1, 2], [[(0, 8), (1, 2)], [(0, 8)], [(3, 2), (4, 2)]]
               fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2,2), (2,2,2,2,2,2,2),
-                ( (1,0),(1,3), (1,5),  (0,2), (0,3), ), ( (1,4),(0,4), (1,1), (1,2), (0,0), (0,1), (1,6)))
+                ( (1,0),(1,3), (0,2),(0,3),(0,4),    ), ( (1,4),(1,5), (1,1), (1,2), (0,0), (0,1), (1,6)))
               fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2,2), (2,2,2,2,2,2,2),
                 ((1,0), (1, 3),(1,6),(0,0), (0,1),   ), ((1, 4), (1,1), (1,2), (1,5),(0,4), (0,2), (0,3)))
           else:
