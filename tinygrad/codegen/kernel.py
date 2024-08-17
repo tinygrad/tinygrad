@@ -665,6 +665,9 @@ class Kernel:
             permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in pattern_1] + list(range(wd+len(warp_dims), tcd)) + \
                                          [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
             
+            print("shapetracker befiore", st1)
+            print("after reshape ", st1.reshape(new_shape).simplify())
+            print("After permute ", st1.reshape(new_shape).simplify().permute(tuple(permaxis)))
             ret = st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
             print("shapetracker!", ret)
             print("permute axis!", permaxis)
@@ -697,11 +700,27 @@ class Kernel:
               #     0 1 2 3 4 5 6 7 8 9 0
               #     0 1 2 3 4 0 1 2 3 4 5
               #               red     upc
+
+              """
+              good
+              shapetracker befiore ShapeTracker(views=(View(shape=(2, 2, 2, 2, 2, 8, 2, 2, 2), strides=(2, 4, 0, 0, 0, 8, 64, 0, 1), offset=0, mask=None, contiguous=False),))
+              after reshape  ShapeTracker(views=(View(shape=(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2), strides=(2, 4, 0, 0, 0, 32, 16, 8, 64, 0, 1), offset=0, mask=None, contiguous=False),))
+              shapetracker! ShapeTracker(views=(View(shape=(2, 2, 2, 2, 2, 8, 2, 2, 2), strides=(16, 32, 1, 2, 4, 0, 0, 64, 8), offset=0, mask=None, contiguous=False),))
+              permute axis! [6, 5, 10, 0, 1, 4, 2, 9, 3, 8, 7]
+              """
+              """
+              shapetracker befiore ShapeTracker(views=(View(shape=(2, 2, 2, 2, 2, 8, 2, 2, 2, 2), strides=(2, 4, 0, 0, 0, 8, 64, 128, 0, 1), offset=0, mask=None, contiguous=False),))
+              after reshape  ShapeTracker(views=(View(shape=(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2), strides=(2, 4, 0, 0, 0, 32, 16, 8, 64, 128, 0, 1), offset=0, mask=None, contiguous=False),))
+              shapetracker! ShapeTracker(views=(View(shape=(2, 2, 2, 2, 2, 8, 2, 2, 2, 2), strides=(2, 4, 0, 0, 0, 8, 64, 128, 0, 1), offset=0, mask=None, contiguous=False),))
+              permute axis! [0, 2, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+              """
+              # strides=(2, 4, 0, 0, 0, 32, 16, 8, 64, 128, 0, 1),
               reduce_axes, upcast_axes = [0, 1, 2], [[(0, 8), (1, 2)], [(0, 8)], [(3, 2), (4, 2)]]
               fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2,2), (2,2,2,2,2,2,2),
-                ((0,0), (0,1), (0,2), (0,3), (0,4)), ((1,0), (1,1), (1,2), (1,3), (1,4), (1,5), (1,6)))
+                ( (1,0),(1,5), (0,2), (0,3), (1,3)), ( (1,4),(0,4), (1,1), (1,2), (0,0), (0,1), (1,6)))
               fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2,2), (2,2,2,2,2,2,2),
-                ((0,0), (0,1), (0,2), (0,3), (0,4)), ((1,0), (1,1), (1,2), (1,3), (1,4), (1,5), (1,6)))
+                ((1, 3), (0,1), (1,0), (1,1), (1,2)), ((1, 4), (0,0),   (1,6), (1,5),(0,4), (0,2), (0,3)))
           else:
             raise RuntimeError("unsupported device for tensor cores: ", self.opts.device)
 
