@@ -1967,12 +1967,18 @@ class Tensor:
     if mode in {"nearest", "nearest-exact"}:
       arrs = (Tensor.arange(s, dtype=dtypes.int32, device=self.device) for s in size)
       scales = (self.shape[i] / size[i] for i in range(-len(size), 0))
-      idxs = [(scale*arr).floor().cast(dtypes.int) if mode == "nearest" else (scale*(arr+0.5)-0.5).round().cast(dtypes.int)
+      # NOTE: for nearest-exact...
+      # https://github.com/pytorch/pytorch/commit/6adbe044e39c8e8db158d91e151aa6dead6e9aa4#diff-bf10b066c2c62c193fa16ea880093284cbb3e53a3406b702759cb31041e6ae91
+      #   // index_f32 = (output_index + 0.5) * scale - 0.5
+      # // input_index = round(index_f32)
+      # // Same as Pillow and Scikit-Image/Scipy ndi.zoom
+      # const int64_t src_index =
+      # std::min(static_cast<int64_t>(floorf((dst_index + 0.5) * scale)), input_size - 1);
+      idxs = [(arr*scale).floor().cast(dtypes.int) if mode == "nearest" else (((arr+0.5)*scale)).floor().cast(dtypes.int)
               for arr, scale in zip(arrs, scales)]
-      # pre-expanded shape to fit idx selection in 1 kernel lol
-      idxs = [idx.reshape(*(-1 if i == i_ else 1 for i_ in range(len(size)))).expand(*(-1 if i == i_ else size[i_] for i_ in range(len(size))))
-              for i,idx in enumerate(idxs)]
-      return x[*(slice(None) for _ in range(x.ndim - len(size))), *idxs]
+      idxs = [idx.reshape(*(-1 if i == dim else 1 for i in range(len(size)))).expand(*(-1 if i == dim else size[i] for i in range(len(size))))
+              for dim, idx in enumerate(idxs)]
+      return x[..., *idxs]
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
