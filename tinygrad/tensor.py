@@ -743,11 +743,11 @@ class Tensor:
         yield node
     return list(_walk(self, set()))
 
-  def backward(self, gradient:Optional[Tensor]=None) -> Tensor:
+  def backward(self, gradient:Optional[Tensor]=None, retain_graph:bool=False) -> Tensor:
     """
     Propagates the gradient of a tensor backwards through the computation graph.
     If the 'gradient' argument is not provided, the tensor must be a scalar, and the gradient is implicitly set to 1.0.
-
+    If 'retain_graph' is false, the graph used to compute the grads will be freed. Otherwise, it will be kept. Keeping it can increase memory usage.
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
     t.sum().backward()
@@ -774,7 +774,7 @@ class Tensor:
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
-      del t0._ctx
+      if not retain_graph: del t0._ctx
     return self
 
   # ***** movement low level ops *****
