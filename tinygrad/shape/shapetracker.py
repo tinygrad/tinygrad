@@ -134,8 +134,8 @@ class ShapeTracker:
     return idx, valid
 
   def axis_is_masked(self, axis:int) -> bool:
-    _, valid = self.to_indexed_uops()
-    return axis in [x.arg for x in valid.sparents if x.op is UOps.RANGE]
+    _, valid = self.expr_idxs()
+    return f'idx{axis}' in [v.expr for v in valid.vars()]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
