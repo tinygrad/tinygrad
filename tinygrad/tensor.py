@@ -1266,7 +1266,7 @@ class Tensor:
     order[dim0], order[dim1] = order[dim1], order[dim0]
     return self.permute(order)
 
-  def flatten(self, start_dim=0, end_dim=-1):
+  def flatten(self, start_dim=0, end_dim=-1, resolve=True):
     """
     Flattens the tensor by reshaping it into a one-dimensional tensor.
     If `start_dim` or `end_dim` are passed, only dimensions starting with `start_dim` and ending with `end_dim` are flattened.
@@ -1279,10 +1279,10 @@ class Tensor:
     print(t.flatten(start_dim=1).numpy())
     ```
     """
-    start_dim, end_dim = self._resolve_dim(start_dim), self._resolve_dim(end_dim)
+    start_dim, end_dim = (self._resolve_dim(start_dim), self._resolve_dim(end_dim)) if resolve else (start_dim, end_dim)
     return self.reshape(self.shape[:start_dim] + (prod(self.shape[start_dim:end_dim+1]), ) + self.shape[end_dim+1:])
 
-  def unflatten(self, dim:int, sizes:Tuple[int,...]):
+  def unflatten(self, dim:int, sizes:Tuple[int,...], resolve=True):
     """
     Unflattens dimension `dim` of the tensor into multiple dimensions specified by `sizes`. `Tensor.flatten()` is the inverse of this function.
 
@@ -1296,7 +1296,7 @@ class Tensor:
     print(Tensor.ones(5, 12, 3).unflatten(-2, (2, 2, 3, 1, 1)).shape)
     ```
     """
-    dim = self._resolve_dim(dim)
+    dim = self._resolve_dim(dim) if resolve else dim
     return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
 
   # ***** reduce ops *****
@@ -1644,25 +1644,28 @@ class Tensor:
     """
     def replace_ellipsis(l, n): return l[: (i := l.index("..."))] + [f"...{j}" for j in range(n)] + l[i + 1:] if "..." in l else l
     def parse_formula(formula: str):
-      lparens, rparens = map(lambda x: [i for i, ch in enumerate(formula) if ch == x], ("(", ")"))
+      lparens, rparens = map(lambda x: [i for i, ch in enumerate(formula.split()) if ch == x], ("(", ")"))
       assert len(lparens) == len(rparens) and sorted(flatten(pairs := list(zip(lparens, rparens)))) == flatten(pairs), "bracket mismatch"
-      return formula.replace("(", "").replace(")", "").split(), [formula[o + 1 : c].split() for o, c in pairs]
+      return [name for name in formula.split() if name not in ("(", ")")], [(s - 2*i, e - 1 - 2*i) for i, (s, e) in enumerate(pairs)]
 
     assert formula.count("->") == 1, 'need exactly one "->" in formula'
-    (lhs, unflatten_groups), (rhs, flatten_groups) = map(parse_formula, formula.split("->"))
+
+    (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula, formula.replace("(", " ( ").replace(")", " ) ").split("->"))
 
     assert sorted(lhs) == sorted(rhs) and all(name.isalnum() or name == "..." for name in flatten((lhs, rhs))), f"name mismatch in {formula}"
-    assert "..." not in flatten(unflatten_groups), "cannot have collapsed ellipsis (...) in input formula"
+    assert "..." not in flatten([lhs[s:e] for s, e in unflatten_dims]), "cannot have collapsed ellipsis (...) in input formula"
     assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
 
     # resolve ellipsis
-    ellipsis_len = len(self.shape) - len(lhs) + 1 + sum(len(group) - 1 for group in unflatten_groups) if "..." in lhs else 0
-    lhs, rhs, *flatten_groups = map(lambda l: replace_ellipsis(l, ellipsis_len), (lhs, rhs, *flatten_groups))
+    ell_len = len(self.shape) - len(lhs) + 1 + sum(e - s - 1 for s, e in unflatten_dims) if "..." in lhs else 1
+    lhs, rhs = map(lambda l: replace_ellipsis(l, ell_len), (lhs, rhs))
+    unflatten_dims = [(s + (ell_len - 1 if "...0" in lhs[:s] else 0), e + (ell_len - 1 if "...0" in lhs[:e] else 0),) for s, e in unflatten_dims]
+    flatten_dims = [(s + (ell_len - 1 if "...0" in rhs[:s] else 0), e + (ell_len - 1 if "...0" in rhs[:e] else 0),) for s, e in flatten_dims]
 
     # apply movement ops in order unflatten -> permute -> flatten
-    t = functools.reduce(lambda x, group: x.unflatten(lhs.index(group[0]), tuple(sizes.get(name, -1) for name in group)), unflatten_groups, self)
+    t = functools.reduce(lambda x, dims: x.unflatten(dims[0], tuple(sizes.get(lhs[d], -1) for d in range(*dims)), False), unflatten_dims, self)
     t = t.permute([lhs.index(name) for name in rhs])
-    return functools.reduce(lambda x, group: x.flatten(d := rhs.index(group[0]), d + len(group) - 1), reversed(flatten_groups), t)
+    return functools.reduce(lambda x, dims: x.flatten(dims[0], dims[1] - 1, False), reversed(flatten_dims), t)
 
   @staticmethod
   def einsum(formula:str, *raw_xs, acc_dtype:Optional[DTypeLike]=None) -> Tensor:
