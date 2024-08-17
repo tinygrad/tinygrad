@@ -84,14 +84,10 @@ class TestLinearizer(unittest.TestCase):
 
   def test_multioutput(self):
     dtype, st = dtypes.int, ShapeTracker.from_shape((8,))
-    buf_a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=2)
-    buf_b = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=3)
-    buf_out0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=0)
-    buf_out1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=1)
-    a = UOp(UOps.LOAD, dtype, (buf_a, st.to_uop()))
-    b = UOp(UOps.LOAD, dtype, (buf_b, st.to_uop()))
-    out0 = UOp(UOps.STORE, None, (buf_out0, st.to_uop(), a + b))
-    out1 = UOp(UOps.STORE, None, (buf_out1, st.to_uop(), a * b))
+    a = UOp(UOps.LOAD, dtype, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=2), st.to_uop()))
+    b = UOp(UOps.LOAD, dtype, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=3), st.to_uop()))
+    out0 = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=0), st.to_uop(), a + b))
+    out1 = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=1), st.to_uop(), a * b))
     sink = UOp(UOps.SINK, src=(out0, out1))
 
     a_t = Tensor.full(st.shape, 2).contiguous().realize()
