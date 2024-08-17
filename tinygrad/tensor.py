@@ -1972,9 +1972,7 @@ class Tensor:
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
-      else:
-        index = (scale*arr).floor()
-        x = x.gather(i, index.reshape(reshape).expand(expand))
+      else: x = x.gather(i, (scale*arr).floor().reshape(reshape).expand(expand))
     return x.cast(self.dtype)
 
   # ***** unary ops *****
