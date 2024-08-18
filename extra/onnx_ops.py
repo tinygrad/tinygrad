@@ -399,7 +399,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif mode == "ceil": index = index.ceil()
     else: raise ValueError(f"invalid {nearest_mode=}")
     return index.cast(dtypes.int32).clip(0, input_dim-1)
-  def _apply_coordinate_transformation(index: Tensor, input_dim, output_dim, scale_dim, roi_dim, mode: str):
+  def _apply_coordinate_transformation(index: Tensor, input_dim: int, output_dim: int, scale_dim, roi_dim, mode: str):
     if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
     elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1)
     elif mode == "asymmetric": index = index / scale_dim
@@ -442,10 +442,9 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       scales = [scale if i in axes else 1 for i in range(X.ndim)]
       sizes = [int((scale * X.shape[i]) + 0.5) if i in axes else X.shape[i] for i in range(X.ndim)]
   else:
-    if isinstance(scales, Tensor): scales = to_python_const(scales)
+    scales = to_python_const(scales)
     sizes = [int(sc*sh) for sc, sh in zip(scales, X.shape)]
 
-  # out_shape = sizes
   indexes = [Tensor.arange(shape, dtype=dtypes.default_float, device=X.device) for shape in sizes[2:]]
   sizes, roi, axes, scales, input_shape = (val[2:] if isinstance(val, list) else [None] * (X.ndim-2)
                                            for val in (sizes, roi, axes, scales, list(X.shape)))
@@ -453,43 +452,17 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   if mode == "nearest":
     indexes = [_apply_coordinate_transformation(*args, coordinate_transformation_mode) for args in zip(indexes, input_shape, sizes, scales, roi)]
     indexes = [_apply_nearest_mode(*args, nearest_mode) for args in zip(indexes, input_shape)]
-    indexes = [idx.reshape(*(-1 if i == dim else 1 for i in range(len(sizes)))).expand(*(-1 if i == dim else sizes[i] for i in range(len(sizes))))
-               for dim, idx in enumerate(indexes)]
+    indexes = [idx.reshape(*(-1 if i == dim else 1 for i in range(len(sizes)))).expand(sizes) for dim, idx in enumerate(indexes)]
     return X[..., *indexes]
-  # TODO: do linear too
   if mode == "linear":
-    raise NotImplementedError("todo")
-    # y_out, x_out = [_apply_coordinate_transformation(*args, coordinate_transformation_mode) for args in zip(indexes, input_shape, sizes, scales, roi)]
-    # ret = []
-    # for y in to_python_const(y_out):
-    #   for x in to_python_const(x_out):
-    #     x_floor, y_floor = int(x), int(y)
-    #     y_shrink = (y_floor, math.ceil(y)+1)
-    #     x_shrink = (x_floor, math.ceil(x)+1)
-    #     corners = to_python_const(X.shrink((None, None, y_shrink, x_shrink)))[0][0]
-
-    #     wx, wy = math.ceil(x) - x, math.ceil(y) - y
-    #     if x == x_floor and y == y_floor:
-    #       weighted = corners[0][0]
-    #     elif x == x_floor:
-    #       weighted = corners[0][0] * wy + corners[1][0] * (1-wy)
-    #     elif y == y_floor:
-    #       weighted = corners[0][0] * wx + corners[0][1] * (1-wx)
-    #     else:
-    #       weighted = (corners[0][0] * wx + corners[0][1] * (1-wx)) * wy + \
-    #                  (corners[1][0] * (wx) + corners[1][1] * (1-wx)) * (1-wy)
-    #     ret.append(weighted)
-    # return Tensor(ret).reshape(out_shape)
-
-    # x, expand = self, list(self.shape)
-    # for i in range(-len(size), 0):
-    #   scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
-    #   arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-    #   index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-    #   reshape[i] = expand[i] = size[i]
-    #   low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-    #   x = x.gather(i, low).lerp(x.gather(i, high), perc)
-    # return x.cast(self.dtype)
+    expand = list(X.shape)
+    for i in range(-len(sizes), 0):
+      reshape = [1] * X.ndim
+      index = _apply_coordinate_transformation(indexes[i], input_shape[i], sizes[i], scales[i], roi[i], coordinate_transformation_mode)
+      reshape[i] = expand[i] = sizes[i]
+      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+      X = X.gather(i, low).lerp(X.gather(i, high), perc)
+    return X
   if mode == "cubic":
     raise NotImplementedError("cubic interpolation is not implemented")
 

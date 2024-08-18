@@ -1963,22 +1963,20 @@ class Tensor:
     """
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
     assert not (mode == "nearest" and align_corners), 'align_corners option can only be set with the mode="linear"'
-    x, expand = self, list(self.shape)
-    if mode in {"nearest", "nearest-exact"}:
-      arrs = (Tensor.arange(s, dtype=dtypes.int32, device=self.device) + (0.5 if mode == "nearest-exact" else 0) for s in size)
-      scales = (self.shape[i] / size[i] for i in range(-len(size), 0))
-      # TODO: is this clip needed?
-      idxs = [(arr*scale).floor().cast(dtypes.int).clip(0, self.shape[i-len(size)]-1) for i, (arr, scale) in enumerate(zip(arrs, scales))]
-      idxs = [idx.reshape(*(-1 if i == dim else 1 for i in range(len(size)))).expand(*(-1 if i == dim else size[i] for i in range(len(size))))
-              for dim, idx in enumerate(idxs)]
-      return x[..., *idxs]
+    x, expand, indexes = self, list(self.shape), []
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
       reshape[i] = expand[i] = size[i]
-      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-      x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      if mode in {"nearest", "nearest-exact"}:
+        index = ((arr + (0.5 if mode == "nearest-exact" else 0)) * scale).floor().cast(dtypes.int)
+        indexes.append(index.reshape(reshape[-len(size):]).expand(size))
+      elif mode == "linear":
+        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      else: raise ValueError(f"invalid {mode=}")
+    if mode in {"nearest", "nearest-exact"}: x = x[..., *indexes]
     return x.cast(self.dtype)
 
   # ***** unary ops *****
