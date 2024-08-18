@@ -74,9 +74,8 @@ class IndependentLowerer:
           # only get the lidxs that are being used
           lidx_map = {i:j for j,i in enumerate([i for i in grouped_axes if i in reuse_axes.values()])}
           lidxs = get_grouped_dims("lidx", tuple(list(full_shape[global_dims:first_reduce]) + [full_shape[i] for i in lidx_map]), opts.local_max)
-          
-          lidxs = lidxs[:first_reduce-global_dims] + [lidxs[lidx_map[reuse_axes[i]]+first_reduce-global_dims] for i in grouped_axes]
-          self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + lidxs
+          self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
+            lidxs[:first_reduce-global_dims] + [lidxs[lidx_map[reuse_axes[i]]+first_reduce-global_dims] for i in grouped_axes]
         else:
           lidxs = get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.global_max)
           self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
