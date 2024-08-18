@@ -15,12 +15,10 @@ from tinygrad.engine.schedule import ScheduleItem
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
-  print("TEST==========")
   if DEBUG >= 5:
     print(ast)
   k = Kernel(ast, opts=renderer).required_optimizations()
   if not NOOPT:
-    print("<===================HERE")
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
