@@ -469,6 +469,7 @@ class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
          strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
+  @Tensor.train()
   def test_to_preserves(self, src, dest, dtype, requires_grad):
     s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
     if requires_grad: s.sum().backward()
@@ -493,6 +494,7 @@ class TestMoveTensor(unittest.TestCase):
     y = x.to(dev)
     assert x is y
 
+  @Tensor.train()
   def test_to_grad(self):
     x = Tensor.eye(3, requires_grad=True, device=self.d0)
     y = Tensor([[2.0,0,-2.0]], requires_grad=True, device=self.d0)

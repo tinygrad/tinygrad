@@ -107,6 +107,10 @@ backend_test.exclude('test_rnn_*')
 backend_test.exclude('test_lstm_*')
 backend_test.exclude('test_simple_rnn_*')
 
+# no gradient
+backend_test.exclude('test_gradient_of_add_cpu')
+backend_test.exclude('test_gradient_of_add_and_mul_cpu')
+
 # no control flow
 # control flow uses AttributeProto.GRAPH
 backend_test.exclude('test_if_*')

@@ -750,7 +750,8 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
-    t.sum().backward()
+    with Tensor.train():
+      t.sum().backward()
     print(t.grad.numpy())
     ```
     """

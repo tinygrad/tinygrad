@@ -17,6 +17,7 @@ class TestGC(unittest.TestCase):
     del a,b
     assert (tensors_allocated() == 1) # one for Tensor._rng_counter
 
+  @Tensor.train()
   def test_gc_complex(self):
     a = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     b = Tensor.rand(4, 4, requires_grad=True)
