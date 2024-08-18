@@ -84,6 +84,8 @@ class SpeedyConvNet:
 if __name__ == "__main__":
   # *** dataset ***
   X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
+  # TODO: without this line indexing doesn't fuse!
+  X_train, Y_train, X_test, Y_test = [x.contiguous().realize() for x in [X_train, Y_train, X_test, Y_test]]
   cifar10_std, cifar10_mean = X_train.float().std_mean(axis=(0, 2, 3))
   def preprocess(X:Tensor, Y:Tensor) -> Tuple[Tensor, Tensor]:
     return ((X - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).cast(dtypes.default_float), Y.one_hot(depths['num_classes'])
@@ -115,7 +117,7 @@ if __name__ == "__main__":
   @TinyJit
   @Tensor.train()
   def train_step(idxs:Tensor) -> Tensor:
-    with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1, NOOPT=0):
+    with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1):
       X = X_train[idxs]
       Y = Y_train[idxs].realize(X)
     X, Y = preprocess(X, Y)
