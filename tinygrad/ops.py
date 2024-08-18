@@ -4,7 +4,7 @@ from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Ca
 import math, operator, ctypes, struct, functools, hashlib, itertools
 from enum import Enum, auto
 from dataclasses import dataclass
-from tinygrad.dtype import ConstType, dtypes, DType
+from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
 from tinygrad.helpers import merge_dicts, pretty_print, prod
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
@@ -295,9 +295,23 @@ class PatternMatcher:
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
+def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
+  nodes: Dict[Tuple, UOp] = {}
+  replace: Dict[UOp, UOp] = {}
+  def __inner_rewrite(n:UOp) -> UOp:
+    if rn := replace.get(n): return rn
+    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
+    if found := nodes.get(replace_source): replace[n] = found
+    else: nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
+    return found
+  return __inner_rewrite(sink)
+
 def type_verify(uops):
   for u in uops:
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
+    if uop is UOps.DEFINE_LOCAL: assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}"
+    if uop is UOps.DEFINE_GLOBAL: assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}"
+    if isinstance(dtype, ImageDType): assert uop is UOps.DEFINE_GLOBAL, f"{uop} can't be image"
     if uop in {UOps.CONST, UOps.DEFINE_ACC}:
       if uop is UOps.CONST:
         assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
