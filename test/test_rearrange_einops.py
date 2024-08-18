@@ -227,7 +227,7 @@ class test_rearrange_ops(unittest.TestCase):
       assert np.array_equal(result, expected_result)
 
 def check_expression_helper(expression: str):
-   Tensor.ones((1, 2, 3, 4, 5, 6, 7))
+  Tensor.ones((1, 2, 3, 4, 5, 6, 7))
 
 class test_rearrange_parsing(unittest.TestCase):
   def test_elementary_axis_name(self):
