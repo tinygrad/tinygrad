@@ -161,6 +161,9 @@ class TestFetch(unittest.TestCase):
       assert pimg.size == (77, 77), pimg.size
     assert img.parent.name == "images"
 
+  def test_fetch_gzip(self):
+    assert (len(fetch("https://github.com/tinygrad/tinygrad/archive/refs/tags/v0.4.0.tar.gz", allow_caching=False, gunzip=True))>0)
+
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
     self.assertEqual(fully_flatten([[1, 3], [1, 2]]), [1, 3, 1, 2])
