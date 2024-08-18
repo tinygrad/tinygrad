@@ -55,13 +55,13 @@ class ConvGroup:
   def __init__(self, channels_in, channels_out):
     self.conv1 = nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False)
     self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
-    self.norm1 = nn.BatchNorm(channels_out, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
-    self.norm2 = nn.BatchNorm(channels_out, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
+    self.norm1 = nn.BatchNorm(channels_out, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
+    self.norm2 = nn.BatchNorm(channels_out, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
     self.norm1.weight.requires_grad = False
     self.norm2.weight.requires_grad = False
   def __call__(self, x:Tensor) -> Tensor:
-    x =    self.norm1(self.conv1(x).max_pool2d()).gelu()
-    return self.norm2(self.conv2(x)).gelu()
+    x =    self.norm1(self.conv1(x).max_pool2d()).quick_gelu()
+    return self.norm2(self.conv2(x)).quick_gelu()
 
 class SpeedyConvNet:
   def __init__(self):
@@ -71,14 +71,14 @@ class SpeedyConvNet:
     self.conv_group_3 = ConvGroup(depths['block2'], depths['block3'])
     self.linear = nn.Linear(depths['block3'], depths['num_classes'], bias=False)
   def __call__(self, x:Tensor) -> Tensor:
-    x = self.whiten(x).gelu()
+    x = self.whiten(x).quick_gelu()
     x = x.sequential([self.conv_group_1, self.conv_group_2, self.conv_group_3])
     return self.linear(x.max(axis=(2,3))) / hyp['opt']['scaling_factor']
 
 if __name__ == "__main__":
   # *** dataset ***
   X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
-  cifar10_std, cifar10_mean = X_train.std_mean(axis=(0, 2, 3))
+  cifar10_std, cifar10_mean = X_train.float().std_mean(axis=(0, 2, 3))
   X_train = (X_train - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)
   X_test = (X_test - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)
   Y_train = Y_train.one_hot(depths['num_classes'])
@@ -89,8 +89,8 @@ if __name__ == "__main__":
   state_dict = nn.state.get_state_dict(model)
 
   params_bias, params_non_bias = partition(state_dict.items(), lambda x: 'bias' in x[0])
-  opt_bias     = nn.optim.SGD([x[1] for x in params_bias],     lr=hyp['opt']['non_bias_lr'], momentum=.85, nesterov=True, weight_decay=hyp['opt']['bias_decay'])
-  opt_non_bias = nn.optim.SGD([x[1] for x in params_non_bias], lr=hyp['opt']['bias_lr'],     momentum=.85, nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
+  opt_bias     = nn.optim.SGD([x[1] for x in params_bias],     lr=0.01, momentum=.85, nesterov=True, weight_decay=hyp['opt']['bias_decay'])
+  opt_non_bias = nn.optim.SGD([x[1] for x in params_non_bias], lr=0.01, momentum=.85, nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
   opt = nn.optim.OptimizerGroup(opt_bias, opt_non_bias)
 
   num_steps_per_epoch      = X_train.size(0) // batchsize
@@ -105,11 +105,11 @@ if __name__ == "__main__":
   @TinyJit
   def train_step(idxs) -> Tensor:
     with Tensor.train():
-      opt.zero_grad()
       X,Y = X_train[idxs], Y_train[idxs]
       out = model(X)
       loss_batchsize_scaler = 512/batchsize
       loss = out.cross_entropy(Y, reduction='none', label_smoothing=0.2).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
+      opt.zero_grad()
       loss.backward()
       opt.step()
       lr_sched_bias.step()
@@ -125,4 +125,5 @@ if __name__ == "__main__":
       GlobalCounters.reset()
       st = time.perf_counter()
       loss = train_step(tidxs[epoch_step].contiguous()).item()
-      t.set_description(f"loss: {loss:8.2f}   tm: {(et:=(time.perf_counter()-st))*1000:6.2f} ms {GlobalCounters.global_ops/(1e9*et):7.0f} GFLOPS")
+      t.set_description(f"loss: {loss:8.2f}   lr: {opt_non_bias.lr.item():.6f}"
+                     f"   tm: {(et:=(time.perf_counter()-st))*1000:6.2f} ms {GlobalCounters.global_ops/(1e9*et):7.0f} GFLOPS")
