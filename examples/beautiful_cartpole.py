@@ -77,12 +77,7 @@ if __name__ == "__main__":
       return action_loss.realize(), entropy_loss.realize(), critic_loss.realize()
 
   @TinyJit
-  def get_action(obs:Tensor) -> Tensor:
-    # TODO: with no_grad
-    Tensor.no_grad = True
-    ret = model(obs)[0].exp().multinomial().realize()
-    Tensor.no_grad = False
-    return ret
+  def get_action(obs:Tensor) -> Tensor: return model(obs)[0].exp().multinomial().realize()
 
   st, steps = time.perf_counter(), 0
   Xn, An, Rn = [], [], []

@@ -23,9 +23,6 @@ from tinygrad.tensor import _to_np_dtype
 Device.DEFAULT = "GPU"
 
 def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
-  Tensor.no_grad = True
-  Tensor.training = False
-
   # load the model
   onnx_model = onnx.load(io.BytesIO(onnx_data))
   run_onnx = get_run_onnx(onnx_model)

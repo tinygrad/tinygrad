@@ -206,8 +206,6 @@ def prefill(model, toks, start_pos=0):
   return start_pos
 
 if __name__ == "__main__":
-  Tensor.no_grad = True
-
   parser = argparse.ArgumentParser()
   parser.add_argument("--download_model", action="store_true", help="Download a 8B model")
   parser.add_argument("--model", type=Path, help="Model path")

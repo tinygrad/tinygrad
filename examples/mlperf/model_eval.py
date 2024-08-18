@@ -8,7 +8,6 @@ from tinygrad.helpers import getenv
 def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
 
 def eval_resnet():
-  Tensor.no_grad = True
   # Resnet50-v1.5
   from extra.models.resnet import ResNet50
   tlog("imports")
@@ -240,10 +239,6 @@ def eval_mrcnn():
   evaluate_predictions_on_coco(mask_output, iou_type='segm')
 
 if __name__ == "__main__":
-  # inference only
-  Tensor.training = False
-  Tensor.no_grad = True
-
   models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(",")
   for m in models:
     nm = f"eval_{m}"
