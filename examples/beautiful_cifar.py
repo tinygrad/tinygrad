@@ -144,14 +144,16 @@ if __name__ == "__main__":
     idxs = np.arange(X_train.shape[0])
     np.random.shuffle(idxs)
     tidxs = Tensor(idxs, dtype='int')[:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)  # NOTE: long doesn't fold
+    train_loss = 0
     for epoch_step in (t:=trange(num_steps_per_epoch)):
       st = time.perf_counter()
       GlobalCounters.reset()
       loss = train_step(tidxs[epoch_step].contiguous()).item()
-      t.set_description(f"loss: {loss:5.3f}   lr: {opt_non_bias.lr.item():.6f}"
-                     f"   tm: {(et:=(time.perf_counter()-st))*1000:6.2f} ms {GlobalCounters.global_ops/(1e9*et):7.0f} GFLOPS")
+      t.set_description(f"*** loss: {loss:5.3f}   lr: {opt_non_bias.lr.item():.6f}"
+                         f"   tm: {(et:=(time.perf_counter()-st))*1000:6.2f} ms {GlobalCounters.global_ops/(1e9*et):7.0f} GFLOPS")
+      train_loss += loss
     gmt = time.perf_counter()
     GlobalCounters.reset()
     val_loss, acc = [x.item() for x in val_step()]
     get = time.perf_counter()
-    print(f"\033[F*** epoch {epoch:3d}       tm: {(gmt-gst):5.2f} s    val_time: {(get-gmt):5.2f} s   val_loss: {val_loss:5.3f}   eval acc: {acc*100:5.2f}% ***  ")
+    print(f"\033[F*** epoch {epoch:3d}       tm: {(gmt-gst):5.2f} s    val_tm: {(get-gmt):5.2f} s   train_loss: {train_loss/num_steps_per_epoch:5.3f}   val_loss: {val_loss:5.3f}   eval acc: {acc*100:5.2f}%    ")
