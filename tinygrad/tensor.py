@@ -1976,7 +1976,7 @@ class Tensor:
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
       else: raise ValueError(f"invalid {mode=}")
-    if mode in {"nearest", "nearest-exact"}: x = x[..., *indexes]
+    if mode in {"nearest", "nearest-exact"}: x = x[..., *tuple(indexes)]
     return x.cast(self.dtype)
 
   # ***** unary ops *****
