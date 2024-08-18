@@ -140,12 +140,16 @@ class TestLinearizer(unittest.TestCase):
   def test_mid_dim_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 32, 1, 5))))
-    diff = (second_x-first_reduce)
-    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
-    store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
+    st_x = x.lazydata.st
+    g_1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1)
+    first_x = UOp(UOps.LOAD, dtypes.float, (g_1, st_x.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g_1, st_x.reshape((27, 32, 1, 5)).to_uop()))
+    diff = second_x - first_reduce
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    g_0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0)
+    store = UOp(UOps.STORE, None, (g_0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
     opts = [
       # locals
       [Opt(OptOps.LOCAL, 0, 3)],
@@ -188,7 +192,7 @@ class TestLinearizer(unittest.TestCase):
       #   Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
     ]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
-    lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
