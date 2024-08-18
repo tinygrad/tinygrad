@@ -718,6 +718,7 @@ class TestTensorMetadata(unittest.TestCase):
     assert s[-1].metadata[1].name == "sigmoid"
     assert s[-1].metadata[2].name == "__mul__"
 
+  @Tensor.train()
   def test_complex_backward(self):
     _METADATA.set(None)
     x = Tensor.rand(3, requires_grad=True)

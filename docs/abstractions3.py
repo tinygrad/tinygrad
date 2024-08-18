@@ -29,8 +29,9 @@ optim = SGD([l1, l2])
 
 X, Y = X_train[(samples:=Tensor.randint(128, high=X_train.shape[0]))], Y_train[samples]
 optim.zero_grad()
-model(X).sparse_categorical_crossentropy(Y).backward()
-optim._step()   # this will step the optimizer without running realize
+with Tensor.train():
+  model(X).sparse_categorical_crossentropy(Y).backward()
+  optim.schedule_step()   # this will step the optimizer without running realize
 
 # *****
 # 3. Create a schedule.
