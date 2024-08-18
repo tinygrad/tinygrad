@@ -1651,7 +1651,7 @@ class Tensor:
 
     (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula, formula.replace("…", "...").replace("(", " ( ").replace(")", " ) ").split("->"))
 
-    assert sorted(lhs) == sorted(rhs), f"name mismatch in {formula}"
+    assert sorted(lhs) == sorted(rhs) and len(lhs) == len(set(lhs)), f"name mismatch in {formula}"
     for name in flatten((lhs, rhs)): assert name == "..." or (name.isidentifier() and "_" not in (name[0], name[-1])), f"invalid axis name {name}"
     assert "..." not in flatten([lhs[s:e] for s, e in unflatten_dims]), f"cannot have collapsed ellipsis (...) in lhs of {formula}"
     assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
