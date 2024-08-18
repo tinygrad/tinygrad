@@ -13,7 +13,7 @@ from tinygrad.codegen.uopgraph import linearize_uop
 from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
 def _uops_to_prg(uops_list):
-  uops = linearize_uop(uops_list, extra_pm=Device[Device.DEFAULT].renderer.extra_matcher)
+  uops = linearize_uop(uops_list, opts=Device[Device.DEFAULT].renderer)
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops,
@@ -326,7 +326,7 @@ class TestAssembly(unittest.TestCase):
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
-    uops = linearize_uop([a1,a2], extra_pm=Device[Device.DEFAULT].renderer.extra_matcher)
+    uops = linearize_uop([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops[-1].arg, BinaryOps.SHL)
     self.assertEqual(uops[-2].arg, BinaryOps.MUL)
@@ -338,7 +338,7 @@ class TestAssembly(unittest.TestCase):
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
-    uops = linearize_uop([a1,a2], extra_pm=Device[Device.DEFAULT].renderer.extra_matcher)
+    uops = linearize_uop([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops[-1].arg, BinaryOps.SHR)
     self.assertEqual(uops[-2].arg, BinaryOps.IDIV)
