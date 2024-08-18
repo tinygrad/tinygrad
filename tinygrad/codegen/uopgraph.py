@@ -452,6 +452,7 @@ def no_vectorized_alu(alu):
 def create_gate(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
+    if u.op is UOps.BARRIER: return u
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
@@ -606,8 +607,10 @@ def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, s
       assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
       # TODO: this should be enabled, and the valid clause should be removed
       # NOTE: multiple identical stores to DEFINE_LOCAL is okay
-      assert len(all_stores := [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and x.src[0].op is not UOps.DEFINE_LOCAL]) \
-        == len(dedup(all_stores)), "repeated stores in uops"
+      # NOTE: for PTX you have to propogate through some the calculations to determine if it is a store to DEFINE_LOCAL
+      def _islocalbuf(u: UOp): return u.op is UOps.DEFINE_LOCAL or any(_islocalbuf(x) for x in u.src if u.op in [UOps.ALU, UOps.CAST])
+      assert len(all_stores := [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and not _islocalbuf(x.src[0])]) \
+          == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       print_uops(_uops)
       if not CI:
