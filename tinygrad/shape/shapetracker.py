@@ -8,6 +8,7 @@ from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, D
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, UOps
+from tinygrad.codegen.uopgraph import graph_rewrite
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x.render(render_ops, ctx)
@@ -64,9 +65,11 @@ class ShapeTracker:
 
   def reduce(self, axis:Tuple[int, ...]) -> Tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
 
-  def to_uops(self) -> Tuple[UOp, UOp]: return UOp(UOps.ST_IDX, dtypes.pyint, (), self), UOp(UOps.ST_VALID, dtypes.bool, (), self)
+  def to_uop(self) -> UOp: return UOp(UOps.SHAPETRACKER, None, (), self)
 
-  def to_indexed_uops(self, idxs:List[UOp]) -> Tuple[UOp, UOp]:
+  def to_indexed_uops(self, _idxs:Optional[List[UOp]]=None) -> Tuple[UOp, UOp]:
+    idxs = [UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), variable_to_uop(s)), i) for i,s in enumerate(self.shape)] \
+      if _idxs is None else _idxs
     idx, valid = _uop_view(self.views[-1], idxs, UOp.const(dtypes.bool, True))
     for view in reversed(self.views[0:-1]):
       view = view.minify()
@@ -132,8 +135,8 @@ class ShapeTracker:
     return idx, valid
 
   def axis_is_masked(self, axis:int) -> bool:
-    _, valid = self.expr_idxs()
-    return f'idx{axis}' in [v.expr for v in valid.vars()]
+    _, valid = self.to_indexed_uops()
+    return axis in [x.arg for x in graph_rewrite(valid).sparents if x.op is UOps.RANGE]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:

@@ -43,7 +43,7 @@ class IndependentLowerer:
     # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
     full_shape = ast.full_shape
     first_upcasted = len(full_shape)-ki.upcasted
-    first_output_st: ShapeTracker = ast.src[0].src[-1].arg
+    first_output_st: ShapeTracker = ast.src[0].st_arg
     # if there's no reduce, this is first_upcasted
     first_reduce = [x!=y for x,y in zip(first_output_st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
     local_loads = [x for x in ast.parents if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL]
@@ -52,7 +52,7 @@ class IndependentLowerer:
     #   local_loads[0].src[-1].arg.shape[first_reduce:first_upcasted], first_output_st.shape[first_reduce:first_upcasted])]) if local_loads else 0
     # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
     group_for_reduces = sum([any(j!=y for j in x) for x,y in zip(
-      [[l.src[-1].arg.shape[i] for l in local_loads] for i in range(first_reduce,first_upcasted)],
+      [[l.st_arg.shape[i] for l in local_loads] for i in range(first_reduce,first_upcasted)],
       first_output_st.shape[first_reduce:first_upcasted])]) if local_loads else 0
     global_dims = first_reduce-ki.local_dims
 
@@ -94,24 +94,21 @@ class IndependentLowerer:
 
   def _to_uop(self, x:UOp) -> UOp:
     if x.op in BUFFER_UOPS:
-      idx, valid = x.src[-1].arg.to_indexed_uops(self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs)
+      idx, valid = x.st_arg.to_indexed_uops(self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is UOps.CONST: return valid.where(UOp.const(x.dtype, x.arg), UOp.const(x.dtype, 0))
       buf = x.src[0]
       if x.op is UOps.LOAD:
-        barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[1]),)),) if x.src[0].op is UOps.DEFINE_LOCAL else ()
+        barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[2]),)),) if x.src[0].op is UOps.DEFINE_LOCAL else ()
         # NOTE: if there's a following reduceop we need to load the result of this reduceop back into every thread
         # NOTE: this matches the pattern LOAD -> REDUCE -> STORE -> LOAD
-        load_back = x.src[0].op is UOps.DEFINE_LOCAL and x.src[1].op is UOps.STORE and \
-          x.src[1].src[2].op is UOps.REDUCE_AXIS and len(x.src[1].src[2].arg[1]) > 0 and \
-            x.src[1].src[2].src[0].op is UOps.LOAD and x.src[1].src[2].src[0].src[0].op is UOps.DEFINE_LOCAL
-        if load_back:
-          # NOTE: If we're loading the reduced value back into each thread, need to zero-out the reduce axes
-          idx, _ = x.src[-1].arg.to_indexed_uops([UOp.const(u.dtype, 0) if i in x.src[1].src[2].arg[1] else u for i,u in enumerate(self.ridxs)])
-        if x.src[0].op is UOps.DEFINE_GLOBAL: 
-          print("loading with index: ", idx)
-          print("  ",x.src[-1].arg)
+        # load_back = x.src[0].op is UOps.DEFINE_LOCAL and x.src[1].op is UOps.STORE and \
+        #   x.src[1].src[2].op is UOps.REDUCE_AXIS and len(x.src[1].src[2].arg[1]) > 0 and \
+        #     x.src[1].src[2].src[0].op is UOps.LOAD and x.src[1].src[2].src[0].src[0].op is UOps.DEFINE_LOCAL
+        # if load_back:
+        #   # NOTE: If we're loading the reduced value back into each thread, need to zero-out the reduce axes
+        #   idx, _ = x.st_arg.to_indexed_uops([UOp.const(u.dtype, 0) if i in x.src[1].src[2].arg[1] else u for i,u in enumerate(self.ridxs)])
         return UOp(UOps.LOAD, x.dtype, (buf, idx) + ((UOp.const(x.dtype, 0), valid) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the first thread (this is wrong for non group for reduces!)
       store_back = \
@@ -121,7 +118,7 @@ class IndependentLowerer:
         x.src[2].src[0].src[0].op is UOps.DEFINE_LOCAL
       # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduce axes
       if store_back:
-        idx, _ = x.src[-1].arg.to_indexed_uops([UOp.const(u.dtype, 0) if i in x.src[2].arg[1] else u for i,u in enumerate(self.idxs)])
+        idx, _ = x.st_arg.to_indexed_uops([UOp.const(u.dtype, 0) if i in x.src[2].arg[1] else u for i,u in enumerate(self.idxs)])
       if x.src[0].op is UOps.DEFINE_GLOBAL or store_back:
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)

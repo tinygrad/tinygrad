@@ -1508,7 +1508,7 @@ def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp, UOp], inputs:Lis
   if not isinstance(ast, LazyOp) and not isinstance(ast, UOp): ast = LazyOp(MetaOps.KERNEL, ast)
   inbufs = [x.lazydata.base.buffer for x in inputs]
   ast = to_uop(ast) if isinstance(ast, LazyOp) else ast
-  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.src[-1].arg.size, cast(DType,out.src[2].dtype)).allocate() \
+  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.st_arg.size, cast(DType,out.src[2].dtype)).allocate() \
       for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
@@ -1519,7 +1519,7 @@ def helper_linearizer_opt(r:Union[Tensor, List[Tensor]], *args, **kwargs):
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> List[Kernel]:
   lins: List[Kernel] = []
-  outbufs = [(real_bufs[i], lop.src[-1].arg.shape) for i,lop in enumerate(realized_ast.src)]
+  outbufs = [(real_bufs[i], lop.st_arg.shape) for i,lop in enumerate(realized_ast.src)]
 
   def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
 

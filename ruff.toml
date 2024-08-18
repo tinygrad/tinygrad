@@ -12,6 +12,7 @@ lint.select = [
   # "E124",
   "E203",   # whitespace-before-punctuation
   "E272",   # multiple-spaces-before-keyword
+  "E275",   # missing-whitespace-after-keyword
   "E303",   # too-many-blank-lines
   "E304",   # blank-line-after-decorator
   "E501",   # line-too-long
