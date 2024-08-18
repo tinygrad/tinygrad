@@ -13,7 +13,6 @@ class TestGetKernel(unittest.TestCase):
     t = Tensor.arange(10)
     t = t + t * Tensor.rand(10)
     with Context(DEBUG=1, BEAM=2):
-      # Generate the kernel and trigger the debug print
       schedule_item = t.schedule()[-1]
       kernel = get_kernel(Device[Device.DEFAULT].renderer, schedule_item.ast)
       uops = kernel.linearize().uops
