@@ -400,12 +400,15 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     else: raise ValueError(f"invalid {nearest_mode=}")
     return index.cast(dtypes.int32).clip(0, input_dim-1)
   def _apply_coordinate_transformation(index: Tensor, input_dim: int, scale_dim, roi_dim, sizes_frac, mode: str):
-    # output_dim = index.shape[0]
+    # TODO: needs more testing, not confident in this
+    # NOTE: their reference implementation differ from the implementation in their reference docs
+    # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#Resize
     output_dim = scale_dim * input_dim
     if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
     elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1) if output_dim != 1 else Tensor([0])
     elif mode == "asymmetric": index = index / scale_dim
-    elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([0])
+    elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
     elif mode == "half_pixel_symmetric":
       index = input_dim / 2 * (1 - int(output_dim) / sizes_frac) + (index + 0.5) / scale_dim - 0.5
     elif mode == "tf_crop_and_resize":
@@ -419,7 +422,6 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     X = X.permute(*perm)
   else: axes, inverse_perm = list(range(X.ndim)), []
   if roi is not None: roi = to_python_const(roi)
-
   if sizes is not None:
     sizes = [1]*(X.ndim - sizes.shape[0]) + to_python_const(sizes)
     scales = [sizes[i] / X.shape[i] for i in range(X.ndim)]
@@ -434,9 +436,9 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     sizes = [int(sc*sh) for sc, sh in zip(scales, X.shape)]
 
   sizes_frac = [sc*sh for sc, sh in zip(scales, X.shape)][2:]
-  indexes = [Tensor.arange(shape, dtype=dtypes.default_float, device=X.device) for shape in sizes[2:]]
   sizes, axes, scales, input_shape = (val[2:] if isinstance(val, list) else [None] * (X.ndim-2) for val in (sizes, axes, scales, list(X.shape)))
   roi = [[st, ed] for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])] if isinstance(roi, list) else [None] * (X.ndim-2)
+  indexes = [Tensor.arange(shape, dtype=dtypes.default_float, device=X.device) for shape in sizes]
   indexes = [_apply_coordinate_transformation(*args, coordinate_transformation_mode) for args in zip(indexes, input_shape, scales, roi, sizes_frac)]
   if mode == "nearest":
     indexes = [_apply_nearest_mode(*args, nearest_mode) for args in zip(indexes, input_shape)]
