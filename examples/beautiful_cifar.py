@@ -1,9 +1,13 @@
+import time
+start_tm = time.perf_counter()
+import math
 from typing import Tuple
-import math, time
 import numpy as np
 from tinygrad import Tensor, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.helpers import partition, trange, getenv, Context
 from extra.lr_scheduler import OneCycleLR
+
+dtypes.default_float = dtypes.half
 
 # from https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 batchsize = getenv("BS", 1024)
@@ -36,7 +40,8 @@ hyp = {
       'decay_pow': 3.,
       'every_n_steps': 5,
     },
-    'train_epochs': 12.1,
+    'train_epochs': 12,
+    #'train_epochs': 12.1,
     'device': 'cuda',
     'data_location': 'data.pt',
   }
@@ -158,4 +163,4 @@ if __name__ == "__main__":
     GlobalCounters.reset()
     val_loss, acc = [x.float().item() for x in val_step()]
     get = time.perf_counter()
-    print(f"\033[F*** epoch {epoch:3d}       tm: {(gmt-gst):5.2f} s    val_tm: {(get-gmt):5.2f} s   train_loss: {train_loss/num_steps_per_epoch:5.3f}   val_loss: {val_loss:5.3f}   eval acc: {acc*100:5.2f}%    ")
+    print(f"\033[F*** epoch {epoch:3d}       tm: {(gmt-gst):5.2f} s    val_tm: {(get-gmt):5.2f} s   train_loss: {train_loss/num_steps_per_epoch:5.3f}   val_loss: {val_loss:5.3f}   eval acc: {acc*100:5.2f}%  @ {get-start_tm:6.2f} s  ")
