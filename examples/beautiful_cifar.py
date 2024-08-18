@@ -88,6 +88,8 @@ if __name__ == "__main__":
   model = SpeedyConvNet()
   state_dict = nn.state.get_state_dict(model)
 
+  #for k,v in nn.state.torch_load("/tmp/cifar_net.pt").items(): print(k)
+
   params_bias, params_non_bias = partition(state_dict.items(), lambda x: 'bias' in x[0])
   opt_bias     = nn.optim.SGD([x[1] for x in params_bias],     lr=0.01, momentum=.85, nesterov=True, weight_decay=hyp['opt']['bias_decay'])
   opt_non_bias = nn.optim.SGD([x[1] for x in params_non_bias], lr=0.01, momentum=.85, nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
@@ -104,9 +106,9 @@ if __name__ == "__main__":
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps)
 
   @TinyJit
-  def train_step(idxs) -> Tensor:
+  def train_step(idxs:Tensor) -> Tensor:
     with Tensor.train():
-      with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1):
+      with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1, NOOPT=0):
         X = X_train[idxs]
         Y = Y_train[idxs].realize(X)
       out = model(X)
@@ -118,6 +120,7 @@ if __name__ == "__main__":
       lr_sched_non_bias.step()
       return loss
 
+  np.random.seed(1337)
   for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
     # TODO: move to tinygrad
     idxs = np.arange(X_train.shape[0])
