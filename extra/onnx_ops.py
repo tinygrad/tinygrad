@@ -398,24 +398,22 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
     return ret.cast(dtypes.int32).clip(0, x_len-1)
-  def _get_index_transformation(input_index, output_size):
-    output_size = output_size if mode == "linear" else [math.floor(x) for x in output_size]
-    scales_ = [os/xs for xs, os in zip(X.shape, output_shape)]
-    arr = Tensor.arange(math.floor(output_size[input_index]), dtype=dtypes.default_float)
-    if coordinate_transformation_mode == "half_pixel": arr = (arr + 0.5) / scales_[input_index] - 0.5
+  def _get_index_transformation(input_index: int, output_shape, scale_):
+    arr = Tensor.arange(int(output_shape[input_index]), dtype=dtypes.default_float, device=X.device)
+    if coordinate_transformation_mode == "half_pixel": arr = (arr + 0.5) / scale_[input_index] - 0.5
     elif coordinate_transformation_mode == "align_corners": arr = arr * (X.shape[input_index] - 1) / (output_shape[input_index] - 1)
-    elif coordinate_transformation_mode == "asymmetric": arr = arr / scales_[input_index]
-    elif coordinate_transformation_mode == "half_pixel_symmetric": arr = X.shape[input_index] / 2 * (1 - int(output_shape[input_index]) / output_shape[input_index]) + (arr + 0.5) / scales_[input_index] - 0.5
-    elif coordinate_transformation_mode == "pytorch_half_pixel": arr = (arr + 0.5) / scales_[input_index] - 0.5 if output_shape[input_index] > 1 else Tensor([0])
+    elif coordinate_transformation_mode == "asymmetric": arr = arr / scale_[input_index]
+    elif coordinate_transformation_mode == "half_pixel_symmetric": arr = X.shape[input_index] / 2 * (1 - int(output_shape[input_index]) / output_shape[input_index]) + (arr + 0.5) / scale_[input_index] - 0.5
+    elif coordinate_transformation_mode == "pytorch_half_pixel": arr = (arr + 0.5) / scale_[input_index] - 0.5 if output_shape[input_index] > 1 else Tensor([-0.5])
     elif coordinate_transformation_mode == "tf_crop_and_resize": arr = roi[input_index][0] * (X.shape[input_index] - 1) + arr * ((roi[input_index][1] - roi[input_index][0]) * (X.shape[input_index] - 1) / (output_shape[input_index] - 1)) if output_shape[input_index] > 1 else Tensor([0.5 * (roi[input_index][0] + roi[input_index][1]) * (X.shape[input_index] - 1)])
     return arr.clip(0, X.shape[input_index]-1)
-  def _interpolate(indices, output_shape):
+  def _interpolate(indices: Tensor, output_shape):
     x, expand = X, list(X.shape)
     for i in range(-(X.ndim-2), 0):
-      reshape = [1]*X.ndim
-      reshape[i] = expand[i] = math.floor(output_shape[i])
+      reshape, index = [1] * X.ndim, indices[i]
+      reshape[i] = expand[i] = int(output_shape[i])
       if mode == "linear":
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (indices[i].floor(), indices[i].ceil(), indices[i] - indices[i].floor())]
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
       elif mode == "nearest":
         x = x.gather(i, _nearest_mode(indices[i], X.shape[i]).reshape(reshape).expand(expand))
@@ -453,8 +451,10 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif keep_aspect_ratio_policy == "not_smaller":
       scale = max(scales)
       sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
-  output_shape = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
-  return _interpolate([_get_index_transformation(i, output_shape) for i in range(-(X.ndim-2), 0)], output_shape)
+  output_shape = sizes if sizes else [x*s if mode == "linear" else int(x*s) for x,s in zip(X.shape, scales)]
+  scales = scales if mode == "linear" else [os/xs for xs, os in zip(X.shape, output_shape)]
+  indices = [_get_index_transformation(i, output_shape, scales) for i in range(-(X.ndim-2), 0)]
+  return _interpolate(indices, output_shape)
 
 def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   if not axes: axes = list(range(t.ndim))
