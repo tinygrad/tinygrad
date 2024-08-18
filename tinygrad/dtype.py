@@ -66,7 +66,7 @@ class dtypes:
   @staticmethod
   def finfo(dtype:DType) -> Tuple[int, int]:
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
-    return {dtypes.float16: (6, 10), dtypes.bfloat16: (9, 7), dtypes.float32: (9, 23), dtypes.float64: (12, 52)}[dtype]
+    return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   # TODO: priority should be higher than bool

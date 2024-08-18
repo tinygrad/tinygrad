@@ -118,6 +118,13 @@ class TestDType(unittest.TestCase):
       assert dt == tin.dtype == tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
       np.testing.assert_allclose(tin, tor, atol=1e-6, rtol=1e-3)
 
+  def test_finfo(self):
+    if self.DTYPE not in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]: return
+    info = np.finfo(_to_np_dtype(self.DTYPE))
+    assert info.bits == self.DTYPE.itemsize*8
+    assert info.nexp == dtypes.finfo(self.DTYPE)[0]
+    assert info.nmant == dtypes.finfo(self.DTYPE)[1]
+
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   target_dtype = target_dtype or least_upper_dtype(a_dtype, b_dtype)
   if not is_dtype_supported(a_dtype) or not is_dtype_supported(b_dtype) or not is_dtype_supported(target_dtype): return
