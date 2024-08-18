@@ -61,19 +61,19 @@ class IndependentLowerer:
         # define indexes for GPU-like execution
         if len(opts.tensor_cores) == 0:
           # reuse local indexes for reducops if they are equal
-          print("len(ast.parents)",len(ast.parents))
-          reduceops = [x for x in ast.parents if x.op is UOps.REDUCE_AXIS and all(i >= first_reduce and i < first_reduce+group_for_reduces for i in x.arg[1])]
+          grouped_axes = range(first_reduce,first_reduce+group_for_reduces)
+          reduceops = [x for x in ast.parents if x.op is UOps.REDUCE_AXIS and all(i in grouped_axes for i in x.arg[1])]
           reuse_axes:Dict[int, int] = {}
-          shape_map = {i:full_shape[i] for r in reduceops for i in r.arg[1] if i in range(first_reduce,first_reduce+group_for_reduces)}
+          shape_map = {i:full_shape[i] for r in reduceops for i in r.arg[1] if i in grouped_axes}
           for r in reduceops:
             commit: Dict[int, int] = {}
             for i in r.arg[1]: commit[i] = {shape_map[a]:a for a in shape_map if a not in [commit[f] for f in commit]}[full_shape[i]]
             reuse_axes.update(commit)
-          lidx_map = {i:list(reuse_axes.values()).index(reuse_axes[i]) for i in range(first_reduce,first_reduce+group_for_reduces)}
+          lidx_map = {i:list(reuse_axes.values()).index(reuse_axes[i]) for i in grouped_axes}
 
           lidxs = get_grouped_dims("lidx", tuple(list(full_shape[global_dims:first_reduce]) + \
-            [full_shape[i] for i in range(first_reduce,first_reduce+group_for_reduces) if i in reuse_axes.values()]), opts.local_max)
-          lidxs = lidxs[:first_reduce-global_dims] + [lidxs[ki.local_dims+lidx_map[i]] for i in range(first_reduce,first_reduce+group_for_reduces)]
+            [full_shape[i] for i in grouped_axes if i in reuse_axes.values()]), opts.local_max)
+          lidxs = lidxs[:first_reduce-global_dims] + [lidxs[ki.local_dims+lidx_map[i]] for i in grouped_axes]
           self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + lidxs
         else:
           self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
