@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING,
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, type_verify, print_uops
+from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, graph_rewrite, type_verify, print_uops
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -510,17 +510,6 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
     children[x].append(u)
   in_degree[u] = len(u.src)
   return srcs[u]
-
-def graph_rewrite(sink:UOp, pm:PatternMatcher=constant_folder) -> UOp:
-  nodes: Dict[Tuple, UOp] = {}
-  replace: Dict[UOp, UOp] = {}
-  def __inner_rewrite(n:UOp) -> UOp:
-    if rn := replace.get(n): return rn
-    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
-    if found := nodes.get(replace_source): replace[n] = found
-    else: nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
-    return found
-  return __inner_rewrite(sink)
 
 linearize_cnt = 0
 def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, skip_check=False) -> List[UOp]:
