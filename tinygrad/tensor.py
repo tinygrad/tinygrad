@@ -1649,20 +1649,22 @@ class Tensor:
 
     assert formula.count("->") == 1, 'need exactly one "->" in formula'
 
-    (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula, formula.replace("(", " ( ").replace(")", " ) ").split("->"))
+    (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula, formula.replace("…", "...").replace("(", " ( ").replace(")", " ) ").split("->"))
 
-    assert sorted(lhs) == sorted(rhs) and all(name.isalnum() or name == "..." for name in flatten((lhs, rhs))), f"name mismatch in {formula}"
-    assert "..." not in flatten([lhs[s:e] for s, e in unflatten_dims]), "cannot have collapsed ellipsis (...) in input formula"
+    assert sorted(lhs) == sorted(rhs), f"name mismatch in {formula}"
+    for name in flatten((lhs, rhs)): assert name == "..." or (name.isidentifier() and "_" not in (name[0], name[-1])), f"invalid axis name {name}"
+    assert "..." not in flatten([lhs[s:e] for s, e in unflatten_dims]), f"cannot have collapsed ellipsis (...) in lhs of {formula}"
     assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
 
     # resolve ellipsis
-    ell_len = len(self.shape) - len(lhs) + 1 + sum(e - s - 1 for s, e in unflatten_dims) if "..." in lhs else 1
-    lhs, rhs = map(lambda l: l[: (i := l.index("..."))] + [f"...{j}" for j in range(ell_len)] + l[i + 1:] if "..." in l else l, (lhs, rhs))
-    unflatten_dims = [(s + (ell_len - 1 if "...0" in lhs[:s] else 0), e + (ell_len - 1 if "...0" in lhs[:e] else 0),) for s, e in unflatten_dims]
-    flatten_dims = [(s + (ell_len - 1 if "...0" in rhs[:s] else 0), e + (ell_len - 1 if "...0" in rhs[:e] else 0),) for s, e in flatten_dims]
+    if "..." in lhs: ell_len = len(self.shape) - len(lhs) + 1 + sum(e - s - 1 for s, e in unflatten_dims)
+    lhs, rhs = map(lambda l: l[:(i:=l.index("..."))] + [f"...{j}" for j in range(ell_len)] + l[i + 1:] if "..." in l else l, (lhs, rhs))
+    unflatten_dims = [(s + (ell_len - 1 if "...0" in lhs[:s] else 0), e + (ell_len - 1 if "...0" in lhs[:e] else 0)) for s, e in unflatten_dims]
+    flatten_dims = [(s + (ell_len - 1 if "...0" in rhs[:s] else 0), e + (ell_len - 1 if "...0" in rhs[:e] else 0)) for s, e in flatten_dims]
 
     # apply movement ops in order unflatten -> permute -> flatten/unsqueeze
     t = functools.reduce(lambda x, dims: x.unflatten(dims[0], tuple(sizes.get(lhs[d], -1) for d in range(*dims))), unflatten_dims, self)
+    for i, name in enumerate(lhs): assert (name not in sizes) or sizes[name] == t.shape[i], f"size provided for dimension {name} incorrect"
     t = t.permute([lhs.index(name) for name in rhs])
     return functools.reduce(lambda x, dims: x.flatten(dims[0], dims[1] - 1) if dims[0]<dims[1] else x.unsqueeze(dims[0]), reversed(flatten_dims), t)
 

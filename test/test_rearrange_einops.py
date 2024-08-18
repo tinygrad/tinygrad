@@ -1,5 +1,7 @@
-# modified from https://github.com/arogozhnikov/einops/blob/master/tests/test_examples.py
+# modified from
+# https://github.com/arogozhnikov/einops/blob/master/tests/test_examples.py
 # https://github.com/arogozhnikov/einops/blob/master/tests/test_ops.py
+# https://github.com/arogozhnikov/einops/blob/master/tests/test_parsing.py
 
 import numpy as np
 import unittest
@@ -126,6 +128,9 @@ class test_rearrange_ops(unittest.TestCase):
     with self.assertRaises(ValueError):
       ## should fail as 6 does not divide 8
       y.rearrange("(a1 a2 a3) b -> b a3 a2 a1", a1=3, a2=2)
+    with self.assertRaises(AssertionError):
+      ## incorrect dimension provided for an axis that is only permuted
+      y.rearrange("(a1 a2 a3) b -> b a3 a2 a1", a1=2, a2=2, b=2)
 
   def test_rearrange_ellipsis_ops(self):
     identity_patterns = [
@@ -220,6 +225,85 @@ class test_rearrange_ops(unittest.TestCase):
         expected_result |= ((x >> original_axis) & 1) << result_axis
 
       assert np.array_equal(result, expected_result)
+
+def check_expression_helper(expression: str):
+   Tensor.ones((1, 2, 3, 4, 5, 6, 7))
+
+class test_rearrange_parsing(unittest.TestCase):
+  def test_elementary_axis_name(self):
+    for name in [
+      "a",
+      "b",
+      "h",
+      "dx",
+      "h1",
+      "zz",
+      "i9123",
+      "somelongname",
+      "Alex",
+      "camelCase",
+      "u_n_d_e_r_score",
+      "unreasonablyLongAxisName",
+    ]:
+      Tensor.ones((1,)).rearrange(f"{name} -> {name}")
+
+    for name in ["2b", "12", "_startWithUnderscore", "endWithUnderscore_", "_"]:
+      with self.assertRaises(AssertionError):
+        Tensor.ones((1,)).rearrange(f"{name} -> {name}")
+
+    with self.assertRaises(RuntimeError):
+      Tensor.ones((1,)).rearrange(" -> ")
+
+  def test_invalid_expressions(self):
+    # double ellipsis should raise an error
+    def _test_expression(expression: str):
+      Tensor.ones((2, 3, 4, 5, 6)).rearrange(f"{expression} -> {expression}")
+
+    _test_expression("... a b c d")
+    with self.assertRaises(AssertionError):
+      _test_expression("... a b c d ...")
+    with self.assertRaises(AssertionError):
+      _test_expression("... a b c (d ...)")
+    with self.assertRaises(AssertionError):
+      _test_expression("(... a) b c (d ...)")
+
+    # double/missing/enclosed parenthesis
+    Tensor.ones((2, 3, 4, 5, 6)).rearrange("a b c d ... -> (a) b c (d ...)")
+    with self.assertRaises(AssertionError):
+      _test_expression("(a)) b c (d ...)")
+    with self.assertRaises(AssertionError):
+      _test_expression("(a b c (d ...)")
+    with self.assertRaises(AssertionError):
+      _test_expression("(a) (()) b c (d ...)")
+    with self.assertRaises(AssertionError):
+      _test_expression("(a) ((b c) (d ...))")
+
+    # invalid identifiers
+    _test_expression("camelCase under_scored cApiTaLs ß ...")
+    with self.assertRaises(AssertionError):
+      _test_expression("1a")
+    with self.assertRaises(AssertionError):
+      _test_expression("_pre")
+    with self.assertRaises(AssertionError):
+      _test_expression("...pre")
+    with self.assertRaises(AssertionError):
+      _test_expression("pre...")
+
+  def test_unicode_ellipsis(self):
+    equivalent_rearrange_patterns = [
+      ("a b … -> (a b) … ", "a b ... -> (a b) ... "),
+      ("… c d e -> … (c d) e", "... c d e -> ... (c d) e"),
+      ("… -> … ", "... -> ... "),
+      ("… ->  (…)", "... ->  (...)"),
+      ("a b … -> b (…) a", "a b ... -> b (...) a"),
+      ("a b … e -> b (a …) e", "a b ... e -> b (a ...) e"),
+    ]
+
+    xnp = np.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
+    x = Tensor(xnp)
+
+    for pattern1, pattern2 in equivalent_rearrange_patterns:
+      assert np.array_equal(x.rearrange(pattern1).numpy(), x.rearrange(pattern2).numpy())
 
 
 if __name__ == "__main__":
