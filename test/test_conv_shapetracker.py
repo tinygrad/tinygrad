@@ -21,6 +21,7 @@ class TestConvShapetracker(unittest.TestCase):
     for st in [x.st_arg for x in sched[0].ast.parents if x.op is UOps.LOAD]:
       assert len(st.views) == 1
 
+  @Tensor.train()
   def test_conv_2x2_backward_one_view(self):
     X = Tensor.rand(1, 1, 3, 3, requires_grad=True)
     conv = Conv2d(1, 1, (2, 2), bias=False)

@@ -7,7 +7,7 @@ from tinygrad.helpers import Profiling, CI
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestConvSpeed(unittest.TestCase):
-
+  @Tensor.train()
   def test_mnist(self):
     # https://keras.io/examples/vision/mnist_convnet/
     conv = 3
