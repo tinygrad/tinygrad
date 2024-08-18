@@ -136,7 +136,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 0.0, f"got val {val}, should not be updated"
 
   def test_exec_update_fuzz(self):
-    a = Tensor.rand((3, 3, 3), dtype=dtypes.int, device=Device.DEFAULT).realize()
+    a = Tensor.randint((3, 3, 3), dtype=dtypes.int, device=Device.DEFAULT).realize()
     b = a + 1
     si = create_schedule([b.lazydata])[-1]
     k = Kernel(si.ast, opts=TestHCQ.d0.renderer)
