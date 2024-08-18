@@ -55,8 +55,8 @@ class ConvGroup:
   def __init__(self, channels_in, channels_out):
     self.conv1 = nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False)
     self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
-    self.norm1 = nn.BatchNorm(channels_out, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
-    self.norm2 = nn.BatchNorm(channels_out, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
+    self.norm1 = nn.BatchNorm(channels_out, track_running_stats=True, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
+    self.norm2 = nn.BatchNorm(channels_out, track_running_stats=True, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
     self.norm1.weight.requires_grad = False
     self.norm2.weight.requires_grad = False
   def __call__(self, x:Tensor) -> Tensor:
@@ -73,7 +73,7 @@ class SpeedyConvNet:
   def __call__(self, x:Tensor) -> Tensor:
     x = self.whiten(x).quick_gelu()
     x = x.sequential([self.conv_group_1, self.conv_group_2, self.conv_group_3])
-    return self.linear(x.max(axis=(2,3))) / hyp['opt']['scaling_factor']
+    return self.linear(x.max(axis=(2,3))) * hyp['opt']['scaling_factor']
 
 if __name__ == "__main__":
   # *** dataset ***
@@ -105,6 +105,9 @@ if __name__ == "__main__":
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr'],     pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps)
 
+  def loss_fn(out, Y):
+    return out.cross_entropy(Y, reduction='none', label_smoothing=0.2).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
+
   @TinyJit
   def train_step(idxs:Tensor) -> Tensor:
     with Tensor.train():
@@ -112,23 +115,43 @@ if __name__ == "__main__":
         X = X_train[idxs]
         Y = Y_train[idxs].realize(X)
       out = model(X)
-      loss = out.cross_entropy(Y, reduction='none', label_smoothing=0.2).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
+      loss = loss_fn(out, Y)
       opt.zero_grad()
       loss.backward()
       opt.step()
       lr_sched_bias.step()
       lr_sched_non_bias.step()
-      return loss
+      return loss / (batchsize*loss_batchsize_scaler)
+
+  eval_batchsize = 2500
+  @TinyJit
+  def val_step() -> Tensor:
+    # TODO with Tensor.no_grad()
+    Tensor.no_grad = True
+    loss, acc = [], []
+    for i in range(0, X_test.size(0), eval_batchsize):
+      out, target = model(X_test[i:i+eval_batchsize]), Y_test[i:i+eval_batchsize]
+      loss.append(loss_fn(out, target))
+      acc.append((out.argmax(-1).one_hot(depths['num_classes']) * target).sum() / eval_batchsize)
+    ret = Tensor.stack(*loss).mean() / (batchsize*loss_batchsize_scaler), Tensor.stack(*acc).mean()
+    Tensor.no_grad = False
+    return ret
 
   np.random.seed(1337)
   for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
     # TODO: move to tinygrad
+    gst = time.perf_counter()
     idxs = np.arange(X_train.shape[0])
     np.random.shuffle(idxs)
     tidxs = Tensor(idxs, dtype='int')[:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)  # NOTE: long doesn't fold
     for epoch_step in (t:=trange(num_steps_per_epoch)):
-      GlobalCounters.reset()
       st = time.perf_counter()
-      loss = train_step(tidxs[epoch_step].contiguous()).item() / (batchsize*loss_batchsize_scaler)
+      GlobalCounters.reset()
+      loss = train_step(tidxs[epoch_step].contiguous()).item()
       t.set_description(f"loss: {loss:5.3f}   lr: {opt_non_bias.lr.item():.6f}"
                      f"   tm: {(et:=(time.perf_counter()-st))*1000:6.2f} ms {GlobalCounters.global_ops/(1e9*et):7.0f} GFLOPS")
+    gmt = time.perf_counter()
+    GlobalCounters.reset()
+    val_loss, acc = [x.item() for x in val_step()]
+    get = time.perf_counter()
+    print(f"\033[F*** epoch {epoch:3d}       tm: {(gmt-gst):5.2f} s    val_time: {(get-gmt):5.2f} s   val_loss: {val_loss:5.3f}   eval acc: {acc*100:5.2f}% ***  ")
