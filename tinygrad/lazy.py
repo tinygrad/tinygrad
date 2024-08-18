@@ -31,7 +31,7 @@ class LazyBuffer:
     self._base: Optional[LazyBuffer] = None
     if base is None:
       # properties on base
-      self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
+      self.op, self.arg, self.srcs = op, arg, srcs  # this is a UOp, except the src is LazyBuffers and not UOps
       assert self.op is not MetaOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
 
       if self.op is MetaOps.VIEW:
