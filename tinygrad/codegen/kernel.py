@@ -721,7 +721,7 @@ class Kernel:
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
-          local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(cast(DType, op.dtype)), (), (f"temp{self.reduceops.index(op)}", st_uop.arg.real_size()))
+          local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(cast(DType, op.dtype)), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
           local_load = UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, start)))
           grouped_reduce = UOp(UOps.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
           if op is self.reduceops[-1]: return grouped_reduce
