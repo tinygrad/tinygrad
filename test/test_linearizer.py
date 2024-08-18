@@ -266,6 +266,9 @@ class TestLinearizer(unittest.TestCase):
       for i,u in enumerate(ranges):
         if i < 2: continue
         assert ranges[i-2] != u or ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-2], ranges[i-1], {u}}"
+    # check for correctness when dims are grouped differently
+    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], \
+      opts=[[Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 8), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 2)]])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -285,6 +288,7 @@ class TestLinearizer(unittest.TestCase):
       [Opt(OptOps.GROUPTOP, 1, 3)],
       [Opt(OptOps.GROUPTOP, 0, 15)],
       [Opt(OptOps.GROUPTOP, 1, 15)],
+      [Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 15)], # group the reduces differently
       [Opt(OptOps.UNROLL, 0, 3)],
       [Opt(OptOps.UNROLL, 1, 3)],
     ]
