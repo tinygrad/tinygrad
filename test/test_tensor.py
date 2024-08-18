@@ -646,7 +646,7 @@ class TestInferenceMode(unittest.TestCase):
     x = Tensor(x_init, requires_grad=True)
     m = Tensor(m_init, requires_grad=True)
     W = Tensor(W_init, requires_grad=True)
-    with Tensor.inference():
+    with Tensor.test():
       tmp = x.mul(m)
       mm = tmp.matmul(W)
       out = mm.relu()
@@ -663,7 +663,7 @@ class TestInferenceMode(unittest.TestCase):
     x = Tensor(x_init, requires_grad=True)
     m = Tensor(m_init, requires_grad=True)
     W = Tensor(W_init, requires_grad=True)
-    @Tensor.inference()
+    @Tensor.test()
     def f(x, m, W):
       tmp = x.mul(m)
       mm = tmp.matmul(W)

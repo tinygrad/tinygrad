@@ -34,7 +34,7 @@ if __name__ == "__main__":
     return loss
 
   @TinyJit
-  @Tensor.inference()
+  @Tensor.test()
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
 
   test_acc = float('nan')
