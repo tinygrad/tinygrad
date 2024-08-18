@@ -109,22 +109,23 @@ if __name__ == "__main__":
     return out.cross_entropy(Y, reduction='none', label_smoothing=0.2).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
   @TinyJit
+  @Tensor.train()
   def train_step(idxs:Tensor) -> Tensor:
-    with Tensor.train():
-      with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1, NOOPT=0):
-        X = X_train[idxs]
-        Y = Y_train[idxs].realize(X)
-      out = model(X)
-      loss = loss_fn(out, Y)
-      opt.zero_grad()
-      loss.backward()
-      opt.step()
-      lr_sched_bias.step()
-      lr_sched_non_bias.step()
-      return loss / (batchsize*loss_batchsize_scaler)
+    with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1, NOOPT=0):
+      X = X_train[idxs]
+      Y = Y_train[idxs].realize(X)
+    out = model(X)
+    loss = loss_fn(out, Y)
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+    lr_sched_bias.step()
+    lr_sched_non_bias.step()
+    return loss / (batchsize*loss_batchsize_scaler)
 
   eval_batchsize = 2500
   @TinyJit
+  @Tensor.test()
   def val_step() -> Tensor:
     # TODO with Tensor.no_grad()
     Tensor.no_grad = True
