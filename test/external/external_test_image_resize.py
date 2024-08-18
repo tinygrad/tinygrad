@@ -1,4 +1,3 @@
-# just for testing, will del later
 import torch
 from PIL import Image
 import numpy as np
