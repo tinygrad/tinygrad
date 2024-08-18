@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, ctypes, ctypes.util, struct, platform
+import os, ctypes, ctypes.util, struct, platform, time
 from tinygrad.runtime.autogen import libc, adsprpc, qcom_dsp
 def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 from hexdump import hexdump
@@ -24,56 +24,79 @@ def ioctl(fd, request, argp):
   fn = os.readlink(f"/proc/self/fd/{fd}")
   idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
 
-  if fn == "/dev/ion":
-    if nr == 0:
-      st = get_struct(argp, qcom_dsp.struct_ion_allocation_data)
-      print("bef ION_IOC_ALLOC", format_struct(st))
-    elif nr == 1:
-      st = get_struct(argp, qcom_dsp.struct_ion_handle_data)
-      print("bef ION_IOC_FREE", format_struct(st))
-    elif nr == 2:
-      st = get_struct(argp, qcom_dsp.struct_ion_fd_data)
-      print("bef ION_IOC_MAP", format_struct(st))
-  elif fn == "/dev/adsprpc-smd":
-    assert chr(itype) == 'R'
-    if nr == 8:
-      st = ctypes.c_uint32.from_address(argp)
-      print("bef FASTRPC_IOCTL_GETINFO", st.value)
-    elif nr == 2:
-      st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_mmap)
-      print("bef FASTRPC_IOCTL_MMAP", format_struct(st))
-    elif nr == 1:
-      # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
+  if fn == "/dev/adsprpc-smd":
+    if nr == 1:
       st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
-      print("bef FASTRPC_IOCTL_INVOKE", format_struct(st))
       method = (st.sc>>24) & 0xFF
       in_args = (st.sc>>16) & 0xFF
       out_args = (st.sc>>8) & 0xFF
-      in_h = (st.sc>>4) & 0xF
-      out_h = (st.sc>>0) & 0xF
-      print(f"\tm:{method} ia:{in_args} oa:{out_args} ih:{in_h} oh:{out_h}")
-      if in_args or out_args:
-        for arg in range(in_args+out_args):
-          print(arg, format_struct(st.pra[arg]))
-          # print(arg, f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
-          # print("input" if arg < in_args else "output", f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
-          if st.pra[arg].buf.pv is not None:
-            hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:0x40])
-            if arg >= in_args: ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
-      #print(format_struct(st.pra)))
-    elif nr == 6:
-      print("bef FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
-      print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
-      # print(bytearray(to_mv(ini.file, ini.filelen)))
-    elif nr == 7:
-      print("bef FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
-    elif nr == 12: print("bef FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
-    else:
-      print(f"bef UNPARSED {nr}")
-  else:
-    print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=}", fn)
+      if out_args:
+        for arg in range(in_args, in_args+out_args):
+          ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
 
+  # if fn == "/dev/ion":
+  #   if nr == 0:
+  #     st = get_struct(argp, qcom_dsp.struct_ion_allocation_data)
+  #     print("bef ION_IOC_ALLOC", format_struct(st))
+  #   elif nr == 1:
+  #     st = get_struct(argp, qcom_dsp.struct_ion_handle_data)
+  #     print("bef ION_IOC_FREE", format_struct(st))
+  #   elif nr == 2:
+  #     st = get_struct(argp, qcom_dsp.struct_ion_fd_data)
+  #     print("bef ION_IOC_MAP", format_struct(st))
+  # elif fn == "/dev/adsprpc-smd":
+  #   assert chr(itype) == 'R'
+  #   if nr == 8:
+  #     st = ctypes.c_uint32.from_address(argp)
+  #     print("bef FASTRPC_IOCTL_GETINFO", st.value)
+  #   elif nr == 2:
+  #     st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_mmap)
+  #     print("bef FASTRPC_IOCTL_MMAP", format_struct(st))
+  #   elif nr == 1:
+  #     # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
+  #     st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
+  #     print("bef FASTRPC_IOCTL_INVOKE", format_struct(st))
+  #     method = (st.sc>>24) & 0xFF
+  #     in_args = (st.sc>>16) & 0xFF
+  #     out_args = (st.sc>>8) & 0xFF
+  #     in_h = (st.sc>>4) & 0xF
+  #     out_h = (st.sc>>0) & 0xF
+
+  #     # if in_args == 2:
+  #     #   if st.pra[1].buf.len == 0x52:
+  #     #     print("sleep", libc.gettid())
+  #     #     time.sleep(20)
+
+  #     # if 
+
+  #     print(f"\tm:{method} ia:{in_args} oa:{out_args} ih:{in_h} oh:{out_h}")
+  #     if in_args or out_args:
+  #       for arg in range(in_args+out_args):
+  #         print(arg, format_struct(st.pra[arg]))
+  #         # print(arg, f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
+  #         # print("input" if arg < in_args else "output", f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
+  #         if st.pra[arg].buf.len == 0x258:
+  #           print(bytearray(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)))
+
+  #         if st.pra[arg].buf.pv is not None:
+  #           hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:0x40])
+  #           if arg >= in_args: ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
+  #     #print(format_struct(st.pra)))
+  #   elif nr == 6:
+  #     print("bef FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
+  #     print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
+  #     # print(bytearray(to_mv(ini.file, ini.filelen)))
+  #   elif nr == 7:
+  #     print("bef FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
+  #   elif nr == 12: print("bef FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
+  #   else:
+  #     print(f"bef UNPARSED {nr}")
+  # else:
+  #   print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=}", fn)
+
+  # print("enter", libc.gettid())
   ret = libc.syscall(0x1d, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
+  # print("done", libc.gettid())
   if fn == "/dev/ion":
     if nr == 0:
       st = get_struct(argp, qcom_dsp.struct_ion_allocation_data)
@@ -113,7 +136,20 @@ def ioctl(fd, request, argp):
           print(arg, format_struct(st.pra[arg]))
           # print(arg, f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
           # print("input" if arg < in_args else "output", f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
-          if st.pra[arg].buf.pv is not None: hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:0x40])
+          if st.pra[arg].buf.pv is not None:
+            # if st.pra[arg].buf.len == 0x258:
+            #   print(bytearray(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)))
+            if st.pra[arg].buf.len == 0x68:
+              print(bytearray(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)))
+            
+            cut = 0x2000 if st.pra[arg].buf.len == 0x2000 or st.pra[arg].buf.len == 0x258 else 0x100
+            ww = to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)
+            hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:cut])
+
+            # if st.pra[arg].buf.len == 0x1000 and ww[0x30] == 0x6e:
+            #   z = ww.cast('Q')[1] + 0x7F00000000
+            #   print("DOO")
+            #   hexdump(to_mv(z, 0x200))
       #print(format_struct(st.pra)))
     elif nr == 6:
       print(ret, "FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, ctypes, ctypes.util, struct, platform, pathlib, contextlib, mmap
+import os, ctypes, ctypes.util, struct, platform, pathlib, contextlib, mmap, array
 from tinygrad.runtime.autogen import adsprpc, qcom_dsp
 from tinygrad.helpers import round_up, mv_address, to_mv
 from hexdump import hexdump
@@ -23,54 +23,80 @@ def format_struct(s):
 def ioctl(fd, request, argp):
   fn = os.readlink(f"/proc/self/fd/{fd}")
   idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
-  if fn == "/dev/ion":
-    if nr == 0:
-      st = get_struct(argp, qcom_dsp.struct_ion_allocation_data)
-      print("bef ION_IOC_ALLOC", format_struct(st))
-    elif nr == 1:
-      st = get_struct(argp, qcom_dsp.struct_ion_handle_data)
-      print("bef ION_IOC_FREE", format_struct(st))
-    elif nr == 2:
-      st = get_struct(argp, qcom_dsp.struct_ion_fd_data)
-      print("bef ION_IOC_MAP", format_struct(st))
-  elif fn == "/dev/adsprpc-smd":
-    assert chr(itype) == 'R'
-    if nr == 8:
-      st = ctypes.c_uint32.from_address(argp)
-      print("bef FASTRPC_IOCTL_GETINFO", st.value)
-    elif nr == 2:
-      st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_mmap)
-      print("bef FASTRPC_IOCTL_MMAP", format_struct(st))
-    elif nr == 1:
-      # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
+
+  if fn == "/dev/adsprpc-smd":
+    if nr == 1:
       st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
-      print("bef FASTRPC_IOCTL_INVOKE", format_struct(st))
       method = (st.sc>>24) & 0xFF
       in_args = (st.sc>>16) & 0xFF
       out_args = (st.sc>>8) & 0xFF
-      in_h = (st.sc>>4) & 0xF
-      out_h = (st.sc>>0) & 0xF
-      print(f"\tm:{method} ia:{in_args} oa:{out_args} ih:{in_h} oh:{out_h}")
-      if in_args or out_args:
-        for arg in range(in_args+out_args):
-          print(arg, format_struct(st.pra[arg]))
-          # print(arg, f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
-          # print("input" if arg < in_args else "output", f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
-          if st.pra[arg].buf.pv is not None: hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:0x40])
-      #print(format_struct(st.pra)))
-    elif nr == 6:
-      print("bef FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
-      print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
-      # print(bytearray(to_mv(ini.file, ini.filelen)))
-    elif nr == 7:
-      print("bef FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
-    elif nr == 12: print("bef FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
-    else:
-      print(f"bef UNPARSED {nr}")
-  else:
-    print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=}", fn)
-  
+      if out_args:
+        for arg in range(in_args, in_args+out_args):
+          ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
+
+  # if fn == "/dev/ion":
+  #   if nr == 0:
+  #     st = get_struct(argp, qcom_dsp.struct_ion_allocation_data)
+  #     print("bef ION_IOC_ALLOC", format_struct(st))
+  #   elif nr == 1:
+  #     st = get_struct(argp, qcom_dsp.struct_ion_handle_data)
+  #     print("bef ION_IOC_FREE", format_struct(st))
+  #   elif nr == 2:
+  #     st = get_struct(argp, qcom_dsp.struct_ion_fd_data)
+  #     print("bef ION_IOC_MAP", format_struct(st))
+  # elif fn == "/dev/adsprpc-smd":
+  #   assert chr(itype) == 'R'
+  #   if nr == 8:
+  #     st = ctypes.c_uint32.from_address(argp)
+  #     print("bef FASTRPC_IOCTL_GETINFO", st.value)
+  #   elif nr == 2:
+  #     st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_mmap)
+  #     print("bef FASTRPC_IOCTL_MMAP", format_struct(st))
+  #   elif nr == 1:
+  #     # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
+  #     st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
+  #     print("bef FASTRPC_IOCTL_INVOKE", format_struct(st))
+  #     method = (st.sc>>24) & 0xFF
+  #     in_args = (st.sc>>16) & 0xFF
+  #     out_args = (st.sc>>8) & 0xFF
+  #     in_h = (st.sc>>4) & 0xF
+  #     out_h = (st.sc>>0) & 0xF
+
+  #     # if in_args == 2:
+  #     #   if st.pra[1].buf.len == 0x52:
+  #     #     print("sleep", libc.gettid())
+  #     #     time.sleep(20)
+
+  #     # if 
+
+  #     print(f"\tm:{method} ia:{in_args} oa:{out_args} ih:{in_h} oh:{out_h}")
+  #     if in_args or out_args:
+  #       for arg in range(in_args+out_args):
+  #         print(arg, format_struct(st.pra[arg]))
+  #         # print(arg, f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
+  #         # print("input" if arg < in_args else "output", f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
+  #         if st.pra[arg].buf.len == 0x258:
+  #           print(bytearray(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)))
+
+  #         if st.pra[arg].buf.pv is not None:
+  #           hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:0x40])
+  #           if arg >= in_args: ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
+  #     #print(format_struct(st.pra)))
+  #   elif nr == 6:
+  #     print("bef FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
+  #     print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
+  #     # print(bytearray(to_mv(ini.file, ini.filelen)))
+  #   elif nr == 7:
+  #     print("bef FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
+  #   elif nr == 12: print("bef FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
+  #   else:
+  #     print(f"bef UNPARSED {nr}")
+  # else:
+  #   print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=}", fn)
+
+  # print("enter", libc.gettid())
   ret = libc.syscall(0x1d, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
+  # print("done", libc.gettid())
   if fn == "/dev/ion":
     if nr == 0:
       st = get_struct(argp, qcom_dsp.struct_ion_allocation_data)
@@ -107,14 +133,28 @@ def ioctl(fd, request, argp):
       print(f"\tm:{method} ia:{in_args} oa:{out_args} ih:{in_h} oh:{out_h}")
       if in_args or out_args:
         for arg in range(in_args+out_args):
-          print("input" if arg < in_args else "output", f"arg (0x{st.pra[arg].buf.len:X})")
-          if st.pra[arg].buf.pv:
-            hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:0x40])
+          print(arg, format_struct(st.pra[arg]))
+          # print(arg, f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
+          # print("input" if arg < in_args else "output", f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
+          if st.pra[arg].buf.pv is not None:
+            # if st.pra[arg].buf.len == 0x258:
+            #   print(bytearray(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)))
+            if st.pra[arg].buf.len == 0x68:
+              print(bytearray(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)))
+
+            cut = 0x2000 if st.pra[arg].buf.len == 0x2000 or st.pra[arg].buf.len == 0x258 else 0x100
+            ww = to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)
+            hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:cut])
+
+            # if st.pra[arg].buf.len == 0x1000 and ww[0x30] == 0x6e:
+            #   z = ww.cast('Q')[1] + 0x7F00000000
+            #   print("DOO")
+            #   hexdump(to_mv(z, 0x200))
       #print(format_struct(st.pra)))
     elif nr == 6:
       print(ret, "FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
       print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
-      # hexdump(to_mv(ini.file, ini.filelen))
+      # print(bytearray(to_mv(ini.file, ini.filelen)))
     elif nr == 7:
       print(ret, "FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
     elif nr == 12: print(ret, "FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
@@ -158,7 +198,7 @@ install_hook(libc.ioctl, ioctl)
 from tinygrad.runtime.autogen import libc
 
 
-adsp = ctypes.CDLL(ctypes.util.find_library("adsprpc"))
+# adsp = ctypes.CDLL(ctypes.util.find_library("adsprpc"))
 # print(adsp)
 
 def rpc_invoke(rpcfd, handle, method, ins=None, outs=None):
@@ -210,15 +250,197 @@ if __name__ == "__main__":
   # TODO: unmap here
   # qcom_dsp.ION_IOC_FREE(ionfd, handle=shell_mem.handle)
 
-  # rpc_invoke(rpcfd, handle=3, method=3)
+  rpc_invoke(rpcfd, handle=3, method=3)
 
-  # a1 = memoryview(bytearray(b'\x00\x00\x00\x00\xFF\xFF\xFF\xFF\x00\x00\x00\x00\x00\x00\x00\x00'))
-  # a2 = memoryview(bytearray())
-  # o1 = memoryview(bytearray(0x10))
-  # o2 = memoryview(bytearray())
-  # rpc_invoke(rpcfd, handle=0x0, method=4, ins=[a1, a2], outs=[o1, o2])
+  from threading import Thread
+  def init_shit():
+    a1 = memoryview(bytearray(b'\x00\x00\x00\x00\xFF\xFF\xFF\xFF\x00\x00\x00\x00\x00\x00\x00\x00'))
+    a2 = memoryview(bytearray())
+    o1 = memoryview(bytearray(0x10)).cast('I')
+    o2 = memoryview(bytearray())
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+    shitty_id = o1[0]
+    print("shit id is ", hex(shitty_id))
 
-  # print(o1[0])
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0x1000]))
+    o1 = memoryview(bytearray(0x4))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=5, ins=[a1], outs=[o1, o2])
+
+    # try to load apps_std?, return error
+    err_shit = memoryview(bytearray(0x4000))
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0x1000, 0x1000]))
+    a2 = memoryview(bytearray(0x1000))
+    a2[:(0x18 + 79)] = bytearray(array.array('Q', [0x8, mv_address(err_shit) & 0xffffffff, 0xff])) + bytearray(b'libapps_std_skel.so: cannot open shared object file: No such file or directory\x00')
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    # whtat's that??
+    # a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    # a2 = memoryview(bytearray(0x0))
+    # o1 = memoryview(bytearray(0x10))
+    # o2 = memoryview(bytearray(0x1000))
+    # rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0xc, 0x1000]))
+    a2 = memoryview(array.array('I', [4, 0, 0x64])) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    # load lib
+    libcnt = bytearray(pathlib.Path('libcalculator_skel.so').read_bytes())[:0x1000]
+    # libcalc = memoryview(libcnt))[:0x1000]
+    need_sz = round_up(len(libcnt) + 0x18, 0x1000)
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, need_sz, 0x1000]))
+    a2 = memoryview(bytearray(need_sz))
+    a2[:(0x18 + len(libcnt))] = bytearray(array.array('Q', [0x8, len(libcnt), len(libcnt)])) + libcnt
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0xc, 0x1000]))
+    a2 = memoryview(array.array('I', [4, 0, 0x65])) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0xc, 0x1000]))
+    a2 = memoryview(array.array('I', [4, 0, 0x65])) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    # 0x68 wtf 2?
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0x68, 0x1000]))
+    a2 = memoryview(bytearray(b'`\x00\x00\x00\x00\x00\x00\x00\xec\xb5U\x8f\x7f\x00\x00\x00\x0c\x08\x00\x00\x00\x00\x00\x00\x15\x00T\x00\x00\x00\x00\x00\xb4\x81\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xd0`\x00\x00\x00\x00\x00\x00\n\xe0\xc1f\x00\x00\x00\x00X\xaeQ%\x00\x00\x00\x00\n\xe0\xc1f\x00\x00\x00\x00X\xaeQ%\x00\x00\x00\x00X\xaeQ%\x00\x00\x00\x00X\xaeQ%\x00\x00\x00\x00'))
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    libcnt = bytearray(pathlib.Path('/data/home/nimlgen/tinygrad/testsig-0x67489311.so').read_bytes())
+    for i in range(0, len(libcnt), 0x200):
+      shlib = libcnt[i:i+0x200]
+      need_sz = len(shlib) + 0x18
+
+      a1 = memoryview(array.array('I', [shitty_id, 0, 0x218, 0x1000]))
+      a2 = memoryview(bytearray(0x218))
+      addww = 0
+      if len(shlib) != 0x200: addww = 0x100000000
+      a2[:(0x18 + len(shlib))] = bytearray(array.array('Q', [0x8, len(shlib) | addww, 0x200])) + shlib
+      o1 = memoryview(bytearray(0x10))
+      o2 = memoryview(bytearray(0x1000))
+      rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    libcnt = bytearray(pathlib.Path('libcalculator_skel.so').read_bytes())[:0x1884]
+    need_sz = round_up(len(libcnt) + 0x18, 0x1000)
+    a1 = memoryview(array.array('I', [shitty_id, 0, need_sz, 0x1000]))
+    a2 = memoryview(bytearray(need_sz))
+    a2[:(0x18 + len(libcnt))] = bytearray(array.array('Q', [0x8, len(libcnt), len(libcnt)])) + libcnt
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+    
+    # a1 = memoryview(array.array('I', [shitty_id, 0, 0x258, 0x1000]))
+    # a2 = memoryview(bytearray(b'\x08\x00\x00\x00\x00\x00\x00\x00@\x02\x00\x00\x00\x00\x00\x00@\x02\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00^\x01\x00\x00\x01\x00\x00\x00f\x01\x00\x00\x0e\x00\x00\x00p\x01\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x0c\x00\x00\x00 \x06\x00\x00\r\x00\x00\x00`\x17\x00\x00\x04\x00\x00\x00\x8c\x03\x00\x00\x06\x00\x00\x00\x94\x00\x00\x00\x0b\x00\x00\x00\x10\x00\x00\x00\x05\x00\x00\x00\x04\x02\x00\x00\n\x00\x00\x00\x87\x01\x00\x00\x03\x00\x00\x00\x08"\x00\x00\x01\x00\x00p\x03\x00\x00\x00\xf9\xff\xffo\x19\x00\x00\x00\x14\x00\x00\x00\x07\x00\x00\x00\x17\x00\x00\x00\x9c\x05\x00\x00\x02\x00\x00\x00x\x00\x00\x00\x07\x00\x00\x00L\x04\x00\x00\x08\x00\x00\x00P\x01\x00\x00\t\x00\x00\x00\x0c\x00\x00\x00\x15\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe0 \x00\x00\xfc \x00\x00\x18!\x00\x004!\x00\x00\x04\x00\x00\x00\xb0 \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xa8\x17\x00\x00\xb0\x17\x00\x00\xc8\x17\x00\x00\x00\x00\x00\x00\x01\x00\x02\x00\x04\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00`!\x00\x00\x04\x01\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00h!\x00\x00\x01\x00\x00\x00\x00\x01\x02\x00\x04\x00\x00\x00\x08\x00\x00\x00\x03\x00\x00\x00\x02\x00\x00\x00X!\x00\x00\x04\x08\x00\x00\x00\x01\x02\x00\x04\x00\x00\x00\x04\x00\x00\x00\x03\x00\x00\x00\x02\x00\x00\x00P!\x00\x00\x04\x04\x00\x00\xa0!\x00\x00\xc0!\x00\x00\xa0!\x00\x00\xb0!\x00\x00p!\x00\x00\x80!\x00\x00\x90!\x00\x00\x00\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x04\x00\x00\x04\x00\x00\x00\xde\xc0\xad\xde\x00\x00\x00\x00\x00\x04\x03\x00\x04\x00\x00\x00\xde\xc0\xad\xde\x00\x00\x00\x00\x00\x04\x00\x00\x08\x00\x00\x00\xf0\x17\x00\x00\x00\x00\x00\x00\t\x04\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x02\x08\x03\x00\x04\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x02\x04\x03\x00:\'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x90\x14\x00\x00\xf8\x14\x00\x00(\x15\x00\x00\x94\x15\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe1\x16A\x01\x00\x00\x00\x00\x82\xd5*\x00\x00\x00\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00'))
+    # o1 = memoryview(bytearray(0x10))
+    # o2 = memoryview(bytearray(0x1000))
+    # rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0x258, 0x1000]))
+    a2 = memoryview(bytearray(b'\x08\x00\x00\x00\x00\x00\x00\x00@\x02\x00\x00\x00\x00\x00\x00@\x02\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00^\x01\x00\x00\x01\x00\x00\x00f\x01\x00\x00\x0e\x00\x00\x00p\x01\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x0c\x00\x00\x00 \x06\x00\x00\r\x00\x00\x00`\x17\x00\x00\x04\x00\x00\x00\x8c\x03\x00\x00\x06\x00\x00\x00\x94\x00\x00\x00\x0b\x00\x00\x00\x10\x00\x00\x00\x05\x00\x00\x00\x04\x02\x00\x00\n\x00\x00\x00\x87\x01\x00\x00\x03\x00\x00\x00\x08"\x00\x00\x01\x00\x00p\x03\x00\x00\x00\xf9\xff\xffo\x19\x00\x00\x00\x14\x00\x00\x00\x07\x00\x00\x00\x17\x00\x00\x00\x9c\x05\x00\x00\x02\x00\x00\x00x\x00\x00\x00\x07\x00\x00\x00L\x04\x00\x00\x08\x00\x00\x00P\x01\x00\x00\t\x00\x00\x00\x0c\x00\x00\x00\x15\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe0 \x00\x00\xfc \x00\x00\x18!\x00\x004!\x00\x00\x04\x00\x00\x00\xb0 \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xa8\x17\x00\x00\xb0\x17\x00\x00\xc8\x17\x00\x00\x00\x00\x00\x00\x01\x00\x02\x00\x04\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00`!\x00\x00\x04\x01\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00h!\x00\x00\x01\x00\x00\x00\x00\x01\x02\x00\x04\x00\x00\x00\x08\x00\x00\x00\x03\x00\x00\x00\x02\x00\x00\x00X!\x00\x00\x04\x08\x00\x00\x00\x01\x02\x00\x04\x00\x00\x00\x04\x00\x00\x00\x03\x00\x00\x00\x02\x00\x00\x00P!\x00\x00\x04\x04\x00\x00\xa0!\x00\x00\xc0!\x00\x00\xa0!\x00\x00\xb0!\x00\x00p!\x00\x00\x80!\x00\x00\x90!\x00\x00\x00\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x04\x00\x00\x04\x00\x00\x00\xde\xc0\xad\xde\x00\x00\x00\x00\x00\x04\x03\x00\x04\x00\x00\x00\xde\xc0\xad\xde\x00\x00\x00\x00\x00\x04\x00\x00\x08\x00\x00\x00\xf0\x17\x00\x00\x00\x00\x00\x00\t\x04\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x02\x08\x03\x00\x04\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x02\x04\x03\x00:\'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x90\x14\x00\x00\xf8\x14\x00\x00(\x15\x00\x00\x94\x15\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe1\x16A\x01\x00\x00\x00\x00\x82\xd5*\x00\x00\x00\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00\xa0\x06\x00\x00'))
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    a2 = memoryview(bytearray(0x0)) # wtf?
+    o1 = memoryview(bytearray(0x10))
+    o2 = memoryview(bytearray(0x1000))
+    rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    assert False
+
+    # a1 = memoryview(array.array('I', [shitty_id, 0, 0, 0x1000]))
+    # a2 = memoryview(bytearray(0x0)) # wtf?
+    # o1 = memoryview(bytearray(0x10))
+    # o2 = memoryview(bytearray(0x1000))
+    # rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
+
+    print("DONE")
+
+
+  thread = Thread(target=init_shit)
+  thread.start()
 
   a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
   a2 = memoryview(bytearray(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
@@ -226,12 +448,15 @@ if __name__ == "__main__":
   o2 = memoryview(bytearray(0xff))
   rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
 
+  assert False
+
+  thread.join()
+
   # a1 = memoryview(bytearray(b'\x00\x00\x00\x00\xFF\xFF\xFF\xFF\x00\x00\x00\x00\x00\x00\x00\x00'))
   # a2 = memoryview(bytearray())
   # o1 = memoryview(bytearray(0x10))
   # o2 = memoryview(bytearray())
   # rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
-
 
   os._exit(0)
 
