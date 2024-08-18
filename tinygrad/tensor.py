@@ -157,7 +157,7 @@ class Tensor:
     def __enter__(self): self.prev, Tensor.training = Tensor.training, self.mode
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
 
-  class inference_mode(ContextDecorator):
+  class test(ContextDecorator):
     def __init__(self, mode:bool = True): self.mode = mode
     def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.mode
     def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
@@ -1970,7 +1970,7 @@ class Tensor:
       reshape[i] = expand[i] = size[i]
       low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
       x = x.gather(i, low).lerp(x.gather(i, high), perc)
-    return x
+    return x.cast(self.dtype)
 
   # ***** unary ops *****
 

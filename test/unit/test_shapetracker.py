@@ -108,13 +108,13 @@ class TestRealDoesntSimplify(unittest.TestCase):
     self.st = ShapeTracker((
       View.create((8, 3, 1, 2, 11, 1), (33, 11, 0, 0, 1, 0), 0, None),
       View.create((8, 6, 11), (66, 11, 1), 0, None)))
-    assert self.st.real_strides() == (33, None, 1)
+    self.assertEqual(self.st.real_strides(), (33, None, 1))
 
   def test_2(self):
     self.st = ShapeTracker((
       View.create((2, 2, 4, 3, 3), (72, 9, 18, -3, -1), 8, None),
       View.create((4, 4, 3, 3), (36, 9, 3, 1), 0, None)))
-    assert self.st.real_strides() == (None, 18, -3, -1)
+    self.assertEqual(self.st.real_strides(), (None, 18, -3, -1))
 
 class TestRealStrides(unittest.TestCase):
   def test_1(self):
@@ -131,7 +131,7 @@ class TestRealSimplifies(unittest.TestCase):
     self.st = self.st.simplify()
     assert len(self.st.views) == 1
     print(self.st.views[-1].strides, st)
-    assert self.st.views[-1].strides == st
+    self.assertEqual(self.st.views[-1].strides, st)
 
   def test_1(self):
     self.st = ShapeTracker((
@@ -367,38 +367,38 @@ class TestSimplifyingShapeTracker(unittest.TestCase):
     self.st = self.st.expand((10, 10))
     self.st = self.st.reshape((100,))
     print(self.st.views)
-    assert(len(self.st.views) == 2)
+    assert (len(self.st.views) == 2)
     self.st = self.st.reshape((10, 10))
     print(self.st.views)
 
     self.st = self.st.simplify()
     print(self.st.views)
-    assert(len(self.st.views) == 1)
+    assert (len(self.st.views) == 1)
 
   # multiview simplify
   def test_expand_contract_different_shape(self):
     self.st.expand((10, 10))
     self.st.reshape((100,))
     print(self.st.views)
-    assert(len(self.st.views) == 2)
+    assert (len(self.st.views) == 2)
     self.st.reshape((2, 5, 2, 5))
     print(self.st.views)
 
     self.st = self.st.simplify()
     print(self.st.views)
-    assert(len(self.st.views) == 1)
+    assert (len(self.st.views) == 1)
 
   # multiview simplify
   def test_expand_contract_still_complex(self):
     self.st.expand((10, 10))
     self.st.reshape((100,))
     print(self.st.views)
-    assert(len(self.st.views) == 2)
+    assert (len(self.st.views) == 2)
     self.st.reshape((5, 20))
 
     self.st = self.st.simplify()
     print(self.st.views)
-    assert(len(self.st.views) == 2)
+    assert (len(self.st.views) == 2)
 
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
@@ -584,6 +584,20 @@ class TestMaskedShapeTracker(unittest.TestCase):
     st3.pad(((0, 2), (1, 2), (2, 2), (0, 4)))
     st3.reshape((4, 3, 6, 5))
     st3.assert_same()
+
+  def test_axis_is_masked(self):
+    st = ShapeTracker.from_shape((100, 100, 100, 100)).pad(((0,1),(0,0),(2,0), (0,0)))
+    assert st.axis_is_masked(0)
+    assert not st.axis_is_masked(1)
+    assert st.axis_is_masked(2)
+    assert not st.axis_is_masked(3)
+
+  def test_axis_is_masked_rw1(self):
+    st = ShapeTracker(views=(View(shape=(1, 2, 1, 4, 4, 13, 4, 13), strides=(0, 324, 0, 81, 0, 9, 0, 1), offset=-20,
+                                  mask=((0, 1), (0, 2), (0, 1), (0, 4), (0, 4), (2, 11), (0, 4), (2, 11)), contiguous=False),
+                             View(shape=(2, 4, 11, 11, 4, 3, 3), strides=(10816, 0, 52, 1, 2704, 728, 14), offset=0,
+                                  mask=None, contiguous=False)))
+    assert not st.axis_is_masked(0)
 
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):

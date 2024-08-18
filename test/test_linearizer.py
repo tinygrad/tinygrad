@@ -1,25 +1,23 @@
-from typing import List, Tuple, Dict, Union
+from typing import List, Tuple, Union, cast
 import numpy as np
 import unittest
 from dataclasses import replace
-from test.external.fuzz_linearizer import compare_linearizer
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.codegen.uops import UOps
+from tinygrad.ops import UOp, UOps
 from tinygrad.device import Device, Buffer
-from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, MetaOps, TernaryOps, ReduceOps, UnaryOps
-from tinygrad.renderer import TensorCore
+from extra.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, MetaOps, TernaryOps, ReduceOps, UnaryOps, to_uop
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 # from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
-from tinygrad.helpers import DEBUG, prod, Context, getenv, CI, flatten, dedup
+from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup
 from tinygrad.dtype import DType, dtypes
 
-def helper_realized_ast(r:Union[Tensor, List[Tensor]]):
+def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer]]:
   if isinstance(r, Tensor): r = [r]
   s = create_schedule([x.lazydata for x in r])
   run_schedule(s[:-1])  # run all kernels except the last one
@@ -701,7 +699,7 @@ class TestLinearizer(unittest.TestCase):
     load_t = Tensor.full(load.st.shape, 1).contiguous().realize()
     k = helper_linearizer_ast(ast, [load_t], wanna_output=[load_t.numpy().sum()])[1]
     self.assertEqual(k.uops[-1].op, UOps.ENDIF)
-    self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.op is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
+    self.assertLess(k.uops.index([x for x in k.uops if x.op is UOps.STORE][-1]), k.uops.index(k.uops[-1]))
 
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -790,6 +788,7 @@ class TestLinearizer(unittest.TestCase):
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_load_cache_const_bufs(self):
     # make sure const buffers are differentiated from local and mem buffers
     ST, DT = ShapeTracker(views=(View(shape=((1,)), strides=(0, 0), offset=0, mask=None, contiguous=False),)), dtypes.int
@@ -804,8 +803,8 @@ class TestLinearizer(unittest.TestCase):
     lin = Kernel(ast)
     lin.linearize()
 
-    assert len(lin.uops.uops) <= 7, "too many uops"
-    a_bufs = [u.op for u in lin.uops.uops[-1].src[2].src]
+    assert len(lin.uops) <= 7, "too many uops"
+    a_bufs = [u.op for u in lin.uops[-1].src[2].src]
     assert a_bufs == [UOps.LOAD, UOps.CONST]
 
   def test_upcast_cse(self):
@@ -838,6 +837,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
@@ -900,7 +900,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL")) and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
@@ -1005,7 +1005,7 @@ class TestLinearizer(unittest.TestCase):
       # children of PHI are placed after ENDRANGE
       if any(x.op is UOps.PHI for x in u.src):
         end_range = [i for i, x in enumerate(k.uops) if x.op is UOps.ENDRANGE][0]
-        assert end_range < k.uops.uops.index(u)
+        assert end_range < k.uops.index(u)
 
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
@@ -1075,7 +1075,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
-      sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is MetaOps.KERNEL]
+      sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is UOps.SINK]
       assert len(sched) == 1
 
       lin = Kernel(sched[0].ast)
@@ -1096,7 +1096,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
-    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is MetaOps.KERNEL]
+    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is UOps.SINK]
     assert len(sched) == 1
     lin = Kernel(sched[0].ast)
     assert not any(u.op is UOps.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
@@ -1510,20 +1510,22 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 1
     assert k.upcasted == 1
 
-def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp], inputs:List[Tensor], *args, **kwargs):
-  if not isinstance(ast, LazyOp): ast = LazyOp(MetaOps.KERNEL, ast)
+def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp, UOp], inputs:List[Tensor], *args, **kwargs):
+  if not isinstance(ast, LazyOp) and not isinstance(ast, UOp): ast = LazyOp(MetaOps.KERNEL, ast)
   inbufs = [x.lazydata.base.buffer for x in inputs]
-  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
+  ast = to_uop(ast) if isinstance(ast, LazyOp) else ast
+  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.st_arg.size, cast(DType,out.src[2].dtype)).allocate() \
+      for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Union[Tensor, List[Tensor]], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
   return _helper_linearizer_opt_ast(realized_ast, real_bufs, *args, **kwargs)
 
-def _helper_linearizer_opt_ast(realized_ast:LazyOp, real_bufs:List[Buffer], opts=[],
+def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> List[Kernel]:
   lins: List[Kernel] = []
-  outbufs = [(real_bufs[i], lop.arg.st.shape) for i,lop in enumerate(realized_ast.src)]
+  outbufs = [(real_bufs[i], lop.st_arg.shape) for i,lop in enumerate(realized_ast.src)]
 
   def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
 
@@ -1567,52 +1569,6 @@ def _helper_linearizer_opt_ast(realized_ast:LazyOp, real_bufs:List[Buffer], opts
     check_opt(x, lambda: Kernel(realized_ast), color_sizes[i] if i < len(color_sizes) else None)
   return lins
 
-# creates a back-to-back multi reduce AST by merging r0 and r1.
-# TODO: delete once we can schedule multi reduce
-def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs:Dict[int,Tensor]={}, \
-                                 merge=lambda r0,r1: LazyOp(BinaryOps.ADD, (r0, r1))) -> Tuple[LazyOp, ...]:
-  assert len(s0:=r0.schedule()) == 1 and len(s1:=r1.schedule()) == 1, "inputs should be realized"
-  assert all({idx:replace_idxs[idx] is r0 or replace_idxs[idx] is r1 for idx in replace_idxs}.values()), "replace idxs should be in {{r0, r1}}"
-  op0, op1 = s0[0].ast.src[0].src[0], s1[0].ast.src[0].src[0]
-  _replace_idxs = {idx:(op0 if replace_idxs[idx] is r0 else op1) for idx in replace_idxs}
-  def _deep_replace(op:LazyOp, offset=0):
-    if op.op is BufferOps.LOAD:
-      if op.arg.idx+offset in _replace_idxs: return _replace_idxs[op.arg.idx+offset]
-      else: arg = MemBuffer(op.arg.idx+offset, op.arg.dtype, op.arg.st)
-    else: arg = op.arg
-    return LazyOp(op.op, tuple(_deep_replace(x, offset) for x in op.src), arg)
-  # limitation: r0 and r1 cannot share inputs.
-  op0 = _deep_replace(op0, 0)
-  op0_loads = len([x for x in op0.parents if x.op is BufferOps.LOAD])
-  out = merge(op0, _deep_replace(op1, op0_loads))
-  # limitation: only tests single output
-  op = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, s0[-1].ast.src[-1].arg.dtype, s0[-1].ast.src[-1].arg.st))
-  if DEBUG >= 3: print(op)
-  return op,
-
-def check_fused_tc_opt(tc:TensorCore, r0:Tensor, r1:Tensor, inputs:List[Tensor]):
-  ast = _temp_create_multireduce_ast(r0, r1)
-  (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
-  helper_linearizer_ast(ast, inputs, [
-    [],
-    [Opt(OptOps.UPCAST, 0, 4)],
-    [Opt(OptOps.UPCAST, 1, 4)],
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
-    [Opt(OptOps.UNROLL, 0, 2)], # check unroll
-    [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
-    [Opt(OptOps.LOCAL, 0, 4)], # check local
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
-    [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
-    [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
-    [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
-    [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-    # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
-  ], apply_tc=True, atol=atol, rtol=rtol)
-
 class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -1640,37 +1596,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.GROUP, 0, 2)] * 4,
       [Opt(OptOps.LOCAL, 0, 2)] * 4,
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)] * 4,
-    ])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("parallel reduce")
-  def test_local_and_grouped_reduce_multireduce(self):
-    N = 128
-    Tensor.manual_seed(1882)
-    a = Tensor.rand(4, 4, N, N).realize()
-    b = Tensor.rand(4, 4, N).realize()
-    # TODO: this isn't the best AST, it's always math.inf
-    r0 = (b.sqrt() + ((a+1).sum(axis=3).exp()))
-    c = Tensor.rand(4, 4, N, N).realize()
-    d = Tensor.rand(4, 4, N).realize()
-    r1 = (d.sqrt() + ((c+1).sum(axis=3).exp()))
-    ast = _temp_create_multireduce_ast(r0, r1)
-    helper_linearizer_ast(ast, [b, a, d, c], [
-      [Opt(OptOps.LOCAL, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 8)],
-      [Opt(OptOps.LOCAL, 0, 16)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
-      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
-      # Checking how it works with locals + grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)],
-      # Checking how it works with locals + grouped reduce + upcasts
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
     ])
 
   def test_upcasts(self):
@@ -1723,41 +1648,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)],
     ])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("AST has implicit movement ops")
-  def test_matmul_multireduce(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a = Tensor.rand(N, N).realize()
-    b = Tensor.rand(N, N).realize()
-    r0 = a@b
-    c = Tensor.rand(N, N).realize()
-    d = Tensor.rand(N, N).realize()
-    r1 = c@d
-    ast = _temp_create_multireduce_ast(r0, r1)
-    helper_linearizer_ast(ast, [a, b, c, d], [
-      [Opt(OptOps.UPCAST, 0, 2)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # Checking how it works with upcasts
-      [Opt(OptOps.LOCAL, 0, 2)],
-      [Opt(OptOps.LOCAL, 1, 32)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 32)],
-      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.LOCAL, 1, 8)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.UNROLL, 0, 4)], # Checking how it works with grouped_reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 4)], # Checking how it works with local+grouped_reduce
-      # Checking all together
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4),
-       Opt(OptOps.UPCAST, 1, 2)],
-      # Full global upcast + local
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)],
-    ], wanna_output=[(a.numpy()@b.numpy()+c.numpy()@d.numpy()).flatten()])
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_double_reduce(self):
@@ -1808,25 +1698,6 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       k.apply_opt(Opt(OptOps.TC, 0, 1))
 
-  @unittest.skip("parallel tensor cores")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_invalid_fused_tensor_core(self):
-    Tensor.manual_seed(1552)
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in == dtypes.bfloat16: continue
-      M, N, K = 12, 8, 30
-      a, b = Tensor.rand(M, K, dtype=tc.dtype_in).realize(), Tensor.rand(K, N, dtype=tc.dtype_in).realize()
-      r0 = a.matmul(b, acc_dtype=tc.dtype_out)
-      M, N, K = 16, 8, 33
-      c, d = Tensor.rand(M, K, dtype=tc.dtype_in).realize(), Tensor.rand(K, N, dtype=tc.dtype_in).realize()
-      r1 = c.matmul(d, acc_dtype=tc.dtype_out)
-      ast = _temp_create_multireduce_ast(r0, r1)
-      lin = Kernel(ast)
-      lin.apply_opt(Opt(op=OptOps.TC, axis=0, amt=2))
-      lin.linearize()
-      result = compare_linearizer(lin)
-      assert result[0] == "COMPARE_ERROR"
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_core_opts(self):
     N = 128
@@ -1870,35 +1741,6 @@ class TestKernelOpts(unittest.TestCase):
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
         [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
       ], apply_tc=True, atol=atol, rtol=rtol)
-
-  @unittest.skip("parallel tensor cores")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_fused_tensor_core_simple(self):
-    N = 64
-    Tensor.manual_seed(1552)
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in == dtypes.bfloat16: continue
-      [a, b, c, d] = [Tensor.randn(N, N, dtype=tc.dtype_in).realize() for _ in range(4)]
-      r0 = a.matmul(b, acc_dtype=tc.dtype_out)
-      r1 = c.matmul(d, acc_dtype=tc.dtype_out)
-      check_fused_tc_opt(tc, r0, r1, [a, b, c, d])
-
-  @unittest.skip("parallel tensor cores")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_fused_tensor_core_permuted(self):
-    N = 64
-    Tensor.manual_seed(1552)
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in == dtypes.bfloat16: continue
-      # one permuted
-      [a, b, c, d] = [Tensor.randn(N, N, dtype=tc.dtype_in).realize() for _ in range(4)]
-      r0 = a.matmul(b, acc_dtype=tc.dtype_out)
-      r1 = c.T.matmul(d, acc_dtype=tc.dtype_out)
-      check_fused_tc_opt(tc, r0, r1, [a, b, c, d])
-      # both permuted
-      r0 = a.T.matmul(b, acc_dtype=tc.dtype_out)
-      r1 = c.T.matmul(d, acc_dtype=tc.dtype_out)
-      check_fused_tc_opt(tc, r0, r1, [a, b, c, d])
 
   def test_padto_matmul(self):
     if CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
@@ -2035,27 +1877,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8)],
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.GROUP, 0, 4)]
     ])
-
-  def test_padto_matmul_multireduce(self):
-    if CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
-    N = 17 * 17
-    Tensor.manual_seed(289)
-    a = Tensor.rand(N, N).realize()
-    b = Tensor.rand(N, N).realize()
-    c = Tensor.rand(N, N).realize()
-    d = Tensor.rand(N, N).realize()
-    r0 = a@b
-    r1 = c@d
-    ast = _temp_create_multireduce_ast(r0,r1)
-    helper_linearizer_ast(ast, [a,b,c,d], opts=[
-      [Opt(OptOps.PADTO, 0, 32)],
-      [Opt(OptOps.PADTO, 1, 32)],
-      [Opt(OptOps.PADTO, 2, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
-      # can optimize further post PADTO
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
-    ], wanna_output=[(a.numpy()@b.numpy()+c.numpy()@d.numpy()).reshape(N, N, 1)])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")

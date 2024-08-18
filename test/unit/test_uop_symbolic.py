@@ -9,22 +9,20 @@ from typing import Tuple
 
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType, ConstType
-from tinygrad.codegen.uops import UOp, UOps
-from tinygrad.codegen.uopgraph import UOpGraph
-from tinygrad.ops import BinaryOps
+from tinygrad.codegen.uopgraph import linearize_uop
+from tinygrad.ops import BinaryOps, UOp, UOps, print_uops
 import functools
 
 def render(self) -> Tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0)
-  graph = UOpGraph([UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, 0), self))])
-  graph.linearize()
-  if DEBUG>=5: graph.print()
+  uops = linearize_uop([UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, 0), self))])
+  if DEBUG>=5: print_uops(uops)
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
     code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
-  rewritten_uop = [uop for uop in graph.uops if uop.op is UOps.STORE][0].src[-1]
-  fxn = TestRenderer().render("", graph)
+  rewritten_uop = [uop for uop in uops if uop.op is UOps.STORE][0].src[-1]
+  fxn = TestRenderer().render("", uops)
   return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin.arg, rewritten_uop.vmax.arg
 
 def NumNode(val): return UOp.const(dtypes.int, val)
