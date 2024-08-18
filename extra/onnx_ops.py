@@ -399,72 +399,59 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif mode == "ceil": index = index.ceil()
     else: raise ValueError(f"invalid {nearest_mode=}")
     return index.cast(dtypes.int32).clip(0, input_dim-1)
-  def _apply_coordinate_transformation(index: Tensor, input_dim: int, output_dim: int, scale_dim, roi_dim, mode: str):
+  def _apply_coordinate_transformation(index: Tensor, input_dim: int, scale_dim, roi_dim, sizes_frac, mode: str):
+    # output_dim = index.shape[0]
+    output_dim = scale_dim * input_dim
     if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
-    elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1)
+    elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1) if output_dim != 1 else Tensor([0])
     elif mode == "asymmetric": index = index / scale_dim
-    elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim > 1 else Tensor([0])
+    elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([0])
     elif mode == "half_pixel_symmetric":
-      index = input_dim / 2 * (1 - int(output_dim) / output_dim) + (index + 0.5) / scale_dim - 0.5
+      index = input_dim / 2 * (1 - int(output_dim) / sizes_frac) + (index + 0.5) / scale_dim - 0.5
     elif mode == "tf_crop_and_resize":
       index = roi_dim[0] * (input_dim - 1) + index * ((roi_dim[1] - roi_dim[0]) * (input_dim - 1) / (output_dim - 1))
     else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
     return index.clip(0, input_dim-1)
 
-  # src: https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
-  # TODO: replace this by permuting X based on axis
   if axes is not None:
-    if scales is not None:
-      scales = to_python_const(scales)
-      new_scales = [1] * X.ndim
-      for i, d in enumerate(axes): new_scales[d] = scales[i]
-      scales = new_scales
-    if sizes is not None:
-      sizes = to_python_const(sizes)
-      new_sizes = list(X.shape)
-      for i, d in enumerate(axes): new_sizes[d] = sizes[i]
-      sizes = new_sizes
-    if roi is not None:
-      roi = to_python_const(roi)
-      new_roi = ([0.0] * X.ndim) + ([1.0] * X.ndim)
-      for i, d in enumerate(axes):
-        new_roi[d] = roi[i]
-        new_roi[X.ndim + d] = roi[len(axes) + i]
-      roi = new_roi
-  else: axes = list(range(X.ndim))
+    perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
+    inverse_perm = [perm.index(i) for i in range(len(perm))]
+    X = X.permute(*perm)
+  else: axes, inverse_perm = list(range(X.ndim)), []
+  if roi is not None: roi = to_python_const(roi)
 
   if sizes is not None:
-    sizes = to_python_const(sizes)
+    sizes = [1]*(X.ndim - sizes.shape[0]) + to_python_const(sizes)
     scales = [sizes[i] / X.shape[i] for i in range(X.ndim)]
-    if keep_aspect_ratio_policy != "stretch":
-      if keep_aspect_ratio_policy == "not_larger": scale = min(scale for i, scale in enumerate(scales) if i in axes)
-      if keep_aspect_ratio_policy == "not_smaller": scale = max(scale for i, scale in enumerate(scales) if i in axes)
+    if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
+      scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
+      scale = scale_fxn(scale for i, scale in enumerate(scales) if i in axes)
       scales = [scale if i in axes else 1 for i in range(X.ndim)]
       sizes = [int((scale * X.shape[i]) + 0.5) if i in axes else X.shape[i] for i in range(X.ndim)]
+    elif keep_aspect_ratio_policy != "stretch": raise ValueError(f"invalid {keep_aspect_ratio_policy=}")
   else:
-    scales = to_python_const(scales)
+    scales = [1]*(X.ndim - scales.shape[0]) + to_python_const(scales)
     sizes = [int(sc*sh) for sc, sh in zip(scales, X.shape)]
 
+  sizes_frac = [sc*sh for sc, sh in zip(scales, X.shape)][2:]
   indexes = [Tensor.arange(shape, dtype=dtypes.default_float, device=X.device) for shape in sizes[2:]]
-  sizes, roi, axes, scales, input_shape = (val[2:] if isinstance(val, list) else [None] * (X.ndim-2)
-                                           for val in (sizes, roi, axes, scales, list(X.shape)))
-
+  sizes, axes, scales, input_shape = (val[2:] if isinstance(val, list) else [None] * (X.ndim-2) for val in (sizes, axes, scales, list(X.shape)))
+  roi = [[st, ed] for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])] if isinstance(roi, list) else [None] * (X.ndim-2)
+  indexes = [_apply_coordinate_transformation(*args, coordinate_transformation_mode) for args in zip(indexes, input_shape, scales, roi, sizes_frac)]
   if mode == "nearest":
-    indexes = [_apply_coordinate_transformation(*args, coordinate_transformation_mode) for args in zip(indexes, input_shape, sizes, scales, roi)]
     indexes = [_apply_nearest_mode(*args, nearest_mode) for args in zip(indexes, input_shape)]
     indexes = [idx.reshape(*(-1 if i == dim else 1 for i in range(len(sizes)))).expand(sizes) for dim, idx in enumerate(indexes)]
-    return X[..., *indexes]
+    X = X[..., *indexes]
   if mode == "linear":
     expand = list(X.shape)
     for i in range(-len(sizes), 0):
-      reshape = [1] * X.ndim
-      index = _apply_coordinate_transformation(indexes[i], input_shape[i], sizes[i], scales[i], roi[i], coordinate_transformation_mode)
+      reshape, index = [1] * X.ndim, indexes[i]
       reshape[i] = expand[i] = sizes[i]
       low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
       X = X.gather(i, low).lerp(X.gather(i, high), perc)
-    return X
   if mode == "cubic":
     raise NotImplementedError("cubic interpolation is not implemented")
+  return X.permute(*inverse_perm) if inverse_perm else X
 
 def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   if not axes: axes = list(range(t.ndim))
