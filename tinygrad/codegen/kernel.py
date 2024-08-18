@@ -422,7 +422,7 @@ class Kernel:
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
-      # check(len(reduce_axes:=[i for r in self.reduceops for i in r.arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
+      check(len(reduce_axes:=[i for r in self.reduceops for i in r.arg[1]]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
@@ -728,17 +728,6 @@ class Kernel:
           st_uop = ShapeTracker.from_shape(tuple([1 if i in second_axis else a for i,a in enumerate(local_shape)])).to_uop()
           return UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
         arg = (reduceop, axis)
-          # start = LazyOp(op.op, tuple(fixup_ast(x, apply_to_st) for x in op.src), arg)
-          
-          
-          # if len(arg) == 0: return start
-          
-          # local_buffer = MemBuffer(-self.reduceops.index(op)-1, start.dtype, ShapeTracker.from_shape(local_shape))
-          # local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
-          # local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
-          # grouped_reduce =  LazyOp(op.op, (local_load,), arg)
-          # if op is self.reduceops[-1]: return grouped_reduce
-          # return LazyOp(BufferOps.LOAD, (LazyOp(BufferOps.STORE, (grouped_reduce,), local_buffer),), local_buffer)
       elif op.op is UOps.SINK:
         arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
