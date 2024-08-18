@@ -1,7 +1,7 @@
 import math, time
 import numpy as np
 from tinygrad import Tensor, nn, GlobalCounters, TinyJit
-from tinygrad.helpers import partition, trange, getenv
+from tinygrad.helpers import partition, trange, getenv, Context
 from extra.lr_scheduler import OneCycleLR
 
 # from https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
@@ -95,6 +95,7 @@ if __name__ == "__main__":
 
   num_steps_per_epoch      = X_train.size(0) // batchsize
   total_train_steps        = math.ceil(num_steps_per_epoch * hyp['misc']['train_epochs'])
+  loss_batchsize_scaler = 512/batchsize
 
   pct_start = hyp['opt']['percent_start']
   initial_div_factor = 1e16 # basically to make the initial lr ~0 or so :D
@@ -105,9 +106,10 @@ if __name__ == "__main__":
   @TinyJit
   def train_step(idxs) -> Tensor:
     with Tensor.train():
-      X,Y = X_train[idxs], Y_train[idxs]
+      with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1):
+        X = X_train[idxs]
+        Y = Y_train[idxs].realize(X)
       out = model(X)
-      loss_batchsize_scaler = 512/batchsize
       loss = out.cross_entropy(Y, reduction='none', label_smoothing=0.2).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
       opt.zero_grad()
       loss.backward()
@@ -120,10 +122,10 @@ if __name__ == "__main__":
     # TODO: move to tinygrad
     idxs = np.arange(X_train.shape[0])
     np.random.shuffle(idxs)
-    tidxs = Tensor(idxs)[:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)
+    tidxs = Tensor(idxs, dtype='int')[:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)  # NOTE: long doesn't fold
     for epoch_step in (t:=trange(num_steps_per_epoch)):
       GlobalCounters.reset()
       st = time.perf_counter()
-      loss = train_step(tidxs[epoch_step].contiguous()).item()
-      t.set_description(f"loss: {loss:8.2f}   lr: {opt_non_bias.lr.item():.6f}"
+      loss = train_step(tidxs[epoch_step].contiguous()).item() / (batchsize*loss_batchsize_scaler)
+      t.set_description(f"loss: {loss:5.3f}   lr: {opt_non_bias.lr.item():.6f}"
                      f"   tm: {(et:=(time.perf_counter()-st))*1000:6.2f} ms {GlobalCounters.global_ops/(1e9*et):7.0f} GFLOPS")
