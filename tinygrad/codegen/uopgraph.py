@@ -254,6 +254,8 @@ constant_folder = PatternMatcher([
   # other arange folders
   (NOp.cvar("c1") - (NOp.var("x") + NOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
   (-(NOp.var("x") * NOp.cvar("c1")), lambda x, c1: x*-c1),
+  # max folding (before rewriting max)
+  (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # rewrite max
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x.lt(y).where(y, x)),
   # const rules
