@@ -28,7 +28,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     for t in tst: t.to_(mt)
 
   st = time.monotonic()
-  ret = tinygrad_fxn(*tst).realize()
+  with Tensor.train():
+    ret = tinygrad_fxn(*tst).realize()
   tinygrad_fp = time.monotonic() - st
 
   def compare(s, tinygrad_output, torch_output, atol, rtol):
@@ -53,7 +54,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     torch_fbp = time.monotonic() - st
 
     st = time.monotonic()
-    (ret+1).square().mean().backward()
+    with Tensor.train():
+      (ret+1).square().mean().backward()
     for tt in tst: tt.grad.realize()
     tinygrad_fbp = time.monotonic() - st
 
@@ -295,6 +297,7 @@ class TestOps(unittest.TestCase):
   def test_cmp_lt(self): self._test_cmp(lambda x,y: x<y)
   def test_cmp_le(self): self._test_cmp(lambda x,y: x<=y)
 
+  @Tensor.train()
   def test_cmp_ne_backwards(self):
     t1 = torch.ones(4, requires_grad=True)
     t2 = torch.ones(4, requires_grad=True)
@@ -308,6 +311,7 @@ class TestOps(unittest.TestCase):
     (t*(t != 0)).sum().backward()
     np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
 
+  @Tensor.train()
   def test_cmp_lt_backwards(self):
     t1 = torch.ones(4, requires_grad=True)
     t2 = torch.ones(4, requires_grad=True)

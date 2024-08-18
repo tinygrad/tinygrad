@@ -698,6 +698,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2).dtype == dtypes.float16
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2.0).dtype == dtypes.float16
 
+  @Tensor.train()
   def test_gradient_dtype(self):
     old_default_float = dtypes.default_float
 
@@ -717,6 +718,7 @@ class TestAutoCastType(unittest.TestCase):
     dtypes.default_float = old_default_float
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @Tensor.train()
   def test_backward_sum_acc_dtype(self):
     # test acc of sum in the backward is upcasted to float
     t = Tensor([5, -5], dtype=dtypes.half, requires_grad=True)
@@ -732,6 +734,7 @@ class TestAutoCastType(unittest.TestCase):
     np.testing.assert_allclose(t.mean(axis=1).numpy(), np.array([x] * N, dtype=np.float16), rtol=1e-3)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @Tensor.train()
   def test_mean_half_precision_overflow(self):
     N = 256
     t = Tensor([60000] * N*N, dtype=dtypes.half, requires_grad=True).reshape(N, N)

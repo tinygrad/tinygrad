@@ -36,7 +36,7 @@ class Function:
     ctx = fxn(x[0].device, *x, metadata=_METADATA.get())
     ret = Tensor.__new__(Tensor)
     ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
-    ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
+    ret._ctx = ctx if ctx.requires_grad and Tensor.training else None  # used by autograd engine
     return ret
 
 import tinygrad.function as F

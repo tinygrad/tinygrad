@@ -219,6 +219,7 @@ class TestSchedule(unittest.TestCase):
           img_bn.backward()
           check_schedule(opt.schedule_step(), cnt)
 
+  @Tensor.train()
   def test_fold_conv_relu_backward(self):
     c1 = nn.Conv2d(3,16,3, bias=False)
     c1.weight.requires_grad = True
@@ -241,6 +242,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @Tensor.train()
   def test_fold_conv_relu_backward_half(self):
     old_float = dtypes.default_float
     dtypes.default_float = dtypes.float16
@@ -266,6 +268,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
 
+  @Tensor.train()
   def test_fold_batchnorm_backward(self):
     with Context(FUSE_CONV_BW=1):
       with Tensor.train():
@@ -538,6 +541,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
+  @Tensor.train()
   def test_example_matmul(self):
     x = Tensor.eye(64, requires_grad=True)
     y = Tensor.eye(64, requires_grad=True)
@@ -1299,6 +1303,7 @@ class TestConvBW(unittest.TestCase):
       if flops is not None: assert GlobalCounters.global_ops <= flops, f"too many ops {GlobalCounters.global_ops}"
       if FUSE_CONV_BW: self.assertEqual(len(kernels), cnt)
 
+  @Tensor.train()
   def test_fold_conv_relu_backward(self):
     c1 = nn.Conv2d(3,16,3, bias=False)
     c1.weight.requires_grad = True
@@ -1322,6 +1327,7 @@ class TestConvBW(unittest.TestCase):
 
   @unittest.expectedFailure
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @Tensor.train()
   def test_fold_conv_relu_backward_half(self):
     old_float = dtypes.default_float
     dtypes.default_float = dtypes.float16

@@ -70,10 +70,11 @@ class TestCustomFunction(unittest.TestCase):
     # have to go forward before we can go backward
     a = Tensor.randn(4,4,requires_grad=True).permute(1,0)
     b = Tensor.randn(4,4,requires_grad=True).permute(1,0)
-    c = ATan2.apply(a, b)
+    with Tensor.train():
+      c = ATan2.apply(a, b)
 
-    # run the backward pass
-    c.mean().backward()
+      # run the backward pass
+      c.mean().backward()
     assert a.grad is not None and b.grad is not None, "tinygrad didn't compute gradients"
     print(a.grad.numpy())
     print(b.grad.numpy())
