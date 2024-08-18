@@ -1,6 +1,7 @@
+from typing import Tuple
 import math, time
 import numpy as np
-from tinygrad import Tensor, nn, GlobalCounters, TinyJit
+from tinygrad import Tensor, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.helpers import partition, trange, getenv, Context
 from extra.lr_scheduler import OneCycleLR
 
@@ -55,13 +56,13 @@ class ConvGroup:
   def __init__(self, channels_in, channels_out):
     self.conv1 = nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False)
     self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
-    self.norm1 = nn.BatchNorm(channels_out, track_running_stats=True, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
-    self.norm2 = nn.BatchNorm(channels_out, track_running_stats=True, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
+    self.norm1 = nn.BatchNorm(channels_out, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
+    self.norm2 = nn.BatchNorm(channels_out, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
     self.norm1.weight.requires_grad = False
     self.norm2.weight.requires_grad = False
   def __call__(self, x:Tensor) -> Tensor:
-    x =    self.norm1(self.conv1(x).max_pool2d()).quick_gelu()
-    return self.norm2(self.conv2(x)).quick_gelu()
+    x =    self.norm1(self.conv1(x).max_pool2d().float()).cast(dtypes.default_float).quick_gelu()
+    return self.norm2(self.conv2(x).float()).cast(dtypes.default_float).quick_gelu()
 
 class SpeedyConvNet:
   def __init__(self):
@@ -79,10 +80,8 @@ if __name__ == "__main__":
   # *** dataset ***
   X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
   cifar10_std, cifar10_mean = X_train.float().std_mean(axis=(0, 2, 3))
-  X_train = (X_train - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)
-  X_test = (X_test - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)
-  Y_train = Y_train.one_hot(depths['num_classes'])
-  Y_test = Y_test.one_hot(depths['num_classes'])
+  def preprocess(X:Tensor, Y:Tensor) -> Tuple[Tensor, Tensor]:
+    return ((X - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).cast(dtypes.default_float), Y.one_hot(depths['num_classes'])
 
   # *** model ***
   model = SpeedyConvNet()
@@ -114,6 +113,7 @@ if __name__ == "__main__":
     with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1, NOOPT=0):
       X = X_train[idxs]
       Y = Y_train[idxs].realize(X)
+    X, Y = preprocess(X, Y)
     out = model(X)
     loss = loss_fn(out, Y)
     opt.zero_grad()
@@ -131,9 +131,10 @@ if __name__ == "__main__":
     Tensor.no_grad = True
     loss, acc = [], []
     for i in range(0, X_test.size(0), eval_batchsize):
-      out, target = model(X_test[i:i+eval_batchsize]), Y_test[i:i+eval_batchsize]
-      loss.append(loss_fn(out, target))
-      acc.append((out.argmax(-1).one_hot(depths['num_classes']) * target).sum() / eval_batchsize)
+      X, Y = preprocess(X_test[i:i+eval_batchsize], Y_test[i:i+eval_batchsize])
+      out = model(X)
+      loss.append(loss_fn(out, Y))
+      acc.append((out.argmax(-1).one_hot(depths['num_classes']) * Y).sum() / eval_batchsize)
     ret = Tensor.stack(*loss).mean() / (batchsize*loss_batchsize_scaler), Tensor.stack(*acc).mean()
     Tensor.no_grad = False
     return ret
@@ -149,12 +150,12 @@ if __name__ == "__main__":
     for epoch_step in (t:=trange(num_steps_per_epoch)):
       st = time.perf_counter()
       GlobalCounters.reset()
-      loss = train_step(tidxs[epoch_step].contiguous()).item()
+      loss = train_step(tidxs[epoch_step].contiguous()).float().item()
       t.set_description(f"*** loss: {loss:5.3f}   lr: {opt_non_bias.lr.item():.6f}"
                          f"   tm: {(et:=(time.perf_counter()-st))*1000:6.2f} ms {GlobalCounters.global_ops/(1e9*et):7.0f} GFLOPS")
       train_loss += loss
     gmt = time.perf_counter()
     GlobalCounters.reset()
-    val_loss, acc = [x.item() for x in val_step()]
+    val_loss, acc = [x.float().item() for x in val_step()]
     get = time.perf_counter()
     print(f"\033[F*** epoch {epoch:3d}       tm: {(gmt-gst):5.2f} s    val_tm: {(get-gmt):5.2f} s   train_loss: {train_loss/num_steps_per_epoch:5.3f}   val_loss: {val_loss:5.3f}   eval acc: {acc*100:5.2f}%    ")
