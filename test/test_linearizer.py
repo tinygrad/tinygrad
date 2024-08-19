@@ -141,14 +141,13 @@ class TestLinearizer(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
     st_x = x.lazydata.st
-    g_1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1)
-    first_x = UOp(UOps.LOAD, dtypes.float, (g_1, st_x.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5)).to_uop()))
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
-    second_x = UOp(UOps.LOAD, dtypes.float, (g_1, st_x.reshape((27, 32, 1, 5)).to_uop()))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 32, 1, 5)).to_uop()))
     diff = second_x - first_reduce
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
-    g_0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0)
-    store = UOp(UOps.STORE, None, (g_0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
       # locals
@@ -204,10 +203,7 @@ class TestLinearizer(unittest.TestCase):
     x0 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
     x1 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
     x2 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
-    g0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0)
-    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1)
-    g2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2)
-    g3 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=3)
+    g0, g1, g2, g3 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(4)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x0.lazydata.st.reshape((27, 1, 1, 32, 5)).expand((27, 32, 32, 32, 5)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (3,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g2, x1.lazydata.st.reshape((27, 1, 32, 1, 5)).expand((27, 32, 32, 1, 5)).to_uop()))
