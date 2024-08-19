@@ -780,6 +780,12 @@ class TestShapeTrackerSize(unittest.TestCase):
     st = st.shrink(((0, 100), (0, 50)))
     self.assertEqual(st.real_size(), 9950)    # careful here
 
+  def test_size_variable(self):
+    st = ShapeTracker(views=(View(shape=(1, 1, 1, (NumNode(1)+Variable('start_pos', 0, 8192)), 1, 8, 4, 128), strides=(0, 0, 0, 1024, 0, 128, 0, 1),
+                                  offset=0, mask=None, contiguous=False), View(shape=(1, 32, 1, (NumNode(1)+Variable('start_pos', 0, 8192)), 128),
+                                                                               strides=(0, 128, 0, 4096, 1), offset=0, mask=None, contiguous=False)))
+    self.assertEqual(st.real_size(), 8389632)
+
 class TestIdxs(unittest.TestCase):
   def test_check_idx_range(self):
     # generated from: (Tensor.rand(4096,599*64) @ Tensor.rand(599*64,1024)).realize()
