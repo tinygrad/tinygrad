@@ -7,8 +7,8 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps
-from tinygrad.codegen.uopgraph import graph_rewrite
+from tinygrad.ops import UOp, UOps, graph_rewrite
+from tinygrad.codegen.uopgraph import constant_folder
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x.render(render_ops, ctx)
@@ -83,13 +83,10 @@ class ShapeTracker:
 
   def real_size(self) -> int:
     if 0 in self.shape: return 0
-    idx, valid = self.expr_idxs()
-    if not valid: return 0
-    # TODO: it's possible that the real_size is smaller condition on valid being true
-    ret = idx.max
-    if not isinstance(ret, int): ret = ret.max  # might be represent by symbolic shape, take one more max for int max
-    assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
-    return ret+1
+    idx, valid = self.to_indexed_uops()
+    if not valid.vmax.arg: return 0
+    assert idx.vmax.arg < 1e12, f"real_size broken for {self}"
+    return idx.vmax.arg+1
 
   def vars(self) -> Set[Variable]: return set().union(*[v.vars() for v in self.views])
 
@@ -136,7 +133,7 @@ class ShapeTracker:
 
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.to_indexed_uops()
-    return axis in [x.arg for x in graph_rewrite(valid).sparents if x.op is UOps.RANGE]
+    return axis in [x.arg for x in graph_rewrite(valid, constant_folder).sparents if x.op is UOps.RANGE]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
