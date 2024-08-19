@@ -1665,7 +1665,7 @@ class Tensor:
 
     assert formula.count("->") == 1, 'need exactly one "->" in formula'
 
-    (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula,formula.split("->"))
+    (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula, formula.split("->"))
 
     for name in sizes: assert name in lhs, f"axis {name} is not used in transform"
     assert sorted(lhs) == sorted(rhs) and len(lhs) == len(set(lhs)), f"name mismatch in {formula}"

@@ -141,7 +141,7 @@ class test_rearrange_ops(unittest.TestCase):
       y.rearrange("(a1 a2 a3) b -> b a3 a2 a1", a1=2, a2=2, b=2)
     with self.assertRaises(AssertionError):
       ## unused axis provided
-      y.rearrange("(a b c) d, -> a b c d", e=2)
+      y.rearrange("(a b c) d -> a b c d", b=2, c=2, e=2)
 
   def test_rearrange_ellipsis_ops(self):
     identity_patterns = [
