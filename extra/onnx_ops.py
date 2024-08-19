@@ -392,31 +392,31 @@ def GatherElements(x: Tensor, indices: Tensor, axis):
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',
            cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch',
            mode='nearest', nearest_mode='round_prefer_floor'):
-  def _nearest_mode(x_resized: Tensor, x_len):
-    if nearest_mode == "round_prefer_floor": ret = (x_resized - 0.5).ceil()
-    elif nearest_mode == "round_prefer_ceil": ret = (x_resized + 0.5).floor()
-    elif nearest_mode == "floor": ret = x_resized.floor()
-    elif nearest_mode == "ceil": ret = x_resized.ceil()
-    return ret.cast(dtypes.int32).clip(0, x_len-1)
-  def _apply_index_transformation(arr_idx:int, sizes, scales):
-    output_width = X.shape[arr_idx] * scales[arr_idx]
-    arr = Tensor.arange(sizes[arr_idx], dtype=dtypes.default_float, device=X.device)
-    if coordinate_transformation_mode == "half_pixel": arr = (arr + 0.5) / scales[arr_idx] - 0.5
-    elif coordinate_transformation_mode == "align_corners": arr = arr * (X.shape[arr_idx] - 1) / (output_width - 1)
-    elif coordinate_transformation_mode == "asymmetric": arr = arr / scales[arr_idx]
-    elif coordinate_transformation_mode == "half_pixel_symmetric": arr = X.shape[arr_idx] / 2 * (1 - int(output_width) / output_width) + (arr + 0.5) / scales[arr_idx] - 0.5
-    elif coordinate_transformation_mode == "pytorch_half_pixel": arr = (arr + 0.5) / scales[arr_idx] - 0.5 if output_width != 1 else Tensor([-0.5])
-    elif coordinate_transformation_mode == "tf_crop_and_resize": arr = roi[arr_idx][0] * (X.shape[arr_idx] - 1) + arr * ((roi[arr_idx][1] - roi[arr_idx][0]) * (X.shape[arr_idx] - 1) / (output_width - 1))
-    return arr.clip(0, X.shape[arr_idx]-1)
-  def _interpolate(indices:Tensor, output_shape):
+  def _nearest_mode(index:Tensor):
+    if nearest_mode == "round_prefer_floor": ret = (index - 0.5).ceil()
+    elif nearest_mode == "round_prefer_ceil": ret = (index + 0.5).floor()
+    elif nearest_mode == "floor": ret = index.floor()
+    elif nearest_mode == "ceil": ret = index.ceil()
+    return ret.cast(dtypes.int32)
+  def _apply_index_transformation(i:int, sizes, scales):
+    output_width = X.shape[i] * scales[i]
+    arr = Tensor.arange(sizes[i], dtype=dtypes.default_float, device=X.device)
+    if coordinate_transformation_mode == "half_pixel": arr = (arr + 0.5) / scales[i] - 0.5
+    elif coordinate_transformation_mode == "align_corners": arr = arr * (X.shape[i] - 1) / (output_width - 1)
+    elif coordinate_transformation_mode == "asymmetric": arr = arr / scales[i]
+    elif coordinate_transformation_mode == "half_pixel_symmetric": arr = X.shape[i] / 2 * (1 - int(output_width) / output_width) + (arr + 0.5) / scales[i] - 0.5
+    elif coordinate_transformation_mode == "pytorch_half_pixel": arr = (arr + 0.5) / scales[i] - 0.5 if output_width != 1 else Tensor([-0.5])
+    elif coordinate_transformation_mode == "tf_crop_and_resize": arr = roi[i][0] * (X.shape[i] - 1) + arr * ((roi[i][1] - roi[i][0]) * (X.shape[i] - 1) / (output_width - 1))
+    return arr.clip(0, X.shape[i]-1)
+  def _interpolate(indices:Tensor, sizes):
     x, expand = X, list(X.shape)
     for i in range(-(X.ndim-2), 0):
       reshape, index = [1] * X.ndim, indices[i]
-      reshape[i] = expand[i] = output_shape[i]
+      reshape[i] = expand[i] = sizes[i]
       if mode == "linear":
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
-      elif mode == "nearest": x = x.gather(i, _nearest_mode(indices[i], X.shape[i]).reshape(reshape).expand(expand))
+      elif mode == "nearest": x = x.gather(i, _nearest_mode(index).reshape(reshape).expand(expand))
       elif mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
     return x.cast(X.dtype)
   if roi is not None:
@@ -436,7 +436,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     scales = to_python_const(scales)
     if axes is not None: scales = [(scales[axes.index(a)] if a in axes else 1) for a in range(X.ndim)]
     sizes = [int(x*s) for x,s in zip(X.shape, scales)]
-  indices = [_apply_index_transformation(arr_idx, sizes, scales) for arr_idx in range(-(X.ndim-2), 0)]
+  indices = [_apply_index_transformation(i, sizes, scales) for i in range(-(X.ndim-2), 0)]
   return _interpolate(indices, sizes)
 
 def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
