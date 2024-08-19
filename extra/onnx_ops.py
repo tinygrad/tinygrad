@@ -398,16 +398,16 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
     return ret.cast(dtypes.int32).clip(0, x_len-1)
-  def _get_index_transformation(input_index: int, output_shape, scale_):
+  def _apply_index_transformation(input_index:int, output_shape, scale_factor):
     arr = Tensor.arange(int(output_shape[input_index]), dtype=dtypes.default_float, device=X.device)
-    if coordinate_transformation_mode == "half_pixel": arr = (arr + 0.5) / scale_[input_index] - 0.5
+    if coordinate_transformation_mode == "half_pixel": arr = (arr + 0.5) / scale_factor[input_index] - 0.5
     elif coordinate_transformation_mode == "align_corners": arr = arr * (X.shape[input_index] - 1) / (output_shape[input_index] - 1)
-    elif coordinate_transformation_mode == "asymmetric": arr = arr / scale_[input_index]
-    elif coordinate_transformation_mode == "half_pixel_symmetric": arr = X.shape[input_index] / 2 * (1 - int(output_shape[input_index]) / output_shape[input_index]) + (arr + 0.5) / scale_[input_index] - 0.5
-    elif coordinate_transformation_mode == "pytorch_half_pixel": arr = (arr + 0.5) / scale_[input_index] - 0.5 if output_shape[input_index] > 1 else Tensor([-0.5])
+    elif coordinate_transformation_mode == "asymmetric": arr = arr / scale_factor[input_index]
+    elif coordinate_transformation_mode == "half_pixel_symmetric": arr = X.shape[input_index] / 2 * (1 - int(output_shape[input_index]) / output_shape[input_index]) + (arr + 0.5) / scale_factor[input_index] - 0.5
+    elif coordinate_transformation_mode == "pytorch_half_pixel": arr = (arr + 0.5) / scale_factor[input_index] - 0.5 if output_shape[input_index] != 1 else Tensor([-0.5])
     elif coordinate_transformation_mode == "tf_crop_and_resize": arr = roi[input_index][0] * (X.shape[input_index] - 1) + arr * ((roi[input_index][1] - roi[input_index][0]) * (X.shape[input_index] - 1) / (output_shape[input_index] - 1)) if output_shape[input_index] > 1 else Tensor([0.5 * (roi[input_index][0] + roi[input_index][1]) * (X.shape[input_index] - 1)])
     return arr.clip(0, X.shape[input_index]-1)
-  def _interpolate(indices: Tensor, output_shape):
+  def _interpolate(indices:Tensor, output_shape):
     x, expand = X, list(X.shape)
     for i in range(-(X.ndim-2), 0):
       reshape, index = [1] * X.ndim, indices[i]
@@ -422,38 +422,24 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     return x.cast(X.dtype)
   if roi is not None:
     roi = to_python_const(roi)
-    roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
+    roi = [(st, ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
     if axes is not None:
-      roi_ = [(1,1)] * 4
-      for a,r in zip(axes, roi):
-        roi_[a] = r
-      roi = roi_
-  if scales is not None:
+      roi = [(roi[axes.index(a)] if a in axes else (1, 1)) for a in range(X.ndim)]
+  if sizes is not None:
+    sizes = to_python_const(sizes)
+    scales = [s/X.shape[a] for a,s in zip(axes, sizes)] if axes is not None else [si/xs for xs, si in zip(X.shape, sizes)]
+    if axes is not None:
+      sizes = [sizes[axes.index(a)] if a in axes else 1 for a in range(X.ndim)]
+    if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
+      scale = min(scales) if keep_aspect_ratio_policy == "not_larger" else max(scales)
+      sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
+  else:
     scales = to_python_const(scales)
     if axes is not None:
-      scales_ = [1]*X.ndim
-      for a,s in zip(axes, scales):
-        scales_[a] = s
-      scales = scales_
-  elif sizes is not None:
-    sizes = to_python_const(sizes)
-    scales = []
-    if axes is not None:
-      sizes_ = [1]*X.ndim
-      for a,s in zip(axes, sizes):
-        sizes_[a] = s
-        scales.append(s/X.shape[a])
-      sizes = sizes_
-    else: scales = [si/xs for xs, si in zip(X.shape, sizes)]
-    if keep_aspect_ratio_policy == "not_larger":
-      scale = min(scales)
-      sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
-    elif keep_aspect_ratio_policy == "not_smaller":
-      scale = max(scales)
-      sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
+      scales = [(scales[axes.index(a)] if a in axes else 1) for a in range(X.ndim)]
   output_shape = sizes if sizes else [x*s if mode == "linear" else int(x*s) for x,s in zip(X.shape, scales)]
   scales = scales if mode == "linear" else [os/xs for xs, os in zip(X.shape, output_shape)]
-  indices = [_get_index_transformation(i, output_shape, scales) for i in range(-(X.ndim-2), 0)]
+  indices = [_apply_index_transformation(i, output_shape, scales) for i in range(-(X.ndim-2), 0)]
   return _interpolate(indices, output_shape)
 
 def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
