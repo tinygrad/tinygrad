@@ -1531,14 +1531,6 @@ class Tensor:
     std, mean = t.std_mean()
     print(std.numpy(), mean.numpy())
     ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    std, mean = t.std_mean(axis=0)
-    print(std.numpy(), mean.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    std, mean = t.std_mean(axis=1)
-    print(std.numpy(), mean.numpy())
-    ```
     """
     return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
