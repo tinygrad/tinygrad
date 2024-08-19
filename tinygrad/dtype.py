@@ -66,7 +66,8 @@ class dtypes:
   @staticmethod
   def finfo(dtype:DType) -> Tuple[int, int]:  # (exponent, mantissa)
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
-    return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
+    return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23),
+             dtypes.float64: (11, 52), dtypes.f8e4m3: (4, 3), dtypes.f8e5m2: (5, 2)}[dtype]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   # TODO: priority should be higher than bool
@@ -80,13 +81,13 @@ class dtypes:
   uint32: Final[DType] = DType(6, 4, "unsigned int", 'I', 1)
   int64: Final[DType] = DType(7, 8, "long", 'l', 1)
   uint64: Final[DType] = DType(8, 8, "unsigned long", 'L', 1)
-  float16: Final[DType] = DType(9, 2, "half", 'e', 1)
-  # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
-  bfloat16: Final[DType] = DType(10, 2, "__bf16", None, 1)
-  float32: Final[DType] = DType(11, 4, "float", 'f', 1)
-  float64: Final[DType] = DType(12, 8, "double", 'd', 1)
-  f8e5m2: Final[DType] = DType(8, 1, "f8e5m2", None, 1)
   f8e4m3: Final[DType] = DType(8, 1, "f8e4m3", None, 1)
+  f8e5m2: Final[DType] = DType(9, 1, "f8e5m2", None, 1)
+  float16: Final[DType] = DType(10, 2, "half", 'e', 1)
+  # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
+  bfloat16: Final[DType] = DType(11, 2, "__bf16", None, 1)
+  float32: Final[DType] = DType(12, 4, "float", 'f', 1)
+  float64: Final[DType] = DType(13, 8, "double", 'd', 1)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -113,9 +114,9 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 # we don't support weak type and complex type
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
   dtypes.int64: [dtypes.float16, dtypes.bfloat16], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
-  dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float16, dtypes.bfloat16],
-  dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], dtypes.f8e5m2: [dtypes.float16],
-  dtypes.f8e4m3: [dtypes.float16] }
+  dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float16, dtypes.bfloat16], dtypes.float16: [dtypes.float32],
+  dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], dtypes.f8e5m2: [dtypes.float16, dtypes.bfloat16],
+  dtypes.f8e4m3: [dtypes.float16, dtypes.bfloat16] }
 
 @functools.lru_cache(None)
 def _get_recursive_parents(dtype:DType) -> Set[DType]:
