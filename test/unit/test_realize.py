@@ -17,7 +17,7 @@ class TestGetKernel(unittest.TestCase):
       kernel = get_kernel(Device[Device.DEFAULT].renderer, schedule_item.ast)
       uops = kernel.linearize().uops
       if uops:
-        sink = UOp(UOps.SINK, None, (uops[-1],))
+        UOp(UOps.SINK, None, (uops[-1],))
 
     for call in mock_print.ase:
       self.assertNotIn("us", call[0][0])
