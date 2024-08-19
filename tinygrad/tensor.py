@@ -138,7 +138,8 @@ class Tensor:
       if data.shape == (): data = _metaop(MetaOps.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
       else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)
     elif isinstance(data, pathlib.Path):
-      data = _metaop(MetaOps.EMPTY, (data.stat().st_size,), dtypes.uint8, f"DISK:{data.resolve()}")
+      dtype = dtype or dtypes.uint8
+      data = _metaop(MetaOps.EMPTY, (data.stat().st_size // dtype.itemsize,), dtype, f"DISK:{data.resolve()}")
 
     # by this point, it has to be a LazyBuffer
     if not isinstance(data, (LazyBuffer, MultiLazyBuffer)):
