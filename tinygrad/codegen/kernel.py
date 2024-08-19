@@ -7,7 +7,7 @@ from typing import Literal, Optional, List, Tuple, Union, cast, Dict, Final, Def
 from tinygrad.ops import BinaryOps, ReduceOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
-from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
+from tinygrad.dtype import DType, ImageDType, PtrDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -769,28 +769,10 @@ class Kernel:
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
 
 # the living definition of intermediate UOps
+
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if uop in sts: return
-  op, dtype, src, arg = uop.op, uop.dtype, uop.src, uop.arg
-  # verify type and src
-  if op in {UOps.LOAD, UOps.STORE}:
-    assert src[0].op in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL} and src[1].op is UOps.SHAPETRACKER, f"invalid src for {uop}"
-    if op is UOps.LOAD and src[0].op is UOps.DEFINE_LOCAL: assert len(src) == 3 and src[2].op is UOps.STORE and src[2].src[0].op is UOps.DEFINE_LOCAL
-    ret_dtype = src[0].dtype.base if isinstance(src[0].dtype, ImageDType) else src[0].dtype
-    if op is UOps.STORE: assert dtype is None and ret_dtype == src[2].dtype, f"invalid dtype for {uop}"
-    else: assert dtype is not None and dtype == ret_dtype
-  elif op is UOps.CONST:
-    assert len(src) == 1 and src[0].op is UOps.SHAPETRACKER, f"CONST must have a SHAPETRACKER {uop}"
-    if isinstance(arg, Variable): assert dtype == dtypes.int32
-    else: type_verify([uop])
-  elif op is UOps.REDUCE_AXIS:
-    assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in ReduceOps, f"REDUCE_AXIS must define exactly one reduceop and one axis arg {arg}"
-  elif op is UOps.SHAPETRACKER:
-    assert isinstance(arg, ShapeTracker) and len(src) == 0, f"SHAPETRACKER must only define a ShapeTracker arg {uop}"
-  else:
-    assert op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL}, f"forbidden intermediate uop {op}"
-    type_verify([uop])
-  # verify shape
+  op, _, src, arg = uop.op, uop.dtype, uop.src, uop.arg
   # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
   if op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
   # restore globals from the two stage reduce
@@ -802,6 +784,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   # only reduceuop is allowed to change shape, limited to turning n to 1
   if op is UOps.REDUCE_AXIS: st = ShapeTracker.from_shape(sts[src[0]].reduce(arg[1][-1] if arg[0] is ReduceOps.WMMA else arg[1]))
   else:
+    assert op in {UOps.SHAPETRACKER, UOps.ALU, UOps.CAST, UOps.BITCAST, *BUFFER_UOPS}, f"forbidden intermediate UOp {uop}"
     # movementops are pushed to the edges with SHAPETRACKER
     # elementwise inherits shape
     st = arg if op is UOps.SHAPETRACKER else sts[src[-1]]
@@ -818,4 +801,5 @@ def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   for out in ast.src: _assert_valid_uop(out, out.st_arg, sts)
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
+  type_verify(list(sts))
   return sts
