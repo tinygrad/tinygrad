@@ -84,9 +84,7 @@ class NVSignal(HCQSignal):
 
 class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
   def __del__(self):
-    if self.binded_device is not None:
-      self.binded_device.synchronize() # Synchronize to ensure the buffer is no longer in use.
-      self.binded_device._gpu_free(self.hw_page)
+    if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferOptions(cpu_access=True, nolru=True))
 
   @hcq_command
   def setup(self, compute_class=None, copy_class=None, local_mem_window=None, shared_mem_window=None, local_mem=None, local_mem_tpc_bytes=None):
@@ -109,7 +107,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
 
   def bind(self, device):
     self.binded_device = device
-    self.hw_page = cast(NVDevice, device)._gpu_alloc(len(self.q) * 4, map_to_cpu=True)
+    self.hw_page = device.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
     for i, value in enumerate(self.q): hw_view[i] = value
 
