@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Literal, Optional, List, Tuple, Union, cast, Dict, Final, DefaultDict
 
-from tinygrad.ops import BinaryOps, ReduceOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops
+from tinygrad.ops import BinaryOps, ReduceOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import DType, ImageDType, PtrDType
@@ -768,7 +768,8 @@ class Kernel:
     return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
 
-# the living definition of UOp st_arg
+# the living definition of intermediate UOps
+
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if uop in sts: return
   op, _, src, arg = uop.op, uop.dtype, uop.src, uop.arg
@@ -799,4 +800,5 @@ def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   for out in ast.src: _assert_valid_uop(out, out.st_arg, sts)
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
+  type_verify(list(sts))
   return sts
