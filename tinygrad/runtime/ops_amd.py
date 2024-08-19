@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any, cast
+from typing import Tuple, List, Any
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, HCQArgsState, \
