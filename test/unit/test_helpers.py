@@ -167,7 +167,7 @@ class TestFetch(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_fetch_gzip_on_img(self):
-    img = fetch("https://avatars.githubusercontent.com/u/132956020", allow_caching=False, gunzip=True)
+    _ = fetch("https://avatars.githubusercontent.com/u/132956020", allow_caching=False, gunzip=True)
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
     self.assertEqual(fully_flatten([[1, 3], [1, 2]]), [1, 3, 1, 2])
