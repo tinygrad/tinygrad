@@ -97,7 +97,7 @@ class TestDType(unittest.TestCase):
   def test_bitcast(self):
     if Device.DEFAULT == "WEBGL": raise unittest.SkipTest("no bitcast in WebGL GLSL")
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
-    if self.DTYPE in [dtypes.fp8_e4m3, dtypes.fp8_e5m2]: raise unittest.SkipTest("no casting test support for fp8")
+    if self.DTYPE in [dtypes.fp8_e4m3, dtypes.fp8_e5m2]: raise unittest.SkipTest("no bitcast test support for fp8")
     list(map(
       lambda dtype:
         _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
