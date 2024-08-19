@@ -2929,6 +2929,8 @@ class Tensor:
     """
     Converts `self` to a one-hot tensor.
 
+    'num_classes' defaults to -1, which means num_classes will be inferred as max(self) + 1.
+
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([0, 1, 3, 3, 4])
     print(t.one_hot(5).numpy())
