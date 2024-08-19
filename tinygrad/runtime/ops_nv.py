@@ -486,8 +486,10 @@ class NVDevice(HCQCompiled):
     self.arch: str = f"sm_{(sm_info.data>>8)&0xff}{(val>>4) if (val:=sm_info.data&0xff) > 0xf else val}"
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
-    super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
-                     functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue, timeline_signals=(NVSignal(), NVSignal()))
+    compiler = compiler_t(self.arch)
+    renderer = PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch, compiler.version)
+    super().__init__(device, NVAllocator(self), renderer, compiler, functools.partial(NVProgram, self),
+                      NVSignal, NVComputeQueue, NVCopyQueue, timeline_signals=(NVSignal(), NVSignal()))
 
     self._setup_gpfifos()
 
