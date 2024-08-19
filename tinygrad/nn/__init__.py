@@ -43,14 +43,13 @@ class BatchNorm:
     shape_mask = [1, -1, *([1]*(x.ndim-2))]
     if self.track_running_stats and not Tensor.training:
       return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
-    else:
-      # This requires two full memory accesses to x
-      # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
-      # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
-      batch_mean = x.mean(axis=(reduce_axes:=tuple(x for x in range(x.ndim) if x != 1)))
-      y = (x - batch_mean.detach().reshape(shape=shape_mask))  # d(var)/d(mean) = 0
-      batch_var = (y*y).mean(axis=reduce_axes)
-      return batch_mean, batch_var
+    # This requires two full memory accesses to x
+    # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
+    # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
+    batch_mean = x.mean(axis=(reduce_axes:=tuple(x for x in range(x.ndim) if x != 1)))
+    y = (x - batch_mean.detach().reshape(shape=shape_mask))  # d(var)/d(mean) = 0
+    batch_var = (y*y).mean(axis=reduce_axes)
+    return batch_mean, batch_var
 
   def __call__(self, x:Tensor):
     batch_mean, batch_var = self.calc_stats(x)
