@@ -178,8 +178,8 @@ def threefry2x32(x: UOp, seed: UOp):
 dts = {dtypes.fp8_e4m3, dtypes.fp8_e5m2}
 
 def _rewrite_fp8_alu(args, res):
-    dt = dtypes.float if res.arg not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dtypes.bool
-    return UOp(UOps.ALU, dt, cast(Tuple[UOp],(arg.cast(dtypes.float) for arg in args)), res.arg).cast(res.dtype)
+  dt = dtypes.float if res.arg not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dtypes.bool
+  return UOp(UOps.ALU, dt, cast(Tuple[UOp],(arg.cast(dtypes.float) for arg in args)), res.arg).cast(res.dtype)
 def srcs(n): return tuple(UPat(name=f"x{i}", dtype=dts) for i in range(n))
 
 # NOTE: match for dtypes.bool for comparison ops
