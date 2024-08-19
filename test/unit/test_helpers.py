@@ -142,7 +142,7 @@ class TestRoundUp(unittest.TestCase):
     self.assertEqual(round_up(232, 24984), 24984)
     self.assertEqual(round_up(24984, 232), 25056)
 
-@unittest.skip("no fetch tests because they need internet")
+# @unittest.skip("no fetch tests because they need internet")
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
     self.assertRaises(Exception, fetch, 'http://www.google.com/404', allow_caching=False)
@@ -160,6 +160,10 @@ class TestFetch(unittest.TestCase):
     with Image.open(img) as pimg:
       assert pimg.size == (77, 77), pimg.size
     assert img.parent.name == "images"
+
+  def test_fetch_gzip(self):
+    fetch_out = fetch('https://getsamplefiles.com/download/gzip/sample-1.gz', gunzip=True)
+    print('test_OUTT: ', fetch_out.is_file())
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
