@@ -423,7 +423,7 @@ class TestEqStrDType(unittest.TestCase):
 class TestHelpers(unittest.TestCase):
   signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
   uints = (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
-  floats = (dtypes.float16, dtypes.float32, dtypes.float64)
+  floats = (dtypes.f8e4m3, dtypes.f8e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
 
   @given(strat.sampled_from(signed_ints+uints), strat.integers(min_value=1, max_value=8))
   def test_is_int(self, dtype, amt):
@@ -443,10 +443,7 @@ class TestHelpers(unittest.TestCase):
     assert dtypes.is_float(dtype.vec(amt) if amt > 1 else dtype)
     assert not dtypes.is_int(dtype.vec(amt) if amt > 1 else dtype)
     assert not dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
-
-  def test_bf16_is_float(self):
-    assert dtypes.is_float(dtypes.bfloat16)
-
+  
   @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), strat.integers(min_value=2, max_value=8))
   def test_scalar(self, dtype, amt):
     assert dtype.vec(amt).scalar() == dtype
@@ -492,7 +489,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_int = default_int
       assert dtypes.default_int == default_int
 
-    for default_float in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_float in [dtypes.f8e4m3, dtypes.f8e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
