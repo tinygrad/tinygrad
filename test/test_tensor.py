@@ -1,7 +1,7 @@
 import subprocess
 import numpy as np
 import torch
-import unittest, copy, mmap, random, math
+import unittest, copy, mmap, random, math, pathlib, tempfile
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import getenv, temp, CI, _METADATA
@@ -394,6 +394,24 @@ class TestTinygrad(unittest.TestCase):
     assert t.dtype == dtypes.uint8
     assert t.shape == (6,)
     np.testing.assert_equal(t.numpy(), list(data))
+
+  def test_data_pathlib(self):
+    temp = tempfile.NamedTemporaryFile()
+
+    test_array = np.array([1,2,3,4], dtype=np.uint8)
+    test_array.tofile(pathlib.Path(temp.name))
+
+    try:
+      a = Tensor(pathlib.Path(temp.name))
+      assert a.dtype == dtypes.uint8
+      assert a.data().format == "B"
+      assert a.numpy().shape == (4,)
+      assert a.tolist() == [1,2,3,4]
+      np.testing.assert_equal(a.numpy(), a.tolist())
+      temp.close()
+    except Exception as error:
+      self.assertRaises(error)
+      temp.close()
 
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
