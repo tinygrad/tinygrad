@@ -317,7 +317,7 @@ def _make_cuda_code_for_op():
   return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_half}.items() }
 
 def get_fp8_header(dtype):
-    return f"""
+  return f"""
 __device__ __forceinline__ bool operator<({dtype} a, {dtype} b) {{
     return static_cast<float>(a) < static_cast<float>(b);
 }}
