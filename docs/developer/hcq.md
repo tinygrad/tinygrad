@@ -11,7 +11,7 @@ To interact with devices, there are 2 types of queues: `HWComputeQueue` and `HWC
 For example, the following Python code enqueues a wait, execute, and signal command on the HCQ-compatible device:
 ```python
 HWComputeQueue().wait(signal_to_wait, value_to_wait) \
-                .exec(program, kernargs_ptr, global_dims, local_dims) \
+                .exec(program, args_state, global_dims, local_dims) \
                 .signal(signal_to_fire, value_to_fire) \
                 .submit(your_device)
 ```
@@ -118,9 +118,18 @@ Backends must adhere to the `HCQBuffer` protocol when returning allocation resul
 
 ### HCQ Compatible Program
 
-The `HCQProgram` is a helper base class for defining programs compatible with HCQ-compatible devices. Currently, the arguments consist of pointers to buffers, followed by `vals` fields. The convention expects a packed struct containing the passed pointers, followed by `vals` located at `kernargs_args_offset`.
+`HCQProgram` is a base class for defining programs compatible with HCQ-enabled devices. It provides a flexible framework for handling different argument layouts (see `HCQArgsState`).
 
 ::: tinygrad.device.HCQProgram
+    options:
+        members: true
+        show_source: false
+
+#### Arguments State
+
+`HCQArgsState` is a base class for managing the argument state for HCQ programs. Backend implementations should create a subclass of `HCQArgsState` to manage arguments for the given program.
+
+::: tinygrad.device.HCQArgsState
     options:
         members: true
         show_source: false

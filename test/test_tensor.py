@@ -57,6 +57,26 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+  # A simple test is to check that we can accumulate gradients (run backward twice or more times)
+  # This will only work if retain_graph works.
+  def test_retain_graph(self):
+    x = Tensor(x_init, requires_grad=True)
+    W = Tensor(W_init, requires_grad=True)
+    m = Tensor(m_init)
+    out = x.dot(W).relu()
+    out = out.log_softmax()
+    out = out.mul(m).add(m).sum()
+    out.backward(retain_graph=True)
+    xgrad,wgrad = x.grad.numpy(), W.grad.numpy()
+    out.backward(retain_graph=True)
+    xgrad2,wgrad2 = x.grad.numpy(), W.grad.numpy()
+    out.backward() # no need to retain again since we will not re-run backward
+    xgrad3,wgrad3 = x.grad.numpy(), W.grad.numpy()
+    np.testing.assert_allclose(xgrad3, xgrad * 3., atol=1e-6)
+    np.testing.assert_allclose(wgrad3, wgrad * 3., atol=1e-6)
+    np.testing.assert_allclose(xgrad2, xgrad * 2., atol=1e-6)
+    np.testing.assert_allclose(wgrad2, wgrad * 2., atol=1e-6)
+
   @unittest.expectedFailure
   def test_second_order_backward_pass(self):
     def test_pytorch():
@@ -642,11 +662,11 @@ class TestTrainMode(unittest.TestCase):
     assert not Tensor.training
 
 class TestInferenceMode(unittest.TestCase):
-  def test_inference_mode(self):
+  def test_inference(self):
     x = Tensor(x_init, requires_grad=True)
     m = Tensor(m_init, requires_grad=True)
     W = Tensor(W_init, requires_grad=True)
-    with Tensor.inference_mode():
+    with Tensor.test():
       tmp = x.mul(m)
       mm = tmp.matmul(W)
       out = mm.relu()
@@ -663,7 +683,7 @@ class TestInferenceMode(unittest.TestCase):
     x = Tensor(x_init, requires_grad=True)
     m = Tensor(m_init, requires_grad=True)
     W = Tensor(W_init, requires_grad=True)
-    @Tensor.inference_mode()
+    @Tensor.test()
     def f(x, m, W):
       tmp = x.mul(m)
       mm = tmp.matmul(W)

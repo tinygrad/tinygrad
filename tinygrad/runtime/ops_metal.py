@@ -99,6 +99,8 @@ class MetalDevice(Compiled):
   def __init__(self, device:str):
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
+    if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
+
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
 

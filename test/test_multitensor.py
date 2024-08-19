@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import MetaOps, ReduceOps, BufferOps, BinaryOps
+from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
@@ -569,24 +569,24 @@ class TestMultiTensor(unittest.TestCase):
       t = t + 1
       for si in t.schedule():
         ast = si.ast.src[0]
-        assert ast.op is BufferOps.STORE
-        assert ast.src[0].op is BinaryOps.ADD
-        assert ast.src[0].src[0].op is BufferOps.LOAD and ast.src[0].src[0]
-        assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 1
+        assert ast.op is UOps.STORE
+        assert ast.src[2].arg is BinaryOps.ADD
+        assert ast.src[2].src[0].op is UOps.LOAD and ast.src[2].src[0]
+        assert ast.src[2].src[1].op is UOps.CONST and ast.src[2].src[1].arg == 1
       t = 2 * t
       for si in t.schedule():
         ast = si.ast.src[0]
-        assert ast.op is BufferOps.STORE
-        assert ast.src[0].op is BinaryOps.MUL
-        assert ast.src[0].src[0].op is BufferOps.CONST and ast.src[0].src[0].arg.val == 2
-        assert ast.src[0].src[1].op is BufferOps.LOAD
+        assert ast.op is UOps.STORE
+        assert ast.src[2].arg is BinaryOps.MUL
+        assert ast.src[2].src[0].op is UOps.CONST and ast.src[2].src[0].arg == 2
+        assert ast.src[2].src[1].op is UOps.LOAD
       t = t + t.full_like(3)
       for si in t.schedule():
         ast = si.ast.src[0]
-        assert ast.op is BufferOps.STORE
-        assert ast.src[0].op is BinaryOps.ADD
-        assert ast.src[0].src[0].op is BufferOps.LOAD
-        assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 3
+        assert ast.op is UOps.STORE
+        assert ast.src[2].arg is BinaryOps.ADD
+        assert ast.src[2].src[0].op is UOps.LOAD
+        assert ast.src[2].src[1].op is UOps.CONST and ast.src[2].src[1].arg == 3
 
   def test_shard_memory(self):
     devices = (d0, d1, d2, d3)
@@ -882,6 +882,26 @@ class TestBatchNorm(unittest.TestCase):
     # TODO: test synced / unsynced batchnorm cross device kernel and copies
     assert synced_si
     assert unsynced_si
+
+def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
+  for shp in shps:
+    single_in = Tensor.randn(shp)
+    multi_in  = single_in.shard(devices_2, axis=0)
+
+    single_out = fxn(single_in).numpy()
+    multi_out  = fxn(multi_in).numpy()
+
+    try:
+      assert single_out.shape == multi_out.shape, f"shape mismatch: single={single_out.shape} | multi={multi_out.shape}"
+      assert single_out.dtype == multi_out.dtype, f"dtype mismatch: single={single_out.dtype} | multi={multi_out.dtype}"
+      np.testing.assert_allclose(single_out, multi_out, atol=atol, rtol=rtol)
+    except Exception as e:
+      raise Exception(f"Failed shape {single_out.shape}: {e}")
+
+@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+class TestTensorOps(unittest.TestCase):
+  def test_interpolate(self):
+    helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))
 
 if __name__ == '__main__':
   unittest.main()

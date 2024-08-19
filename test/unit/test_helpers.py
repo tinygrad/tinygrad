@@ -148,7 +148,7 @@ class TestFetch(unittest.TestCase):
     self.assertRaises(Exception, fetch, 'http://www.google.com/404', allow_caching=False)
 
   def test_fetch_small(self):
-    assert(len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
+    assert (len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
   def test_fetch_img(self):
     img = fetch("https://avatars.githubusercontent.com/u/132956020", allow_caching=False)

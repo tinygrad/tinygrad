@@ -2,7 +2,7 @@ import sys, unittest
 from typing import Optional, Set, Tuple
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.codegen.uops import UOp
+from tinygrad.ops import UOp
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import DType
@@ -29,7 +29,7 @@ def assert_jit_cache_len(fxn, expected_len):
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
 
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
-  if dtype == dtypes.bigint and device != "PYTHON": return False
+  if dtype == dtypes.pyint and device != "PYTHON": return False
   if dtype == dtypes.bfloat16:
     # NOTE: this requires bf16 buffer support
     return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
@@ -65,7 +65,7 @@ class TestUOps(unittest.TestCase):
       self.assertEqual(uop1.dtype, uop2.dtype)
       self.assertEqual(uop1.arg, uop2.arg)
       self.assertEqual(len(uop1.src), len(uop2.src))
-      for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
+      for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2, cache)
     except AssertionError as e:
       print(f"{uop1=}")
       print(f"{uop2=}")
