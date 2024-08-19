@@ -70,11 +70,10 @@ class TestDType(unittest.TestCase):
   def test_to_np(self):
     _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
 
-  def test_casts_to(self):
-    list(map(
-      lambda dtype: _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE),
-      get_available_cast_dtypes(self.DTYPE)
-    ))
+  def test_casts_to(self): list(map(
+    lambda dtype: _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE),
+    get_available_cast_dtypes(self.DTYPE)
+  ))
   def test_casts_from(self): list(map(
     lambda dtype: _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype),
     get_available_cast_dtypes(self.DTYPE)
@@ -200,20 +199,24 @@ class TestBFloat16DTypeCast(unittest.TestCase):
     converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
 
+
 class TestFp8e4m3DType(TestDType):
   DTYPE = dtypes.fp8_e4m3
   def test_casts_to(self):
-    pass
+    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.fp8_e4m3), dtypes.float32)
+    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.fp8_e4m3), dtypes.half)
   def test_casts_from(self):
-    pass
+    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.float32), dtypes.fp8_e4m3)
+    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.half), dtypes.fp8_e4m3)
 
 class TestFp8e5m2DType(TestDType):
   DTYPE = dtypes.fp8_e5m2
   def test_casts_to(self):
-    pass
+    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.fp8_e5m2), dtypes.float32)
+    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.fp8_e5m2), dtypes.half)
   def test_casts_from(self):
-    pass
-
+    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.float32), dtypes.fp8_e5m2)
+    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.half), dtypes.fp8_e5m2)
 
 class TestHalfDType(TestDType): DTYPE = dtypes.half
 
