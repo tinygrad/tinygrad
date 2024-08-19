@@ -1,5 +1,5 @@
 import subprocess, hashlib, tempfile, ctypes, ctypes.util, re, pathlib
-from typing import Callable
+from typing import Callable, Tuple
 from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
 import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.device import Compiler, CompileError
@@ -46,7 +46,7 @@ def nv_disassemble(lib):
   except Exception as e: print("Failed to disasm cubin:", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
 
 class CUDACompiler(Compiler):
-  version: tuple[int, int]
+  version: Tuple[int, int]
   def __init__(self, arch:str, cache_key:str="cuda"):
     self.arch, self.compile_options = arch, [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     nvrtc_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
