@@ -228,12 +228,15 @@ class TestLinearizer(unittest.TestCase):
   def test_double_reduce_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(8, 32, 8, 16, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((8, 1, 32, 8, 1, 16)).expand((8, 32, 32, 8, 16, 16))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,5))
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((8, 32, 1, 8, 16, 1))))
+    st = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 1, 32, 8, 1, 16)).expand((8, 32, 32, 8, 16, 16)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2, 5)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 32, 1, 8, 16, 1)).to_uop()))
     squares = (second_x-first_reduce)
-    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (1,4))
-    store = LazyOp(BufferOps.STORE, (squares_sum,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((8, 1, 1, 8, 1, 1))))
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (1, 4)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((8, 1, 1, 8, 1, 1)).to_uop(), squares_sum,))
+    sink = UOp(UOps.SINK, src=(store,))
     wanna_output = (x.numpy()-x.numpy().sum(axis=(1,3), keepdims=True)).sum(axis=(1,3)).reshape((8,1,1,8,1,1))
     opts = [
       # openCL / GPU=1 is 256 max threads
@@ -262,7 +265,7 @@ class TestLinearizer(unittest.TestCase):
       #  Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
       #  Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
     ]
-    lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
