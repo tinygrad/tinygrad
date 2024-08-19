@@ -36,7 +36,7 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, rtol=None):
   try:
     assert tensor.dtype == target_dtype
     np.testing.assert_allclose(tensor.numpy(), target, rtol=rtol or \
-                               {dtypes.float16:1e-3, dtypes.bfloat16:1e-2, dtypes.f8e4m3:1.5e-1, dtypes.f8e5m2: 1.5e-1}.get(target_dtype, 1e-7))
+                               {dtypes.float16:1e-3, dtypes.bfloat16:1e-2, dtypes.fp8_e4m3:1.5e-1, dtypes.fp8_e5m2: 1.5e-1}.get(target_dtype, 1e-7))
   except AssertionError as e:
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
@@ -55,7 +55,7 @@ def _test_cast(a:Tensor, target_dtype:DType):
 
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
-  if target_dtype in [dtypes.bfloat16, dtypes.f8e4m3, dtypes.f8e5m2]: raise unittest.SkipTest("no test for (bf16, f8e4m3, f8e5m2) bitcast yet")
+  if target_dtype in [dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2]: raise unittest.SkipTest("no test for (bf16, fp8_e4m3, fp8_e5m2) bitcast yet")
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
 
 class TestDType(unittest.TestCase):
@@ -120,7 +120,7 @@ class TestDType(unittest.TestCase):
       np.testing.assert_allclose(tin, tor, atol=1e-6, rtol=1e-3)
 
   def test_finfo(self):
-    if self.DTYPE not in [dtypes.f8e4m3, dtypes.f8e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]: return
+    if self.DTYPE not in [dtypes.fp8_e4m3, dtypes.fp8_e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]: return
     info = np.finfo(_to_np_dtype(self.DTYPE))
     assert info.bits == self.DTYPE.itemsize*8
     assert info.nexp == dtypes.finfo(self.DTYPE)[0]
@@ -199,100 +199,100 @@ class TestBFloat16DTypeCast(unittest.TestCase):
     converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
 
-@unittest.skipUnless(is_dtype_supported(dtypes.f8e4m3), "f8e4m3 not supported")
-class TestF8e4m3(unittest.TestCase):
-  def test_f8e4m3_creation_numpy(self):
+@unittest.skipUnless(is_dtype_supported(dtypes.fp8_e4m3), "fp8_e4m3 not supported")
+class TestFp8e4m3(unittest.TestCase):
+  def test_fp8_e4m3_creation_numpy(self):
     data = [-1, 1, 2]
-    t = Tensor(data, dtype=dtypes.f8e4m3)
-    assert t.dtype == dtypes.f8e4m3
+    t = Tensor(data, dtype=dtypes.fp8_e4m3)
+    assert t.dtype == dtypes.fp8_e4m3
     tnp = t.numpy()
     assert tnp.dtype == np.float32
     np.testing.assert_allclose(tnp, np.array(data))
 
-  def test_f8e4m3_ones(self):
-    t = Tensor.ones(3, 5, dtype=dtypes.f8e4m3)
-    assert t.dtype == dtypes.f8e4m3
+  def test_fp8_e4m3_ones(self):
+    t = Tensor.ones(3, 5, dtype=dtypes.fp8_e4m3)
+    assert t.dtype == dtypes.fp8_e4m3
     np.testing.assert_allclose(t.numpy(), np.ones((3, 5)))
 
   def test_arithmetic(self):
-    t1 = Tensor([1, 2, 3], dtype=dtypes.f8e4m3)
-    t2 = Tensor([4, 5, 4], dtype=dtypes.f8e4m3)
+    t1 = Tensor([1, 2, 3], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([4, 5, 4], dtype=dtypes.fp8_e4m3)
     result = t1 + t2
     np.testing.assert_allclose(result.numpy(), np.array([5., 7., 7.]))
-    t1 = Tensor([10, 20, 30], dtype=dtypes.f8e4m3)
-    t2 = Tensor([4, 5, 6], dtype=dtypes.f8e4m3)
+    t1 = Tensor([10, 20, 30], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([4, 5, 6], dtype=dtypes.fp8_e4m3)
     result = t1 - t2
     np.testing.assert_allclose(result.numpy(), np.array([6., 15., 24.]))
-    t1 = Tensor([10, 20, 30], dtype=dtypes.f8e4m3)
-    t2 = Tensor([2, 4, 6], dtype=dtypes.f8e4m3)
+    t1 = Tensor([10, 20, 30], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([2, 4, 6], dtype=dtypes.fp8_e4m3)
     result = t1 / t2
     np.testing.assert_allclose(result.numpy(), np.array([5., 5., 5.]))
-    t1 = Tensor([2, 3, 4], dtype=dtypes.f8e4m3)
-    t2 = Tensor([5, 6, 7], dtype=dtypes.f8e4m3)
+    t1 = Tensor([2, 3, 4], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([5, 6, 7], dtype=dtypes.fp8_e4m3)
     result = t1 * t2
     np.testing.assert_allclose(result.numpy(), np.array([10., 18., 28.]))
-    t = Tensor([2, 3, 4], dtype=dtypes.f8e4m3)
+    t = Tensor([2, 3, 4], dtype=dtypes.fp8_e4m3)
     result = t ** 2
     np.testing.assert_allclose(result.numpy(), np.array([4., 9., 16.]))
-    t = Tensor([4, 9, 16], dtype=dtypes.f8e4m3)
+    t = Tensor([4, 9, 16], dtype=dtypes.fp8_e4m3)
     result = t.sqrt()
     np.testing.assert_allclose(result.numpy(), np.array([2., 3., 4.]))
-    t1 = Tensor([1, 2, 5], dtype=dtypes.f8e4m3)
-    t2 = Tensor([1, 2, 3], dtype=dtypes.f8e4m3)
+    t1 = Tensor([1, 2, 5], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([1, 2, 3], dtype=dtypes.fp8_e4m3)
     result = t1 != t2
     assert result.dtype is dtypes.bool
     np.testing.assert_allclose(result.numpy(), np.array([False, False, True]))
-    t1 = Tensor([1, 2, 3], dtype=dtypes.f8e4m3)
-    t2 = Tensor([2, 2, 2], dtype=dtypes.f8e4m3)
+    t1 = Tensor([1, 2, 3], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([2, 2, 2], dtype=dtypes.fp8_e4m3)
     result = t1 < t2
     assert result.dtype is dtypes.bool
     np.testing.assert_allclose(result.numpy(), np.array([True, False, False]))
 
-@unittest.skipUnless(is_dtype_supported(dtypes.f8e5m2), "f8e5m2 not supported")
-class TestF8e5m2(unittest.TestCase):
-  def test_f8e5m2_creation_numpy(self):
+@unittest.skipUnless(is_dtype_supported(dtypes.fp8_e5m2), "fp8_e5m2 not supported")
+class TestFp8e5m2(unittest.TestCase):
+  def test_fp8_e5m2_creation_numpy(self):
     data = [-1, 1, 2]
-    t = Tensor(data, dtype=dtypes.f8e5m2)
-    assert t.dtype == dtypes.f8e5m2
+    t = Tensor(data, dtype=dtypes.fp8_e5m2)
+    assert t.dtype == dtypes.fp8_e5m2
     tnp = t.numpy()
     assert tnp.dtype == np.float32
     np.testing.assert_allclose(tnp, np.array(data))
 
-  def test_f8e5m2_ones(self):
-    t = Tensor.ones(3, 5, dtype=dtypes.f8e5m2)
-    assert t.dtype == dtypes.f8e5m2
+  def test_fp8_e5m2_ones(self):
+    t = Tensor.ones(3, 5, dtype=dtypes.fp8_e5m2)
+    assert t.dtype == dtypes.fp8_e5m2
     np.testing.assert_allclose(t.numpy(), np.ones((3, 5)))
 
   def test_arithmetic(self):
-    t1 = Tensor([1, 2, 2], dtype=dtypes.f8e5m2)
-    t2 = Tensor([4, 5, 5], dtype=dtypes.f8e5m2)
+    t1 = Tensor([1, 2, 2], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([4, 5, 5], dtype=dtypes.fp8_e5m2)
     result = t1 + t2
     np.testing.assert_allclose(result.numpy(), np.array([5., 7., 7.]), rtol=0.15)
-    t1 = Tensor([1, 3, 3], dtype=dtypes.f8e5m2)
-    t2 = Tensor([2, 5, 2], dtype=dtypes.f8e5m2)
+    t1 = Tensor([1, 3, 3], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([2, 5, 2], dtype=dtypes.fp8_e5m2)
     result = t1 - t2
     np.testing.assert_allclose(result.numpy(), np.array([-1., -2., 1.]), rtol=0.15)
-    t1 = Tensor([10, 20, 30], dtype=dtypes.f8e5m2)
-    t2 = Tensor([2, 4, 6], dtype=dtypes.f8e5m2)
+    t1 = Tensor([10, 20, 30], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([2, 4, 6], dtype=dtypes.fp8_e5m2)
     result = t1 / t2
     np.testing.assert_allclose(result.numpy(), np.array([5., 5., 5.]), rtol=0.15)
-    t1 = Tensor([2, 3, 4], dtype=dtypes.f8e5m2)
-    t2 = Tensor([5, 6, 7], dtype=dtypes.f8e5m2)
+    t1 = Tensor([2, 3, 4], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([5, 6, 7], dtype=dtypes.fp8_e5m2)
     result = t1 * t2
     np.testing.assert_allclose(result.numpy(), np.array([10., 18., 28.]), rtol=0.15)
-    t = Tensor([2, 3, 4], dtype=dtypes.f8e5m2)
+    t = Tensor([2, 3, 4], dtype=dtypes.fp8_e5m2)
     result = t ** 2
     np.testing.assert_allclose(result.numpy(), np.array([4., 9., 16.]), rtol=0.15)
-    t = Tensor([4, 9, 16], dtype=dtypes.f8e5m2)
+    t = Tensor([4, 9, 16], dtype=dtypes.fp8_e5m2)
     result = t.sqrt()
     np.testing.assert_allclose(result.numpy(), np.array([2., 3., 4.]), rtol=0.15)
-    t1 = Tensor([1, 2, 5], dtype=dtypes.f8e5m2)
-    t2 = Tensor([1, 2, 3], dtype=dtypes.f8e5m2)
+    t1 = Tensor([1, 2, 5], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([1, 2, 3], dtype=dtypes.fp8_e5m2)
     result = t1 != t2
     assert result.dtype is dtypes.bool
     np.testing.assert_allclose(result.numpy(), np.array([False, False, True]))
-    t1 = Tensor([1, 2, 3], dtype=dtypes.f8e5m2)
-    t2 = Tensor([2, 2, 2], dtype=dtypes.f8e5m2)
+    t1 = Tensor([1, 2, 3], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([2, 2, 2], dtype=dtypes.fp8_e5m2)
     result = t1 < t2
     assert result.dtype is dtypes.bool
     np.testing.assert_allclose(result.numpy(), np.array([True, False, False]))
@@ -423,7 +423,7 @@ class TestEqStrDType(unittest.TestCase):
 class TestHelpers(unittest.TestCase):
   signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
   uints = (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
-  floats = (dtypes.f8e4m3, dtypes.f8e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
+  floats = (dtypes.fp8_e4m3, dtypes.fp8_e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
 
   @given(strat.sampled_from(signed_ints+uints), strat.integers(min_value=1, max_value=8))
   def test_is_int(self, dtype, amt):
@@ -489,7 +489,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_int = default_int
       assert dtypes.default_int == default_int
 
-    for default_float in [dtypes.f8e4m3, dtypes.f8e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_float in [dtypes.fp8_e4m3, dtypes.fp8_e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
@@ -577,7 +577,7 @@ class TestTypeSpec(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_arange(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
-    float_rtol = None if default_float not in [dtypes.f8e4m3, dtypes.f8e5m2] else 0.5
+    float_rtol = None if default_float not in [dtypes.fp8_e4m3, dtypes.fp8_e5m2] else 0.5
     _assert_eq(Tensor.arange(5), dtypes.default_int, np.arange(5))
     _assert_eq(Tensor.arange(120), dtypes.default_int, np.arange(120))
     _assert_eq(Tensor.arange(5.0), dtypes.default_float, np.arange(5), rtol=float_rtol)

@@ -13,7 +13,7 @@ if TYPE_CHECKING: from tinygrad.renderer import Renderer
 # ***** float4/image store handling *****
 
 def fold_expanded(ex, buf):
-  if buf.dtype not in [PtrDType(x) for x in (dtypes.f8e4m3, dtypes.f8e5m2, dtypes.float, dtypes.half)] and not isinstance(buf.dtype, ImageDType):
+  if buf.dtype not in [PtrDType(x) for x in (dtypes.fp8_e4m3, dtypes.fp8_e5m2, dtypes.float, dtypes.half)] and not isinstance(buf.dtype, ImageDType):
     return None
   new_srcs = dedup(list(ex.src))
   old_new_srcs = new_srcs[:]
@@ -163,7 +163,7 @@ def transcendental_folding(ops):
 # CUDA does not handle fp8 arithmetic natively. As a workaround, we cast to float, do arithmetic and cast back.
 @functools.lru_cache(None)
 def fp8_arithmetic():
-  dts = {dtypes.f8e4m3, dtypes.f8e5m2}
+  dts = {dtypes.fp8_e4m3, dtypes.fp8_e5m2}
   def rewrite(args, res):
     dt = dtypes.float if res.arg not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dtypes.bool
     return UOp(UOps.ALU, dt, cast(Tuple[UOp],(arg.cast(dtypes.float) for arg in args)), res.arg).cast(res.dtype)

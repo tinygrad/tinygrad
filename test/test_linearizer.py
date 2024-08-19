@@ -894,8 +894,8 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL")) and (tc.dtype_in in [dtypes.bfloat16, dtypes.f8e4m3, dtypes.f8e5m2]\
-                                                                   or tc.dtype_out in [dtypes.bfloat16, dtypes.f8e4m3, dtypes.f8e5m2] ): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL")) and (tc.dtype_in in [dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2]\
+                                                                   or tc.dtype_out in [dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2] ): continue
       helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")

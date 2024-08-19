@@ -311,7 +311,7 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
   tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.half, dtypes.bfloat16)] # noqa: E501
-  tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.f8e4m3, dtypes.f8e5m2)] # noqa: E501
+  tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.fp8_e4m3, dtypes.fp8_e5m2)] # noqa: E501
   def __init__(self, arch:str, driver_version:Tuple[int,int]):
     archv:int = int(arch[3:])
     if archv < 80:
@@ -332,19 +332,19 @@ class CUDARenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+x)}+threadIdx.{chr(120+int(x))})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
-  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.f8e5m2: "__nv_fp8_e5m2", dtypes.f8e4m3: "__nv_fp8_e4m3"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8_e5m2: "__nv_fp8_e5m2", dtypes.fp8_e4m3: "__nv_fp8_e4m3"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     # TODO: refactor to render_dtype here
     dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("nv_bfloat16","bf16"),
-     dtypes.f8e4m3: ("__nv_fp8_e4m3", "e4m3" ), dtypes.f8e5m2: ("__nv_fp8_e5m2", "e5m2" ) }
+     dtypes.fp8_e4m3: ("__nv_fp8_e4m3", "e4m3" ), dtypes.fp8_e5m2: ("__nv_fp8_e5m2", "e5m2" ) }
 
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.half, dtypes.bfloat16)):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
 
-    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.f8e4m3, dtypes.f8e5m2)):
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.fp8_e4m3, dtypes.fp8_e5m2)):
       prefix += ["#include <cuda_fp8.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [2, 4, 8, 16]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
