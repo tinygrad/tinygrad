@@ -161,6 +161,12 @@ class TestFetch(unittest.TestCase):
       assert pimg.size == (77, 77), pimg.size
     assert img.parent.name == "images"
 
+  def test_fetch_gzip(self):
+    import gzip
+    with self.assertRaises(gzip.BadGzipFile): fetch("https://github.com/tinygrad/tinygrad/raw/master/docs/logo_tiny_light.svg", allow_caching=False, gunzip=True)
+    assert fetch("https://github.com/tinygrad/tinygrad/raw/c8cd6e725c7d67fde03aa9dbdecd316909a8bdfc/extra/datasets/sops.gz", allow_caching=False).stat().st_size == 488441 # default is gunzip=False
+    assert fetch("https://github.com/tinygrad/tinygrad/raw/c8cd6e725c7d67fde03aa9dbdecd316909a8bdfc/extra/datasets/sops.gz", allow_caching=False, gunzip=True).stat().st_size == 21064045
+
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
     self.assertEqual(fully_flatten([[1, 3], [1, 2]]), [1, 3, 1, 2])
