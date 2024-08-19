@@ -314,14 +314,16 @@ class CUDARenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+x)}+threadIdx.{chr(120+int(x))})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
-  type_map = {dtypes.bfloat16: "nv_bfloat16"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8_e5m2: "__nv_fp8_e5m2", dtypes.fp8_e4m3: "__nv_fp8_e4m3"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
-    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.half, dtypes.bfloat16)):
-      prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
+    headers = {dtypes.half: "fp16", dtypes.bfloat16: "bf16", dtypes.fp8_e4m3: "fp8", dtypes.fp8_e5m2: "fp8"}
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in\
+                       (dtypes.half, dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2)):
+      prefix += [f"#include <cuda_{headers[dtype]}.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }

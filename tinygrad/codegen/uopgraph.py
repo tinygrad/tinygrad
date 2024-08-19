@@ -171,6 +171,23 @@ def threefry2x32(x: UOp, seed: UOp):
 
   return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
 
+# ***** fp8 arithmetic *****
+
+# CUDA does not handle fp8 arithmetic natively. As a workaround, we cast to float, do arithmetic and cast back.
+@functools.lru_cache(None)
+def fp8_arithmetic_rewriter():
+  dts = {dtypes.fp8_e4m3, dtypes.fp8_e5m2}
+  def rewrite(args, res):
+    dt = dtypes.float if res.arg not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dtypes.bool
+    return UOp(UOps.ALU, dt, cast(Tuple[UOp],(arg.cast(dtypes.float) for arg in args)), res.arg).cast(res.dtype)
+  def srcs(n): return tuple(UPat(name=f"x{i}", dtype=dts) for i in range(n))
+  # note: match for dtypes.bool for comparison ops
+  return PatternMatcher([
+    (UPat(UOps.ALU, dtype=dts, name="y",src=(srcs(1))), lambda x0, y: rewrite((x0,),y)),
+    (UPat(UOps.ALU, dtype=dts.union({dtypes.bool}), name="y",src=(srcs(2))), lambda x0, x1, y: rewrite((x0, x1), y)),
+    (UPat(UOps.ALU, dtype=dts, name="y",src=(srcs(3))), lambda x0, x1, x2, y: rewrite((x0, x1, x2), y))
+  ])
+
 # ***** main rewriter *****
 
 def reduce_before_expand(reduce, expand, x):
@@ -516,7 +533,8 @@ def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, s
   global linearize_cnt, acc_number
   sink: UOp = sink_in if isinstance(sink_in, UOp) else UOp(UOps.SINK, None, tuple(sink_in))
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
-  folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
+  folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))\
+    + fp8_arithmetic_rewriter()
 
   # do graph rewrite
   acc_number = 0

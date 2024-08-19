@@ -426,9 +426,9 @@ class Tensor:
     if (had_counter := Tensor._rng_counter is None): Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
 
     if not THREEFRY:
-      # for bfloat16, numpy rand passes buffer in float
-      if to_dtype(dtype or dtypes.default_float) == dtypes.bfloat16:
-        return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dtypes.bfloat16)
+      # for unsupported floats, numpy rand passes buffer in float
+      if (dt:=to_dtype(dtype or dtypes.default_float)) in (dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2):
+        return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dt)
       return Tensor._metaop(MetaOps.CUSTOM, shape, arg=custom_random, device=device, dtype=dtype, **kwargs)
 
     # threefry
@@ -1353,7 +1353,7 @@ class Tensor:
     ```
     """
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
-    return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
+    return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2) else ret
 
   def max(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
