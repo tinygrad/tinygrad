@@ -64,16 +64,15 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need bfloat16 support")
-  def test_rand_half(self):
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
+  def test_rand_float16(self):
     N = 128
-    x = Tensor.rand((2, N, N), dtype=dtypes.half)
-    assert x.dtype == dtypes.half
-    x = x.numpy()
-    ones = x[x == 1]
-    zeros = x[x == 0]
-    assert ones.size == 0
-    assert zeros.size > 0
+    x = Tensor.rand((2, N, N), dtype=dtypes.float16)
+    assert x.dtype == dtypes.float16
+    nx = x.numpy()
+    # seed dependant, check output range is [0, 1)
+    assert nx[nx == 1].size == 0
+    assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
   @unittest.skipIf(not THREEFRY.value, "not using threefry")

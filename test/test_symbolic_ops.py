@@ -50,7 +50,7 @@ class TestSymbolicOps(unittest.TestCase):
   def test_attention_training(self):
     with Tensor.train():
       self.test_attention(dropout_p=0.0)
-      with self.assertRaises(AssertionError):
+      with self.assertRaises(ValueError):
         # symbolic shape dropout is not supported
         self.test_attention(dropout_p=0.5)
 
