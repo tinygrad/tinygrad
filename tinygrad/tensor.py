@@ -1521,6 +1521,23 @@ class Tensor:
     """
     return self.var(axis, keepdim, correction).sqrt()
 
+  def std_mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
+    """
+    Calculates the standard deviation and mean over the dimensions specified by dim.
+    Syntactic sugar around `Tensor.std` and `Tensor.mean` to match `torch.std_mean`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    std, mean = t.std_mean()
+    print(std.numpy(), mean.numpy())
+    ```
+    """
+    return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
+
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
@@ -3013,6 +3030,33 @@ class Tensor:
     y = ((y_counter == Y.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask).sum()
     return -((1 - label_smoothing) * (log_probs * y).sum() + smoothing) / loss_mask.sum()
+
+  def cross_entropy(self, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
+    """
+    Compute the cross entropy loss between input logits and target.
+
+    NOTE: `self` are logits and `Y` are the target labels or class probabilities.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.cross_entropy(Y).item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.cross_entropy(Y, reduction='none').numpy())
+    ```
+    """
+    assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
+    assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
+    y = y.one_hot(num_classes=cast(int, self.shape[1])) if y.ndim < 2 else y
+    y = (1 - label_smoothing)*y + label_smoothing / cast(int, y.shape[1])
+    ret = -self.log_softmax(axis=1).mul(y).sum(axis=1)
+    do_reduction: Dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
+    return do_reduction[reduction](ret)
 
   # ***** Tensor Properties *****
 
