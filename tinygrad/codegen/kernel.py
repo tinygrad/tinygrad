@@ -784,6 +784,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   # only reduceuop is allowed to change shape, limited to turning n to 1
   if op is UOps.REDUCE_AXIS: st = ShapeTracker.from_shape(sts[src[0]].reduce(arg[1][-1] if arg[0] is ReduceOps.WMMA else arg[1]))
   else:
+    assert op in {UOps.SHAPETRACKER, UOps.ALU, UOps.CAST, UOps.BITCAST, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
     # movementops are pushed to the edges with SHAPETRACKER
     # elementwise inherits shape
     st = arg if op is UOps.SHAPETRACKER else sts[src[-1]]
