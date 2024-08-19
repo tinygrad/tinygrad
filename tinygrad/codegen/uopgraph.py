@@ -598,8 +598,8 @@ def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, s
       # NOTE: multiple identical stores to DEFINE_LOCAL is okay
       # NOTE: for PTX you have to propogate through some the calculations to determine if it is a store to DEFINE_LOCAL
       def _islocalbuf(u: UOp): return u.op is UOps.DEFINE_LOCAL or any(_islocalbuf(x) for x in u.src if u.op in [UOps.ALU, UOps.CAST])
-      assert len(all_stores := [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and not _islocalbuf(x.src[0])]) \
-          == len(dedup(all_stores)), "repeated stores in uops"
+      all_stores = [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and not _islocalbuf(x.src[0])]
+      assert len(all_stores) == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       print_uops(_uops)
       if not CI:
