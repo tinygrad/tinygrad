@@ -85,7 +85,7 @@ if __name__ == "__main__":
   # *** dataset ***
   X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
   # TODO: without this line indexing doesn't fuse!
-  X_train, Y_train, X_test, Y_test = [x.contiguous().realize() for x in [X_train, Y_train, X_test, Y_test]]
+  X_train, Y_train, X_test, Y_test = [x.contiguous() for x in [X_train, Y_train, X_test, Y_test]]
   cifar10_std, cifar10_mean = X_train.float().std_mean(axis=(0, 2, 3))
   def preprocess(X:Tensor, Y:Tensor) -> Tuple[Tensor, Tensor]:
     return ((X - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).cast(dtypes.default_float), Y.one_hot(depths['num_classes'])
