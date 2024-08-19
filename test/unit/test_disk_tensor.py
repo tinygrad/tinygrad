@@ -394,5 +394,58 @@ class TestTarExtract(unittest.TestCase):
     with self.assertRaises(tarfile.ReadError):
       tar_extract(self.invalid_tar_path)
 
+class TestPathTensor(unittest.TestCase):
+  def setUp(self):
+    self.temp_dir = tempfile.TemporaryDirectory()
+    self.test_file = pathlib.Path(self.temp_dir.name) / "test_file.bin"
+    self.test_data = np.arange(100, dtype=np.uint8).tobytes()
+    with open(self.test_file, "wb") as f:
+      f.write(self.test_data)
+
+  def tearDown(self):
+    self.temp_dir.cleanup()
+
+  def test_path_tensor_no_device(self):
+    t = Tensor(self.test_file)
+    self.assertEqual(t.shape, (100,))
+    self.assertEqual(t.dtype, dtypes.uint8)
+    self.assertTrue(t.device.startswith("DISK:"))
+    np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
+
+  def test_path_tensor_with_device(self):
+    t = Tensor(self.test_file, device="CPU")
+    self.assertEqual(t.shape, (100,))
+    self.assertEqual(t.dtype, dtypes.uint8)
+    self.assertEqual(t.device, "CPU")
+    np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
+
+  def test_path_tensor_empty_file(self):
+    empty_file = pathlib.Path(self.temp_dir.name) / "empty_file.bin"
+    empty_file.touch()
+    t = Tensor(empty_file)
+    self.assertEqual(t.shape, (0,))
+    self.assertEqual(t.dtype, dtypes.uint8)
+    self.assertTrue(t.device.startswith("DISK:"))
+
+  def test_path_tensor_non_existent_file(self):
+    non_existent_file = pathlib.Path(self.temp_dir.name) / "non_existent.bin"
+    with self.assertRaises(FileNotFoundError):
+      Tensor(non_existent_file)
+
+  def test_path_tensor_with_dtype(self):
+    t = Tensor(self.test_file, dtype=dtypes.int16)
+    self.assertEqual(t.shape, (50,))
+    self.assertEqual(t.dtype, dtypes.int16)
+    self.assertTrue(t.device.startswith("DISK:"))
+    np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.int16))
+
+  def test_path_tensor_copy_to_device(self):
+    print("AFFE")
+    print(self.test_file.stat().st_size)
+    t = Tensor(self.test_file)
+    t_cpu = t.to("CPU")
+    self.assertEqual(t_cpu.device, "CPU")
+    np.testing.assert_array_equal(t_cpu.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
+
 if __name__ == "__main__":
   unittest.main()
