@@ -314,14 +314,12 @@ class CUDARenderer(CStyleLanguage):
   tensor_cores += [TensorCore(dims=(8,16,32), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=d, dtype_out=dtypes.float) for d in (dtypes.fp8_e4m3, dtypes.fp8_e5m2)] # noqa: E501
   def __init__(self, arch:str, driver_version:Tuple[int,int]):
     archv:int = int(arch[3:])
-    if archv < 80:
-      self.tensor_cores = []
-    elif archv < 89:
-      self.tensor_cores = self.tensor_cores[:2]
+    if archv < 80: self.tensor_cores = []
+    elif archv < 89: self.tensor_cores = self.tensor_cores[:2]
     # driver version >= 12.4, sm_89 or higher
-    can_use_fp8_tcs = ((driver_version[0] > 12) or (driver_version[0] == 12 and driver_version[1] >= 4)) and (archv >= 89)
-    if not can_use_fp8_tcs:
-      self.tensor_cores = [tc for tc in self.tensor_cores if tc.dims != (8,16,32)]
+    else: 
+      if not ((driver_version[0] > 12) or (driver_version[0] == 12 and driver_version[1] >= 4)):
+        self.tensor_cores = [tc for tc in self.tensor_cores if tc.dims != (8,16,32)]
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
