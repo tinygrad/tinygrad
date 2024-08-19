@@ -131,7 +131,8 @@ class Tensor:
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
-      if dtype == dtypes.bfloat16: data = Tensor(_fromnp(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
+      if dtype in (dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2):
+        data = Tensor(_fromnp(np.array(data, np.float32)), device=device).cast(dtype).lazydata
       else: data = _fromnp(np.array(data).astype(_to_np_dtype(dtype)))
     elif data is None: data = _metaop(MetaOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, np.ndarray):
@@ -299,7 +300,7 @@ class Tensor:
     print(repr(t.numpy()))
     ```
     """
-    if self.dtype == dtypes.bfloat16: return self.float().numpy()
+    if self.dtype in (dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2): return self.float().numpy()
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
@@ -2552,7 +2553,6 @@ class Tensor:
       elif not isinstance(y, Node): y_dtype = dtypes.from_py(y)
       if isinstance(y, Node): y = Tensor.from_node(y, device=x.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
-
     if match_dtype and x.dtype != y.dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
       x, y = x.cast(output_dtype), y.cast(output_dtype)

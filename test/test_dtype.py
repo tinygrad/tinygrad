@@ -70,10 +70,11 @@ class TestDType(unittest.TestCase):
   def test_to_np(self):
     _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
 
-  def test_casts_to(self): list(map(
-    lambda dtype: _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE),
-    get_available_cast_dtypes(self.DTYPE)
-  ))
+  def test_casts_to(self):
+    list(map(
+      lambda dtype: _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE),
+      get_available_cast_dtypes(self.DTYPE)
+    ))
   def test_casts_from(self): list(map(
     lambda dtype: _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype),
     get_available_cast_dtypes(self.DTYPE)
@@ -97,6 +98,7 @@ class TestDType(unittest.TestCase):
   def test_bitcast(self):
     if Device.DEFAULT == "WEBGL": raise unittest.SkipTest("no bitcast in WebGL GLSL")
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
+    if self.DTYPE in [dtypes.fp8_e4m3, dtypes.fp8_e5m2]: raise unittest.SkipTest("no casting test support for fp8")
     list(map(
       lambda dtype:
         _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
@@ -197,6 +199,21 @@ class TestBFloat16DTypeCast(unittest.TestCase):
     random_values = Tensor(np.random.uniform(-65504, 65504, 1000), dtype=dtypes.float16)
     converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
+
+class TestFp8e4m3DType(TestDType):
+  DTYPE = dtypes.fp8_e4m3
+  def test_casts_to(self):
+    pass
+  def test_casts_from(self):
+    pass
+
+class TestFp8e5m2DType(TestDType):
+  DTYPE = dtypes.fp8_e5m2
+  def test_casts_to(self):
+    pass
+  def test_casts_from(self):
+    pass
+
 
 class TestHalfDType(TestDType): DTYPE = dtypes.half
 
