@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, cast, Literal, Callable
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer, TensorCore
@@ -284,6 +284,26 @@ class MetalRenderer(CStyleLanguage):
   return {arg[3].name}2(c.thread_elements()[0], c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
+
+# CUDA does not handle fp8 arithmetic natively. As a workaround, we cast to float, do arithmetic and cast back.
+dts = {dtypes.fp8_e4m3, dtypes.fp8_e5m2}
+
+def _rewrite_fp8_alu(args, res):
+  dt = dtypes.float if res.arg not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dtypes.bool
+  return UOp(UOps.ALU, dt, cast(Tuple[UOp],(arg.cast(dtypes.float) for arg in args)), res.arg).cast(res.dtype)
+def nsrcs(n): return tuple(UPat(name=f"x{i}", dtype=dts) for i in range(n))
+
+# NOTE: match for dtypes.bool for comparison ops
+# NOTE: CUDA does not handle e4m3 <-> e5m2 casts. Done also by casting to float
+fp8_arithmetic_rewriter = PatternMatcher([
+    (UPat(UOps.ALU, dtype=dts, name="y",src=(nsrcs(1))), lambda x0, y: _rewrite_fp8_alu((x0,),y)),
+    (UPat(UOps.ALU, dtype=dts.union({dtypes.bool}), name="y",src=(nsrcs(2))), lambda x0, x1, y: _rewrite_fp8_alu((x0, x1), y)),
+    (UPat(UOps.ALU, dtype=dts, name="y",src=(nsrcs(3))), lambda x0, x1, x2, y: _rewrite_fp8_alu((x0, x1, x2), y)),
+    (UPat(UOps.ALU, dtype=dts, name="y",src=(nsrcs(3))), lambda x0, x1, x2, y: _rewrite_fp8_alu((x0, x1, x2), y)),
+    (UPat(UOps.CAST, dtype=dtypes.fp8_e4m3, src=UPat(name="x", dtype=dtypes.fp8_e5m2)), lambda x: x.cast(dtypes.float).cast(dtypes.fp8_e4m3)),
+    (UPat(UOps.CAST, dtype=dtypes.fp8_e5m2, src=UPat(name="x", dtype=dtypes.fp8_e4m3)), lambda x: x.cast(dtypes.float).cast(dtypes.fp8_e5m2)),
+  ])
+
 code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"1/{x}",
                     BinaryOps.MAX: lambda a,b,dtype: f"__hmax({a},{b})" if dtype in (dtypes.half, dtypes.bfloat16) else f"max({a},{b})",
                     UnaryOps.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
@@ -315,6 +335,7 @@ class CUDARenderer(CStyleLanguage):
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+x)}+threadIdx.{chr(120+int(x))})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8_e5m2: "__nv_fp8_e5m2", dtypes.fp8_e4m3: "__nv_fp8_e4m3"}
+  extra_matcher = fp8_arithmetic_rewriter
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name

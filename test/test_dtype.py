@@ -75,7 +75,7 @@ class TestDType(unittest.TestCase):
     get_available_cast_dtypes(self.DTYPE)
   ))
   def test_casts_from(self): list(map(
-    lambda dtype: _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype),
+    lambda dtype: _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype not in [dtypes.fp8_e4m3, dtypes.fp8_e5m2] else None,
     get_available_cast_dtypes(self.DTYPE)
   ))
 
@@ -100,7 +100,7 @@ class TestDType(unittest.TestCase):
     if self.DTYPE in [dtypes.fp8_e4m3, dtypes.fp8_e5m2]: raise unittest.SkipTest("no bitcast test support for fp8")
     list(map(
       lambda dtype:
-        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
+        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype not in (dtypes.bool, dtypes.fp8_e4m3, dtypes.fp8_e5m2) else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
 
@@ -453,6 +453,7 @@ class TestTypeSpec(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
+    if default_float in (dtypes.fp8_e4m3, dtypes.fp8_e5m2): raise unittest.SkipTest("no test_creation for fp8")
     _assert_eq(Tensor(True), dtypes.bool, True)
     _assert_eq(Tensor(None), dtypes.default_float, [])
     _assert_eq(Tensor(2), dtypes.default_int, 2)
@@ -501,7 +502,7 @@ class TestTypeSpec(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_arange(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
-
+    if default_float in (dtypes.fp8_e4m3, dtypes.fp8_e5m2): raise unittest.SkipTest("no test_creation for fp8")
     _assert_eq(Tensor.arange(5), dtypes.default_int, np.arange(5))
     _assert_eq(Tensor.arange(120), dtypes.default_int, np.arange(120))
     _assert_eq(Tensor.arange(5.0), dtypes.default_float, np.arange(5))
