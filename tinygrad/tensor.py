@@ -2553,6 +2553,7 @@ class Tensor:
       elif not isinstance(y, Node): y_dtype = dtypes.from_py(y)
       if isinstance(y, Node): y = Tensor.from_node(y, device=x.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
+
     if match_dtype and x.dtype != y.dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
       x, y = x.cast(output_dtype), y.cast(output_dtype)
