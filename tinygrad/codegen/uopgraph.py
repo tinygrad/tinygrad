@@ -6,6 +6,8 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, graph_rewrite, type_verify, print_uops
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
+from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.renderer.assembly import PTXRenderer
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
@@ -156,6 +158,22 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
 def transcendental_folding(ops):
   return PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=k), cast(Callable, v))
                          for k,v in ((UnaryOps.EXP2, xexp2), (UnaryOps.LOG2, xlog2), (UnaryOps.SIN, xsin)) if k not in ops])
+
+# ***** fp8 arithmetic *****
+# CUDA does not handle fp8 arithmetic natively. As a workaround, we cast to float, do arithmetic and cast back.
+@functools.lru_cache(None)
+def fp8_arithmetic():
+  dts = {dtypes.f8e4m3, dtypes.f8e5m2}
+  def rewrite(args, res):
+    dt = dtypes.float if res.arg not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dtypes.bool
+    return UOp(UOps.ALU, dt, cast(Tuple[UOp],(arg.cast(dtypes.float) for arg in args)), res.arg).cast(res.dtype)
+  def srcs(n): return tuple(UPat(name=f"x{i}", dtype=dts) for i in range(n))
+  # note: match for dtypes.bool for comparison ops
+  return PatternMatcher([
+    (UPat(UOps.ALU, dtype=dts, name="y",src=(srcs(1))), lambda x0, y: rewrite((x0,),y)),
+    (UPat(UOps.ALU, dtype=dts.union({dtypes.bool}), name="y",src=(srcs(2))), lambda x0, x1, y: rewrite((x0, x1), y)),
+    (UPat(UOps.ALU, dtype=dts, name="y",src=(srcs(3))), lambda x0, x1, x2, y: rewrite((x0, x1, x2), y))
+  ])
 
 # ***** threefry *****
 
@@ -517,7 +535,8 @@ def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, s
   global linearize_cnt, acc_number
   sink: UOp = sink_in if isinstance(sink_in, UOp) else UOp(UOps.SINK, None, tuple(sink_in))
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
-  folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
+  folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))\
+      + (fp8_arithmetic() if isinstance(opts, (CUDARenderer, PTXRenderer)) else PatternMatcher([]))
 
   # do graph rewrite
   acc_number = 0

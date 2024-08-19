@@ -305,27 +305,6 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
                     UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
-def _make_cuda_code_for_op():
-  def wrapper(key, func):
-    def cast(*args):
-      if (dt:=args[-1]) in [dtypes.f8e4m3, dtypes.f8e5m2]:
-        dtstr = {dtypes.f8e4m3: "__nv_fp8_e4m3", dtypes.f8e5m2:"__nv_fp8_e5m2"}[dt]
-        operands = tuple(f"(float)({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1]))
-        return f"({dtstr})({func(*(((args[0],) if key is TernaryOps.WHERE else ()) + operands), dtypes.float)})"
-      return func(*args)
-    return cast
-  return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_half}.items() }
-
-def get_fp8_header(dtype):
-  return f"""
-__device__ __forceinline__ bool operator<({dtype} a, {dtype} b) {{
-    return static_cast<float>(a) < static_cast<float>(b);
-}}
-__device__ __forceinline__ bool operator!=({dtype} a, {dtype} b) {{
-    return static_cast<float>(a) != static_cast<float>(b);
-}}
-"""
-
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
   global_max = (2147483647, 65535, 65535)
@@ -352,7 +331,7 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+x)}+threadIdx.{chr(120+int(x))})"}
-  code_for_op = _make_cuda_code_for_op()
+  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.f8e5m2: "__nv_fp8_e5m2", dtypes.f8e4m3: "__nv_fp8_e4m3"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
@@ -366,7 +345,7 @@ class CUDARenderer(CStyleLanguage):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
 
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.f8e4m3, dtypes.f8e5m2)):
-      prefix += ["#include <cuda_fp8.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [2, 4, 8, 16]] + [get_fp8_header(dt_map[dtype][0])]
+      prefix += ["#include <cuda_fp8.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [2, 4, 8, 16]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
