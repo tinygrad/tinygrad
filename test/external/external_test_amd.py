@@ -20,7 +20,8 @@ class TestAMD(unittest.TestCase):
                               global_size=TestAMD.d0_runner.global_size, local_size=TestAMD.d0_runner.local_size)
       TestAMD.d0_runner.clprg(TestAMD.a.lazydata.buffer._buf, TestAMD.b.lazydata.buffer._buf,
                               global_size=TestAMD.d0_runner.global_size, local_size=TestAMD.d0_runner.local_size)
-    assert (val:=TestAMD.a.lazydata.buffer.as_buffer().cast("f")[0]) == 4000.0, f"got val {val}"
+    val = TestAMD.a.lazydata.buffer.as_buffer().cast("f")[0]
+    assert val == 4000.0, f"got val {val}"
 
 if __name__ == "__main__":
   unittest.main()
