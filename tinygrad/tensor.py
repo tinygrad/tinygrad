@@ -2066,7 +2066,7 @@ class Tensor:
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
     ```
     """
-    return F.Neg.apply(self) if self.dtype != dtypes.bool else self.logical_not()
+    return self*-1 if self.dtype != dtypes.bool else self.logical_not()
   def contiguous(self):
     """
     Returns a contiguous tensor.
