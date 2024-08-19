@@ -255,7 +255,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
     assert endif.src[0] is if_uop
-    gated_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
+    gated_uops = tuple(uops[uops.index(if_uop)+1:uops.index(endif)])
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, UOps.STORE)
 
@@ -272,7 +272,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
     assert endif.src[0] is if_uop
-    gated_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
+    gated_uops = tuple(uops[uops.index(if_uop)+1:uops.index(endif)])
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, UOps.STORE)
 
@@ -291,7 +291,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     endifs = [u for u in uops if u.op is UOps.ENDIF]
     self.assertEqual(len(ifs), 1)
     self.assertEqual(len(endifs), 1)
-    gated_uops = tuple(uops.uops[uops.uops.index(ifs[0])+1:uops.uops.index(endifs[0])])
+    gated_uops = tuple(uops[uops.index(ifs[0])+1:uops.index(endifs[0])])
     self.assertEqual(len(gated_uops), 2)
     for x in gated_uops: self.assertIs(x.op, UOps.STORE)
 
