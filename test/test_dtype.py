@@ -443,7 +443,7 @@ class TestHelpers(unittest.TestCase):
     assert dtypes.is_float(dtype.vec(amt) if amt > 1 else dtype)
     assert not dtypes.is_int(dtype.vec(amt) if amt > 1 else dtype)
     assert not dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
-  
+
   @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), strat.integers(min_value=2, max_value=8))
   def test_scalar(self, dtype, amt):
     assert dtype.vec(amt).scalar() == dtype
