@@ -95,6 +95,17 @@ class TestUOpsStats(unittest.TestCase):
     # NOTE: it's hard to assert on the memory here, all depends on caching
     assert required_mem <= mem
 
+  def test_simple_matmul_half(self):
+    a = Tensor.empty(1024,1024, dtype=dtypes.half)
+    b = Tensor.empty(1024,1024, dtype=dtypes.half)
+    c = a@b
+    ops, mem = get_stats(c)
+    expected_ops = c.numel() * 1024 * 2
+    required_mem = a.nbytes() + b.nbytes() + c.nbytes()
+    assert expected_ops == ops
+    # NOTE: it's hard to assert on the memory here, all depends on caching
+    assert required_mem <= mem
+    
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):
     globl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), tuple())
