@@ -414,7 +414,7 @@ class TestTinygrad(unittest.TestCase):
     assert t.dtype == dtypes.uint8
     assert t.shape == (6,)
     np.testing.assert_equal(t.numpy(), list(data))
-  
+
   def test_data_pathlib(self):
     temp = tempfile.NamedTemporaryFile(delete=False)
     test_array = np.array([1,2,3,4,5,6], dtype=np.uint8)
