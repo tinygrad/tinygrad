@@ -2948,15 +2948,18 @@ class Tensor:
     if not Tensor.training or p == 0: return self
     return self * (Tensor.rand(*self.shape, requires_grad=False, dtype=dtypes.default_float, device=self.device) >= p) * (1/(1.0 - p))
 
-  def one_hot(self, num_classes:int) -> Tensor:
+  def one_hot(self, num_classes:int=-1) -> Tensor:
     """
     Converts `self` to a one-hot tensor.
+
+    `num_classes` defaults to -1, which means num_classes will be inferred as max(self) + 1.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([0, 1, 3, 3, 4])
     print(t.one_hot(5).numpy())
     ```
     """
+    if num_classes == -1: num_classes = (self.max()+1).item()
     return (self[..., None] == Tensor.arange(num_classes, requires_grad=False, device=self.device)).where(1, 0)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None,
