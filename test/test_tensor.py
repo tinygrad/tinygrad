@@ -1,7 +1,7 @@
 import subprocess
 import numpy as np
 import torch
-import unittest, copy, mmap, random, math
+import unittest, copy, mmap, random, math, pathlib, tempfile
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import getenv, temp, CI, _METADATA
@@ -414,6 +414,52 @@ class TestTinygrad(unittest.TestCase):
     assert t.dtype == dtypes.uint8
     assert t.shape == (6,)
     np.testing.assert_equal(t.numpy(), list(data))
+  
+  def test_data_pathlib(self):
+    temp = tempfile.NamedTemporaryFile(delete=False)
+    test_array = np.array([1,2,3,4,5,6], dtype=np.uint8)
+    test_array.tofile(pathlib.Path(temp.name))
+    a = Tensor(pathlib.Path(temp.name))
+    assert a.dtype == dtypes.uint8, f"Expected dtype: {dtypes.uint8}, got: {a.dtype}"
+    assert a.shape == (6,), f"Expected shape: (6,), got: {a.shape}"
+    assert a.data().format == "B", f"Expected format: 'B', got: {a.data().format}"
+    np.testing.assert_equal(a.numpy(), test_array, f"Expected data: {test_array}, got: {a.numpy()}")
+    assert a.tolist() == test_array.tolist(), f"Expected list: {test_array.tolist()}, got: {a.tolist()}"
+    # Clean up
+    temp.close()
+    pathlib.Path(temp.name).unlink()  # Delete the temp file
+
+  def test_tensor_pathlib_size(self):
+    temp = tempfile.NamedTemporaryFile(delete=False)
+    test_array = np.array([1,2,3,4,5,6], dtype=np.uint8)
+    test_array.tofile(pathlib.Path(temp.name))
+    a = Tensor(pathlib.Path(temp.name))
+    assert a.shape == (6,), f"Expected shape: (6,), got: {a.shape}"
+    np.testing.assert_equal(a.numpy(), np.array([1,2,3,4,5,6], dtype=np.uint8))
+    temp.close()
+    pathlib.Path(temp.name).unlink()  # Delete the temp file
+
+  def test_tensor_pathlib_empty(self):
+    temp = tempfile.NamedTemporaryFile(delete=False)
+    a = Tensor(pathlib.Path(temp.name))
+    assert a.shape == (0,), f"Expected shape: (0,), got: {a.shape}"
+    np.testing.assert_equal(a.numpy(), np.array([], dtype=np.uint8))
+    temp.close()
+    pathlib.Path(temp.name).unlink()  # Delete the temp file
+
+  def test_tensor_pathlib_read_write(self):
+    temp = tempfile.NamedTemporaryFile(delete=False)
+    og_array = np.array([1,2,3,4,5,6], dtype=np.uint8)
+    og_array.tofile(pathlib.Path(temp.name))
+    a = Tensor(pathlib.Path(temp.name))
+    assert a.dtype == dtypes.uint8, f"Expected dtype: {dtypes.uint8}, got: {a.dtype}"
+    np.testing.assert_equal(a.numpy(), og_array, f"Expected data: {og_array}, got: {a.numpy()}")
+    new_array = np.array([7,8,9,10,11,12], dtype=np.uint8)
+    new_array.tofile(pathlib.Path(temp.name))
+    tensor = Tensor(pathlib.Path(temp.name))
+    np.testing.assert_equal(tensor.numpy(), new_array, f"Expected data: {new_array}, got: {tensor.numpy()}")
+    temp.close()
+    pathlib.Path(temp.name).unlink()  # Delete the temp file
 
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
