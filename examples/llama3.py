@@ -142,8 +142,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
   if quantize == "int8": linear = Int8Linear
   elif quantize == "nf4": linear = NF4Linear(64)
   else: linear = nn.Linear
-  with Context(THREEFRY=0):
-    model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192, jit=True)
+  model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192, jit=True)
 
   # load weights
   if model_path.is_dir():
