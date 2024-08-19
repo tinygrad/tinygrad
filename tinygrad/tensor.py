@@ -3037,16 +3037,24 @@ class Tensor:
     """
     Compute the cross entropy loss between input logits and target.
 
-    See: https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
+    NOTE: `self` are logits and `Y` are the target labels or class probabilities.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[-1, 2, -3], [1, -2, 3]])
     Y = Tensor([1, 2])
     print(t.cross_entropy(Y).item())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.cross_entropy(Y, reduction='none').numpy())
+    ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
     assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
+    y = y.one_hot(num_classes=self.shape[1]) if y.ndim < 2 else y
     y = (1 - label_smoothing)*y + label_smoothing / cast(int, y.shape[1])
     ret = -self.log_softmax(axis=1).mul(y).sum(axis=1)
     do_reduction: Dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
