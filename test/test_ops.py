@@ -1803,8 +1803,6 @@ class TestOps(unittest.TestCase):
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest-exact"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
 
-
-
   def test_cat(self):
     for dim in range(-2, 3):
       helper_test_op([(45,65,9), (45,65,9), (45,65,9)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
