@@ -2631,7 +2631,7 @@ class Tensor:
     """
     numerator, denominator = self._broadcasted(x, reverse)
     if upcast: numerator, denominator = numerator.cast(least_upper_float(numerator.dtype)), denominator.cast(least_upper_float(denominator.dtype))
-    return F.Div.apply(numerator, denominator)
+    return (numerator * denominator.reciprocal()) if dtypes.is_float(numerator.dtype) else F.IDiv.apply(numerator, denominator)
 
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
