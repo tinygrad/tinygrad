@@ -57,10 +57,12 @@ class TestAssign(unittest.TestCase):
       x.realize()
     x = Tensor([0])
     f(x)
-    assert (out:=x.item()) == 1, f"expected 1, got {out}"
+    out = x.item()
+    assert out == 1, f"expected 1, got {out}"
     x = Tensor([0])
     f(x)
-    assert (out:=x.item()) == 1, f"expected 1, got {out}"
+    out = x.item()
+    assert out == 1, f"expected 1, got {out}"
 
   def test_assign_add_jit(self):
     @TinyJit

@@ -7,12 +7,12 @@ import tinygrad.runtime.autogen.libc as libc
 class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
 
 def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[ElfSection], Any]:
-  def _elf_parse_names(tabs): return {sum(len(w) + 1 for w in tabs.split(b'\0')[:i]): w.decode('utf-8') for i, w in enumerate(tabs.split(b'\0'))}
+  def _strtab(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
 
   header = libc.Elf64_Ehdr.from_buffer_copy(blob)
   section_headers = (libc.Elf64_Shdr * header.e_shnum).from_buffer_copy(blob[header.e_shoff:])
-  section_names = _elf_parse_names(blob[(shstrst:=section_headers[header.e_shstrndx].sh_offset):shstrst+section_headers[header.e_shstrndx].sh_size])
-  sections = [ElfSection(section_names[sh.sh_name], sh, blob[sh.sh_offset:sh.sh_offset+sh.sh_size]) for sh in section_headers]
+  sh_strtab = blob[(shstrst:=section_headers[header.e_shstrndx].sh_offset):shstrst+section_headers[header.e_shstrndx].sh_size]
+  sections = [ElfSection(_strtab(sh_strtab, sh.sh_name), sh, blob[sh.sh_offset:sh.sh_offset+sh.sh_size]) for sh in section_headers]
 
   def _to_carray(sh, ctype): return (ctype * (sh.header.sh_size // sh.header.sh_entsize)).from_buffer_copy(sh.content)
   rel = [(sh, sh.name[4:], _to_carray(sh, libc.Elf64_Rel)) for sh in sections if sh.header.sh_type == libc.SHT_REL]

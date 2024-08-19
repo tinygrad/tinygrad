@@ -1,17 +1,18 @@
 from __future__ import annotations
 from typing import Union, Optional, Any, Tuple, List, get_args
-from tinygrad.dtype import dtypes, DType, ConstType
-from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata
-from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, reduce_st
+from tinygrad.dtype import dtypes, DType, DTypeLike, ConstType, to_dtype
+from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP
+from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
-def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
+def create_lazybuffer(device:str, st:ShapeTracker, dtype:DTypeLike, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0: op, arg, srcs, base = MetaOps.CONST, 0, (), None
+  dtype = to_dtype(dtype)
   if op is MetaOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, Variable) else arg, True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
@@ -23,21 +24,21 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
 
 view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "DISK"}
 class LazyBuffer:
-  def __init__(self, device:str, st:ShapeTracker, dtype:DType,
+  def __init__(self, device:str, st:ShapeTracker, dtype:DTypeLike,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None, metadata:Optional[Metadata]=None):
-    self.device, self.st, self.dtype, self.shape, self.size, self.metadata = device, st, dtype, st.shape, st.size, metadata
+    self.device, self.st, self.dtype, self.shape, self.size, self.metadata = device, st, to_dtype(dtype), st.shape, st.size, metadata
     self._base: Optional[LazyBuffer] = None
     if base is None:
       # properties on base
-      self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
+      self.op, self.arg, self.srcs = op, arg, srcs  # this is a UOp, except the src is LazyBuffers and not UOps
       assert self.op is not MetaOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
 
       if self.op is MetaOps.VIEW:
         # some LazyBuffers can be processed with only a view, no AST required
-        self.buffer: Buffer = srcs[0].base.buffer.view(st.size, dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
+        self.buffer: Buffer = srcs[0].base.buffer.view(st.size, self.dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
       else:
-        self.buffer = srcs[1].base.buffer if self.op is MetaOps.ASSIGN else Buffer(device, self.size, dtype)
+        self.buffer = srcs[1].base.buffer if self.op is MetaOps.ASSIGN else Buffer(device, self.size, self.dtype)
       self.buffer.ref(1)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
@@ -66,7 +67,7 @@ class LazyBuffer:
   def lbs(self) -> List[LazyBuffer]: return [self]
 
   @staticmethod
-  def metaop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
+  def metaop(op, shape:Tuple[sint,...], dtype:DTypeLike, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
     assert isinstance(src, tuple)
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
@@ -91,7 +92,7 @@ class LazyBuffer:
     self.base.forced_realize = True
     return self
 
-  def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True):
+  def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True) -> LazyBuffer:
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:
@@ -140,7 +141,8 @@ class LazyBuffer:
         srcs.append(root._view(s.base.contiguous_child[1]))
       else:
         srcs.append(s)
-    assert all_same(dts:=[x.dtype.scalar() for x in (srcs[1:] if op is TernaryOps.WHERE else srcs)]), f"all dtypes must match {dts} on {op}"
+    if not all_same(dts:=[x.dtype.scalar() for x in (srcs[1:] if op is TernaryOps.WHERE else srcs)]):
+      raise AssertionError(f"all dtypes must match {dts} on {op}")
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     if op is UnaryOps.NEG: assert srcs[0].dtype != dtypes.bool, "UnaryOps.NEG does not accept dtype bool"
@@ -170,10 +172,10 @@ class LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
     axis = tuple(sorted([x for x in axis if self.shape[x] != 1]))
     if len(axis) == 0: return self
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(reduce_st(self.st, axis)), self.dtype, op, axis, (self,))
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.st.reduce(axis)), self.dtype, op, axis, (self,))
 
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
-    new_shape = reduce_st(self.st, axis)
+    new_shape = self.st.reduce(axis)
     # TODO: this logic should move to the scheduler
     if 0 in self.shape and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: dtypes.min(self.dtype)}[op], new_shape)
 
@@ -183,7 +185,7 @@ class LazyBuffer:
       return self.const(self.base.arg * {ReduceOps.SUM: prod(self.shape[i] for i in axis), ReduceOps.MAX: 1}[op], new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
-    if not getenv("SPLIT_REDUCEOP", 1) or not all_int(self.shape) or (0 in self.shape) or \
+    if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
       prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
 

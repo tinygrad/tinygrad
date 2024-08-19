@@ -2,15 +2,14 @@ from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
 from dataclasses import replace
+from tinygrad.ops import UOp, UOps
 from tinygrad.device import Device, Buffer, Compiler
-from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import DType, ImageDType
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
-from tinygrad.codegen.uopgraph import UOpGraph
 from tinygrad.tensor import Tensor
-from tinygrad.shape.symbolic import sym_infer
+from tinygrad.shape.symbolic import Variable, sym_infer
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer import Program
 
@@ -35,7 +34,8 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, factor
 
-def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):
+def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:List[Buffer], early_stop:Optional[float]=None,
+                  max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> List[float]:
   factor = 1
   if p.global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(p.global_size, max_global_size, var_vals)
@@ -43,7 +43,7 @@ def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_
   try: car = CompiledRunner(p, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
-  input_bufs = [rawbufs[i] for i,_ in car.p.globals]
+  input_bufs = [rawbufs[i] for i in car.p.globals]
   for _ in range(cnt):
     if clear_l2:
       if hasattr(dev:=Device[p.dname], 'invalidate_caches'): dev.invalidate_caches()
@@ -62,8 +62,8 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tup
   signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   try:
     p = x[1].to_program(name_override="test")
-    assert isinstance(p.uops, UOpGraph), "uop graph wasn't generated?"
-    if len(p.uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
+    assert p.uops is not None, "uop list wasn't generated?"
+    if len(p.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
     st = time.perf_counter()
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st
@@ -89,13 +89,14 @@ def _ensure_buffer_alloc(bufs:List[Buffer]) -> List[Buffer]: return [buf.ensure_
 
 # get (scrap) buffers for timing the linearizer
 def bufs_from_lin(lin:Kernel, allocate:bool=True) -> List[Buffer]:
-  bufsts:DefaultDict[int, List[MemBuffer]] = defaultdict(list)
-  for x in lin.membufs: bufsts[x.idx].append(x)
-  rawbufs:List[Optional[Buffer]] = [None]*len(bufsts)
+  bufsts: DefaultDict[int, List[UOp]] = defaultdict(list)
+  for x in lin.bufs:
+    if x.src[0].op is UOps.DEFINE_GLOBAL: bufsts[x.src[0].arg].append(x)
+  rawbufs: List[Optional[Buffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
-    buf_size = prod(lx[0].dtype.shape) if isinstance(lx[0].dtype, ImageDType) else max(y.st.real_size() for y in lx)
+    buf_size = prod(dtype.shape) if isinstance(dtype:=cast(DType,lx[0].src[0].dtype), ImageDType) else max(y.st_arg.real_size() for y in lx)
     if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
-    rawbufs[k] = Buffer(lin.opts.device, buf_size, lx[0].dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, lx[0].dtype)
+    rawbufs[k] = Buffer(lin.opts.device, buf_size, dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, dtype)
   assert all(r is not None for r in rawbufs)
   return cast(List[Buffer], rawbufs)
 
@@ -139,23 +140,27 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True,
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
+    var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:
       acted_lins: List[Kernel] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
       timed_lins: List[Tuple[Kernel, float]] = []
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
+      least_compute_ops = math.inf
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
         p, lib, compile_et = proc
         if lib in seen_libs: continue
+        # filter out kernels that use 1000x more compute than the smallest
+        least_compute_ops = min(this_compute_ops:=sym_infer(p.op_estimate, var_vals), least_compute_ops)
+        if least_compute_ops*1000 < this_compute_ops: continue
         #print(acted_lins[i].colored_shape(), acted_lins[i].applied_opts)  # for debugging BEAMs that segfault
         seen_libs.add(lib)
         try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0, clear_l2=hasattr(dev, 'invalidate_caches'))
         except RuntimeError: continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
-        if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(cast(UOpGraph, p.uops).uops):5d} uops {compile_et*1e6:12.2f} us compile/{timed_lins[-1][1]*1e6:12.2f} us run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
+        if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(cast(List, p.uops)):5d} uops {compile_et*1e6:12.2f} us compile/{timed_lins[-1][1]*1e6:12.2f} us run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
         elif DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
 
       # done
@@ -193,7 +198,7 @@ def time_linearizer(lin:Kernel, rawbufs:List[Buffer], allow_test_size=True, max_
   assert dev.compiler is not None
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
-  var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
+  var_vals: Dict[Variable, int] = {k:(k.max+k.min)//2 for k in lin.ast.variables()}
   p = lin.to_program()
   tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
                       max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))

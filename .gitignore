@@ -1,5 +1,6 @@
 __pycache__
 .venv/
+.venv-*/
 .vscode
 .DS_Store
 notebooks
@@ -54,3 +55,4 @@ weights
 comgr_*
 *.pkl
 site/
+master_schedule.py

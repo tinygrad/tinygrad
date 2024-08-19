@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys
 import itertools, urllib.request, subprocess, shutil, math, json, contextvars
 from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
@@ -23,10 +23,11 @@ def argfix(*x):
     return tuple(x[0])
   return x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def all_same(items:List[T]): return all(x == items[0] for x in items)
+def all_same(items:Union[Tuple[T, ...], List[T]]): return all(x == items[0] for x in items)
 def all_int(t: Sequence[Any]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
+def memsize_to_str(_bytes: int) -> str: return [f"{(_bytes / d):.2f} {pr}" for d,pr in [(1e9,"GB"),(1e6,"MB"),(1e3,"KB"),(1,"B")] if _bytes > d][0]
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
@@ -38,12 +39,13 @@ def round_up(num, amt:int): return (num+amt-1)//amt * amt
 def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
 def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
-  assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"  # noqa: E501
+  kvs = set([(k,v) for d in ds for k,v in d.items()])
+  assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst:List[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
+def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
   a:List[T] = []
   b:List[T] = []
-  for s in lst: (a if fxn(s) else b).append(s)
+  for s in itr: (a if fxn(s) else b).append(s)
   return a,b
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
@@ -107,7 +109,8 @@ WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEF
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
 MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("TRANSCENDENTAL", 1)
-FUSE_AS_ONE_KERNEL, FUSE_CONV_BW = ContextVar("FUSE_AS_ONE_KERNEL", 0), ContextVar("FUSE_CONV_BW", 0)
+FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
+SPLIT_REDUCEOP, ARANGE_DIFF = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("ARANGE_DIFF", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -144,41 +147,54 @@ class Profiling(contextlib.ContextDecorator):
   def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None, ts=1):
     self.enabled, self.sort, self.frac, self.fn, self.time_scale = enabled, sort, frac, fn, 1e3/ts
   def __enter__(self):
+    import cProfile
     self.pr = cProfile.Profile()
     if self.enabled: self.pr.enable()
   def __exit__(self, *exc):
     if self.enabled:
       self.pr.disable()
       if self.fn: self.pr.dump_stats(self.fn)
+      import pstats
       stats = pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort)
       for fcn in stats.fcn_list[0:int(len(stats.fcn_list)*self.frac)]:    # type: ignore[attr-defined]
         (_primitive_calls, num_calls, tottime, cumtime, callers) = stats.stats[fcn]    # type: ignore[attr-defined]
         scallers = sorted(callers.items(), key=lambda x: -x[1][2])
         print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
-              colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
-              colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
+              colored(_format_fcn(fcn).ljust(50), "yellow"),
+              colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if scallers else '')
 
 class ProfileLogger:
   writers: int = 0
   mjson: List[Dict] = []
-  actors: Dict[str, int] = {}
-  subactors: Dict[Tuple[str, str], int] = {}
+  actors: Dict[Union[str, Tuple[str, str]], int] = {}
 
-  def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
+  def __init__(self): self.events, self.deps, ProfileLogger.writers = [], [], ProfileLogger.writers + 1
 
-  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor)]
+  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None, args=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor, args)]
+
+  def _ensure_actor(self, actor_name, subactor_name):
+    if actor_name not in self.actors:
+      self.actors[actor_name] = (pid:=len(self.actors))
+      self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+
+    if (subactor_key:=(actor_name,subactor_name)) not in self.actors:
+      self.actors[subactor_key] = (tid:=len(self.actors))
+      self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
+
+    return self.actors[actor_name], self.actors.get(subactor_key, -1)
 
   def __del__(self):
-    for name,st,et,actor_name,subactor_name in self.events:
-      if actor_name not in self.actors:
-        self.actors[actor_name] = (pid:=len(self.actors))
-        self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+    # perfetto json docs: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
+    for name, st, et, actor_name, subactor_name, args in self.events:
+      pid, tid = self._ensure_actor(actor_name,subactor_name)
+      args = {k: (v if v.__class__ is str else v(et-st)) for k, v in args.items()} if args is not None else None
+      self.mjson.append({"name": name, "ph": "X", "pid": pid, "tid": tid, "ts": st, "dur": et-st, "args": args})
 
-      if (subactor_key:=(actor_name,subactor_name)) not in self.subactors:
-        self.subactors[subactor_key] = (tid:=len(self.subactors))
-        self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
-
-      self.mjson.append({"name": name, "ph": "X", "pid": self.actors[actor_name], "tid": self.subactors.get(subactor_key, -1), "ts":st, "dur":et-st})
+    for en,st,dep_actor_name,dep_subactor_name,actor_name,subactor_name in self.deps:
+      dep_pid, dep_tid = self._ensure_actor(dep_actor_name,dep_subactor_name)
+      pid, tid = self._ensure_actor(actor_name,subactor_name)
+      self.mjson.append({"ph": "s", "pid": dep_pid, "tid": dep_tid, "id": len(self.mjson), "ts": en, "bp": "e"})
+      self.mjson.append({"ph": "f", "pid": pid, "tid": tid, "id": len(self.mjson)-1, "ts": st, "bp": "e"})
 
     ProfileLogger.writers -= 1
     if ProfileLogger.writers == 0 and len(self.mjson) > 0:
@@ -198,7 +214,9 @@ def db_connection():
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
-    _db_connection.execute("PRAGMA journal_mode=WAL")
+    # another connection has set it already or is in the process of setting it
+    # that connection will lock the database
+    with contextlib.suppress(sqlite3.OperationalError): _db_connection.execute("PRAGMA journal_mode=WAL").fetchone()
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
 
@@ -295,29 +313,30 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 
 class tqdm:
   def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:Optional[int]=None, rate:int=100):
-    self.iter, self.desc, self.dis, self.unit, self.unit_scale, self.rate = iterable, f"{desc}: " if desc else "", disable, unit, unit_scale, rate
+    self.iterable, self.disable, self.unit, self.unit_scale, self.rate = iterable, disable, unit, unit_scale, rate
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, getattr(iterable, "__len__", lambda:0)() if total is None else total
+    self.set_description(desc)
     self.update(0)
   def __iter__(self):
-    for item in self.iter:
+    for item in self.iterable:
       yield item
       self.update(1)
     self.update(close=True)
   def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
-    if self.dis or (not close and self.i % self.skip != 0): return
-    prog, dur, ncols = self.n/self.t if self.t else 0, time.perf_counter()-self.st, shutil.get_terminal_size().columns
-    if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1)
-    def fmt(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([int(t)//3600,int(t)%3600//60,int(t)%60]) if i or x)
-    def fn(x): return (f"{x/1000**int(g:=math.log(x,1000)):.{int(3-3*math.fmod(g,1))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(g)].strip()) if x else '0.00'
-    unit_text = f'{fn(self.n)}{f"/{fn(self.t)}" if self.t else self.unit}' if self.unit_scale else f'{self.n}{f"/{self.t}" if self.t else self.unit}'
-    it_text = (fn(self.n/dur) if self.unit_scale else f"{self.n/dur:5.2f}") if self.n else "?"
-    tm = f'{fmt(dur)}<{fmt(dur/prog-dur) if self.n else "?"}' if self.t else fmt(dur)
-    suf = f'{unit_text} [{tm}, {it_text}{self.unit}/s]'
-    sz = max(ncols-len(self.desc)-5-2-len(suf), 1)
+    if self.disable or (not close and self.i % self.skip != 0): return
+    prog, elapsed, ncols = self.n/self.t if self.t else 0, time.perf_counter()-self.st, shutil.get_terminal_size().columns
+    if self.i/elapsed > self.rate and self.i: self.skip = max(int(self.i/elapsed)//self.rate,1)
+    def HMS(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([int(t)//3600,int(t)%3600//60,int(t)%60]) if i or x)
+    def SI(x): return (f"{x/1000**int(g:=math.log(x,1000)):.{int(3-3*math.fmod(g,1))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(g)].strip()) if x else '0.00'
+    prog_text = f'{SI(self.n)}{f"/{SI(self.t)}" if self.t else self.unit}' if self.unit_scale else f'{self.n}{f"/{self.t}" if self.t else self.unit}'
+    elapsed_text = HMS(elapsed) + (f'<{HMS(elapsed/prog-elapsed) if self.n else "?"}' if self.t else '')
+    it_text = (SI(self.n/elapsed) if self.unit_scale else f"{self.n/elapsed:5.2f}") if self.n else "?"
+    suf = f'{prog_text} [{elapsed_text}, {it_text}{self.unit}/s]'
+    sz = max(ncols-len(self.desc)-3-2-2-len(suf), 1)
     bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
-    print(bar[:ncols+1],flush=True,end='\n'*close,file=sys.stderr)
+    print(bar[:ncols+1], flush=True, end='\n'*close, file=sys.stderr)
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
@@ -329,5 +348,5 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
       if cache[s][1] == 1: dfs(s, cache)
   if cache is None: dfs(x, cache:={})
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
-  cx[2], srcs = True, ('None' if srcfn(x) is None else''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
+  cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
