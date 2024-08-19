@@ -3054,7 +3054,7 @@ class Tensor:
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
     assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
-    y = y.one_hot(num_classes=self.shape[1]) if y.ndim < 2 else y
+    y = y.one_hot(num_classes=cast(int, self.shape[1])) if y.ndim < 2 else y
     y = (1 - label_smoothing)*y + label_smoothing / cast(int, y.shape[1])
     ret = -self.log_softmax(axis=1).mul(y).sum(axis=1)
     do_reduction: Dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
