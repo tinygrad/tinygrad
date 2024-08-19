@@ -295,6 +295,17 @@ class PatternMatcher:
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
+def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
+  nodes: Dict[Tuple, UOp] = {}
+  replace: Dict[UOp, UOp] = {}
+  def __inner_rewrite(n:UOp) -> UOp:
+    if rn := replace.get(n): return rn
+    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
+    if found := nodes.get(replace_source): replace[n] = found
+    else: nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
+    return found
+  return __inner_rewrite(sink)
+
 def type_verify(uops):
   for u in uops:
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
@@ -319,7 +330,8 @@ def type_verify(uops):
     if uop is UOps.ALU:
       if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
       elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
-        assert dtype == (bd:=(dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool)), f"{arg} output dtype mismatch {dtype=} != {bd=}"
+        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
+        assert dtype == bd, f"{arg} output dtype mismatch {dtype=} != {bd=}"
         assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
       elif arg is BinaryOps.IDIV:
         assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), f"input dtype is not int {src[0].dtype=}, {src[1].dtype=}"
@@ -329,8 +341,8 @@ def type_verify(uops):
         assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
       elif arg in BinaryOps: assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
       elif arg == TernaryOps.WHERE:
-        assert src[0].dtype == (bd:=(dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool)), \
-          f"{arg} selector dtype mismatch {src[0].dtype=} != {bd}"
+        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
+        assert src[0].dtype == bd, f"{arg} selector dtype mismatch {src[0].dtype=} != {bd}"
         assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
 
 def uop_alu_resolve(u:UOp) -> sint:

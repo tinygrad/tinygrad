@@ -52,7 +52,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer],
                       reduce_info:Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]],
                       cache:Dict[Tuple[LazyBuffer, ShapeTracker], UOp]) -> UOp:
-  """recursively create a lazyop"""
+  """recursively create a UOp"""
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   if (buf, st) in cache: return cache[(buf, st)]
   assert buf.op is not None, "base must be a base itself"
@@ -90,13 +90,13 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
     return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (buf.op, rinfo[1])))
 
   # elementwise ops pass shapetracker
-  in_ops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache) for x in buf.srcs)
+  in_uops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache) for x in buf.srcs)
   if buf.op in {MetaOps.CONTIGUOUS, MetaOps.ASSIGN}:
     assert buf in outputs, f"{buf.op} must be writable"
-    return in_ops[0]
-  if buf.op is UnaryOps.CAST: return cache.setdefault((buf, st), UOp(UOps.CAST, dtype, in_ops))
-  if buf.op is UnaryOps.BITCAST: return cache.setdefault((buf, st), UOp(UOps.BITCAST, dtype, in_ops))
-  return cache.setdefault((buf, st), UOp(UOps.ALU, dtype, in_ops, buf.op))
+    return in_uops[0]
+  if buf.op is UnaryOps.CAST: return cache.setdefault((buf, st), UOp(UOps.CAST, dtype, in_uops))
+  if buf.op is UnaryOps.BITCAST: return cache.setdefault((buf, st), UOp(UOps.BITCAST, dtype, in_uops))
+  return cache.setdefault((buf, st), UOp(UOps.ALU, dtype, in_uops, buf.op))
 
 def _permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
   permute_axis = tuple(i for i in range(len(input_st.shape)) if i not in axis) + axis
@@ -180,8 +180,8 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     if vv: var_vals.update(vv)
     ubuf = UOp(UOps.DEFINE_GLOBAL, out.dtype if isinstance(out.dtype, ImageDType) else PtrDType(out.dtype), (), i)
     ast.append(UOp(UOps.STORE, None, (ubuf, output_st.to_uop(), src)))
-  return LBScheduleItem(UOp(UOps.SINK, None, tuple(ast)), outs, list(inputs), var_vals,
-                        dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))
+  sink = UOp(UOps.SINK, None, tuple(ast))
+  return LBScheduleItem(sink, outs, list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
