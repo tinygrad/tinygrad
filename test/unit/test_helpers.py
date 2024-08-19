@@ -166,12 +166,12 @@ class TestFetch(unittest.TestCase):
     gzip_url: str = 'https://ftp.gnu.org/gnu/gzip/gzip-1.13.tar.gz'
     fp_gz = fetch(gzip_url, gunzip=True)
     fp_no_gz = fetch(gzip_url, gunzip=False)
-    with open(fp_gz, 'rb') as f: content_gzip = f.read()
-    with open(fp_no_gz, 'rb') as f: content_no_gzip = gzip.decompress(f.read())
+    with open(fp_gz, 'rb') as f: content_gz = f.read()
+    with open(fp_no_gz, 'rb') as f: content_no_gz = gzip.decompress(f.read())
     assert fp_gz.stat().st_size > fp_no_gz.stat().st_size
-    assert isinstance(content_gzip, bytes) and isinstance(content_no_gzip, bytes)
-    assert len(content_gzip) == len(content_no_gzip)
-    assert content_gzip == content_no_gzip
+    assert isinstance(content_gz, bytes) and isinstance(content_no_gz, bytes)
+    assert len(content_gz) == len(content_no_gz)
+    assert content_gz == content_no_gz
 
   def test_fetch_gunzip_invalid(self):
     # given a non-gzipped file, fetch(gunzip=True) fails
