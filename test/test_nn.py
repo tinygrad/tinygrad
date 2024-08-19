@@ -161,7 +161,6 @@ class TestNN(unittest.TestCase):
     # assert that the inference output matches the expected output using running statistics
     np.testing.assert_allclose(outt_inference.numpy(), expected_out_inference.numpy(), atol=1e-5)
 
-
   def test_linear(self):
     def _test_linear(x, in_dim, out_dim):
       # create in tinygrad
