@@ -1532,7 +1532,8 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[]
       for opt in opts:
         k.apply_opt(opt)
     if expected_color_size is not None:
-      assert (cs:=list(zip(k.colors(), k.full_shape))) == expected_color_size, f"expected={expected_color_size} got={cs}"
+      cs = list(zip(k.colors(), k.full_shape))
+      assert cs == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = get_prg(k)
     for buf,_ in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
