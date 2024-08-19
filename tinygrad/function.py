@@ -131,14 +131,8 @@ class Mul(Function):
     return self.y.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None, \
            self.x.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
 
-class Div(Function):
-  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    self.x, self.y = x, y
-    return x.e(BinaryOps.MUL, y.e(UnaryOps.RECIP)) if not dtypes.is_int(x.dtype) else x.e(BinaryOps.IDIV, y)
-
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return grad_output.e(BinaryOps.MUL, self.y.e(UnaryOps.RECIP)) if self.needs_input_grad[0] else None, \
-           grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(BinaryOps.MUL, self.y.e(BinaryOps.MUL, self.y).e(UnaryOps.RECIP)) if self.needs_input_grad[1] else None  # noqa: E501
+class IDiv(Function):
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return  x.e(BinaryOps.IDIV, y)
 
 # ************* ternary ops *************
 
