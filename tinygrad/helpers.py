@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys
-import itertools, urllib.request, subprocess, shutil, math, json, contextvars
+import itertools, urllib.request, subprocess, shutil, math, json, contextvars, gzip
 from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -261,19 +261,21 @@ def diskcache(func):
 
 # *** http support ***
 
-def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None,
+def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None, gunzip=False,
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
-  else: fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / (name or hashlib.md5(url.encode('utf-8')).hexdigest())
+  else: fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / \
+      ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
       progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
+      readfile = gzip.GzipFile(fileobj=r) if gunzip else r
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
-        while chunk := r.read(16384): progress_bar.update(f.write(chunk))
+        while chunk := readfile.read(16384): progress_bar.update(f.write(chunk))
         f.close()
         progress_bar.update(close=True)
         if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")

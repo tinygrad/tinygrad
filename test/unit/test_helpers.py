@@ -1,7 +1,7 @@
 import unittest
 from PIL import Image
 from tinygrad.helpers import Context, ContextVar
-from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction, get_shape
+from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction, get_shape, gzip
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -160,6 +160,12 @@ class TestFetch(unittest.TestCase):
     with Image.open(img) as pimg:
       assert pimg.size == (77, 77), pimg.size
     assert img.parent.name == "images"
+
+  def test_fetch_gunzip(self):
+    with self.assertRaises(OSError):
+      with open(fetch("https://github.com/tinygrad/tinygrad/archive/refs/tags/v0.9.2.tar.gz", allow_caching=False, gunzip=True), 'rb') as f:
+        with gzip.GzipFile(fileobj=f) as gz:
+          gz.read()
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
