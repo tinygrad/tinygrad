@@ -71,7 +71,7 @@ class TestUOpsStats(unittest.TestCase):
     expected_mem = a.nbytes() + b.nbytes() + c.nbytes()
     self.assertEqual(mem, expected_mem)
     # NOTE; ops also include indexing ops
-    assert expected_ops <= ops and ops <= expected_ops * 2
+    assert expected_ops == ops
 
   def test_simple_add_sq(self):
     a = Tensor.empty(100,100)
@@ -82,7 +82,7 @@ class TestUOpsStats(unittest.TestCase):
     expected_mem = a.nbytes() + b.nbytes() + c.nbytes()
     self.assertEqual(mem, expected_mem)
     # NOTE; ops also include indexing ops
-    assert expected_ops <= ops and ops <= expected_ops * 2
+    assert expected_ops == ops
 
   def test_simple_matmul(self):
     a = Tensor.empty(1024,1024)
@@ -91,7 +91,7 @@ class TestUOpsStats(unittest.TestCase):
     ops, mem = get_stats(c)
     expected_ops = c.numel() * 1024 * 2
     required_mem = a.nbytes() + b.nbytes() + c.nbytes()
-    assert expected_ops <= ops and ops <= expected_ops * 1.2
+    assert expected_ops == ops
     # NOTE: it's hard to assert on the memory here, all depends on caching
     assert required_mem <= mem
 
