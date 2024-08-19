@@ -6,14 +6,14 @@ from tinygrad.helpers import from_mv, getenv, DEBUG
 from tinygrad.runtime.ops_clang import ClangCompiler
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.dtype import DType
-from tinygrad.codegen.uops import UOp
+from tinygrad.ops import UOp
 
-from tinygrad.runtime.autogen import libc, ion, msm_ion, adsprpc
-ION_IOC_ALLOC = 0
-ION_IOC_FREE = 1
-ION_IOC_SHARE = 4
-ION_IOC_SYNC = 7
-ION_IOC_CLEAN_INV_CACHES = 2
+from tinygrad.runtime.autogen import libc, ion, msm_ion, adsprpc, qcom_dsp
+# ION_IOC_ALLOC = 0
+# ION_IOC_FREE = 1
+# ION_IOC_SHARE = 4
+# ION_IOC_SYNC = 7
+# ION_IOC_CLEAN_INV_CACHES = 2
 
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
@@ -47,50 +47,50 @@ class DSPProgram:
     pra[1].buf.pv = ctypes.addressof(time_est)
     pra[1].buf.len = 8
     for i,b in enumerate(bufs):
-      test[i] = b[1]
-      pra[i+2].dma.fd = b[2].fd
-      pra[i+2].dma.len = b[1]
+      test[i] = b.size
+      pra[i+2].dma.fd = b.share_info.fd
+      pra[i+2].dma.len = b.size
     ret = adsp.remote_handle64_invoke(self.handle, (1<<24) | (1<<16) | (1<<8) | len(bufs), pra)
     # print("invoke", ret)
     assert ret == 0, f"!!! invoke returned {ret}"
+    # if ret != 0:
+    #   print("errr,wow", ret)
+    #   time.sleep(10)
     #return time_est.value / 19_200_000
     return time_est.value / 1e6
 
-def ion_iowr(fd, nr, args, magc=ion.ION_IOC_MAGIC):
-  ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord(magc) & 0xFF) << 8 | (nr & 0xFF), args)
-  if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
+# def ion_iowr(fd, nr, args, magc=ion.ION_IOC_MAGIC):
+#   ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord(magc) & 0xFF) << 8 | (nr & 0xFF), args)
+#   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
+
+class DSPBuffer:
+  def __init__(self, va_addr:int, size:int, share_info:Any): self.va_addr, self.size, self.share_info = va_addr, size, share_info
 
 class DSPAllocator(Allocator):
-  def __init__(self):
-    self.ion_fd = os.open("/dev/ion", os.O_RDWR | os.O_CLOEXEC)
+  def __init__(self, device):
+    self.device = device
+    # self.ion_fd = os.open("/dev/ion", os.O_RDWR | os.O_CLOEXEC)
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
-    arg3 = ion.struct_ion_allocation_data(len=size, align=0x200, heap_id_mask=1<<msm_ion.ION_SYSTEM_HEAP_ID, flags=ion.ION_FLAG_CACHED)
-    ion_iowr(self.ion_fd, ION_IOC_ALLOC, arg3)
-    ion_iowr(self.ion_fd, ION_IOC_SHARE, arg2:=ion.struct_ion_fd_data(handle=arg3.handle))
-    res = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, arg2.fd, 0)
+    # arg3 = ion.struct_ion_allocation_data(len=size, align=0x200, heap_id_mask=1<<msm_ion.ION_SYSTEM_HEAP_ID, flags=ion.ION_FLAG_CACHED)
+    # ion_iowr(self.ion_fd, ION_IOC_ALLOC, arg3)
+    # ion_iowr(self.ion_fd, ION_IOC_SHARE, arg2:=ion.struct_ion_fd_data(handle=arg3.handle))
+    # res = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, arg2.fd, 0)
     # ion_iowr(self.ion_fd, ION_IOC_CLEAN_INV_CACHES, msm_ion.struct_ion_flush_data(handle=arg3.handle, fd=arg2.fd, vaddr=res, len=size), magc='M')
-    return (res, size, arg2)
+
+    alloc = qcom_dsp.ION_IOC_ALLOC(self.device.ion_fd, len=size, align=0x200, heap_id_mask=1<<msm_ion.ION_SYSTEM_HEAP_ID, flags=ion.ION_FLAG_CACHED)
+    share_info = qcom_dsp.ION_IOC_SHARE(self.device.ion_fd, handle=alloc.handle)
+    va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
+    return DSPBuffer(va_addr, size, share_info)
 
   def _free(self, opaque, options:BufferOptions):
-    libc.munmap(opaque[0], opaque[1])
-    os.close(opaque[2].fd)
-    ion_iowr(self.ion_fd, ION_IOC_FREE, ion.struct_ion_handle_data(handle=opaque[2].handle))
+    libc.munmap(opaque.va_addr, opaque.size)
+    os.close(opaque.share_info.fd)
+    qcom_dsp.ION_IOC_FREE(self.device.ion_fd, handle=opaque.share_info.handle)
 
-  def copyin(self, dest, src:memoryview): ctypes.memmove(dest[0], from_mv(src), src.nbytes)
-  def copyout(self, dest:memoryview, src):
-    res, size, arg2 = src
-    # print(hex(res), hex(size), arg2.handle, arg2.fd)
-    # ION_IOC_SYNC
-    # ion_iowr(self.ion_fd, ION_IOC_CLEAN_INV_CACHES, msm_ion.struct_ion_flush_data(handle=arg2.handle, fd=arg2.fd, vaddr=res, length=size), magc='M')
-    # ion_iowr(self.ion_fd, ION_IOC_SYNC, arg2)
-    # ion_iowr(self.ion_fd, ION_IOC_CLEAN_INV_CACHES, msm_ion.struct_ion_flush_data(handle=arg2.handle, fd=arg2.fd, vaddr=res, length=size), magc='M')
-    # ion_iowr(self.ion_fd, ION_IOC_SYNC, arg2)
-    # print(hex(res), hex(size), arg2.handle, arg2.fd)
-    # res2 = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, arg2.fd, 0)
-    # print(hex(res2), hex(res))
-    ctypes.memmove(from_mv(dest), res, dest.nbytes)
+  def copyin(self, dest, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
+  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
 class DSPRenderer(CStyleLanguage):
   device = "DSP"
@@ -161,8 +161,9 @@ class DSPRenderer(CStyleLanguage):
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
-    compiler = ClangCompiler("compile_dsp", args=["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",
-                                                  "-mhvx=v65", "-mhvx-length=128b",
-                                                  #"-fvectorize", "-Rpass=loop-vectorize",
-                                                  "-I/data/home/nimlgen/tinygrad/extra/dsp/include"])
-    super().__init__(device, DSPAllocator(), DSPRenderer(), compiler, DSPProgram)
+    self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
+    self.rpc_fd = os.open('/dev/adsprpc-smd', os.O_RDONLY | os.O_NONBLOCK)
+
+    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b",
+                     "-I/data/home/nimlgen/tinygrad/extra/dsp/include"]
+    super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp", args=compiler_args), DSPProgram)
