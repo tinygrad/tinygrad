@@ -317,7 +317,7 @@ class CUDARenderer(CStyleLanguage):
     if archv < 80: self.tensor_cores = []
     elif archv < 89: self.tensor_cores = self.tensor_cores[:2]
     # driver version >= 12.4, sm_89 or higher
-    else: 
+    else:
       if not ((driver_version[0] > 12) or (driver_version[0] == 12 and driver_version[1] >= 4)):
         self.tensor_cores = [tc for tc in self.tensor_cores if tc.dims != (8,16,32)]
 
