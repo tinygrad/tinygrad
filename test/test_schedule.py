@@ -193,9 +193,17 @@ class TestSchedule(unittest.TestCase):
     with Tensor.train(False):
       img = Tensor.empty(1,3,8,8)
       c1 = nn.Conv2d(3,32,3)
-      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      bn = nn.BatchNorm2d(32, track_running_stats=True)
       out = bn(c1(img)).relu()
       check_schedule(out, 1, [c1.weight, c1.bias])
+
+  def test_fold_conv_batchnorm_notrain_no_running_stats(self):
+    with Tensor.train(False):
+      img = Tensor.empty(1,3,8,8)
+      c1 = nn.Conv2d(3,32,3)
+      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      out = bn(c1(img)).relu()
+      check_schedule(out, 4, [c1.weight, c1.bias])
 
   def test_fold_conv_batchnorm(self):
     with Tensor.train():
