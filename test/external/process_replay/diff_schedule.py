@@ -1,7 +1,6 @@
 # create a diff of two schedule graphs
 import shutil, importlib, uuid, os, logging, contextlib
 from collections import defaultdict
-from itertools import zip_longest
 from typing import DefaultDict, Dict, List, Set, Tuple
 from test.external.process_replay.utils import print_diff
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
