@@ -49,7 +49,7 @@ class BatchNorm:
       batch_var = (y*y).mean(axis=reduce_axes)
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
-      # NOTE: wow, this is done all throughout training in most PyTorch models
+      # NOTE: wow, this is done alldef test_batchnorm3d(self): self.test_batchnorm2d(threed=True) throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
         self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(y.shape)/(prod(y.shape)-y.shape[1]) * batch_var.detach())
