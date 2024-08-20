@@ -308,14 +308,16 @@ class TestLinearizer(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32, dtype=dtypes.float).realize()
     x_p = Tensor.randn(4, 32, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32))))
-    first_x_p = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, x_p.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
-    first_reduce_p = LazyOp(ReduceOps.SUM, (LazyOp(UnaryOps.EXP2, (first_x_p,)),), (2,))
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((4, 32, 1))))
-    diff = (second_x-LazyOp(BinaryOps.ADD, (first_reduce,first_reduce_p)))
-    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
-    store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((4, 1, 1))))
+    g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
+    first_x_p = UOp(UOps.LOAD, dtypes.float, (g2, x_p.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_reduce_p = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x_p.alu(UnaryOps.EXP2),), (ReduceOps.SUM, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1)).to_uop()))
+    diff = (second_x-(first_reduce + first_reduce_p))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((4, 1, 1)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
     opts = [
       # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # grouping
       # [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
@@ -330,7 +332,7 @@ class TestLinearizer(unittest.TestCase):
       # [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 0, 8)],
     ]
     wanna_output = (x.numpy()-(x.numpy().sum(-1, keepdims=True)+np.exp2(x_p.numpy()).sum(-1, keepdims=True))).sum(-1).reshape(4, 1,1)
-    lins = helper_linearizer_ast((store, ), [x,x_p], wanna_output=[wanna_output], opts=opts)
+    lins = helper_linearizer_ast(sink, [x,x_p], wanna_output=[wanna_output], opts=opts)
     for l in lins:
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
