@@ -47,7 +47,7 @@ for si in schedule: print(str(si)[:80])
 # *****
 # 4. Lower a schedule.
 
-from tinygrad.engine.realize import lower_schedule, ExecItem
+from tinygrad.engine.realize import lower_schedule_item, ExecItem
 lowered: List[ExecItem] = [ei for si in tqdm(schedule) for ei in lower_schedule_item(si)]
 
 # *****
