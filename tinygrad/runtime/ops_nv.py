@@ -50,18 +50,18 @@ def make_uvm_type():
                                    for name,dt in nv_gpu.__dict__.items() if name.startswith("UVM_") and nv_gpu.__dict__.get(name+"_PARAMS")})
 uvm = make_uvm_type()
 
-def make_qmd_struct_type():
+def make_qmd_struct_type(v):
   fields: List[Tuple[str, Union[Type[ctypes.c_uint64], Type[ctypes.c_uint32]], Any]] = []
-  bits = [(name,dt) for name,dt in nv_gpu.__dict__.items() if name.startswith("NVC6C0_QMDV03_00") and isinstance(dt, tuple)]
-  bits += [(name+f"_{i}",dt(i)) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith("NVC6C0_QMDV03_00") and callable(dt)]
+  bits = [(name,dt) for name,dt in nv_gpu.__dict__.items() if name.startswith(f"NVC6C0_QMD{v}") and isinstance(dt, tuple)]
+  bits += [(name+f"_{i}",dt(i)) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith(f"NVC6C0_QMD{v}") and callable(dt)]
   bits = sorted(bits, key=lambda x: x[1][1])
   for i,(name, data) in enumerate(bits):
     if i > 0 and (gap:=(data[1] - bits[i-1][1][0] - 1)) != 0: fields.append((f"_reserved{i}", ctypes.c_uint32, gap))
-    fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[0]-data[1]+1))
+    fields.append((name.replace(f"NVC6C0_QMD{v}_", "").replace(f"SEMAPHORE_RELEASE", "RELEASE").lower(), ctypes.c_uint32, data[0]-data[1]+1))
     if len(fields) >= 2 and fields[-2][0].endswith('_lower') and fields[-1][0].endswith('_upper') and fields[-1][0][:-6] == fields[-2][0][:-6]:
       fields = fields[:-2] + [(fields[-1][0][:-6], ctypes.c_uint64, fields[-1][2] + fields[-2][2])]
   return init_c_struct_t(tuple(fields))
-qmd_struct_t = make_qmd_struct_type()
+qmd_struct_t = make_qmd_struct_type("V02_03")
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
@@ -154,12 +154,19 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
 
     if (prev_qmd:=self.cmd_idx_to_qmd.get(cmd_idx - 1)) is None:
       self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8]
-      self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9]
+      # self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9]
+      self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS_B, 0x1), 2]
     else:
-      prev_qmd.dependent_qmd0_pointer = qmd_addr >> 8
-      prev_qmd.dependent_qmd0_action = 1
-      prev_qmd.dependent_qmd0_prefetch = 1
-      prev_qmd.dependent_qmd0_enable = 1
+      prev_qmd.dependent_qmd_pointer = qmd_addr >> 8
+      prev_qmd.dependent_qmd_schedule_enable = 1
+      prev_qmd.dependent_qmd_type = 1
+      # prev_qmd.dependent_qmd0_prefetch = 1
+      # prev_qmd.dependent_qmd0_enable = 1
+
+      # prev_qmd.dependent_qmd0_pointer = qmd_addr >> 8
+      # prev_qmd.dependent_qmd0_action = 1
+      # prev_qmd.dependent_qmd0_prefetch = 1
+      # prev_qmd.dependent_qmd0_enable = 1
 
   def _update_exec(self, cmd_idx, global_size, local_size):
     # Patch the exec cmd with new launch dims
@@ -169,8 +176,8 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
   def _signal(self, signal, value=0):
     if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 2)) is not None:
       for i in range(2):
-        if getattr(prev_qmd, f'release{i}_enable') == 0:
-          setattr(prev_qmd, f'release{i}_enable', 1)
+        if getattr(prev_qmd, f'release_enable{i}') == 0:
+          setattr(prev_qmd, f'release_enable{i}', 1)
           setattr(prev_qmd, f'release{i}_address', signal.signal_addr)
           setattr(prev_qmd, f'release{i}_payload', value)
           self.cmd_idx_to_qmd[len(self) - 1] = prev_qmd
@@ -260,7 +267,7 @@ class NVProgram(HCQProgram):
     smem_config = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
     self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
                             invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
-                            cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3, constant_buffer_invalidate_0=1,
+                            cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=2, constant_buffer_invalidate_0=1,
                             shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
                             max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
                             barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
