@@ -359,20 +359,6 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 from ctypes.util import find_library
 
 
-# class dotdict(dict):
-#   """dot.notation access to dictionary attributes"""
-#   __getattr__ = dict.get
-#   __setattr__ = dict.__setitem__
-#   __delattr__ = dict.__delitem__
-
-# def log_wrapper(f):
-#   def logging_fn(*args, **kwargs):
-#     print(f"calling {f.__name__}")
-#     res = f(*args, **kwargs)
-#     print(f"finished {f.__name__}")
-#     return res
-#   return logging_fn
-
 # import tinygrad.runtime.autogen.objc as objc
 
 libobjc = ctypes.CDLL(find_library("objc"))
@@ -412,7 +398,6 @@ libc.malloc.argtypes = [ctypes.c_size_t]
 libc.malloc.restype = ctypes.c_void_p
 libc.free.argtypes = [ctypes.c_void_p]
 
-# @log_wrapper
 def dump_objc_methods(clz: ctypes.c_void_p):
   methods = {}
   method_count = ctypes.c_uint()
@@ -458,7 +443,6 @@ SIMPLE_TYPES = {
     '?': '<unknown-type>',
 }
 
-# @log_wrapper
 @functools.lru_cache(maxsize=None)
 def get_methods_rec(c: ctypes.c_void_p):
   methods = {}
@@ -471,7 +455,6 @@ def get_methods_rec(c: ctypes.c_void_p):
   return methods
 
 
-# @log_wrapper
 def objc_type_to_ctype(t: str):
   if len(t) == 1:
     return SIMPLE_TYPES[t]
@@ -489,13 +472,11 @@ class ObjcClass:
   ptr: ctypes.c_void_p
   methods_info: Dict[str, Dict[str, Any]]
 
-  # @log_wrapper
   def __init__(self, name:str):
     self.ptr = libobjc.objc_getClass(name.encode())
     assert self.ptr is not None, f"Class {name} not found"
     self.methods_info = get_methods_rec(_metaclass_ptr:=libobjc.object_getClass(self.ptr))
 
-  # @log_wrapper
   @functools.lru_cache(maxsize=None)
   def __getattr__(self, name:str) -> Any:
     sel_name = name.replace("_", ":")
@@ -523,17 +504,7 @@ class ObjcInstance(ObjcClass):
     self.methods_info = get_methods_rec(libobjc.object_getClass(self.ptr))
 
 
-NSString = ObjcClass("NSString")
+NSString: Any = ObjcClass("NSString")
 
 def nsstring_to_str(nsstring: ObjcClass) -> str:
     return ctypes.string_at(nsstring.UTF8String(), size=nsstring.length()).decode()
-
-
-# class ObjcFramework(dotdict):
-#   pass
-
-# def objc_load_framework(name: str) -> ObjcFramework:
-
-#   pass
-
-# Foundation = objc_load_framework("Foundation")
