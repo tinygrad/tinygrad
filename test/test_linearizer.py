@@ -675,19 +675,22 @@ class TestLinearizer(unittest.TestCase):
       # [Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)]
     ]
 
-    x_ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((1, N, N)).expand((N,N,N))))
-    x_ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((N, 1, N))))
-    r0 = LazyOp(ReduceOps.SUM, (x_ld0,), (1,))
-    r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.ADD, (x_ld1, LazyOp(op=UnaryOps.NEG, src=(r0,), arg=None)),),), (0,))
-    store = LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((1,1,N))))
-    helper_linearizer_ast((store,), [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=0, keepdims=True)).sum(axis=0).reshape(1,1,N)], opts=opts)
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    x_ld0 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((1, N, N)).expand((N,N,N)).to_uop()))
+    x_ld1 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).to_uop()))
+    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (ReduceOps.SUM, (1,)))
+    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1-r0,),(ReduceOps.SUM, (0,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((1,1,N)).to_uop(), r1))
+    sink = UOp(UOps.SINK, src=(store,))
+    helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=0, keepdims=True)).sum(axis=0).reshape(1,1,N)], opts=opts)
 
-    x_ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((N, 1, N)).expand((N,N,N))))
-    x_ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((N, N, 1))))
-    r0 = LazyOp(ReduceOps.SUM, (x_ld0,), (2,))
-    r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.ADD, (x_ld1, LazyOp(op=UnaryOps.NEG, src=(r0,), arg=None)),),), (1,))
-    store = LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((N,1,1))))
-    helper_linearizer_ast((store,), [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(N,1,1)], opts=opts)
+    x_ld0 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).expand((N,N,N)).to_uop()))
+    x_ld1 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, N, 1)).to_uop()))
+    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (ReduceOps.SUM, (2,)))
+    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1-r0,),(ReduceOps.SUM, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((N,1,1)).to_uop(), r1))
+    sink = UOp(UOps.SINK, src=(store,))
+    helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(N,1,1)], opts=opts)
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_padto_max_multireduce(self):
