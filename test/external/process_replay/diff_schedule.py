@@ -43,8 +43,8 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
 
 def print_si_diff(si0:ScheduleItem, si1:ScheduleItem):
   logging.basicConfig(level=logging.INFO)
-  ei0 = lower_schedule_item(si0)
-  ei1 = lower_schedule_item(si1)
+  ei0 = lower_schedule_item(si0)[-1]
+  ei1 = lower_schedule_item(si1)[-1]
   assert isinstance(ei0.prg, CompiledRunner) and isinstance(ei1.prg, CompiledRunner)
   print_diff(si0.ast, si1.ast)
   print_diff(ei0.prg.p.src, ei1.prg.p.src)
