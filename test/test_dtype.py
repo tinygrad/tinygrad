@@ -199,24 +199,24 @@ class TestBFloat16DTypeCast(unittest.TestCase):
     converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
 
+# Overrides cast tests with a custom array since random might return something not representable in fp8 dtypes
+class TestFp8DType(TestDType):
+  @staticmethod
+  def _test_cast_fp8(dtype_from: DType, dtype_to: DType):
+    src = Tensor([3.0, -2.6, 2.1, -1.4, 0.8, -0.25, 0.0625], dtype=dtypes.float).cast(dtype_from)
+    _test_cast(src, dtype_to)
 
-class TestFp8e4m3DType(TestDType):
-  DTYPE = dtypes.fp8_e4m3
-  def test_casts_to(self):
-    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.fp8_e4m3), dtypes.float32)
-    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.fp8_e4m3), dtypes.half)
-  def test_casts_from(self):
-    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.float32), dtypes.fp8_e4m3)
-    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.half), dtypes.fp8_e4m3)
+  def test_casts_from(self): list(map(
+    lambda dtype: self._test_cast_fp8(self.DTYPE, dtype),
+    get_available_cast_dtypes(self.DTYPE)
+  ))
+  def test_casts_to(self): list(map(
+    lambda dtype: self._test_cast_fp8(dtype, self.DTYPE),
+    get_available_cast_dtypes(self.DTYPE)
+  ))
 
-class TestFp8e5m2DType(TestDType):
-  DTYPE = dtypes.fp8_e5m2
-  def test_casts_to(self):
-    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.fp8_e5m2), dtypes.float32)
-    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.fp8_e5m2), dtypes.half)
-  def test_casts_from(self):
-    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.float32), dtypes.fp8_e5m2)
-    _test_cast(Tensor([1.0, -0.5, 0.25, -0.125, 0.0625], dtype=dtypes.half), dtypes.fp8_e5m2)
+class TestFp8e4m3DType(TestFp8DType): DTYPE = dtypes.fp8_e4m3
+class TestFp8e5m2DType(TestFp8DType): DTYPE = dtypes.fp8_e5m2
 
 class TestHalfDType(TestDType): DTYPE = dtypes.half
 
