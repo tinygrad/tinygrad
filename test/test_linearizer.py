@@ -564,25 +564,30 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "very slow")
   def test_indexing_multireduce(self):
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    g2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=2)
     arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), \
         View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
     # TODO: do this arange broadcast in the scheduler
     arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
     arange_axis = (3,)
-    arange = LazyOp(ReduceOps.SUM, (LazyOp(BufferOps.CONST, (), ConstBuffer(1, dtypes.int, arange_input_st)), ), arange_axis)
+    arange = UOp(UOps.REDUCE_AXIS, dtypes.int, (UOp(UOps.CONST, dtypes.int, (arange_input_st.to_uop(),), 1),), (ReduceOps.SUM, arange_axis))
     arange_out_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
-    arange = arange-LazyOp.const(1, dtypes.int, arange_out_shape)
+    arange_ones = UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).reshape((1,)*len(arange_out_shape)).expand(arange_out_shape).to_uop(),), 1)
+    arange = arange-arange_ones
     # p2: the indexing
     dataset = Tensor.rand(16384, 256).realize()
-    data1 = MemBuffer(1, dataset.dtype, ShapeTracker.from_shape(dataset.shape).reshape((1, 16384, 256, 1)).expand(arange_out_shape))
+    data1 = (g1, ShapeTracker.from_shape(dataset.shape).reshape((1, 16384, 256, 1)).expand(arange_out_shape).to_uop())
     idxs = Tensor([0,3,5,6]).realize()
-    data2 = MemBuffer(2, dtypes.int, ShapeTracker.from_shape((4,)+(1,)*(len(arange_out_shape)-1)).expand(arange_out_shape))
-    reduce_input = LazyOp(BufferOps.LOAD, (), data1)*LazyOp(UnaryOps.CAST, (arange.eq(LazyOp(BufferOps.LOAD, (), data2)),), dataset.dtype)
-    out = LazyOp(ReduceOps.SUM, (reduce_input, ), (1,))
-    output_shape = tuple(1 if i in out.arg else s for i,s in enumerate(arange_out_shape))
-    store = LazyOp(BufferOps.STORE, (out, ), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape)))
+    data2 = (g2, ShapeTracker.from_shape((4,)+(1,)*(len(arange_out_shape)-1)).expand(arange_out_shape).to_uop())
+    reduce_input = UOp(UOps.LOAD, dataset.dtype, data1)*UOp(UOps.CAST, dataset.dtype.scalar(), src=(arange.eq(UOp(UOps.LOAD, dtypes.int, data2)),))
+    out_axis = (1,)
+    out = UOp(UOps.REDUCE_AXIS, reduce_input.dtype, (reduce_input,), (ReduceOps.SUM, out_axis))
+    output_shape = tuple(1 if i in out_axis else s for i,s in enumerate(arange_out_shape))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape(output_shape).to_uop(), out))
+    sink = UOp(UOps.SINK, src=(store,))
     real_index = dataset.numpy()[idxs.numpy()].reshape(4, 1, 256, 1)
-    helper_linearizer_ast((store, ), [dataset, idxs], wanna_output=[real_index])
+    helper_linearizer_ast(sink, [dataset, idxs], wanna_output=[real_index])
 
   # AssertionError: repeated stores in uops
   def test_argmax_multireduce_axis0(self):
