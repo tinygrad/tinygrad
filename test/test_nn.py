@@ -36,9 +36,9 @@ class TestNN(unittest.TestCase):
         bn.weight = Tensor.randn(sz)
         bn.bias = Tensor.randn(sz)
         if track_running_stats:
-            bn.running_mean = Tensor.randn(sz)
-            bn.running_var = Tensor.randn(sz)
-            bn.running_var.numpy()[bn.running_var.numpy() < 0] = 0
+          bn.running_mean = Tensor.randn(sz)
+          bn.running_var = Tensor.randn(sz)
+          bn.running_var.numpy()[bn.running_var.numpy() < 0] = 0
 
         # create in torch
         with torch.no_grad():
@@ -50,12 +50,12 @@ class TestNN(unittest.TestCase):
           tbn.weight[:] = torch.tensor(bn.weight.numpy())
           tbn.bias[:] = torch.tensor(bn.bias.numpy())
           if track_running_stats:
-              tbn.running_mean[:] = torch.tensor(bn.running_mean.numpy())
-              tbn.running_var[:] = torch.tensor(bn.running_var.numpy())
+            tbn.running_mean[:] = torch.tensor(bn.running_mean.numpy())
+            tbn.running_var[:] = torch.tensor(bn.running_var.numpy())
 
         if track_running_stats:
-            np.testing.assert_allclose(bn.running_mean.numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
-            np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
+          np.testing.assert_allclose(bn.running_mean.numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
+          np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
 
         # trial
         if threed:
@@ -72,8 +72,8 @@ class TestNN(unittest.TestCase):
         # close
         np.testing.assert_allclose(outt.numpy(), toutt.detach().numpy(), rtol=5e-4, atol=1e-6)
         if track_running_stats:
-            np.testing.assert_allclose(bn.running_mean.numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
-            np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
+          np.testing.assert_allclose(bn.running_mean.numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
+          np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
 
   def test_batchnorm2d_training(self): self.test_batchnorm2d(True, False, True)
   def test_batchnorm2d_no_running_stats(self): self.test_batchnorm2d(False, False, False)

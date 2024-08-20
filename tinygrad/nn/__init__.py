@@ -48,7 +48,7 @@ class BatchNorm:
     batch_mean = x.mean(axis=(reduce_axes:=tuple(x for x in range(x.ndim) if x != 1)))
     y = (x - batch_mean.detach().reshape(shape=shape_mask))  # d(var)/d(mean) = 0
     batch_var = (y*y).mean(axis=reduce_axes)
-    return batch_mean, batch_var 
+    return batch_mean, batch_var
 
   def __call__(self, x:Tensor):
     batch_mean, batch_var = self.calc_stats(x)
