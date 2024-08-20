@@ -114,8 +114,7 @@ generate_nv() {
     extra/nv_gpu_driver/clc6c0qmd.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
-    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
-    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc46f.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
     $NVKERN_SRC/src/nvidia/generated/g_allclasses.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
