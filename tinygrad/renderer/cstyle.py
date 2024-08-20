@@ -368,7 +368,7 @@ class AMDRenderer(CStyleLanguage):
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
-  ocml = [("__ocml_" + name + f"_f{n}", f"{dt}, {dt}" if "fmax" == name else dt, dt, atr)
+  ocml = [(f"__ocml_{name}_f{n}", f"{dt}, {dt}" if "fmax" == name else dt, dt, atr)
             for dt, n in [("float", 32), ("double", 64), ("_Float16", 16)]
             for name, atr in [("fmax", "const"), ("exp2", "pure"), ("log2", "pure"), ("sqrt", "const"), ("sin", "")]]
 
