@@ -464,17 +464,19 @@ class TestLinearizer(unittest.TestCase):
   def test_mean_std_multireduce_mid_dim(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 1, 25, 35)).expand((15, 25, 25, 35))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
-    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(0.04, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 35)))) # noqa: E501
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 25, 1, 35))))
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 1, 25, 35)).expand((15, 25, 25, 35)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    mean = first_reduce * UOp(UOps.CONST, dtypes.float, (ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 35)).to_uop(),), 0.04) # noqa: E501
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 25, 1, 35)).to_uop()))
     squares = (second_x-mean)*(second_x-mean)
-    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (1,))
-    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(0.04, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 1, 1, 35)))) # noqa: E501
-    std = LazyOp(UnaryOps.SQRT, (variance,), None)
-    store = LazyOp(BufferOps.STORE, (std,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((15, 1, 1, 35))))
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (1,)))
+    variance = squares_sum * UOp(UOps.CONST, dtypes.float, (ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 1, 1, 35)).to_uop(),), 0.04) # noqa: E501
+    std = variance.alu(UnaryOps.SQRT)
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((15, 1, 1, 35)).to_uop(), std))
+    sink = UOp(UOps.SINK, src=(store,))
     wanna_output = x.numpy().std(axis=1, ddof=0).reshape((15,1,1,35))
-    helper_linearizer_ast((store,), [x], wanna_output=[wanna_output])
+    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.expectedFailure
