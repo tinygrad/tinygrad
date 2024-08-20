@@ -214,6 +214,7 @@ class TestFp8DType(TestDType):
     lambda dtype: self._test_cast_fp8(dtype, self.DTYPE),
     get_available_cast_dtypes(self.DTYPE)
   ))
+
 @unittest.skipUnless(is_dtype_supported(dtypes.fp8_e4m3), "no fp8_e4m3 support")
 class TestFp8e4m3DType(TestFp8DType): DTYPE = dtypes.fp8_e4m3
 
