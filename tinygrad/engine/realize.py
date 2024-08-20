@@ -3,7 +3,7 @@ import time, pprint
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
-from tinygrad.ops import MetaOps, LazyOp
+from tinygrad.ops import MetaOps, UOps, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -14,7 +14,7 @@ from tinygrad.engine.schedule import ScheduleItem
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
+def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
   if DEBUG >= 5:
     print(ast)
   k = Kernel(ast, opts=renderer).required_optimizations()
@@ -66,9 +66,9 @@ def get_kernel(renderer:Renderer, ast:LazyOp) -> Kernel:
 # **************** Runners ****************
 
 class Runner:
-  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0, lds_estimate:sint=0):
+  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0, lds_estimate:Optional[sint]=None):
     self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate, self.lds_estimate = \
-      True, display_name, dname, op_estimate, mem_estimate, lds_estimate
+      True, display_name, dname, op_estimate, mem_estimate, mem_estimate if lds_estimate is None else lds_estimate
   @property
   def device(self): return Device[self.dname]
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
@@ -96,10 +96,10 @@ class CompiledRunner(Runner):
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
     lra = {}
     if global_size:
-      lra['global_size'] = global_size
+      lra['global_size'] = tuple(global_size)
       assert len(global_size) == 3, "global size must have len 3"
     if local_size:
-      lra['local_size'] = local_size
+      lra['local_size'] = tuple(local_size)
       assert len(local_size) == 3, "local size must have len 3"
     return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 
@@ -146,11 +146,11 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: Dict[Tuple[str, LazyOp, int, bool], CompiledRunner] = {}
-def get_runner(dname:str, ast:LazyOp) -> CompiledRunner:
-  ckey = (dname, ast, BEAM.value, False)
+method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
+def get_runner(dname:str, ast:UOp) -> CompiledRunner:
+  ckey = (dname, ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (dname.split(":")[0], ast, BEAM.value, True)
+  bkey = (dname.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
@@ -178,6 +178,7 @@ class ExecItem:
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
         lds_est = sym_infer(self.prg.lds_estimate, var_vals)
+        mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
         ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
         print(f"{colored(f'*** {self.prg.dname[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(40-ansilen(self.prg.display_name))} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
               (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_est/((et or 1e-20)*1e9):9.2f} GFLOPS {mem_est/((et or 1e-20)*1e9):6.1f}|{lds_est/((et or 1e-20)*1e9):<7.1f} GB/s)" +  # noqa: E501
@@ -186,19 +187,19 @@ class ExecItem:
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is MetaOps.COPY or getenv("USE_COPY_KERNEL")
-  if si.ast.op is MetaOps.KERNEL:
+  assert len(set(x.device for x in si.bufs)) == 1 or (si.ast.op is UOps.EXT and si.ast.arg[0] is MetaOps.COPY)
+  if si.ast.op is UOps.SINK:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
-  out = si.outputs[0]
-  if si.ast.op is MetaOps.COPY:
+  out, (op, arg) = si.outputs[0], si.ast.arg
+  if op is MetaOps.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
-    return ExecItem(kernel_type(si.ast.arg, out.device, si.inputs[0].device), list(si.bufs))
-  if si.ast.op is MetaOps.CUSTOM: return ExecItem(CustomOp(si.ast.arg), list(si.bufs))
-  if si.ast.op is MetaOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if si.ast.op is MetaOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
+    return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
+  if op is MetaOps.CUSTOM: return ExecItem(CustomOp(arg), list(si.bufs))
+  if op is MetaOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
+  if op is MetaOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {si.ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
@@ -263,5 +264,5 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
   assigned = _internal_memory_planner([si.bufs for si in schedule],
-                                      noopt_buffers={b for si in schedule if si.ast.op is not MetaOps.KERNEL for b in si.bufs})
+                                      noopt_buffers={b for si in schedule if si.ast.op is not UOps.SINK for b in si.bufs})
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs), si.metadata) for si in schedule]

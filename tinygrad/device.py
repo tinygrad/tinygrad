@@ -19,8 +19,8 @@ class _Device:
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
-    assert ((cpn:=multiprocessing.current_process().name) == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY"], \
-      f"can only open device {ix} from parent, not {cpn}"
+    cpn = multiprocessing.current_process().name
+    assert (cpn == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY"], f"can only open device {ix} from parent, not {cpn}"
     x = ix.split(":")[0].upper()
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
@@ -29,8 +29,7 @@ class _Device:
   def default(self) -> Compiled: return self[self.DEFAULT]
   @functools.cached_property
   def DEFAULT(self) -> str:
-    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
-    if device_from_env: return device_from_env
+    if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
     for device in ["METAL", "AMD", "NV", "CUDA", "GPU", "CLANG", "LLVM"]:
       try:
         if self[device]:
@@ -324,18 +323,18 @@ class HWComputeQueue(HWCommandQueue):
   def _memory_barrier(self): pass
 
   @hcq_command
-  def exec(self, prg:HCQProgram, kernargs:int, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+  def exec(self, prg:HCQProgram, args_state:HCQArgsState, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
     """
     Enqueues an execution command for a kernel program.
 
     Args:
       prg: The program to execute
-      kernargs: The pointer to kernel arguments
+      args_state: The args state to execute program with
       global_size: The global work size
       local_size: The local work size
     """
-    self._exec(prg, kernargs, global_size, local_size)
-  def _exec(self, prg, kernargs, global_size, local_size): raise NotImplementedError("backend should overload this function")
+    self._exec(prg, args_state, global_size, local_size)
+  def _exec(self, prg, args_state, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
   def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
     """
@@ -419,7 +418,9 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
   st, en = (dev.signal_t(), dev.signal_t()) if enabled else (None, None)
 
   if enabled and queue is not None: queue.timestamp(st)
-  elif enabled: queue_type().timestamp(st).submit(dev)
+  elif enabled:
+    queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(st).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
+    dev.timeline_value += 1
 
   try: yield (st, en)
   finally:
@@ -430,25 +431,26 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
 
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
-class HCQProgram:
-  def __init__(self, device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
-    self.device, self.name, self.kernargs_alloc_size, self.kernargs_args_offset = device, name, kernargs_alloc_size, kernargs_args_offset
+class HCQArgsState:
+  def __init__(self, ptr:int, prg:HCQProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): self.ptr, self.prg = ptr, prg
+  def update_buffer(self, index:int, buf:HCQBuffer): raise NotImplementedError("need update_buffer")
+  def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
-  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> int:
+class HCQProgram:
+  def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int):
+    self.args_state_t, self.device, self.name, self.kernargs_alloc_size = args_state_t, device, name, kernargs_alloc_size
+
+  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
     """
     Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
-
     Args:
       bufs: Buffers to be written to kernel arguments.
       vals: Values to be written to kernel arguments.
       kernargs_ptr: Optional pointer to pre-allocated kernel arguments memory.
-
     Returns:
-      Pointer to the filled kernel arguments.
+      Arguments state with the given buffers and values set for the program.
     """
-    self._fill_kernargs(ptr:=(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size)), bufs, vals)
-    return ptr
-  def _fill_kernargs(self, kernargs_ptr:int, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): raise NotImplementedError("need fill_kernargs")
+    return self.args_state_t(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size), self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
                vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
@@ -491,7 +493,7 @@ class HCQCompiled(Compiled):
     self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
-    self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool]] = []
+    self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
     self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
     if PROFILE: self._prof_setup()
 
@@ -507,7 +509,7 @@ class HCQCompiled(Compiled):
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:
-      self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
+      self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp, None) for st, en, name, is_cp in self.sig_prof_records]
       self.sig_prof_records = []
 
   def _alloc_kernargs(self, alloc_size:int) -> int:
@@ -575,8 +577,11 @@ class HCQCompiled(Compiled):
   def _prof_finalize(self):
     qname = ["COMPUTE", "DMA"]
 
-    for st, en, name, is_cp in self.raw_prof_records:
-      self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, qname[is_cp])]
+    # Sync to be sure all events on the device are recorded.
+    self.synchronize()
+
+    for st, en, name, is_cp, args in self.raw_prof_records:
+      self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, qname[is_cp], args)]
     for a_st, a_en, a_dev, a_is_copy, b_st, b_en, b_dev, b_is_copy in self.dep_prof_records:
       # Perfetto connects nodes based on timing data, ensuring every choice is valid by averaging times to a midpoint.
       a_tm, b_tm = a_dev._gpu2cpu_time((a_st+a_en)/decimal.Decimal(2), a_is_copy), b_dev._gpu2cpu_time((b_st+b_en)/decimal.Decimal(2), b_is_copy)
@@ -653,7 +658,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   def transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev, dest_dev):
     src_dev.allocator.map(dest)
 
-    with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
+    with hcq_profile(src_dev, queue_type=src_dev.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
       src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
                                .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
                                .copy(dest.va_addr, src.va_addr, sz) \

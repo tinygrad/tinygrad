@@ -40,7 +40,7 @@ In tinygrad, you can do [`x.conv2d(w, b)`](tensor/ops.md/#tinygrad.Tensor.conv2d
 
 ### tinygrad is lazy
 
-When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor/index.md/#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
+When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor/properties.md#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
 
 ### tinygrad requires @TinyJit to be fast
 

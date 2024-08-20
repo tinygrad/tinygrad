@@ -455,7 +455,7 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  model = get_mlperf_bert_model(init_ckpt)
+  model = get_mlperf_bert_model(init_ckpt if not INITMLPERF else None)
   
   for _, x in get_state_dict(model).items():
     x.realize().to_(GPUS)

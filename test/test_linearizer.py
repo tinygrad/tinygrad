@@ -1,25 +1,23 @@
-from typing import List, Tuple, Dict, Union
+from typing import List, Tuple, Union, cast
 import numpy as np
 import unittest
 from dataclasses import replace
-from test.external.fuzz_linearizer import compare_linearizer
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.codegen.uops import UOp, UOps
+from tinygrad.ops import UOp, UOps
 from tinygrad.device import Device, Buffer
-from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, MetaOps, TernaryOps, ReduceOps, UnaryOps
-from tinygrad.renderer import TensorCore
+from extra.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, MetaOps, TernaryOps, ReduceOps, UnaryOps, to_uop
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 # from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
-from tinygrad.helpers import DEBUG, prod, Context, getenv, CI, flatten, dedup
-from tinygrad.dtype import DType, dtypes
+from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup
+from tinygrad.dtype import DType, PtrDType, dtypes
 
-def helper_realized_ast(r:Union[Tensor, List[Tensor]]):
+def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer]]:
   if isinstance(r, Tensor): r = [r]
   s = create_schedule([x.lazydata for x in r])
   run_schedule(s[:-1])  # run all kernels except the last one
@@ -86,48 +84,410 @@ class TestLinearizer(unittest.TestCase):
 
   def test_multioutput(self):
     dtype, st = dtypes.int, ShapeTracker.from_shape((8,))
-    a = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtype, st=st))
-    b = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtype, st=st))
-    out0 = LazyOp(BufferOps.STORE, (LazyOp(op=BinaryOps.ADD, src=(a,b)),), MemBuffer(idx=0, dtype=dtype, st=st))
-    out1 = LazyOp(BufferOps.STORE, (LazyOp(op=BinaryOps.MUL, src=(a,b)),), MemBuffer(idx=1, dtype=dtype, st=st))
+    g0, g1, g2, g3 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=i) for i in range(4)]
+    a = UOp(UOps.LOAD, dtype, (g2, st.to_uop()))
+    b = UOp(UOps.LOAD, dtype, (g3, st.to_uop()))
+    out0 = UOp(UOps.STORE, None, (g0, st.to_uop(), a + b))
+    out1 = UOp(UOps.STORE, None, (g1, st.to_uop(), a * b))
+    sink = UOp(UOps.SINK, src=(out0, out1))
 
     a_t = Tensor.full(st.shape, 2).contiguous().realize()
     b_t = Tensor.full(st.shape, 3).contiguous().realize()
-    lin = helper_linearizer_ast((out0, out1), [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
+    lin = helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
 
     stores = [u for u in lin.uops if u.op is UOps.STORE]
     mutable_bufs = dedup(flatten([[x for x in u.src[0].sparents if x.op is UOps.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg for u in mutable_bufs] == [0, 1]
 
-  @unittest.skip("TODO: fix uops toposort")
-  def test_sum_multireduce(self):
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(32, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((1, 32)).expand((32, 32))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (1,))
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((32, 1))))
-    squares = (second_x-first_reduce)
-    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (0,))
-    store = LazyOp(BufferOps.STORE, (squares_sum,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((1, 1))))
-    wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1)
-    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
+    st_x = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((1, 32)).expand((32, 32)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (1,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((32, 1)).to_uop()))
+    diff = second_x - first_reduce
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (0,)))
+    store = UOp(UOps.STORE, None, (g0, ShapeTracker.from_shape((1, 1)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+    opts = [
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # grouping
+      [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
+      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
+      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)], # unroll reduce
+      [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)],
+      [Opt(OptOps.UNROLL, 0, 8), Opt(OptOps.UNROLL, 1, 8)] if Device.DEFAULT not in {"NV", "METAL"} else [], # can't do float8,
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)], # grouping + unrolling
+      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
+      [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 0, 8)],
+    ]
+    wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1).reshape(1,1)
+    lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
-  @unittest.skip("TODO: fix uops toposort")
-  def test_double_sum_multireduce(self):
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_mid_dim_multireduce(self):
     Tensor.manual_seed(0)
-    x = Tensor.randn(2, 32, 4, 16, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((2, 1, 32, 4, 1, 16)).expand((2, 32, 32, 4, 16, 16))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,5))
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((2, 32, 1, 4, 16, 1))))
+    x = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
+    st_x = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 32, 1, 5)).to_uop()))
+    diff = second_x - first_reduce
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+    opts = [
+      # locals
+      [Opt(OptOps.LOCAL, 0, 3)],
+      [Opt(OptOps.LOCAL, 0, 9)],
+      [Opt(OptOps.LOCAL, 0, 27)],
+      # grouping
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
+      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
+      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
+      # # unroll
+      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)],
+      [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)],
+      [Opt(OptOps.UNROLL, 0, 8), Opt(OptOps.UNROLL, 1, 8)] if Device.DEFAULT not in {"NV", "METAL"} else [],
+      # # upcasting
+      [Opt(OptOps.UPCAST, 0, 3)],
+      [Opt(OptOps.UPCAST, 0, 9)],
+      # locals with grouping
+      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      # locals with unroll
+      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)],
+      # locals with upcasting
+      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 9)],
+      # grouping with unrolling
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
+      # grouping with upcasting
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UPCAST, 0, 3)],
+      # locals with grouping with unroll
+      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
+      # locals with grouping with upcasting
+      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      [Opt(OptOps.LOCAL, 0, 9), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      # grouping with unrolling and upcasting
+      [Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      [Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
+      # locals + grouping + unrolling + upcasting
+      [Opt(OptOps.LOCAL, 0, 3), Opt(OptOps.UPCAST, 0, 3), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2),
+        Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+    ]
+    wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
+    lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+
+  def test_triple_multireduce(self):
+    Tensor.manual_seed(0)
+    x0 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
+    x1 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
+    x2 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
+    g0, g1, g2, g3 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(4)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x0.lazydata.st.reshape((27, 1, 1, 32, 5)).expand((27, 32, 32, 32, 5)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (3,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g2, x1.lazydata.st.reshape((27, 1, 32, 1, 5)).expand((27, 32, 32, 1, 5)).to_uop()))
+    diff = (second_x-first_reduce)
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (2,)))
+    third_x = UOp(UOps.LOAD, dtypes.float, (g3, x2.lazydata.st.reshape((27, 32, 1, 1, 5)).to_uop()))
+    mul = (third_x*second_reduce)
+    third_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (mul,), (ReduceOps.SUM, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 1, 5)).to_uop(), third_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+    wanna_output = (x2.numpy()*(x1.numpy()-x0.numpy().sum(axis=1, keepdims=True)).sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,1,5)
+    lins = helper_linearizer_ast(sink, [x0,x1,x2], wanna_output=[wanna_output])
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_double_reduce_multireduce(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(8, 32, 8, 16, dtype=dtypes.float).realize()
+    st = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 1, 32, 8, 1, 16)).expand((8, 32, 32, 8, 16, 16)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2, 5)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 32, 1, 8, 16, 1)).to_uop()))
     squares = (second_x-first_reduce)
-    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (1,4))
-    store = LazyOp(BufferOps.STORE, (squares_sum,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((2, 1, 1, 4, 1, 1))))
-    wanna_output = (x.numpy()-x.numpy().sum(axis=(1,3), keepdims=True)).sum(axis=(1,3)).reshape((2,1,1,4,1,1))
-    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output])
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (1, 4)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((8, 1, 1, 8, 1, 1)).to_uop(), squares_sum,))
+    sink = UOp(UOps.SINK, src=(store,))
+    wanna_output = (x.numpy()-x.numpy().sum(axis=(1,3), keepdims=True)).sum(axis=(1,3)).reshape((8,1,1,8,1,1))
+    opts = [
+      # openCL / GPU=1 is 256 max threads
+      # grouping
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # first dim of both reduces
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the second reduce
+      [Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)], # second dim of both reduces
+      [Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the first reduce
+      # group all reduce dims
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
+      # checking how it works with 2 grouped reduces + unrolling
+      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
+        Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      # Checking how it works with 2 grouped reduces + locals.
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 0, 4),
+       Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
+      # Checking how it works with 2 grouped reduces + locals + unroll.
+      [Opt(OptOps.LOCAL, 0, 2),
+       Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
+       Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      # Checking how it works with 2 grouped reduces + locals + upcast.
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
+       Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
+      # Checking how it works with 2 grouped reduces + locals + upcast + unroll.
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
+       Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
+       Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+    ]
+    lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i < 2: continue
+        assert ranges[i-2] != u or ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-2], ranges[i-1], {u}}"
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_partial_opt_multireduce(self):
+    # check how it works with one reduce optimized and one unoptimized
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 15, 5, dtype=dtypes.float).softmax(1).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 15, 1, 5))))
+    diff = (second_x-first_reduce)
+    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
+    store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
+    opts = [
+      [Opt(OptOps.GROUPTOP, 0, 3)], # grouping
+      [Opt(OptOps.GROUPTOP, 1, 3)],
+      [Opt(OptOps.GROUPTOP, 0, 15)],
+      [Opt(OptOps.GROUPTOP, 1, 15)],
+      [Opt(OptOps.UNROLL, 0, 3)],
+      [Opt(OptOps.UNROLL, 1, 3)],
+    ]
+    wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
+    lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_multireduce_with_parallel(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 32, dtype=dtypes.float).realize()
+    x_p = Tensor.randn(4, 32, dtype=dtypes.float).realize()
+    g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
+    first_x_p = UOp(UOps.LOAD, dtypes.float, (g2, x_p.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_reduce_p = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x_p.alu(UnaryOps.EXP2),), (ReduceOps.SUM, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1)).to_uop()))
+    diff = (second_x-(first_reduce + first_reduce_p))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((4, 1, 1)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+    opts = [
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # grouping
+      # [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
+      # [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
+      # [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)], # unroll reduce
+      [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)],
+      [Opt(OptOps.UNROLL, 0, 8), Opt(OptOps.UNROLL, 1, 8)] if Device.DEFAULT not in {"NV", "METAL"} else [], # can't do float8,
+      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)], # grouping + unrolling
+      # [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      # [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
+      # [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 0, 8)],
+    ]
+    wanna_output = (x.numpy()-(x.numpy().sum(-1, keepdims=True)+np.exp2(x_p.numpy()).sum(-1, keepdims=True))).sum(-1).reshape(4, 1,1)
+    lins = helper_linearizer_ast(sink, [x,x_p], wanna_output=[wanna_output], opts=opts)
+    for l in lins:
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
+      for i,u in enumerate(ranges):
+        if i == 0: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  def test_multiout_multireduce(self):
+    # check how multireduce works with multioutput
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 15, 5, dtype=dtypes.float).realize()
+    g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
+    diff = (second_x-first_reduce)
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    store0 = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
+    second_out = second_reduce * UOp(UOps.CONST, dtypes.float, (ShapeTracker.from_shape((27,1,1,5)).to_uop(),), 1/15)
+    store1 = UOp(UOps.STORE, src=(g1, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_out))
+    sink = UOp(UOps.SINK, src=(store0, store1))
+    wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
+
+    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output, wanna_output/15])
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.expectedFailure
+  def test_multiout_intermediate_multireduce(self):
+    # check how it outputing at different stages of the multireduce works
+    # TODO: Fails because the stores shapes do not match: store1.shape = (27,15,1,5) != store0.shape = (27,1,1,5)
+    #       so the output shapes are different (FAIL!),
+    #       if we change the shape of store1 to be contiguous, it will match store0 but not the value it's storing (FAIL!)
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 15, 5, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, x.lazydata.st.reshape((27, 15, 1, 5))))
+    diff = (second_x-first_reduce)
+    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
+    store0 = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
+    store1 = LazyOp(BufferOps.STORE, (first_reduce,), MemBuffer(1, dtypes.float, ShapeTracker(views=(View(shape=(27,15,1,5), strides=(5,0,1,1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
+    wanna_output0 = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
+    wanna_output1 = x.numpy().sum(axis=1).reshape(27,1,1,5)
+
+    ast = LazyOp(MetaOps.KERNEL, (store0,store1))
+    k = Kernel(ast)
+    prg = CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+    inbufs = [x.lazydata.base.buffer]
+    outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
+    prg.exec(outbufs+inbufs)
+    np.testing.assert_allclose(np.frombuffer(outbufs[0].as_buffer(), _to_np_dtype(outbufs[0].dtype)).reshape(27,1,1,5), wanna_output0)
+    np.testing.assert_allclose(np.frombuffer(outbufs[1].as_buffer(), _to_np_dtype(outbufs[1].dtype))[:135].reshape(27,1,1,5), wanna_output1)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  def test_complete_unroll_multireduce(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 3, 5, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 1, 3, 5)).expand((27, 3, 3, 5))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 3, 1, 5))))
+    diff = (second_x-first_reduce)
+    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
+    store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
+    opts = [[Opt(OptOps.UNROLL, 0, 3), Opt(OptOps.UNROLL, 0, 3)]]
+    wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
+    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  def test_upcast_multireduce(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 3, 5, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 1, 3, 5)).expand((27, 3, 3, 5))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 3, 1, 5))))
+    diff = (second_x-first_reduce)
+    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
+    store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
+    opts = [[Opt(OptOps.UPCAST, 0, 3)]]
+    wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
+    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skip("can't group with multiple reduces yet")
+  def test_early_endif(self):
+    # make sure the if block of a grouped reduce can be closed early and the result loaded back in
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 12, 5, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 1, 12, 5)).expand((27, 12, 12, 5))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 12, 1, 5))))
+    diff = (second_x-first_reduce)
+    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
+    store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
+    opts = [[Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 3)]]
+    wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
+    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  def test_mean_std_multireduce(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (3,))
+    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 35, 1)))) # noqa: E501
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 25, 35, 1))))
+    squares = (second_x-mean)*(second_x-mean)
+    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (2,))
+    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 1)))) # noqa: E501
+    std = LazyOp(UnaryOps.SQRT, (variance,), None)
+    store = LazyOp(BufferOps.STORE, (std,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((15, 25, 1, 1))))
+    wanna_output = x.numpy().std(axis=2, ddof=0).reshape((15,25,1,1))
+    helper_linearizer_ast((store,), [x], wanna_output=[wanna_output])
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  def test_mean_std_multireduce_mid_dim(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 1, 25, 35)).expand((15, 25, 25, 35))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
+    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(0.04, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 35)))) # noqa: E501
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 25, 1, 35))))
+    squares = (second_x-mean)*(second_x-mean)
+    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (1,))
+    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(0.04, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 1, 1, 35)))) # noqa: E501
+    std = LazyOp(UnaryOps.SQRT, (variance,), None)
+    store = LazyOp(BufferOps.STORE, (std,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((15, 1, 1, 35))))
+    wanna_output = x.numpy().std(axis=1, ddof=0).reshape((15,1,1,35))
+    helper_linearizer_ast((store,), [x], wanna_output=[wanna_output])
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.expectedFailure
+  def test_mean_std_multireduce_multiout(self):
+    # TODO: Same error as in test_multiout_intermediate_multireduce
+    Tensor.manual_seed(0)
+    x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35))))
+    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (3,))
+    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 35, 1)))) # noqa: E501
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, x.lazydata.st.reshape((15, 25, 35, 1))))
+    squares = (second_x-mean)*(second_x-mean)
+    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (2,))
+    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 1)))) # noqa: E501
+    std = LazyOp(UnaryOps.SQRT, (variance,), None)
+    store_mean = LazyOp(BufferOps.STORE, (mean,), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((15,25,1,1))))
+    store_std = LazyOp(BufferOps.STORE, (std,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((15, 25, 1, 1))))
+    wanna_output = [x.numpy().std(axis=2, ddof=0).reshape(15,25,1,1), x.numpy().mean(axis=2).reshape(15,25,1,1)]
+
+    lins = helper_linearizer_ast((store_std,store_mean), [x], wanna_output=wanna_output)
+    for k in lins:
+      assert len([u for u in k.uops if u.op is UOps.DEFINE_ACC]) == 2, "got more than two accs (implies the kernel didn't reuse the mean reduce)"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "ocelot/remu doesn't have multiple wave syncs yet")
-  @unittest.skip("TODO: fix uops toposort")
   def test_var_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(3, 27, 32, dtype=dtypes.float).realize()
@@ -147,6 +507,21 @@ class TestLinearizer(unittest.TestCase):
     # tinygrad ref
     y_tiny = x.var(axis=2, correction=0).reshape(3,27,1,1)
     np.testing.assert_allclose(y_tiny.numpy(), wanna_output, atol=1e-4, rtol=1e-4)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  def test_softmax_multireduce(self):
+    x = Tensor.rand(4, 32).realize()
+    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((4, 1, 32,)).expand((4, 32, 32))))
+    max_x = LazyOp(op=ReduceOps.MAX, src=(first_x,), arg=(2,))
+    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((4, 32, 1,))))
+    centered_x = LazyOp(op=BinaryOps.ADD, src=(second_x, LazyOp(op=UnaryOps.NEG, src=(max_x,), arg=None)))
+    exp_x = LazyOp(op=UnaryOps.EXP2, src=(centered_x,))
+    sum_exp_x = LazyOp(op=ReduceOps.SUM, src=(exp_x,), arg=(1,))
+    # y = LazyOp(op=BinaryOps.MUL, src=(exp_x, LazyOp(op=UnaryOps.RECIP, src=(sum_exp_x,)))) # kernels cannot do a return to full shape
+    recip_sum_exp_x = LazyOp(op=UnaryOps.RECIP, src=(sum_exp_x,))
+    store = LazyOp(op=BufferOps.STORE, src=(recip_sum_exp_x,), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1,1))))
+    expected = 1/np.exp2(x.numpy() - x.numpy().max(axis=-1, keepdims=True)).sum(axis=-1, keepdims=True).reshape(4,1,1)
+    helper_linearizer_ast((store,), [x], wanna_output=[expected])
 
   # *** buildup to fused indexing
   @unittest.skipIf(CI, "very slow because of recomputing")
@@ -240,6 +615,90 @@ class TestLinearizer(unittest.TestCase):
          LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),)) # noqa E501
     helper_linearizer_ast(ast, [t, t_max], wanna_output=[real_argmax])
 
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  def test_padto_sum_multireduce(self):
+    Tensor.manual_seed(0)
+    N = 17
+    x = Tensor.rand(N, N).realize()
+    opts = [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+      # TODO: multireduce pads
+      # causes an issue because the acc won't be masked in the second reduce
+      # [Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)]
+    ]
+
+    x_ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((1, N, N)).expand((N,N,N))))
+    x_ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((N, 1, N))))
+    r0 = LazyOp(ReduceOps.SUM, (x_ld0,), (1,))
+    r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.ADD, (x_ld1, LazyOp(op=UnaryOps.NEG, src=(r0,), arg=None)),),), (0,))
+    store = LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((1,1,N))))
+    helper_linearizer_ast((store,), [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=0, keepdims=True)).sum(axis=0).reshape(1,1,N)], opts=opts)
+
+    x_ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((N, 1, N)).expand((N,N,N))))
+    x_ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((N, N, 1))))
+    r0 = LazyOp(ReduceOps.SUM, (x_ld0,), (2,))
+    r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.ADD, (x_ld1, LazyOp(op=UnaryOps.NEG, src=(r0,), arg=None)),),), (1,))
+    store = LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((N,1,1))))
+    helper_linearizer_ast((store,), [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(N,1,1)], opts=opts)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  def test_padto_max_multireduce(self):
+    Tensor.manual_seed(0)
+    N = 17
+    x = Tensor.rand(N, N).realize()
+    opts = [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),]
+    ]
+
+    x_ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((1, N, N)).expand((N,N,N))))
+    x_ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((N, 1, N))))
+    r0 = LazyOp(ReduceOps.MAX, (x_ld0,), (1,))
+    r1 = LazyOp(ReduceOps.MAX, (LazyOp(BinaryOps.ADD, (x_ld1, LazyOp(op=UnaryOps.NEG, src=(r0,), arg=None)),),), (0,))
+    store = LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((1,1,N))))
+    helper_linearizer_ast((store,), [x], wanna_output=[(x.numpy()-x.numpy().max(axis=0, keepdims=True)).max(axis=0).reshape(1,1,N)], opts=opts)
+
+    x_ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((N, 1, N)).expand((N,N,N))))
+    x_ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((N, N, 1))))
+    r0 = LazyOp(ReduceOps.MAX, (x_ld0,), (2,))
+    r1 = LazyOp(ReduceOps.MAX, (LazyOp(BinaryOps.ADD, (x_ld1, LazyOp(op=UnaryOps.NEG, src=(r0,), arg=None)),),), (1,))
+    store = LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((N,1,1))))
+    helper_linearizer_ast((store,), [x], wanna_output=[(x.numpy()-x.numpy().max(axis=1, keepdims=True)).max(axis=1).reshape(N,1,1)], opts=opts)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  def test_padto_where_multireduce(self):
+    # ternary operators try to use both ridxs
+
+    # we need to make sure the ternary operators nest properly
+    N = 17
+    x = Tensor.rand(N, N).realize()
+    a = Tensor.rand(1, 1).realize()
+    b = Tensor.rand(1, 1).realize()
+    opts = [[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],]
+
+    # TODO: these large ASTs are suboptimal but we need this until the scheduler can fuse these
+    wanna_output = np.where(0.5*17 < (x.numpy()+np.where(0.75*17 < x.numpy().sum(axis=1,keepdims=True), a.numpy(), b.numpy())).sum(axis=1),0.0,1.0).reshape((N,1,1)) # noqa: E501
+    ld0 = x.lazydata.st.reshape((N, 1, N)).expand((N,N,N))
+    ld1 = x.lazydata.st.reshape((N, N, 1))
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld1)),LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,N,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld0)),), arg=(2,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,N,1)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,N,1)))),)),)),), arg=(1,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((N,1,1)))) # noqa: E501
+    helper_linearizer_ast((ast,), [x,a,b], opts=opts, wanna_output=[wanna_output])
+
+    ld0 = x.lazydata.st.reshape((1, N, N)).expand((N,N,N))
+    ld1 = x.lazydata.st.reshape((N, 1, N))
+    wanna_output = np.where(0.5*17 < (x.numpy()+np.where(0.75*17 < x.numpy().sum(axis=0,keepdims=True), a.numpy(), b.numpy())).sum(axis=0),0.0,1.0).reshape(1,1,N) # noqa: E501
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((1,1,N)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld1)),LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,N)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld0)),), arg=(1,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,N)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,N)))),)),)),), arg=(0,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((1,1,N)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((1,1,N)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,N)))) # noqa: E501
+    helper_linearizer_ast((ast,), [x,a,b], opts=opts, wanna_output=[wanna_output])
+
+    # # pad reduce axis
+    # helper_linearizer_ast((ast,), [x,a,b], opts=[[Opt(OptOps.PADTO, 1, 32)],], wanna_output=[wanna_output])
+
+    # ld0 = x.lazydata.st.reshape((1,1,N,N)).expand((N,N,N,N))
+    # ld1 = x.lazydata.st.reshape((N,N,1,1))
+    # wanna_output = np.where(0.5*17 < (x.numpy()+np.where(0.75*17 < x.numpy().sum(keepdims=True), a.numpy(), b.numpy())).sum(keepdims=True),0.0,1.0).reshape((1,1,1,1))# noqa: E501
+    # ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld1)),LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1,1)).expand((N,N,1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld0)),), arg=(2,3,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1,1)).expand((N,N,1,1)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1,1)).expand((N,N,1,1)))),)),)),), arg=(0,1,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1,1)))) # noqa: E501
+    # helper_linearizer_ast((ast,), [x,a,b], opts=[[Opt(OptOps.PADTO, 0, 32)],], wanna_output=[wanna_output])
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_end_local(self):
@@ -250,7 +709,7 @@ class TestLinearizer(unittest.TestCase):
     load_t = Tensor.full(load.st.shape, 1).contiguous().realize()
     k = helper_linearizer_ast(ast, [load_t], wanna_output=[load_t.numpy().sum()])[1]
     self.assertEqual(k.uops[-1].op, UOps.ENDIF)
-    self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.op is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
+    self.assertLess(k.uops.index([x for x in k.uops if x.op is UOps.STORE][-1]), k.uops.index(k.uops[-1]))
 
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -325,214 +784,6 @@ class TestLinearizer(unittest.TestCase):
     end = max(i for i,u in enumerate(lin.uops) if u.op is UOps.ENDRANGE)
     assert lin.uops[end+1].op is UOps.ALU
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skip("AST has implicit movement ops")
-  def test_early_end_local(self):
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.SQRT, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=UnaryOps.NEG, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=UnaryOps.NEG, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None)), arg=None),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 1), strides=(27, 1, 0), offset=0, mask=None, contiguous=True),))))), arg=None),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 1), strides=(27, 1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
-    k = Kernel(ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-    self.assertEqual(len(endifs:=[x for x in k.uops if x.op is UOps.ENDIF]), len(ifs:=[x for x in k.uops if x.op is UOps.IF]))
-    self.assertEqual(len(barriers:=[x for x in k.uops if x.op is UOps.BARRIER]), 3)
-    self.assertEqual(k.uops[k.uops.uops.index(endifs[0])-1].op, UOps.STORE)
-    self.assertEqual(k.uops[k.uops.uops.index(endifs[0])+1], barriers[1])
-    self.assertEqual(k.uops[k.uops.uops.index(endifs[0])+2].op, UOps.LOAD)
-    self.assertLess(k.uops.uops.index(barriers[0]), k.uops.uops.index(ifs[0]))
-    self.assertLess(k.uops.uops.index(ifs[0]), k.uops.uops.index(endifs[0]))
-    self.assertLess(k.uops.uops.index(barriers[1]), k.uops.uops.index(ifs[1]))
-    x = Tensor.randn(3,27,32).realize()
-    helper_linearizer_ast(ast, [x], wanna_output=[x.numpy().std(axis=2, ddof=0).reshape(-1)])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("AST has implicit movement ops")
-  def test_reduceops_order(self):
-    # make sure that the kernel put reduceops in the order of their dependencies when passed to the Linearizer in arbitrary order
-    load = MemBuffer(idx=4, dtype=dtypes.float, st=ShapeTracker.from_shape((32,)))
-    ast0 = LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),), arg=(0,))
-    ast1 = LazyOp(op=ReduceOps.SUM, src=(LazyOp(BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load), \
-      LazyOp(op=UnaryOps.NEG, src=(ast0,), arg=None))),), arg=(0,))
-    ast2 = LazyOp(op=ReduceOps.SUM, src=(LazyOp(BinaryOps.ADD, src=(ast1, LazyOp(op=UnaryOps.NEG, \
-      src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),), arg=None))),), arg=(0,))
-    ast3 = LazyOp(op=ReduceOps.SUM, src=(LazyOp(BinaryOps.ADD, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load), LazyOp(op=UnaryOps.NEG, src=(ast2,), arg=None))), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load), LazyOp(op=UnaryOps.NEG, src=(ast0,), arg=None))),)),), arg=(0,)) # noqa E501
-    for order in [(d, c, b, a) for d in range(4) for c in range(4) for b in range(4) for a in range(4) if len(set([a,b,c,d])) == 4]:
-      asts = [
-        LazyOp(op=BufferOps.STORE, src=(ast0,), arg=MemBuffer(idx=order.index(0), dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))),
-        LazyOp(op=BufferOps.STORE, src=(ast1,), arg=MemBuffer(idx=order.index(1), dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))),
-        LazyOp(op=BufferOps.STORE, src=(ast2,), arg=MemBuffer(idx=order.index(2), dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))),
-        LazyOp(op=BufferOps.STORE, src=(ast3,), arg=MemBuffer(idx=order.index(3), dtype=dtypes.float, st=ShapeTracker.from_shape((1,))))
-      ]
-      k = Kernel([asts[i] for i in order])
-      def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
-      for i,r in enumerate(k.reduceops): assert not any([r in recursive_reduceops(x) for x in k.reduceops[:i]]), "reduceops are out of order"
-      x = Tensor.randn(32).realize()
-      outs = [b:=(a:=x.numpy()).sum(), c:=(a - b).sum(), d:=(c - a).sum(), (a-d + a-b).sum()]
-      helper_linearizer_ast(tuple(asts[i] for i in order), [x], wanna_output=[outs[i] for i in order])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skip("AST has implicit movement ops")
-  def test_multireduce_store_locals(self):
-    # ensure the result of local reducop is stored and loaded back into every thread for future use
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.SQRT, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=UnaryOps.NEG, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=UnaryOps.NEG, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None)), arg=None),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 1), strides=(27, 1, 0), offset=0, mask=None, contiguous=True),))))), arg=None),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 1), strides=(27, 1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
-    k = Kernel(ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-    local_buf = [u for u in k.uops if u.op is UOps.DEFINE_LOCAL]
-    self.assertEqual(len(real_local_stores:=[u for u in k.uops if u.op is UOps.STORE and any([lb in u.src for lb in local_buf])]), 3, \
-      f"should have generated 3 BufferOps.STORE to the local buf but got {len(real_local_stores)}")
-    self.assertEqual(len(real_local_loads:=[u for u in k.uops if u.op is UOps.LOAD and any([lb in u.src for lb in local_buf])]), 3, \
-      f"should have generated 3 BufferOps.LOAD to the local buf but got {len(real_local_loads)}")
-    self.assertEqual((real_local_stores[1].src[1].op, real_local_stores[1].src[1].arg), (UOps.CONST, 0))
-    self.assertEqual((real_local_loads[1].src[1].op, real_local_loads[1].src[1].arg), (UOps.CONST, 0))
-    x = Tensor.randn(3,27,32).realize()
-    helper_linearizer_ast(ast, [x], wanna_output=[x.numpy().std(axis=2, ddof=0).reshape(-1)])
-
-  @unittest.skip("AST has implicit movement ops")
-  def test_multireduce_upcasting(self):
-    # when upcasting multiple reductions, ensure ast_parse will create multiple uops even when using the result of past reductions
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(8, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=UnaryOps.NEG, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(8, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),),))),), arg=(1,)),), arg=None),)),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(8, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
-    k = Kernel(ast)
-    k.upcast()
-    k.linearize()
-    define_globals = [u for u in k.uops if u.op is UOps.DEFINE_GLOBAL]
-    self.assertEqual(len([u for u in k.uops if u.op is UOps.LOAD and define_globals[1] in u.src]), 7)
-    self.assertEqual(len([u for u in k.uops if u.op is UOps.ALU and u.arg is BinaryOps.ADD]), 25)
-    opts = [[Opt(op=OptOps.UPCAST, axis=0, amt=2)], [Opt(op=OptOps.UPCAST, axis=0, amt=4)]]
-    x = Tensor.randn(8,7).softmax().realize()
-    helper_linearizer_ast(ast, [x], opts=opts, wanna_output=[(x.numpy() - x.numpy().sum(axis=1, keepdims=True)).sum(axis=1)])
-
-  @unittest.skip("TODO: fix uops toposort")
-  def test_multireduce_unroll(self):
-    # unrolled multireduceops will cause an issue where and reduceop following another reduceop will need to bring the "unroll" back:
-    # ex you unroll into four values, the four values sum, then you need to four operations on the sum for the next reduceop
-    Tensor.manual_seed(0)
-    x = Tensor.randn(3, 27, 12, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((3, 27, 1, 12)).expand((3, 27, 12, 12))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (3,))
-    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(1/12, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((3, 27, 12, 1)))) # noqa: E501
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((3, 27, 12, 1))))
-    squares = (second_x-mean)*(second_x-mean)
-    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (2,))
-    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(1/12, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((3, 27, 1, 1)))) # noqa: E501
-    store = LazyOp(BufferOps.STORE, (variance,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((3, 27, 1, 1))))
-    wanna_output = x.numpy().var(axis=2, ddof=0).reshape((3,27,1,1))
-    opts = [
-      [Opt(op=OptOps.UNROLL, axis=0, amt=12)],
-      [Opt(op=OptOps.UNROLL, axis=0, amt=6)],
-      [Opt(op=OptOps.UNROLL, axis=0, amt=4)],
-      [Opt(op=OptOps.UNROLL, axis=0, amt=3)],
-      [Opt(op=OptOps.UNROLL, axis=0, amt=2)],
-    ]
-    helper_linearizer_ast((store,), [x], opts=opts, wanna_output=[wanna_output])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("AST has implicit movement ops")
-  def test_multireduce_loop_scope(self):
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=UnaryOps.NEG, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None))), LazyOp(op=UnaryOps.RECIP, src=(LazyOp(op=UnaryOps.SQRT, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=UnaryOps.NEG, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=UnaryOps.NEG, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None)), arg=None),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 1), strides=(27, 1, 0), offset=0, mask=None, contiguous=True),))))), arg=None),), arg=None),)),),),), arg=(2,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 1), strides=(27, 1, 0), offset=0, mask=None, contiguous=True),),))), # noqa: E501
-    k = Kernel(ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-    def get_recursive_children(x:UOp): return set.union(set(x.src), *[get_recursive_children(v) for v in x.src])
-    loop = None
-    for u in k.uops:
-      if u.op is UOps.RANGE: loop = u
-      elif loop is None: continue
-      elif u.op is UOps.ENDRANGE and loop in u.src: loop = None
-      else: self.assertIn(loop, get_recursive_children(u), f"Any uop within a loop should depend on the loop: {u}")
-    x = Tensor.randn(3, 27, 32).realize()
-    helper_linearizer_ast(ast, [x], wanna_output= \
-      [((x.numpy() - x.numpy().mean(axis=2, keepdims=True))/x.numpy().std(axis=2, keepdims=True, ddof=0)).sum(axis=2).reshape(-1)])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("TODO: fix uops toposort")
-  def test_mean_std_multireduce(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (3,))
-    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 35, 1)))) # noqa: E501
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 25, 35, 1))))
-    squares = (second_x-mean)*(second_x-mean)
-    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (2,))
-    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 1)))) # noqa: E501
-    std = LazyOp(UnaryOps.SQRT, (variance,), None)
-    store = LazyOp(BufferOps.STORE, (std,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((15, 25, 1, 1))))
-    wanna_output = x.numpy().std(axis=2, ddof=0).reshape((15,25,1,1))
-    helper_linearizer_ast((store,), [x], wanna_output=[wanna_output])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("TODO: fix uops toposort")
-  def test_mean_std_multireduce_mid_dim(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 1, 25, 35)).expand((15, 25, 25, 35))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
-    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(0.04, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 35)))) # noqa: E501
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((15, 25, 1, 35))))
-    squares = (second_x-mean)*(second_x-mean)
-    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (1,))
-    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(0.04, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 1, 1, 35)))) # noqa: E501
-    std = LazyOp(UnaryOps.SQRT, (variance,), None)
-    store = LazyOp(BufferOps.STORE, (std,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((15, 1, 1, 35))))
-    wanna_output = x.numpy().std(axis=1, ddof=0).reshape((15,1,1,35))
-    helper_linearizer_ast((store,), [x], wanna_output=[wanna_output])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.expectedFailure
-  def test_mean_std_multireduce_multiout(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (3,))
-    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 35, 1)))) # noqa: E501
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, x.lazydata.st.reshape((15, 25, 35, 1))))
-    squares = (second_x-mean)*(second_x-mean)
-    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (2,))
-    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 1)))) # noqa: E501
-    std = LazyOp(UnaryOps.SQRT, (variance,), None)
-    third_reduce = LazyOp(ReduceOps.SUM, (second_x,), (2,))
-    mean_out = third_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 1)))) # noqa: E501
-    store_mean = LazyOp(BufferOps.STORE, (mean_out,), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((15,25,1,1))))
-    store_std = LazyOp(BufferOps.STORE, (std,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((15, 25, 1, 1))))
-    wanna_output = [x.numpy().std(axis=2, ddof=0).reshape(15,25,1,1), x.numpy().mean(axis=2).reshape(15,25,1,1)]
-    lins = helper_linearizer_ast((store_std,store_mean), [x], wanna_output=wanna_output)
-
-    for k in lins:
-      assert len([u for u in k.uops if u.op is UOps.DEFINE_ACC]) == 2, "got more than two accs (didn't reuse the mean reduce)"
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("AST has implicit movement ops")
-  def test_softmax_multireduce(self):
-    x = Tensor.rand(4, 32).realize()
-    x_ast = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((4,32))))
-    max_x = LazyOp(op=ReduceOps.MAX, src=(x_ast,), arg=(1,))
-    centered_x = LazyOp(op=BinaryOps.ADD, src=(x_ast, LazyOp(op=UnaryOps.NEG, src=(max_x,), arg=None)))
-    exp_x = LazyOp(op=UnaryOps.EXP2, src=(centered_x,))
-    sum_exp_x = LazyOp(op=ReduceOps.SUM, src=(exp_x,), arg=(1,))
-    y = LazyOp(op=BinaryOps.MUL, src=(exp_x, LazyOp(op=UnaryOps.RECIP, src=(sum_exp_x,))))
-    y_reduced = LazyOp(op=ReduceOps.SUM, src=(y,), arg=(1,))
-    ast = LazyOp(op=BufferOps.STORE, src=(y_reduced,), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
-    expected = ((np_exp2:=np.exp2(x.numpy() - x.numpy().max(axis=-1, keepdims=True)))/np_exp2.sum(axis=-1, keepdims=True)).sum(axis=-1)
-    helper_linearizer_ast((ast,), [x], wanna_output=[expected])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("AST has implicit movement ops")
-  def test_softmax_multireduce_multiout(self):
-    x = Tensor.rand(4, 32).realize()
-    x_ast = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((4,32))))
-    max_x = LazyOp(op=ReduceOps.MAX, src=(x_ast,), arg=(1,))
-    exp_x = LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.ADD, src=(x_ast, LazyOp(op=UnaryOps.NEG, src=(max_x,), arg=None))),))
-    sum_exp_x = LazyOp(op=ReduceOps.SUM, src=(exp_x,), arg=(1,))
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(exp_x, LazyOp(op=UnaryOps.RECIP, src=(sum_exp_x,)))),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1)))) # noqa: E501
-    max_x_ast = LazyOp(op=BufferOps.STORE, src=(max_x,), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
-    sum_exp_x_ast = LazyOp(op=BufferOps.STORE, src=(sum_exp_x,), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
-    expected = [
-      ((np_exp2:=np.exp2(x.numpy()-(np_max_x:=x.numpy().max(axis=-1,keepdims=True))))/(sum_exp_x:=np_exp2.sum(axis=-1,keepdims=True))).sum(axis=-1,),
-      np_max_x.reshape(-1), sum_exp_x.reshape(-1)
-    ]
-    helper_linearizer_ast((ast,max_x_ast,sum_exp_x_ast), [x], wanna_output=expected)
-
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
 
@@ -547,6 +798,7 @@ class TestLinearizer(unittest.TestCase):
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_load_cache_const_bufs(self):
     # make sure const buffers are differentiated from local and mem buffers
     ST, DT = ShapeTracker(views=(View(shape=((1,)), strides=(0, 0), offset=0, mask=None, contiguous=False),)), dtypes.int
@@ -561,8 +813,8 @@ class TestLinearizer(unittest.TestCase):
     lin = Kernel(ast)
     lin.linearize()
 
-    assert len(lin.uops.uops) <= 7, "too many uops"
-    a_bufs = [u.op for u in lin.uops.uops[-1].src[2].src]
+    assert len(lin.uops) <= 7, "too many uops"
+    a_bufs = [u.op for u in lin.uops[-1].src[2].src]
     assert a_bufs == [UOps.LOAD, UOps.CONST]
 
   def test_upcast_cse(self):
@@ -595,6 +847,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
@@ -611,22 +864,6 @@ class TestLinearizer(unittest.TestCase):
     # the second store is to gds with no upcasts
     assert stores[1].src[2].dtype == dtypes.float
     assert stores[1].src[0].op is UOps.DEFINE_GLOBAL
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("AST has implicit movement ops")
-  def test_upcast_multireduce_nested_local_upcast(self):
-    x, y, z, w = [Tensor.rand((1,128) if i % 2 == 0 else (1,128,128)).realize() for i in range(4)]
-    st0 = ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))
-    st1 = ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 1, 128), offset=0, mask=None, contiguous=False),))
-    ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, st0))
-    ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, st1))
-    ld2 = LazyOp(BufferOps.LOAD, (), MemBuffer(3, dtypes.float, st0))
-    ld3 = LazyOp(BufferOps.LOAD, (), MemBuffer(4, dtypes.float, st1))
-    r0 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.MUL, (ld0, ld1)), ), (2,))
-    r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.MUL, (ld2, ld3)), ), (2,))
-    out_st = ShapeTracker(views=(View(shape=(1, 128, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=True),))
-    ast = (LazyOp(BufferOps.STORE, (LazyOp(BinaryOps.ADD, (r0, r1)), ), MemBuffer(0, dtypes.float, out_st)),)
-    helper_linearizer_ast(ast, [x, y, z, w])
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
@@ -673,7 +910,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL")) and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
@@ -778,7 +1015,7 @@ class TestLinearizer(unittest.TestCase):
       # children of PHI are placed after ENDRANGE
       if any(x.op is UOps.PHI for x in u.src):
         end_range = [i for i, x in enumerate(k.uops) if x.op is UOps.ENDRANGE][0]
-        assert end_range < k.uops.uops.index(u)
+        assert end_range < k.uops.index(u)
 
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
@@ -848,15 +1085,15 @@ class TestLinearizer(unittest.TestCase):
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
-      sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is MetaOps.KERNEL]
+      sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is UOps.SINK]
       assert len(sched) == 1
 
       lin = Kernel(sched[0].ast)
       assert sum(u.arg is UnaryOps.RECIP for u in lin.linearize().uops) == max_ops, msg
 
-    a = Tensor.rand((4,4))
-    b = Tensor.rand((4,4))
-    d = Tensor.rand((4,4))
+    a = Tensor.empty((4,4))
+    b = Tensor.empty((4,4))
+    d = Tensor.empty((4,4))
 
     c = (a*b)/b
     helper(c, "found UnaryOps.RECIP in (a*b)/b operation")
@@ -869,7 +1106,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
-    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is MetaOps.KERNEL]
+    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is UOps.SINK]
     assert len(sched) == 1
     lin = Kernel(sched[0].ast)
     assert not any(u.op is UOps.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
@@ -1283,20 +1520,22 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 1
     assert k.upcasted == 1
 
-def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp], inputs:List[Tensor], *args, **kwargs):
-  if not isinstance(ast, LazyOp): ast = LazyOp(MetaOps.KERNEL, ast)
+def helper_linearizer_ast(ast:Union[Tuple[LazyOp, ...], LazyOp, UOp], inputs:List[Tensor], *args, **kwargs):
+  if not isinstance(ast, LazyOp) and not isinstance(ast, UOp): ast = LazyOp(MetaOps.KERNEL, ast)
   inbufs = [x.lazydata.base.buffer for x in inputs]
-  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
+  ast = to_uop(ast) if isinstance(ast, LazyOp) else ast
+  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.st_arg.size, cast(DType,out.src[2].dtype)).allocate() \
+      for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Union[Tensor, List[Tensor]], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
   return _helper_linearizer_opt_ast(realized_ast, real_bufs, *args, **kwargs)
 
-def _helper_linearizer_opt_ast(realized_ast:LazyOp, real_bufs:List[Buffer], opts=[],
+def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> List[Kernel]:
   lins: List[Kernel] = []
-  outbufs = [(real_bufs[i], lop.arg.st.shape) for i,lop in enumerate(realized_ast.src)]
+  outbufs = [(real_bufs[i], lop.st_arg.shape) for i,lop in enumerate(realized_ast.src)]
 
   def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
 
@@ -1309,7 +1548,8 @@ def _helper_linearizer_opt_ast(realized_ast:LazyOp, real_bufs:List[Buffer], opts
       for opt in opts:
         k.apply_opt(opt)
     if expected_color_size is not None:
-      assert (cs:=list(zip(k.colors(), k.full_shape))) == expected_color_size, f"expected={expected_color_size} got={cs}"
+      cs = list(zip(k.colors(), k.full_shape))
+      assert cs == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = get_prg(k)
     for buf,_ in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
@@ -1340,52 +1580,6 @@ def _helper_linearizer_opt_ast(realized_ast:LazyOp, real_bufs:List[Buffer], opts
     check_opt(x, lambda: Kernel(realized_ast), color_sizes[i] if i < len(color_sizes) else None)
   return lins
 
-# creates a back-to-back multi reduce AST by merging r0 and r1.
-# TODO: delete once we can schedule multi reduce
-def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs:Dict[int,Tensor]={}, \
-                                 merge=lambda r0,r1: LazyOp(BinaryOps.ADD, (r0, r1))) -> Tuple[LazyOp, ...]:
-  assert len(s0:=r0.schedule()) == 1 and len(s1:=r1.schedule()) == 1, "inputs should be realized"
-  assert all({idx:replace_idxs[idx] is r0 or replace_idxs[idx] is r1 for idx in replace_idxs}.values()), "replace idxs should be in {{r0, r1}}"
-  op0, op1 = s0[0].ast.src[0].src[0], s1[0].ast.src[0].src[0]
-  _replace_idxs = {idx:(op0 if replace_idxs[idx] is r0 else op1) for idx in replace_idxs}
-  def _deep_replace(op:LazyOp, offset=0):
-    if op.op is BufferOps.LOAD:
-      if op.arg.idx+offset in _replace_idxs: return _replace_idxs[op.arg.idx+offset]
-      else: arg = MemBuffer(op.arg.idx+offset, op.arg.dtype, op.arg.st)
-    else: arg = op.arg
-    return LazyOp(op.op, tuple(_deep_replace(x, offset) for x in op.src), arg)
-  # limitation: r0 and r1 cannot share inputs.
-  op0 = _deep_replace(op0, 0)
-  op0_loads = len([x for x in op0.lazyops if x.op is BufferOps.LOAD])
-  out = merge(op0, _deep_replace(op1, op0_loads))
-  # limitation: only tests single output
-  op = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, s0[-1].ast.src[-1].arg.dtype, s0[-1].ast.src[-1].arg.st))
-  if DEBUG >= 3: print(op)
-  return op,
-
-def check_fused_tc_opt(tc:TensorCore, r0:Tensor, r1:Tensor, inputs:List[Tensor]):
-  ast = _temp_create_multireduce_ast(r0, r1)
-  (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
-  helper_linearizer_ast(ast, inputs, [
-    [],
-    [Opt(OptOps.UPCAST, 0, 4)],
-    [Opt(OptOps.UPCAST, 1, 4)],
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
-    [Opt(OptOps.UNROLL, 0, 2)], # check unroll
-    [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
-    [Opt(OptOps.LOCAL, 0, 4)], # check local
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
-    [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
-    [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-    [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
-    [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
-    [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-    # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
-  ], apply_tc=True, atol=atol, rtol=rtol)
-
 class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -1414,114 +1608,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2)] * 4,
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)] * 4,
     ])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("parallel reduce")
-  def test_local_and_grouped_reduce_multireduce(self):
-    N = 128
-    Tensor.manual_seed(1882)
-    a = Tensor.rand(4, 4, N, N).realize()
-    b = Tensor.rand(4, 4, N).realize()
-    # TODO: this isn't the best AST, it's always math.inf
-    r0 = (b.sqrt() + ((a+1).sum(axis=3).exp()))
-    c = Tensor.rand(4, 4, N, N).realize()
-    d = Tensor.rand(4, 4, N).realize()
-    r1 = (d.sqrt() + ((c+1).sum(axis=3).exp()))
-    ast = _temp_create_multireduce_ast(r0, r1)
-    helper_linearizer_ast(ast, [b, a, d, c], [
-      [Opt(OptOps.LOCAL, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 8)],
-      [Opt(OptOps.LOCAL, 0, 16)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
-      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
-      # Checking how it works with locals + grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)],
-      # Checking how it works with locals + grouped reduce + upcasts
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
-    ])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("AST has implicit movement ops")
-  def test_atomic_store_multireduce(self):
-    # reducops will need to use the local buffer to load the result of a local reduce into every thread, barriers are needed on both sides
-    # of the load to ensure 1) the correct value is in the local buffer and 2) the value isn't overwritten by the next reduceop
-    N = 512
-    Tensor.manual_seed(1882)
-    a,b = Tensor.rand(4,4,N).realize(), Tensor.rand(4,4,N).realize()
-    r0,r1 = a.sum(-1), b.sum(-1)
-    ast = _temp_create_multireduce_ast(r0, r1)
-    lins = helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
-
-    # sequential
-    a,b = Tensor.rand(4,4,N).realize(), Tensor.rand(4,4,N).realize()
-    dummy = Tensor.rand(4,4,1).realize()
-    r0,r1 = (a-dummy).sum(-1), b.sum(-1)
-    ast = _temp_create_multireduce_ast(r0, r1, replace_idxs={2:r1}, merge=lambda r0,_: r0)
-    lins += helper_linearizer_ast(ast, [a], [[Opt(OptOps.GROUP, 0, 2)]])
-
-    for k in lins:
-      seen_bar = False
-      for u in k.uops:
-        if u.op is UOps.BARRIER:
-          assert not seen_bar, "redudant barrier"
-          seen_bar = True
-        elif (u.op is UOps.LOAD or u.op is UOps.STORE): seen_bar = False
-
-  @unittest.skip("TODO: broken")
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  def test_atomic_store_unrolled_multireduce(self):
-    # unrolled local dim - causes stores for local reductions to pool at the top of the kernel, overwriting eachother
-    Tensor.manual_seed(1882)
-    a,b = Tensor.rand(4,).realize(), Tensor.rand(4,).realize()
-    r0,r1 = a.sum(), b.sum()
-    ast = _temp_create_multireduce_ast(r0, r1)
-    lins = helper_linearizer_ast(ast, [a,b], [
-      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.GROUP, 0, 2)]
-    ])
-
-    for k in lins:
-      seen_bar = False
-      for u in k.uops:
-        if u.op is UOps.BARRIER:
-          assert not seen_bar, "redudant barrier"
-          seen_bar = True
-        elif (u.op is UOps.LOAD or u.op is UOps.STORE): seen_bar = False
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("AST has implicit movement ops")
-  def test_atomic_store_nested_range_multireduce(self):
-    # nested ranges
-    Tensor.manual_seed(1882)
-    a,b = Tensor.rand(6, ).realize(), Tensor.rand(6, ).realize()
-    r0,r1 = a.reshape(6, 1).expand(6, 3).sum(), b.reshape(6, 1).expand(6, 3).sum()
-    ast = _temp_create_multireduce_ast(r0, r1)
-    lins = helper_linearizer_ast(ast, [a,b], [
-      [Opt(OptOps.GROUP, 0, 2)],[Opt(OptOps.GROUP, 1, 3)],
-      [Opt(OptOps.GROUP, 1, 3), Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.UNROLL, 0, 2)],[Opt(OptOps.UNROLL, 1, 3)],
-      [Opt(OptOps.GROUP, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
-      [Opt(OptOps.GROUP, 1, 3), Opt(OptOps.UNROLL, 1, 3)],
-    ])
-
-    for k in lins:
-      seen_bar = False
-      for u in k.uops:
-        if u.op is UOps.BARRIER:
-          assert not seen_bar, "redudant barrier"
-          seen_bar = True
-        elif (u.op is UOps.LOAD or u.op is UOps.STORE): seen_bar = False
 
   def test_upcasts(self):
     N = 16
@@ -1573,41 +1659,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)],
     ])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("AST has implicit movement ops")
-  def test_matmul_multireduce(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a = Tensor.rand(N, N).realize()
-    b = Tensor.rand(N, N).realize()
-    r0 = a@b
-    c = Tensor.rand(N, N).realize()
-    d = Tensor.rand(N, N).realize()
-    r1 = c@d
-    ast = _temp_create_multireduce_ast(r0, r1)
-    helper_linearizer_ast(ast, [a, b, c, d], [
-      [Opt(OptOps.UPCAST, 0, 2)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # Checking how it works with upcasts
-      [Opt(OptOps.LOCAL, 0, 2)],
-      [Opt(OptOps.LOCAL, 1, 32)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 32)],
-      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.LOCAL, 1, 8)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.UNROLL, 0, 4)], # Checking how it works with grouped_reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 4)], # Checking how it works with local+grouped_reduce
-      # Checking all together
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4),
-       Opt(OptOps.UPCAST, 1, 2)],
-      # Full global upcast + local
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)],
-    ], wanna_output=[(a.numpy()@b.numpy()+c.numpy()@d.numpy()).flatten()])
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_double_reduce(self):
@@ -1634,37 +1685,6 @@ class TestKernelOpts(unittest.TestCase):
        Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("AST has implicit movement ops")
-  def test_double_reduce_multireduce(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a = Tensor.rand(8, N, 8, N).realize()
-    r0 = a.sum(axis=(1,3))
-    b = Tensor.rand(8, N, 8, N).realize()
-    r1 = b.sum(axis=(1,3))
-    ast = _temp_create_multireduce_ast(r0, r1)
-    helper_linearizer_ast(ast, [a, b], [
-      # openCL / GPU=1 is 256 max threads
-      [Opt(OptOps.GROUPTOP, 0, 2)], [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 1, 2)], [Opt(OptOps.GROUPTOP, 1, 32)], # Checking how it works with 1 grouped_reduce.
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 64)], # Checking how it works with 2 grouped_reduces.
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 0, 4)],
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 2, 4)], # Checking how it works with 2 grouped_reduces + upcasts.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4)],
-      # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 1, 4)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
-       Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
-       Opt(OptOps.UPCAST, 0, 2)], # No globals
-    ], wanna_output=[(a.numpy().sum(axis=(1, 3))+b.numpy().sum(axis=(1, 3))).flatten()])
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_invalid_tensor_core_extra_opts(self):
     N = 128
@@ -1689,25 +1709,6 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       k.apply_opt(Opt(OptOps.TC, 0, 1))
 
-  @unittest.skip("parallel tensor cores")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_invalid_fused_tensor_core(self):
-    Tensor.manual_seed(1552)
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in == dtypes.bfloat16: continue
-      M, N, K = 12, 8, 30
-      a, b = Tensor.rand(M, K, dtype=tc.dtype_in).realize(), Tensor.rand(K, N, dtype=tc.dtype_in).realize()
-      r0 = a.matmul(b, acc_dtype=tc.dtype_out)
-      M, N, K = 16, 8, 33
-      c, d = Tensor.rand(M, K, dtype=tc.dtype_in).realize(), Tensor.rand(K, N, dtype=tc.dtype_in).realize()
-      r1 = c.matmul(d, acc_dtype=tc.dtype_out)
-      ast = _temp_create_multireduce_ast(r0, r1)
-      lin = Kernel(ast)
-      lin.apply_opt(Opt(op=OptOps.TC, axis=0, amt=2))
-      lin.linearize()
-      result = compare_linearizer(lin)
-      assert result[0] == "COMPARE_ERROR"
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_core_opts(self):
     N = 128
@@ -1724,48 +1725,33 @@ class TestKernelOpts(unittest.TestCase):
         [Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
         [Opt(OptOps.UNROLL, 0, 2)], # check unroll
-        [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
-        [Opt(OptOps.LOCAL, 0, 4)], # check local
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
         [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
-        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
         # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
       ], apply_tc=True, atol=atol, rtol=rtol)
 
-  @unittest.skip("parallel tensor cores")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_fused_tensor_core_simple(self):
-    N = 64
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_tensor_core_opts_locals(self):
+    N = 128
     Tensor.manual_seed(1552)
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
       if tc.dtype_in == dtypes.bfloat16: continue
-      [a, b, c, d] = [Tensor.randn(N, N, dtype=tc.dtype_in).realize() for _ in range(4)]
-      r0 = a.matmul(b, acc_dtype=tc.dtype_out)
-      r1 = c.matmul(d, acc_dtype=tc.dtype_out)
-      check_fused_tc_opt(tc, r0, r1, [a, b, c, d])
-
-  @unittest.skip("parallel tensor cores")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_fused_tensor_core_permuted(self):
-    N = 64
-    Tensor.manual_seed(1552)
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in == dtypes.bfloat16: continue
-      # one permuted
-      [a, b, c, d] = [Tensor.randn(N, N, dtype=tc.dtype_in).realize() for _ in range(4)]
-      r0 = a.matmul(b, acc_dtype=tc.dtype_out)
-      r1 = c.T.matmul(d, acc_dtype=tc.dtype_out)
-      check_fused_tc_opt(tc, r0, r1, [a, b, c, d])
-      # both permuted
-      r0 = a.T.matmul(b, acc_dtype=tc.dtype_out)
-      r1 = c.T.matmul(d, acc_dtype=tc.dtype_out)
-      check_fused_tc_opt(tc, r0, r1, [a, b, c, d])
+      a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
+      r = a.matmul(b, acc_dtype=tc.dtype_out)
+      (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
+      helper_linearizer_opt(r, [
+        [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
+        [Opt(OptOps.LOCAL, 0, 4)], # check local
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
+        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
+      ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
     if CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
@@ -1902,91 +1888,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8)],
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.GROUP, 0, 4)]
     ])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("AST has implicit movement ops")
-  def test_padto_sum_multireduce(self):
-    Tensor.manual_seed(0)
-    N = 17
-    x = Tensor.rand(N, N).realize()
-    opts = [[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],]
-    x_ld = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((N, N))))
-
-    def ast(axis, output_shape):
-      r0 = LazyOp(ReduceOps.SUM, (x_ld,), axis)
-      r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.ADD, (x_ld, LazyOp(op=UnaryOps.NEG, src=(r0,), arg=None)),),), axis)
-      return LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape(output_shape))),
-    helper_linearizer_ast(ast((0, ), (1, 17)), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)])
-    helper_linearizer_ast(ast((1, ), (17, 1)), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=1,keepdims=True)).sum(1)])
-
-    expected = (x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)
-    helper_linearizer_ast(ast((0, ), (1, 17)), [x], opts=[[Opt(OptOps.PADTO, 1, 32)]], wanna_output=[expected])
-
-    op = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(x_ld,LazyOp(op=UnaryOps.NEG, src=(LazyOp(op=ReduceOps.SUM, src=(x_ld,), arg=(0,1)),),arg=None))),), arg=(0,1)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    helper_linearizer_ast((op,), [x], opts=[[Opt(OptOps.PADTO, 0, 32)],], wanna_output=[(x.numpy()-x.numpy().sum(keepdims=True)).sum()])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("AST has implicit movement ops")
-  def test_padto_max_multireduce(self):
-    Tensor.manual_seed(0)
-    N = 17
-    x = Tensor.rand(N, N).realize()
-    opts = [[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],]
-    x_ld = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((N, N))))
-
-    def ast(axis, output_shape):
-      r0 = LazyOp(ReduceOps.MAX, (x_ld,), axis)
-      r1 = LazyOp(ReduceOps.MAX, (LazyOp(BinaryOps.ADD, (x_ld,r0,),),), axis)
-      return LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape(output_shape))),
-    helper_linearizer_ast(ast((0, ), (1, 17)), [x], opts=opts, wanna_output=[(x.numpy()+x.numpy().max(axis=0,keepdims=True)).max(0)])
-    helper_linearizer_ast(ast((1, ), (17, 1)), [x], opts=opts, wanna_output=[(x.numpy()+x.numpy().max(axis=1,keepdims=True)).max(1)])
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.skip("AST has implicit movement ops")
-  def test_padto_where_multireduce(self):
-    # we need to make sure the ternary operators nest properly
-    N = 17
-    x = Tensor.rand(N, N).realize()
-    a = Tensor.rand(1, 1).realize()
-    b = Tensor.rand(1, 1).realize()
-    opts = [[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],]
-
-    # TODO: these large ASTs are suboptimal but we need this until the scheduler can fuse these
-    wanna_output = np.where(0.5*17 < (x.numpy()+np.where(0.75*17 < x.numpy().sum(axis=1,keepdims=True), a.numpy(), b.numpy())).sum(axis=1),0.0,1.0)
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((N,N)))),LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((N,N)))),), arg=(1,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),)),), arg=(1,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((N,1)))) # noqa: E501
-    helper_linearizer_ast((ast,), [x,a,b], opts=opts, wanna_output=[wanna_output])
-
-    wanna_output = np.where(0.5*17 < (x.numpy()+np.where(0.75*17 < x.numpy().sum(axis=0,keepdims=True), a.numpy(), b.numpy())).sum(axis=0),0.0,1.0)
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((N,N)))),LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((N,N)))),), arg=(0,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),)),), arg=(0,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,N)))) # noqa: E501
-    helper_linearizer_ast((ast,), [x,a,b], opts=opts, wanna_output=[wanna_output])
-
-    # pad reduce axis
-    helper_linearizer_ast((ast,), [x,a,b], opts=[[Opt(OptOps.PADTO, 1, 32)],], wanna_output=[wanna_output])
-
-    wanna_output = np.where(0.5*17 < (x.numpy()+np.where(0.75*17 < x.numpy().sum(keepdims=True), a.numpy(), b.numpy())).sum(keepdims=True),0.0,1.0)
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((N,N)))),LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((N,N)))),), arg=(0,1,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),)),), arg=(0,1,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))) # noqa: E501
-    helper_linearizer_ast((ast,), [x,a,b], opts=[[Opt(OptOps.PADTO, 0, 32)],], wanna_output=[wanna_output.flatten()])
-
-  def test_padto_matmul_multireduce(self):
-    if CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
-    N = 17 * 17
-    Tensor.manual_seed(289)
-    a = Tensor.rand(N, N).realize()
-    b = Tensor.rand(N, N).realize()
-    c = Tensor.rand(N, N).realize()
-    d = Tensor.rand(N, N).realize()
-    r0 = a@b
-    r1 = c@d
-    ast = _temp_create_multireduce_ast(r0,r1)
-    helper_linearizer_ast(ast, [a,b,c,d], opts=[
-      [Opt(OptOps.PADTO, 0, 32)],
-      [Opt(OptOps.PADTO, 1, 32)],
-      [Opt(OptOps.PADTO, 2, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
-      # can optimize further post PADTO
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
-    ], wanna_output=[(a.numpy()@b.numpy()+c.numpy()@d.numpy()).reshape(N, N, 1)])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")

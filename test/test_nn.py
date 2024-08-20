@@ -3,10 +3,10 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
+from tinygrad.ops import UOps
 from tinygrad.helpers import CI, Context
-from tinygrad.ops import MetaOps
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
-from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm
+from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -440,7 +440,7 @@ class TestNN(unittest.TestCase):
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(3, len([item for item in schedule if item.ast.op is MetaOps.KERNEL]), "first run realizes arange, weight, and embedding")
+    self.assertEqual(3, len([item for item in schedule if item.ast.op is UOps.SINK]), "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
     b = Tensor([[1, 2, 3],
@@ -448,7 +448,7 @@ class TestNN(unittest.TestCase):
                 [7, 8, 9]])
     result = layer(b)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(1, len([item for item in schedule if item.ast.op is MetaOps.KERNEL]), "second run realizes embedding only")
+    self.assertEqual(1, len([item for item in schedule if item.ast.op is UOps.SINK]), "second run realizes embedding only")
     run_schedule(schedule)
 
   def test_load_state_dict(self):
@@ -480,6 +480,40 @@ class TestNN(unittest.TestCase):
     self.assertEqual(layer.bias.device, devices)
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  def test_lstm_cell(self):
+    layer = LSTMCell(32, 16)
+    with torch.no_grad():
+      torch_layer = torch.nn.LSTMCell(32, 16)
+      layer.weight_hh.assign(torch_layer.weight_hh.numpy())
+      layer.weight_ih.assign(torch_layer.weight_ih.numpy())
+      layer.bias_hh.assign(torch_layer.bias_hh.numpy())
+      layer.bias_ih.assign(torch_layer.bias_ih.numpy())
+
+      inp = Tensor.randn(1, 32)
+      out_h, out_c = layer(inp)
+      torch_out_h, torch_out_c = torch_layer(torch.tensor(inp.numpy()))
+      np.testing.assert_allclose(out_h.numpy(), torch_out_h.numpy(), atol=1e-6)
+      np.testing.assert_allclose(out_c.numpy(), torch_out_c.numpy(), atol=1e-6)
+
+      out_h, out_c = layer(inp, (out_h, out_c))
+      torch_out_h, torch_out_c = torch_layer(torch.tensor(inp.numpy()), (torch_out_h, torch_out_c))
+      np.testing.assert_allclose(out_h.numpy(), torch_out_h.numpy(), atol=1e-6)
+      np.testing.assert_allclose(out_c.numpy(), torch_out_c.numpy(), atol=1e-6)
+
+  def test_lstm_cell_no_bias(self):
+    layer = LSTMCell(32, 16, bias=False)
+    inp = Tensor.randn(1, 32)
+    out_h, out_c = layer(inp)
+    out_h.realize()
+    out_c.realize()
+    h = Tensor.randn(1, 16)
+    c = Tensor.randn(1, 16)
+    out_h, out_c = layer(inp, (h, c))
+    out_h.realize()
+    out_c.realize()
+    assert layer.bias_hh is None
+    assert layer.bias_ih is None
 
 if __name__ == '__main__':
   unittest.main()

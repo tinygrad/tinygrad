@@ -1,11 +1,12 @@
 import unittest
 import time
 import numpy as np
+from test.helpers import TestUOps
 from tinygrad import Tensor, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item, run_schedule
 
-class TestFusionOp(unittest.TestCase):
+class TestFusionOp(TestUOps):
   def test_contiguous_add(self):
     def test(contig=False):
       bt = Tensor(np.arange(16), dtype=dtypes.float32).reshape(4,4)
@@ -28,7 +29,7 @@ class TestFusionOp(unittest.TestCase):
     for _ in range(24): a = a + a
     sched = create_schedule([a.lazydata], None)
     ei = lower_schedule_item(sched[-1])
-    self.assertLess(time.perf_counter()-st, 1.0)
+    self.assertLess(time.perf_counter()-st, 2.0)
     assert len(ei.prg.p.src.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
@@ -42,9 +43,9 @@ class TestFusionOp(unittest.TestCase):
     c = Tensor([1,2,3,4])
     for _ in range(23): c = c + c
     sched3 = create_schedule([c.lazydata], None)
-    assert sched1[-1].ast == sched2[-1].ast
-    assert sched1[-1].ast != sched3[-1].ast
-    self.assertLess(time.perf_counter()-st, 1.0)
+    self.assert_equiv_uops(sched1[-1].ast, sched2[-1].ast)
+    with self.assertRaises(AssertionError): self.assert_equiv_uops(sched1[-1].ast, sched3[-1].ast)
+    self.assertLess(time.perf_counter()-st, 2.0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

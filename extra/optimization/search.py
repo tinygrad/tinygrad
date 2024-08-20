@@ -21,7 +21,7 @@ if __name__ == '__main__':
     ast_strs = [args.ast]
   elif args.file is not None:
     with open(args.file, 'r') as file:
-     ast_strs = file.readlines()
+      ast_strs = file.readlines()
 
   for i, ast_str in enumerate(ast_strs):
     print(f"optimizing {i}/{len(ast_strs)}\nast={ast_str}")
