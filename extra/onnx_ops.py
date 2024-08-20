@@ -443,7 +443,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   if mode == "nearest":
     indexes = [_apply_nearest_mode(*args, nearest_mode) for args in zip(indexes, input_shape)]
     indexes = [idx.reshape(*(-1 if i == dim else 1 for i in range(len(sizes)))).expand(sizes) for dim, idx in enumerate(indexes)]
-    X = X[tuple(slice(None) for _ in range(X.ndim - len(indexes))) + tuple(indexes)]
+    X = X[(..., *indexes)]
   if mode == "linear":
     expand = list(X.shape)
     for i in range(-len(sizes), 0):
