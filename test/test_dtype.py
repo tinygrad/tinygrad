@@ -35,7 +35,8 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
-    np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2}.get(target_dtype, 1e-7))
+    rtol = {dtypes.float16:1e-3, dtypes.bfloat16:1e-2, dtypes.fp8_e4m3:1e-1, dtypes.fp8_e5m2:1e-1}.get(target_dtype, 1e-7)
+    np.testing.assert_allclose(tensor.numpy(), target, rtol=rtol)
   except AssertionError as e:
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
@@ -54,7 +55,7 @@ def _test_cast(a:Tensor, target_dtype:DType):
 
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
-  if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
+  if target_dtype in (dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2): raise unittest.SkipTest("no test for bf16 bitcast yet")
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
 
 class TestDType(unittest.TestCase):
@@ -97,10 +98,9 @@ class TestDType(unittest.TestCase):
   def test_bitcast(self):
     if Device.DEFAULT == "WEBGL": raise unittest.SkipTest("no bitcast in WebGL GLSL")
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
-    if self.DTYPE in [dtypes.fp8_e4m3, dtypes.fp8_e5m2]: raise unittest.SkipTest("no bitcast test support for fp8")
     list(map(
       lambda dtype:
-        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype not in (dtypes.bool, dtypes.fp8_e4m3, dtypes.fp8_e5m2) else None,
+        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
 
