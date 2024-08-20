@@ -272,7 +272,6 @@ constant_folder = PatternMatcher([
   (-(-NOp.var('x')), lambda x: x),    # -(-x) -> x
   (NOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (NOp.var('x') * 1, lambda x: x),    # x*1 -> x
-  (NOp.var('x') * -1, lambda x: -x),  # x*-1 -> -x
   (NOp.var('x') // NOp.var('x'), lambda x: x.const(1)), # x//x -> 1
   (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
@@ -337,8 +336,6 @@ constant_folder = PatternMatcher([
   (NOp.var("x") + NOp.var("x") * NOp.cvar("c0"), lambda x,c0: x*(c0.arg+1)),
   # x!=0 -> (bool)x
   (NOp.var("x").ne(0), lambda x: x.cast(dtypes.bool)),
-  # bool != 1 -> not bool
-  (NOp.var("x", dtype=dtypes.bool).ne(1), lambda x: -x),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("gate").where(NOp.var("alt"), NOp.load(NOp.var("buf"), NOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
