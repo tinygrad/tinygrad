@@ -407,7 +407,9 @@ class NVDevice(HCQCompiled):
     classlist = memoryview(bytearray(100 * 4)).cast('I')
     clsinfo = rmctrl.gpu_get_classlist(self.fd_ctl, self.root, self.device, numClasses=100, classList=mv_address(classlist))
     self.nvclasses = {classlist[i] for i in range(clsinfo.numClasses)}
-    self.compute_class = next(clss for clss in [nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_COMPUTE_B] if clss in self.nvclasses)
+    self.compute_class = next(clss for clss in [nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_COMPUTE_B, nv_gpu.TURING_COMPUTE_A] if clss in self.nvclasses)
+    self.copy_class = next(clss for clss in [nv_gpu.AMPERE_DMA_COPY_B, nv_gpu.TURING_DMA_COPY_A] if clss in self.nvclasses)
+    self.channel_gpfifo_class = next(clss for clss in [nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.TURING_CHANNEL_GPFIFO_A] if clss in self.nvclasses)
 
   def __init__(self, device:str=""):
     if NVDevice.root is None:
@@ -494,9 +496,9 @@ class NVDevice(HCQCompiled):
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.hMemory, hObjectBuffer=gpfifo_area.hMemory,
       gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare,
       hUserdMemory=(ctypes.c_uint32*8)(gpfifo_area.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
-    gpfifo = rm_alloc(self.fd_ctl, nv_gpu.AMPERE_CHANNEL_GPFIFO_A, self.root, channel_group, params).hObjectNew
+    gpfifo = rm_alloc(self.fd_ctl, self.channel_gpfifo_class, self.root, channel_group, params).hObjectNew
     rm_alloc(self.fd_ctl, self.compute_class, self.root, gpfifo, None)
-    rm_alloc(self.fd_ctl, nv_gpu.AMPERE_DMA_COPY_B, self.root, gpfifo, None)
+    rm_alloc(self.fd_ctl, self.copy_class, self.root, gpfifo, None)
 
     ws_token_params = rmctrl.gpfifo_get_work_submit_token(self.fd_ctl, self.root, gpfifo, workSubmitToken=-1)
     assert ws_token_params.workSubmitToken != -1
@@ -516,7 +518,7 @@ class NVDevice(HCQCompiled):
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
 
     NVCopyQueue().wait(self.timeline_signal, self.timeline_value) \
-                 .setup(copy_class=nv_gpu.AMPERE_DMA_COPY_B) \
+                 .setup(copy_class=self.copy_class) \
                  .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
 
     self.timeline_value += 2
