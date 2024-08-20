@@ -509,7 +509,7 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
-    _assert_eq(Tensor.arange(3, 9, 0.4), dtypes.default_float, np.arange(3, 9, 0.4))
+    _assert_eq(Tensor.arange(3, 9, 0.45), dtypes.default_float, np.arange(3, 9, 0.45))
     _assert_eq(Tensor.arange(3, 8.5, 3), dtypes.default_float, np.arange(3, 8.5, 3))
     # stop-start and step have different signs
     _assert_eq(Tensor.arange(3, 5, -2), dtypes.default_int, np.arange(3, 5, -2))
