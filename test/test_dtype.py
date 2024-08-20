@@ -214,8 +214,10 @@ class TestFp8DType(TestDType):
     lambda dtype: self._test_cast_fp8(dtype, self.DTYPE),
     get_available_cast_dtypes(self.DTYPE)
   ))
-
+@unittest.skipUnless(is_dtype_supported(dtypes.fp8_e4m3), "no fp8_e4m3 support")
 class TestFp8e4m3DType(TestFp8DType): DTYPE = dtypes.fp8_e4m3
+
+@unittest.skipUnless(is_dtype_supported(dtypes.fp8_e5m2), "no fp8_e5m2 support")
 class TestFp8e5m2DType(TestFp8DType): DTYPE = dtypes.fp8_e5m2
 
 class TestHalfDType(TestDType): DTYPE = dtypes.half
