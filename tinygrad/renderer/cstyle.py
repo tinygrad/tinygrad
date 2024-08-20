@@ -366,6 +366,7 @@ class AMDRenderer(CStyleLanguage):
   shared_max = 65536
   tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
 
+  # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
   ocml = [("__ocml_" + name + f"_f{n}", f"{dt}, {dt}" if "fmax" == name else dt, dt, atr)
             for dt, n in [("float", 32), ("double", 64), ("_Float16", 16)]
