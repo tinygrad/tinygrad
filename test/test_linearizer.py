@@ -481,22 +481,24 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.expectedFailure
   def test_mean_std_multireduce_multiout(self):
-    # TODO: Same error as in test_multiout_intermediate_multireduce
+    # TODO: Similar error to test_multiout_intermediate_multireduce (implicit expand vs shape mismatch)
     Tensor.manual_seed(0)
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (3,))
-    mean = first_reduce * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 35, 1)))) # noqa: E501
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, x.lazydata.st.reshape((15, 25, 35, 1))))
+    g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (3,)))
+    mean = first_reduce * UOp(UOps.CONST, dtypes.float, (ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 35, 1)).to_uop(),), 1/35) # noqa: E501
+    second_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((15, 25, 35, 1)).to_uop()))
     squares = (second_x-mean)*(second_x-mean)
-    squares_sum = LazyOp(ReduceOps.SUM, (squares,), (2,))
-    variance = squares_sum * LazyOp(BufferOps.CONST, (), ConstBuffer(1/35, dtypes.float, ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 1)))) # noqa: E501
-    std = LazyOp(UnaryOps.SQRT, (variance,), None)
-    store_mean = LazyOp(BufferOps.STORE, (mean,), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((15,25,1,1))))
-    store_std = LazyOp(BufferOps.STORE, (std,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((15, 25, 1, 1))))
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (2,)))
+    variance = squares_sum * UOp(UOps.CONST, dtypes.float, (ShapeTracker.from_shape(()).reshape((1, 1, 1, 1)).expand((15, 25, 1, 1)).to_uop(),), 1/35) # noqa: E501
+    std = variance.alu(UnaryOps.SQRT)
+    store_mean = UOp(UOps.STORE, src=(g1, ShapeTracker.from_shape((15,25,1,1)).to_uop(), mean))
+    store_std = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), std))
+    sink = UOp(UOps.SINK, src=(store_std, store_mean))
     wanna_output = [x.numpy().std(axis=2, ddof=0).reshape(15,25,1,1), x.numpy().mean(axis=2).reshape(15,25,1,1)]
 
-    lins = helper_linearizer_ast((store_std,store_mean), [x], wanna_output=wanna_output)
+    lins = helper_linearizer_ast(sink, [x], wanna_output=wanna_output)
     for k in lins:
       assert len([u for u in k.uops if u.op is UOps.DEFINE_ACC]) == 2, "got more than two accs (implies the kernel didn't reuse the mean reduce)"
 
