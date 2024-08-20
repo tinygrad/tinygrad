@@ -71,6 +71,24 @@ class TestNN(unittest.TestCase):
         np.testing.assert_allclose(bn.running_mean.numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
         np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
 
+  def test_batchnorm_online_stats(self):
+    sz = 3
+    bn = BatchNorm(sz, track_running_stats=False)
+    x = Tensor.rand(2, sz, 4, 4)
+
+    for _ in range(5):
+      bn(x)
+
+    self.assertTrue(bn.online_count.item() > 0, "Online count should be greater than zero")
+    self.assertIsNotNone(bn.online_mean, "Online mean should not be None")
+    self.assertIsNotNone(bn.online_var, "Online variance should not be None")
+
+    output = bn(x)
+    self.assertEqual(output.shape, x.shape, "Output shape should match input shape")
+
+    np.testing.assert_allclose(bn.online_mean.numpy(), x.mean(axis=(0, 2, 3)).numpy(), rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(bn.online_var.numpy(), x.var(axis=(0, 2, 3)).numpy(), rtol=1e-5, atol=1e-6)
+
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
 

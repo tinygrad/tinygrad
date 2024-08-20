@@ -35,14 +35,43 @@ class BatchNorm:
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
     if track_running_stats:
       self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+      self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+
+    # Variables for online calculation when track_running_stats is False
+    if not track_running_stats:
+      self.online_mean = Tensor.zeros(sz, requires_grad=False)
+      self.online_var = Tensor.zeros(sz, requires_grad=False)
+      self.online_count = Tensor.zeros(1, requires_grad=False)
 
   def calc_stats(self, x:Tensor) -> Tuple[Tensor, Tensor]:
     shape_mask = [1, -1, *([1]*(x.ndim-2))]
     if self.track_running_stats and not Tensor.training:
       return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
+
+    elif not self.track_running_stats:
+      batch_mean = x.mean(axis=(reduce_axes:=tuple(x for x in range(x.ndim) if x != 1)))
+      y = (x - batch_mean.detach().reshape(shape=shape_mask))  # d(var)/d(mean) = 0
+      batch_var = (y*y).mean(axis=reduce_axes)
+
+      # Update online algorithm using online mean and variance using Welford's method
+      batch_size = x.shape[0]
+      new_count = self.online_count + batch_size
+
+      delta = batch_mean - self.online_mean
+      new_mean = self.online_mean + delta * (batch_size / new_count)
+
+      m_a = self.online_var * self.online_count
+      m_b = batch_var * batch_size
+      new_var = (m_a + m_b + delta**2 * (self.online_count * batch_size / new_count)) / new_count
+
+      self.online_mean.assign(new_mean)
+      self.online_var.assign(new_var)
+      self.online_count.assign(new_count)
+
+      return new_mean, new_var
+
     else:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
