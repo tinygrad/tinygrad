@@ -281,12 +281,14 @@ class TestLinearizer(unittest.TestCase):
     # check how it works with one reduce optimized and one unoptimized
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 15, 5, dtype=dtypes.float).softmax(1).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 15, 1, 5))))
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
     diff = (second_x-first_reduce)
-    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
-    store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
     opts = [
       [Opt(OptOps.GROUPTOP, 0, 3)], # grouping
       [Opt(OptOps.GROUPTOP, 1, 3)],
@@ -296,7 +298,7 @@ class TestLinearizer(unittest.TestCase):
       [Opt(OptOps.UNROLL, 1, 3)],
     ]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
-    lins = helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
