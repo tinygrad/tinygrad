@@ -731,54 +731,17 @@ class TestLinearizer(unittest.TestCase):
     opts = [[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],]
 
     # TODO: these large ASTs are suboptimal but we need this until the scheduler can fuse these
-    # AST 1
     wanna_output = np.where(0.5*17 < (x.numpy()+np.where(0.75*17 < x.numpy().sum(axis=1,keepdims=True), a.numpy(), b.numpy())).sum(axis=1),0.0,1.0).reshape((N,1,1)) # noqa: E501
+    ld0 = x.lazydata.st.reshape((N, 1, N)).expand((N,N,N))
+    ld1 = x.lazydata.st.reshape((N, N, 1))
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld1)),LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,N,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld0)),), arg=(2,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,N,1)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,N,1)))),)),)),), arg=(1,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((N,1,1)))) # noqa: E501
+    helper_linearizer_ast((ast,), [x,a,b], opts=opts, wanna_output=[wanna_output])
 
-    ld0 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=x.lazydata.st.reshape((N,1,N)).expand((N,N,N))))
-    reduce = LazyOp(op=ReduceOps.SUM, src=(ld0,), arg=(2,))
-
-    c0 = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,N,1))))
-    cmplt = LazyOp(op=BinaryOps.CMPLT, src=(c0, reduce))
-    ld0 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,N,1))))
-    ld1 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,N,1))))
-    where = LazyOp(op=TernaryOps.WHERE, src=(cmplt, ld0, ld1))
-
-    ld0 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=x.lazydata.st.reshape((N,N,1))))
-    reduce = LazyOp(op=ReduceOps.SUM, src=((ld0 + where),), arg=(1,))
-
-    c0 = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,1))))
-    cmplt = LazyOp(op=BinaryOps.CMPLT, src=(c0, reduce))
-
-    c0 = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,1))))
-    c1 = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,1))))
-    where = LazyOp(op=TernaryOps.WHERE, src=(cmplt, c0, c1))
-
-    store = LazyOp(op=BufferOps.STORE, src=(where,), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((N,1,1))))
-    helper_linearizer_ast((store,), [x,a,b], opts=opts, wanna_output=[wanna_output])
-
-    # AST 2
+    ld0 = x.lazydata.st.reshape((1, N, N)).expand((N,N,N))
+    ld1 = x.lazydata.st.reshape((N, 1, N))
     wanna_output = np.where(0.5*17 < (x.numpy()+np.where(0.75*17 < x.numpy().sum(axis=0,keepdims=True), a.numpy(), b.numpy())).sum(axis=0),0.0,1.0).reshape(1,1,N) # noqa: E501
-    ld0 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=x.lazydata.st.reshape((1,N,N)).expand((N,N,N))))
-    reduce = LazyOp(op=ReduceOps.SUM, src=(ld0,), arg=(1,))
-
-    c0 = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,N))))
-    cmplt = LazyOp(op=BinaryOps.CMPLT, src=(c0, reduce))
-    ld0 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,N))))
-    ld1 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,N))))
-    where = LazyOp(op=TernaryOps.WHERE, src=(cmplt, ld0, ld1))
-
-    ld0 = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=x.lazydata.st.reshape((N,1,N))))
-    reduce = LazyOp(op=ReduceOps.SUM, src=((ld0 + where),), arg=(0,))
-
-    c0 = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((1,1,N))))
-    cmplt = LazyOp(op=BinaryOps.CMPLT, src=(c0, reduce))
-
-    c0 = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((1,1,N))))
-    c1 = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((1,1,N))))
-    where = LazyOp(op=TernaryOps.WHERE, src=(cmplt, c0, c1))
-
-    store = LazyOp(op=BufferOps.STORE, src=(where,), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,N))))
-    helper_linearizer_ast((store,), [x,a,b], opts=opts, wanna_output=[wanna_output])
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((1,1,N)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld1)),LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,N)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ld0)),), arg=(1,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,N)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((N,1,N)))),)),)),), arg=(0,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((1,1,N)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)).expand((1,1,N)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,N)))) # noqa: E501
+    helper_linearizer_ast((ast,), [x,a,b], opts=opts, wanna_output=[wanna_output])
 
     # # pad reduce axis
     # helper_linearizer_ast((ast,), [x,a,b], opts=[[Opt(OptOps.PADTO, 1, 32)],], wanna_output=[wanna_output])
