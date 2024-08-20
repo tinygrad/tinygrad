@@ -2013,8 +2013,8 @@ class Tensor:
     ```
     """
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
-    assert mode in ["linear", "nearest", "nearest-exact"], "only supports linear, nearest, and nearest-exact interpolation"
-    if mode == "nearest" and align_corners: raise ValueError("align_corners option can only be set with interpolating mode linear")
+    assert mode in ["linear", "nearest", "nearest-exact"], "only supports linear, nearest, and nearest-exact interpolate"
+    if mode != "linear" and align_corners: raise ValueError("align_corners can only be set with interpolate mode linear")
     x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
