@@ -75,8 +75,8 @@ class TestNN(unittest.TestCase):
 
   def test_batchnorm3d(self): self.test_batchnorm2d(threed=True)
   def test_batchnorm3d_training(self): self.test_batchnorm2d(training=True, threed=True)
-  def test_batchnorm3d_tracking(self): self.test_batchnorm2d(tracking=True, threed=True)
-  def test_batchnorm3d_training_and_tracking(self): self.test_batchnorm2d(training=True, tracking=True, threed=True)
+  def test_batchnorm3d_tracking(self): self.test_batchnorm2d(track_running_stats=True, threed=True)
+  def test_batchnorm3d_training_and_tracking(self): self.test_batchnorm2d(training=True, track_running_stats=True, threed=True)
 
   def test_batchnorm_axis(self):
     sz = (2, 4, 3, 2, 2)
