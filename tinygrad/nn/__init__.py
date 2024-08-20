@@ -36,8 +36,7 @@ class BatchNorm:
     else: self.weight, self.bias = None, None
 
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
-    if track_running_stats:
-      self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
 
   def calc_stats(self, x:Tensor) -> Tuple[Tensor, Tensor]:
     shape_mask = [1, -1, *([1]*(x.ndim-2))]
@@ -55,7 +54,7 @@ class BatchNorm:
     # NOTE: wow, this is done all throughout training in most PyTorch models
     if self.track_running_stats and Tensor.training:
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-      self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * batch_var.detach())
+      self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(x.shape)/(prod(x.shape)-x.shape[1]) * batch_var.detach())
       self.num_batches_tracked += 1
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
