@@ -988,7 +988,17 @@ class TestOps(unittest.TestCase):
   def test_std_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.std(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.std(0, keepdim=True, correction=0))
-
+  def test_std_mean(self):
+    helper_test_op([(15,25,35)], lambda x: torch.stack(torch.std_mean(x)),
+                                 lambda x: Tensor.stack(*x.std_mean()))
+    helper_test_op([(15,25,35)], lambda x: torch.stack(torch.std_mean(x, correction=5)),
+                                 lambda x: Tensor.stack(*x.std_mean(correction=5)))
+    helper_test_op([(15,25,35)], lambda x: torch.stack(torch.std_mean(x, keepdim=True, correction=0)),
+                                 lambda x: Tensor.stack(*x.std_mean(keepdim=True, correction=0)))
+    helper_test_op([(1,0,3,0,5)], lambda x: torch.stack(torch.std_mean(x, axis=(1,3))),
+                                  lambda x: Tensor.stack(*x.std_mean(axis=(1,3))))
+    helper_test_op([(3,4,5,6)], lambda x: torch.stack(torch.std_mean(x, axis=(1,2))),
+                                lambda x: Tensor.stack(*x.std_mean(axis=(1,2))))
   def test_softmax(self):
     # exceed per kernel buffer limit with backward
     forward_only = (Device.DEFAULT == "WEBGPU")
@@ -2005,13 +2015,31 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),torch.clip(y,0,1)),
                                        lambda x,y: x.binary_crossentropy_logits(y.clip(0,1)))
 
+  def test_cross_entropy(self):
+    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y),
+                                       lambda x,y: x.cross_entropy(y))
+    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, torch.argmax(y, dim=1)),
+                                       lambda x,y: x.cross_entropy(y.argmax(axis=1)), forward_only=True)
+  def test_cross_entropy_reductions(self):
+    for r in ("mean", "sum", "none"):
+      helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, reduction=r),
+                                         lambda x,y: x.cross_entropy(y, reduction=r))
+  def test_cross_entropy_smoothing(self):
+    for ls in (0., 0.3, 0.7, 1.):
+      helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, label_smoothing=ls),
+                                         lambda x,y: x.cross_entropy(y, label_smoothing=ls))
+
   def test_one_hot(self):
     data = [1, 2, 4]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6).type(torch.int32),
                        lambda: Tensor(data).one_hot(6), forward_only=True)
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)).type(torch.int32),
+                       lambda: Tensor(data).one_hot(), forward_only=True)
     data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8).type(torch.int32),
                        lambda: Tensor(data).one_hot(8), forward_only=True)
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)).type(torch.int32),
+                       lambda: Tensor(data).one_hot(), forward_only=True)
 
   def test_masked_fill(self):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))

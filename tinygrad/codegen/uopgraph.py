@@ -589,7 +589,7 @@ def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, s
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check:
-    bad_ops = dedup([x.op for x in _uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE}])
+    bad_ops = dedup([x.op for x in _uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.REDUCE_AXIS, UOps.SHAPETRACKER}])
     try:
       type_verify(_uops)
       assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
