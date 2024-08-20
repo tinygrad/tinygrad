@@ -2,7 +2,7 @@ import ctypes, ctypes.util
 from tinygrad.helpers import ObjcClass, ObjcInstance
 
 metal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/Metal")
-core_graphics = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+core_graphics = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")  # needed: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 
 metal.MTLCreateSystemDefaultDevice.restype, metal.MTLCreateSystemDefaultDevice.argtypes = ctypes.c_void_p, []
 
