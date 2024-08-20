@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, cast, Generator, Tuple, Union
 import time, pprint
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
+from tinygrad.helpers import USE_COPY_KERNEL, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
 from tinygrad.ops import MetaOps, UOps, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
@@ -187,7 +187,7 @@ class ExecItem:
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or (si.ast.op is UOps.EXT and si.ast.arg[0] is MetaOps.COPY)
+  assert len(set(x.device for x in si.bufs)) == 1 or (si.ast.op is UOps.EXT and si.ast.arg[0] is MetaOps.COPY) or USE_COPY_KERNEL
   if si.ast.op is UOps.SINK:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)

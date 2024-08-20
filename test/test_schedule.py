@@ -1281,6 +1281,19 @@ class TestSchedule(unittest.TestCase):
     b = a.e(BinaryOps.ADD, b)
     check_schedule(b, 1)
 
+  def test_copy_kernel(self):
+    e = Tensor.full((4, 4), 2.5).contiguous().to("CLANG:1")
+    ext_copy = e.schedule()
+    self.assertIs(ext_copy[-1].ast.op, UOps.EXT)
+    run_schedule(ext_copy)
+    with Context(USE_COPY_KERNEL=1):
+      k = Tensor.full((4, 4), 2.5).contiguous().to("CLANG:1")
+      kernel_copy = k.schedule()
+      self.assertIs(kernel_copy[-1].ast.op, UOps.SINK)
+      run_schedule(kernel_copy)
+    np.testing.assert_allclose(e.numpy(), k.numpy())
+    assert e.device == k.device == "CLANG:1"
+
   def test_reduceop_reshape_dont_push(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(10, 20).realize()
