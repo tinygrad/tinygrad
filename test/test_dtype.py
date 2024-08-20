@@ -453,7 +453,6 @@ class TestTypeSpec(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
-    if default_float in (dtypes.fp8_e4m3, dtypes.fp8_e5m2): raise unittest.SkipTest("no test_creation for fp8")
     _assert_eq(Tensor(True), dtypes.bool, True)
     _assert_eq(Tensor(None), dtypes.default_float, [])
     _assert_eq(Tensor(2), dtypes.default_int, 2)
@@ -502,7 +501,6 @@ class TestTypeSpec(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_arange(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
-    if default_float in (dtypes.fp8_e4m3, dtypes.fp8_e5m2): raise unittest.SkipTest("no test_creation for fp8")
     _assert_eq(Tensor.arange(5), dtypes.default_int, np.arange(5))
     _assert_eq(Tensor.arange(120), dtypes.default_int, np.arange(120))
     _assert_eq(Tensor.arange(5.0), dtypes.default_float, np.arange(5))
@@ -510,7 +508,7 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
-    _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7))
+    _assert_eq(Tensor.arange(3, 9, 0.4), dtypes.default_float, np.arange(3, 9, 0.4))
     _assert_eq(Tensor.arange(3, 8.5, 3), dtypes.default_float, np.arange(3, 8.5, 3))
     # stop-start and step have different signs
     _assert_eq(Tensor.arange(3, 5, -2), dtypes.default_int, np.arange(3, 5, -2))

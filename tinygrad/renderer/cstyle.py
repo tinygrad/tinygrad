@@ -284,7 +284,6 @@ class MetalRenderer(CStyleLanguage):
   return {arg[3].name}2(c.thread_elements()[0], c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-
 # CUDA does not handle fp8 arithmetic natively. We cast to float, do arithmetic and cast back.
 fp8_dtypes = {dtypes.fp8_e4m3, dtypes.fp8_e5m2}
 
