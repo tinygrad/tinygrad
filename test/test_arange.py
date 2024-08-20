@@ -125,6 +125,13 @@ class TestIndexing(unittest.TestCase):
   @unittest.skip("not ready")
   def test_index_fused_opt(self): self.test_index_fused(0)
 
+  def test_index_fused_out_of_bounds(self):
+    dataset = Tensor.rand(256, 256).realize()
+    idxs = Tensor([-19238, -257, 256, 495, 10982377]).realize()
+    with Context(NOOPT=1, FUSE_ARANGE=1):
+      X = dataset[idxs]
+      np.testing.assert_equal(X.numpy(), 0)
+
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_index_mnist(self, noopt=1):
     from tinygrad.nn.datasets import mnist

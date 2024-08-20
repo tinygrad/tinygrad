@@ -197,7 +197,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
 
 def index_collapse(idx,rng,buf,add,mul,ld,reduce):
   if rng not in reduce.src: return None
-  return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx)),)+
+  return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx, ld.const(0), idx.ge(rng.src[0]) & idx.lt(rng.src[1]))),)+
              tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
 # this is symbolic 2.0
