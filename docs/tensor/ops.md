@@ -8,6 +8,7 @@
 ::: tinygrad.Tensor.mean
 ::: tinygrad.Tensor.var
 ::: tinygrad.Tensor.std
+::: tinygrad.Tensor.std_mean
 ::: tinygrad.Tensor.softmax
 ::: tinygrad.Tensor.log_softmax
 ::: tinygrad.Tensor.logsumexp
@@ -40,3 +41,4 @@
 ::: tinygrad.Tensor.binary_crossentropy
 ::: tinygrad.Tensor.binary_crossentropy_logits
 ::: tinygrad.Tensor.sparse_categorical_crossentropy
+::: tinygrad.Tensor.cross_entropy

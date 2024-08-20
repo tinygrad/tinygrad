@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
+from tinygrad.ops import UOps
 from tinygrad.tensor import Tensor
-from tinygrad.ops import MetaOps, BufferOps
 from tinygrad.nn import Conv2d
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.shape.shapetracker import ShapeTracker, View
@@ -16,20 +16,19 @@ class TestConvShapetracker(unittest.TestCase):
     # first run to init the weights, they are saved in seen
     create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen)
     # run it again to get the kernels
-    sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen) if si.ast.op is MetaOps.KERNEL]
+    sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen) if si.ast.op is UOps.SINK]
     assert len(sched) == 1, f"conv should only have one kernel, getting {len(sched)}"
-    for st in [x.arg.st for x in sched[0].ast.lazyops if x.op is BufferOps.LOAD]:
+    for st in [x.st_arg for x in sched[0].ast.parents if x.op is UOps.LOAD]:
       assert len(st.views) == 1
 
-  @unittest.expectedFailure
   def test_conv_2x2_backward_one_view(self):
     X = Tensor.rand(1, 1, 3, 3, requires_grad=True)
     conv = Conv2d(1, 1, (2, 2), bias=False)
     conv(X).mean().backward()
     si = X.grad.schedule()[-1]
     print(si)
-    ldb = [x for x in si.ast.lazyops if x.op is BufferOps.LOAD][0]
-    st: ShapeTracker = ldb.arg.st.simplify()
+    ldb = [x for x in si.ast.parents if x.op is UOps.LOAD][0]
+    st: ShapeTracker = ldb.st_arg.simplify()
     # NOTE: st.real_size() is broken
     print(si.inputs[0].size)
     #self.assertEqual(si.inputs[0].size, st.real_size())
@@ -57,7 +56,8 @@ class TestConvShapetracker(unittest.TestCase):
       s,va = stt.expr_idxs()
       print(s)
       print(va)
-    assert len(st.views) <= 2
+    with self.assertRaises(AssertionError):
+      assert len(st.views) <= 2
 
 if __name__ == '__main__':
   unittest.main()

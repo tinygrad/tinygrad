@@ -129,6 +129,18 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
+def tar_extract(fn:os.PathLike) -> Dict[str, Tensor]:
+  """
+  Extracts files from a tar archive and returns them as dictionary of names (keys) and tensors (values).
+
+  ```python
+  tensors = nn.state.tar_extract("archive.tar")
+  ```
+  """
+  t = Tensor(pathlib.Path(fn))
+  with tarfile.open(fn, "r") as tar:
+    return {member.name:t[member.offset_data:member.offset_data+member.size] for member in tar if member.type == tarfile.REGTYPE}
+
 # torch support!
 
 def torch_load(fn:str) -> Dict[str, Tensor]:
@@ -167,7 +179,8 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
     def __setstate__(self, state): self.tensor = state[0]
 
   deserialized_objects: Dict[str, Any] = {}
-  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16, "IntStorage": dtypes.int32,
+  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16,
+               "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool,
                "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2, "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass

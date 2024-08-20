@@ -24,20 +24,21 @@ if __name__ == "__main__":
   opt = nn.optim.Adam(nn.state.get_parameters(model))
 
   @TinyJit
+  @Tensor.train()
   def train_step() -> Tensor:
-    with Tensor.train():
-      opt.zero_grad()
-      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
-      # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-      loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
-      opt.step()
-      return loss
+    opt.zero_grad()
+    samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
+    # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
+    loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
+    opt.step()
+    return loss
 
   @TinyJit
+  @Tensor.test()
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
 
   test_acc = float('nan')
-  for i in (t:=trange(70)):
+  for i in (t:=trange(getenv("STEPS", 70))):
     GlobalCounters.reset()   # NOTE: this makes it nice for DEBUG=2 timing
     loss = train_step()
     if i%10 == 9: test_acc = get_test_acc().item()
