@@ -14,7 +14,7 @@ from tinygrad.engine.schedule import ScheduleItem
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
+def get_kernels(renderer:Renderer, ast:UOp) -> List[Kernel]:
   if DEBUG >= 5:
     print(ast)
   k = Kernel(ast, opts=renderer).required_optimizations()
@@ -61,7 +61,8 @@ def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
                   raise RuntimeError(f"mismatch of {diff_count}/{b.numel()} items with type {b.dtype}, max {(b-bufs[0]).abs().max().item()}")
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
-  return k
+  # NOTE: this can return multiple kernels for one ast in the future (for things like split reduce op)
+  return [k]
 
 # **************** Runners ****************
 
@@ -147,14 +148,14 @@ class BufferXfer(BufferCopy):
 # **************** method cache ****************
 
 method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
-def get_runner(dname:str, ast:UOp) -> CompiledRunner:
-  ckey = (dname, ast.key, BEAM.value, NOOPT.value, False)
+def get_runner(dname:str, k:Kernel) -> CompiledRunner:
+  ckey = (dname, k.ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (dname.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
+  bkey = (dname.split(":")[0], k.ast.key, BEAM.value, NOOPT.value, True)
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
-    prg: Program = get_kernel(Device[dname].renderer, ast).to_program()
+    prg: Program = k.to_program()
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return UOpsFuzzerRunner(replace(prg, dname=dname))
@@ -186,26 +187,28 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-def lower_schedule_item(si:ScheduleItem) -> ExecItem:
+def lower_schedule_item(si:ScheduleItem) -> List[ExecItem]:
   assert len(set(x.device for x in si.bufs)) == 1 or (si.ast.op is UOps.EXT and si.ast.arg[0] is MetaOps.COPY)
   if si.ast.op is UOps.SINK:
-    runner = get_runner(si.outputs[0].device, si.ast)
-    return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
+    dname = si.outputs[0].device
+    runners = [get_runner(dname, k) for k in get_kernels(Device[dname].renderer, si.ast)]
+    return [ExecItem(r, [si.bufs[x] for x in r.p.globals], si.metadata) for r in runners]
   out, (op, arg) = si.outputs[0], si.ast.arg
   if op is MetaOps.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
-    return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
-  if op is MetaOps.CUSTOM: return ExecItem(CustomOp(arg), list(si.bufs))
-  if op is MetaOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if op is MetaOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
+    return [ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))]
+  if op is MetaOps.CUSTOM: return [ExecItem(CustomOp(arg), list(si.bufs))]
+  if op is MetaOps.EMPTY: return [ExecItem(EmptyOp(out), list(si.bufs))]
+  if op is MetaOps.VIEW: return [ExecItem(ViewOp(out), list(si.bufs))]
   raise RuntimeError(f"don't know how to lower {si.ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule):
     si = schedule.pop(0)
-    try: yield lower_schedule_item(si)
+    try:
+      for ei in lower_schedule_item(si): yield ei
     except Exception as e:
       if DEBUG >= 2:
         print(f"error lowering {si.ast.op}")

@@ -59,8 +59,8 @@ st_0 = UOp(UOps.STORE, None, (output_buf, ShapeTracker.from_shape((1,)).to_uop()
 s = UOp(UOps.SINK, None, (st_0,))
 
 # convert the computation to a "linearized" format (print the format)
-from tinygrad.engine.realize import get_kernel, CompiledRunner
-kernel = get_kernel(Device[DEVICE].renderer, s).linearize()
+from tinygrad.engine.realize import get_kernels, CompiledRunner
+kernel = get_kernels(Device[DEVICE].renderer, s)[-1].linearize()
 
 # compile a program (and print the source)
 fxn = CompiledRunner(kernel.to_program())
