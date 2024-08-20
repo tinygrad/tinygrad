@@ -145,24 +145,20 @@ class LazyBuffer:
       raise AssertionError(f"all dtypes must match {dts} on {op}")
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
-    if op is UnaryOps.NEG: assert srcs[0].dtype != dtypes.bool, "UnaryOps.NEG does not accept dtype bool"
 
     out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else srcs[-1].dtype
 
     # const folding
     if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
       return self.cast(out_dtype).const(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
-    if op is UnaryOps.NEG and self.base.op is UnaryOps.NEG and self.base.realized is None: return self.base.srcs[0]
     if op in BinaryOps:
       x, y = self, in_srcs[0]
       if op is BinaryOps.ADD:
         if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
         if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
       if op is BinaryOps.MUL:
-        if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):
-          return y if val == 1 else y.const(0) if val == 0 else y.e(UnaryOps.NEG)
-        if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0, -1):
-          return x if val == 1 else x.const(0) if val == 0 else x.e(UnaryOps.NEG)
+        if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0): return y if val == 1 else y.const(0)
+        if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0): return x if val == 1 else x.const(0)
 
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
