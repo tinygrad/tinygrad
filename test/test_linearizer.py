@@ -84,10 +84,11 @@ class TestLinearizer(unittest.TestCase):
 
   def test_multioutput(self):
     dtype, st = dtypes.int, ShapeTracker.from_shape((8,))
-    a = UOp(UOps.LOAD, dtype, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=2), st.to_uop()))
-    b = UOp(UOps.LOAD, dtype, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=3), st.to_uop()))
-    out0 = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=0), st.to_uop(), a + b))
-    out1 = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=1), st.to_uop(), a * b))
+    g0, g1, g2, g3 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=i) for i in range(4)]
+    a = UOp(UOps.LOAD, dtype, (g2, st.to_uop()))
+    b = UOp(UOps.LOAD, dtype, (g3, st.to_uop()))
+    out0 = UOp(UOps.STORE, None, (g0, st.to_uop(), a + b))
+    out1 = UOp(UOps.STORE, None, (g1, st.to_uop(), a * b))
     sink = UOp(UOps.SINK, src=(out0, out1))
 
     a_t = Tensor.full(st.shape, 2).contiguous().realize()
@@ -106,12 +107,13 @@ class TestLinearizer(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(32, dtype=dtypes.float).realize()
     st_x = x.lazydata.st
-    first_x = UOp(UOps.LOAD, dtypes.float, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1), st_x.reshape((1, 32)).expand((32, 32)).to_uop()))
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((1, 32)).expand((32, 32)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (1,)))
-    second_x = UOp(UOps.LOAD, dtypes.float, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1), st_x.reshape((32, 1)).to_uop()))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((32, 1)).to_uop()))
     diff = second_x - first_reduce
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (0,)))
-    store = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0), ShapeTracker.from_shape((1, 1)).to_uop(), second_reduce))
+    store = UOp(UOps.STORE, None, (g0, ShapeTracker.from_shape((1, 1)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
       [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # grouping
