@@ -107,7 +107,8 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
+    val = TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]
+    assert val == 1.0, f"got val {val}"
 
   def test_exec_2_kernels_100_times(self):
     q = TestHCQ.d0.hw_compute_queue_t()
@@ -120,7 +121,8 @@ class TestHCQ(unittest.TestCase):
       q.update_wait(0, value=TestHCQ.d0.timeline_value - 1).update_signal(3, value=TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0.timeline_value += 1
 
-    assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 200.0, f"got val {val}"
+    val = TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]
+    assert val == 200.0, f"got val {val}"
 
   def test_exec_update(self):
     q = TestHCQ.d0.hw_compute_queue_t()
@@ -132,11 +134,13 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
-    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 0.0, f"got val {val}, should not be updated"
+    val = TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]
+    assert val == 1.0, f"got val {val}"
+    val = TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]
+    assert val == 0.0, f"got val {val}, should not be updated"
 
   def test_exec_update_fuzz(self):
-    a = Tensor.rand((3, 3, 3), dtype=dtypes.int, device=Device.DEFAULT).realize()
+    a = Tensor.randint((3, 3, 3), dtype=dtypes.int, device=Device.DEFAULT).realize()
     b = a + 1
     si = create_schedule([b.lazydata])[-1]
     k = Kernel(si.ast, opts=TestHCQ.d0.renderer)
@@ -178,7 +182,8 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
+    val = TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]
+    assert val == 1.0, f"got val {val}"
 
   def test_copy_long(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -211,7 +216,8 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
+    val = TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]
+    assert val == 1.0, f"got val {val}"
 
   def test_update_copy_long(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
