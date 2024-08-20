@@ -528,17 +528,19 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_softmax_multireduce(self):
     x = Tensor.rand(4, 32).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((4, 1, 32,)).expand((4, 32, 32))))
-    max_x = LazyOp(op=ReduceOps.MAX, src=(first_x,), arg=(2,))
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((4, 32, 1,))))
-    centered_x = LazyOp(op=BinaryOps.ADD, src=(second_x, LazyOp(op=UnaryOps.NEG, src=(max_x,), arg=None)))
-    exp_x = LazyOp(op=UnaryOps.EXP2, src=(centered_x,))
-    sum_exp_x = LazyOp(op=ReduceOps.SUM, src=(exp_x,), arg=(1,))
-    # y = LazyOp(op=BinaryOps.MUL, src=(exp_x, LazyOp(op=UnaryOps.RECIP, src=(sum_exp_x,)))) # kernels cannot do a return to full shape
-    recip_sum_exp_x = LazyOp(op=UnaryOps.RECIP, src=(sum_exp_x,))
-    store = LazyOp(op=BufferOps.STORE, src=(recip_sum_exp_x,), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1,1))))
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 1, 32,)).expand((4, 32, 32)).to_uop()))
+    max_x = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.MAX, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1,)).to_uop()))
+    centered_x = second_x - max_x
+    exp_x = centered_x.alu(UnaryOps.EXP2)
+    sum_exp_x = UOp(UOps.REDUCE_AXIS, dtypes.float, (exp_x,), (ReduceOps.SUM, (1,)))
+    # y = exp_x * sum_exp_x.alu(UnaryOps.RECIP) # kernels cannot do a return to full shape
+    recip_sum_exp_x = sum_exp_x.alu(UnaryOps.RECIP)
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((4,1,1)).to_uop(), recip_sum_exp_x))
+    sink = UOp(UOps.SINK, src=(store,))
     expected = 1/np.exp2(x.numpy() - x.numpy().max(axis=-1, keepdims=True)).sum(axis=-1, keepdims=True).reshape(4,1,1)
-    helper_linearizer_ast((store,), [x], wanna_output=[expected])
+    helper_linearizer_ast(sink, [x], wanna_output=[expected])
 
   # *** buildup to fused indexing
   @unittest.skipIf(CI, "very slow because of recomputing")
