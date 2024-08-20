@@ -430,15 +430,17 @@ class TestLinearizer(unittest.TestCase):
     # make sure the if block of a grouped reduce can be closed early and the result loaded back in
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 12, 5, dtype=dtypes.float).realize()
-    first_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 1, 12, 5)).expand((27, 12, 12, 5))))
-    first_reduce = LazyOp(ReduceOps.SUM, (first_x,), (2,))
-    second_x = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, x.lazydata.st.reshape((27, 12, 1, 5))))
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 12, 5)).expand((27, 12, 12, 5)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 12, 1, 5)).to_uop()))
     diff = (second_x-first_reduce)
-    second_reduce = LazyOp(ReduceOps.SUM, (diff,), (1,))
-    store = LazyOp(BufferOps.STORE, (second_reduce,), MemBuffer(0, dtypes.float, ShapeTracker.from_shape((27, 1, 1, 5))))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
     opts = [[Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 3)]]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
-    helper_linearizer_ast((store, ), [x], wanna_output=[wanna_output], opts=opts)
+    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_mean_std_multireduce(self):
