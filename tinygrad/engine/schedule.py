@@ -314,7 +314,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if tr.op is UnaryOps.CAST and tr.dtype.itemsize > tr.srcs[0].dtype.itemsize:
+        if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       realizes[tr] = None
