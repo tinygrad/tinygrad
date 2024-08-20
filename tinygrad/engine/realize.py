@@ -2,7 +2,8 @@ from typing import List, Dict, Optional, cast, Generator, Tuple, Union
 import time, pprint
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.helpers import USE_COPY_KERNEL, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
+from tinygrad.helpers import colored, all_int, ansilen, dedup, getenv, DEBUG, BEAM, NOOPT, CAPTURING, USE_COPY_KERNEL, TRACEMETA, \
+                             GlobalCounters, Metadata, Context
 from tinygrad.ops import MetaOps, UOps, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer

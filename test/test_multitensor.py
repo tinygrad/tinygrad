@@ -5,7 +5,7 @@ from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
+from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
 from tinygrad.multi import all_reduce, MultiLazyBuffer
 import numpy as np
 from hypothesis import given, strategies as strat, settings
@@ -172,6 +172,33 @@ class TestMultiTensor(unittest.TestCase):
       t = Tensor.rand(256).realize()
       x = copy_tensor(t)
       np.testing.assert_equal((t+1).numpy(), x.numpy())
+
+  def test_copy_kernel(self):
+    a = Tensor.full((4, 4), 2.5).contiguous().to(f"{Device.DEFAULT}:1")
+    ext_copy = a.schedule()
+    self.assertIs(ext_copy[-1].ast.op, UOps.EXT)
+    run_schedule(ext_copy)
+    with Context(USE_COPY_KERNEL=1):
+      b = Tensor.full((4, 4), 2.5).contiguous().to(f"{Device.DEFAULT}:1")
+      kernel_copy = b.schedule()
+      self.assertIs(kernel_copy[-1].ast.op, UOps.SINK)
+      run_schedule(kernel_copy)
+    np.testing.assert_allclose(a.numpy(), b.numpy())
+    assert a.device == b.device == f"{Device.DEFAULT}:1"
+
+  @unittest.skipIf(Device.DEFAULT == "CLANG", "tests ext device to clang")
+  def test_no_copy_between_devices(self):
+    a = Tensor.full((4, 4), 2.5).contiguous().to("CLANG")
+    ext_copy = a.schedule()
+    self.assertIs(ext_copy[-1].ast.op, UOps.EXT)
+    run_schedule(ext_copy)
+    with Context(USE_COPY_KERNEL=1):
+      b = Tensor.full((4, 4), 2.5).contiguous().to("CLANG")
+      ext_copy_2 = b.schedule()
+      self.assertIs(ext_copy_2[-1].ast.op, UOps.EXT)
+      run_schedule(ext_copy_2)
+    np.testing.assert_allclose(a.numpy(), b.numpy())
+    assert a.device == b.device == "CLANG"
 
   def test_allreduce_naive_jit(self):
     with Context(RING=0):
