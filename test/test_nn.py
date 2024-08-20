@@ -95,6 +95,40 @@ class TestNN(unittest.TestCase):
 
     np.testing.assert_allclose(a.numpy(), b.numpy())
 
+  def test_batchnorm_track_running_stats(self):
+    sz = 4
+    for tracking in (False, True):
+      for training in (False, True):
+        x = Tensor.randn(2, sz, 3, 3)
+        bn = BatchNorm(sz, track_running_stats=tracking)
+        bn.running_mean = Tensor.randn(sz)
+        bn.running_var = Tensor.randn(sz)
+        running_mean_prev = Tensor(bn.running_mean.numpy())
+        running_var_prev = Tensor(bn.running_var.numpy())
+
+        with Tensor.train(training):
+          outt = bn(x)
+
+        shape_mask = [1, -1, *([1] * (x.ndim-2))]
+        if tracking and not training:
+          batch_mean = bn.running_mean
+          batch_var = bn.running_var.reshape(shape=shape_mask).expand(x.shape)
+        else:
+          batch_mean = x.mean(axis=(reduce_axes:=tuple(i for i in range(x.ndim) if i != 1)))
+          batch_var = (x - batch_mean.reshape(shape=shape_mask)).square().mean(axis=reduce_axes)
+        expected_outt = x.batchnorm(bn.weight, bn.bias, batch_mean, batch_var.add(bn.eps).rsqrt())
+
+        np.testing.assert_allclose(outt.numpy(), expected_outt.numpy())
+        if tracking and training:
+          np.testing.assert_allclose(
+              bn.running_mean.numpy(),
+              ((1 - bn.momentum) * running_mean_prev + bn.momentum * batch_mean.detach()).numpy(),
+          )
+          np.testing.assert_allclose(
+              bn.running_var.numpy(),
+              ((1 - bn.momentum) * running_var_prev + bn.momentum * batch_var.detach()).numpy(),
+          )
+
   def test_linear(self):
     def _test_linear(x, in_dim, out_dim):
       # create in tinygrad
