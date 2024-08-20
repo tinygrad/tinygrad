@@ -115,9 +115,9 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 # we don't support weak type and complex type
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
   dtypes.int64: [dtypes.float16, dtypes.bfloat16], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
-  dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float16, dtypes.bfloat16], dtypes.float16: [dtypes.float32],
-  dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], dtypes.fp8_e5m2: [dtypes.float16, dtypes.bfloat16],
-  dtypes.fp8_e4m3: [dtypes.float16, dtypes.bfloat16] }
+  dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float16, dtypes.bfloat16], dtypes.fp8_e5m2: [dtypes.float16, dtypes.bfloat16],
+  dtypes.fp8_e4m3: [dtypes.float16, dtypes.bfloat16], dtypes.float16: [dtypes.float32],
+  dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
 
 @functools.lru_cache(None)
 def _get_recursive_parents(dtype:DType) -> Set[DType]:

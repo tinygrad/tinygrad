@@ -334,7 +334,7 @@ class CUDARenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
     headers = {dtypes.half: "fp16", dtypes.bfloat16: "bf16", dtypes.fp8_e4m3: "fp8", dtypes.fp8_e5m2: "fp8"}
-    for dtype in dedup(uop.dtype for uop in uops if uop.dtype in {dtypes.half, dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2}):
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype in {dtypes.fp8_e4m3, dtypes.fp8_e5m2, dtypes.half, dtypes.bfloat16}):
       prefix += [f"#include <cuda_{headers[dtype]}.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
