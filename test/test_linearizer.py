@@ -803,6 +803,7 @@ class TestLinearizer(unittest.TestCase):
             UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 1, N), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)) # noqa: E501
     helper_linearizer_ast(ast, [x,a,b], opts=opts, wanna_output=[wanna_output])
 
+    # TODO: Refactor these to UOp AST
     # # pad reduce axis
     # helper_linearizer_ast((ast,), [x,a,b], opts=[[Opt(OptOps.PADTO, 1, 32)],], wanna_output=[wanna_output])
 
