@@ -1977,11 +1977,11 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(a@b, [
       [Opt(OptOps.PADTO, 0, 32)],
       [Opt(OptOps.PADTO, 1, 32)],
-      # [Opt(OptOps.PADTO, 2, 32)],
-      # [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32)],
-      # [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
-      # # can optimize further post PADTO
-      # [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
+      [Opt(OptOps.PADTO, 2, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
+      # can optimize further post PADTO
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
     ])
 
   def test_padto_upcasted_not_ok(self):
