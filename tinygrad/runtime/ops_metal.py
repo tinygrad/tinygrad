@@ -1,15 +1,16 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
-import Metal, libdispatch
 from typing import List, Any, Tuple, Optional
-from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
+from tinygrad.helpers import prod, getenv, DEBUG, unwrap2, to_mv, nsstring_to_str
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
+from tinygrad.runtime.support.metal import Metal, libdispatch
+
 
 def wait_check(cbuf: Any):
   cbuf.waitUntilCompleted()
   if (error := cbuf.error()) is not None:
-    raise RuntimeError(error)
+    raise RuntimeError(nsstring_to_str(error.localizedDescription()))
 
 class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]):
@@ -24,7 +25,8 @@ class MetalCompiler(Compiler):
     options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
     try: library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
     except AssertionError as e: raise CompileError(e) from e
-    return library.libraryDataContents().bytes().tobytes()
+    ns_data = library.libraryDataContents()
+    return to_mv(ns_data.bytes(), ns_data.length()).tobytes()
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
@@ -90,7 +92,7 @@ class MetalAllocator(LRUAllocator):
     return MetalBuffer(ret, src.nbytes)
   def as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
-    return src.buf.contents().as_buffer(src.offset+src.size)[src.offset:]
+    return to_mv(src.buf.contents(), src.offset+src.size)[src.offset:]
   def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
   def copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)
   def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)

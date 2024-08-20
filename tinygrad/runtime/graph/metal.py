@@ -1,5 +1,5 @@
 from typing import List, Any, Dict, cast, Optional
-import Metal
+import ctypes
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, unwrap2
 from tinygrad.device import Buffer
@@ -7,6 +7,7 @@ from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_metal import wait_check
+from tinygrad.runtime.support.metal import Metal
 
 class MetalGraph(GraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
@@ -15,12 +16,11 @@ class MetalGraph(GraphRunner):
 
     # create metal batch exec
     icb_descriptor = Metal.MTLIndirectCommandBufferDescriptor.new()
-    icb_descriptor.setCommandTypes_(Metal.MTLIndirectCommandType(Metal.MTLIndirectCommandTypeConcurrentDispatch))
+    icb_descriptor.setCommandTypes_(Metal.MTLIndirectCommandTypeConcurrentDispatch)
     icb_descriptor.setInheritBuffers_(False)
     icb_descriptor.setInheritPipelineState_(False)
     icb_descriptor.setMaxKernelBufferBindCount_(31)
-    self.icb = self.device.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache),
-                                                                                                  Metal.MTLResourceOptions(0))
+    self.icb = self.device.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache), 0)
     if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
@@ -33,7 +33,7 @@ class MetalGraph(GraphRunner):
       descriptor.setSupportIndirectCommandBuffers_(True)
       icb_command = self.icb.indirectComputeCommandAtIndex_(j)
       icb_command.setComputePipelineState_(unwrap2(
-        self.device.device.newComputePipelineStateWithDescriptor_options_reflection_error_(descriptor, Metal.MTLPipelineOption(0), None, None)))
+        self.device.device.newComputePipelineStateWithDescriptor_options_reflection_error_(descriptor, 0, None, None)))
       for i,b in enumerate(ji.bufs):
         if b is not None and b not in input_rawbuffers:
           icb_command.setKernelBuffer_offset_atIndex_(b._buf.buf, b._buf.offset, i)
@@ -65,7 +65,7 @@ class MetalGraph(GraphRunner):
 
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
-    encoder.useResources_count_usage_(all_resources, len(all_resources), Metal.MTLResourceUsageRead | Metal.MTLResourceUsageWrite)
+    encoder.useResources_count_usage_((ctypes.c_void_p * len(all_resources))(*[r.ptr for r in all_resources]), len(all_resources), Metal.MTLResourceUsageRead | Metal.MTLResourceUsageWrite)
     encoder.executeCommandsInBuffer_withRange_(self.icb, Metal.MTLIndirectCommandBufferExecutionRangeMake(0, len(self.jit_cache)))
     encoder.endEncoding()
     command_buffer.commit()
