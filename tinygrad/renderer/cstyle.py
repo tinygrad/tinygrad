@@ -285,24 +285,17 @@ class MetalRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 
-# CUDA does not handle fp8 arithmetic natively. As a workaround, we cast to float, do arithmetic and cast back.
-dts = {dtypes.fp8_e4m3, dtypes.fp8_e5m2}
+# CUDA does not handle fp8 arithmetic natively. We cast to float, do arithmetic and cast back.
+fp8_dtypes = {dtypes.fp8_e4m3, dtypes.fp8_e5m2}
 
-def _rewrite_fp8_alu(args, res):
-  dt = dtypes.float if res.arg not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dtypes.bool
-  return UOp(UOps.ALU, dt, cast(Tuple[UOp],(arg.cast(dtypes.float) for arg in args)), res.arg).cast(res.dtype)
-def nsrcs(n): return tuple(UPat(name=f"x{i}", dtype=dts) for i in range(n))
+def rewrite_fp8_alu(y):
+  dt = dtypes.float if y.arg not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dtypes.bool
+  return UOp(UOps.ALU, dt, cast(Tuple[UOp],(arg.cast(dtypes.float) for arg in y.src)), y.arg).cast(y.dtype)
 
-# NOTE: match for dtypes.bool for comparison ops
-# NOTE: CUDA does not handle e4m3 <-> e5m2 casts. Done also by casting to float
 fp8_arithmetic_rewriter = PatternMatcher([
-    (UPat(UOps.ALU, dtype=dts, name="y",src=(nsrcs(1))), lambda x0, y: _rewrite_fp8_alu((x0,),y)),
-    (UPat(UOps.ALU, dtype=dts.union({dtypes.bool}), name="y",src=(nsrcs(2))), lambda x0, x1, y: _rewrite_fp8_alu((x0, x1), y)),
-    (UPat(UOps.ALU, dtype=dts, name="y",src=(nsrcs(3))), lambda x0, x1, x2, y: _rewrite_fp8_alu((x0, x1, x2), y)),
-    (UPat(UOps.ALU, dtype=dts, name="y",src=(nsrcs(3))), lambda x0, x1, x2, y: _rewrite_fp8_alu((x0, x1, x2), y)),
-    (UPat(UOps.CAST, dtype=dtypes.fp8_e4m3, src=UPat(name="x", dtype=dtypes.fp8_e5m2)), lambda x: x.cast(dtypes.float).cast(dtypes.fp8_e4m3)),
-    (UPat(UOps.CAST, dtype=dtypes.fp8_e5m2, src=UPat(name="x", dtype=dtypes.fp8_e4m3)), lambda x: x.cast(dtypes.float).cast(dtypes.fp8_e5m2)),
-  ])
+    (UPat(UOps.ALU, name="y", src=UPat(dtype=fp8_dtypes), allow_any_len=True), rewrite_fp8_alu),
+    (UPat(UOps.CAST, dtype=fp8_dtypes, name="res", src=UPat(name="x", dtype=fp8_dtypes)), lambda x, res: x.cast(dtypes.float).cast(res.dtype)),
+])
 
 code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"1/{x}",
                     BinaryOps.MAX: lambda a,b,dtype: f"__hmax({a},{b})" if dtype in (dtypes.half, dtypes.bfloat16) else f"max({a},{b})",
