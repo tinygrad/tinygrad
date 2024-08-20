@@ -46,7 +46,8 @@ class TestNV(unittest.TestCase):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.SIN, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.ulong, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)))),), arg=dtypes.float),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     temp_runner = get_runner(TestNV.d0.dname, (ast,))
     temp_runner([TestNV.b.lazydata.buffer, TestNV.along.lazydata.buffer], var_vals={})
-    assert abs((val:=TestNV.b.lazydata.buffer.as_buffer().cast("f")[0]) - 0.80647) < 0.001, f"got val {val}"
+    val = TestNV.b.lazydata.buffer.as_buffer().cast("f")[0]
+    assert abs(val - 0.80647) < 0.001, f"got val {val}"
 
   def test_kernargs_no_oob_access(self):
     kernargs_start = TestNV.d0._gpu_alloc((2 << 20), map_to_cpu=True).va_addr
@@ -59,7 +60,8 @@ class TestNV(unittest.TestCase):
     q.signal(TestNV.d0.timeline_signal, TestNV.d0.timeline_value).submit(TestNV.d0)
     TestNV.d0._wait_signal(TestNV.d0.timeline_signal, TestNV.d0.timeline_value)
     TestNV.d0.timeline_value += 1
-    assert (val:=TestNV.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
+    val = TestNV.b.lazydata.buffer.as_buffer().cast("f")[0]
+    assert val == 1.0, f"got val {val}"
 
 if __name__ == "__main__":
   unittest.main()
