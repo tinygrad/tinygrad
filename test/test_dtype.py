@@ -55,7 +55,7 @@ def _test_cast(a:Tensor, target_dtype:DType):
 
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
-  if target_dtype in (dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2): raise unittest.SkipTest("no test for bf16 bitcast yet")
+  if target_dtype in (dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2): raise unittest.SkipTest("no test for bf16/fp8 bitcast yet")
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
 
 class TestDType(unittest.TestCase):
