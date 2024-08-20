@@ -630,25 +630,36 @@ class TestLinearizer(unittest.TestCase):
     t = Tensor.randn(10, 20).realize()
     t_max = t.max().realize()
     real_argmax = np.argmax(t.numpy())
-    ast =  LazyOp(MetaOps.KERNEL, arg=None, src=(
-     LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=( # noqa E501
-       LazyOp(BinaryOps.ADD, arg=None, src=(
-         LazyOp(BinaryOps.ADD, arg=None, src=(
-           LazyOp(BufferOps.CONST, arg=ConstBuffer(val=200, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()), # noqa E501
-           LazyOp(UnaryOps.NEG, arg=None, src=(
-             LazyOp(ReduceOps.MAX, arg=(0,), src=(
-               LazyOp(BinaryOps.MUL, arg=None, src=(
-                 LazyOp(UnaryOps.CAST, arg=dtypes.int, src=(
-                   LazyOp(BinaryOps.CMPNE, arg=None, src=(
-                     LazyOp(BinaryOps.CMPNE, arg=None, src=(
-                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(200, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=()), # noqa E501
-                       LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)), # noqa E501
-                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)), # noqa E501
-                 LazyOp(BinaryOps.ADD, arg=None, src=(
-                   LazyOp(ReduceOps.SUM, arg=(1,), src=(
-                     LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(201, 399), strides=(0, 0), offset=0, mask=((0, 201), (199, 399)), contiguous=False), View(shape=(200, 200), strides=(1, 400), offset=0, mask=None, contiguous=False)))), src=()),)), # noqa E501
-                   LazyOp(BufferOps.CONST, arg=ConstBuffer(val=200, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),)), # noqa E501
-         LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),)) # noqa E501
+    ast =  UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
+        UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+          UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+            UOp(UOps.CONST, dtypes.int, arg=200, src=(
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),)), # noqa: E501
+            UOp(UOps.ALU, dtypes.int, arg=UnaryOps.NEG, src=(
+              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.MAX, (0,)), src=(
+                UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
+                  UOp(UOps.CAST, dtypes.int, arg=None, src=(
+                    UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
+                      UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
+                        UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                          UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
+                          UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(200, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=()),)), # noqa: E501
+                        UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                          UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
+                          UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)), # noqa: E501
+                      UOp(UOps.CONST, dtypes.bool, arg=True, src=(
+                        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)), # noqa: E501
+                  UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+                    UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.SUM, (1,)), src=(
+                      UOp(UOps.CONST, dtypes.int, arg=-1, src=(
+                        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(201, 399), strides=(0, 0), offset=0, mask=((0, 201), (199, 399)), contiguous=False), View(shape=(200, 200), strides=(1, 400), offset=0, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
+                    UOp(UOps.CONST, dtypes.int, arg=200, src=(
+                      UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)), # noqa: E501
+          UOp(UOps.CONST, dtypes.int, arg=-1, src=(
+            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),)) # noqa: E501
     helper_linearizer_ast(ast, [t, t_max], wanna_output=[real_argmax])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
