@@ -2016,6 +2016,29 @@ class Tensor:
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
     assert not (mode == "nearest" and align_corners), 'align_corners option can only be set with the mode="linear"'
     x, expand, indexes = self, list(self.shape), []
+    if self.dtype == dtypes.uint8 and mode == "linear" and self.ndim == 4:
+      scales = [(self.shape[-2:][i] - int(align_corners)) / (size[i] - int(align_corners)) for i in range(2)]
+      grid_y, grid_x = Tensor.arange(size[0]).reshape(-1, 1).expand(size), Tensor.arange(size[1]).reshape(1, -1).expand(size)
+      y_indices = grid_y * scales[0] if align_corners else (grid_y + 0.5) * scales[0] - 0.5
+      x_indices = grid_x * scales[1] if align_corners else (grid_x + 0.5) * scales[1] - 0.5
+      y0 = y_indices.cast(dtypes.int)
+      x0 = x_indices.cast(dtypes.int)
+      y1 = (y0 + 1)
+      x1 = (x0 + 1)
+      a = self[..., y0, x0]
+      b = self[..., y1, x0]
+      c = self[..., y0, x1]
+      d = self[..., y1, x1]
+      y_lerp = y_indices - y0
+      x_lerp = x_indices - x0
+      def weight_mul(idx, weight, COEF_PREC=16):
+        int_a = (0.5 + weight * (1 << 16)).cast(dtypes.uint64)
+        with_trick = ((int_a * idx) + (1 << (COEF_PREC - 1))) >> COEF_PREC
+        return with_trick
+      top = a + weight_mul((c - a), x_lerp)
+      bottom = b + weight_mul((d - b), x_lerp)
+      ret = top + weight_mul((bottom - top), y_lerp)
+      return ret.clamp(0, 255).cast(dtypes.uint8)
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
