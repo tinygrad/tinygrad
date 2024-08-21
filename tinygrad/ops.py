@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING
 import math, operator, ctypes, struct, functools, hashlib, itertools
 from enum import Enum, auto
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
 from tinygrad.helpers import pretty_print, prod, getenv
 from tinygrad.shape.symbolic import Variable, sint
@@ -194,12 +194,17 @@ class KernelInfo:
 
 # ***** pattern matcher *****
 
+def get_location() -> Tuple[str, int]:
+  frm = sys._getframe(1)
+  while frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>': frm = frm.f_back  # no matchers in ops.py
+  return frm.f_code.co_filename, frm.f_lineno
+
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
   name: Optional[str] = None
   src: Tuple[NOp, ...] = tuple()
   allow_any_len: bool = False
-  location = (frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno
+  location: Tuple[str, int] = field(default_factory=get_location)
 
   @staticmethod
   def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, name=name)
@@ -227,7 +232,7 @@ class UPat:
     elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
 
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
-    self.location = location or ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
+    self.location = location or get_location()
 
   def __repr__(self):
     def rep(x):
@@ -278,8 +283,8 @@ if getenv("TRACK_MATCH_STATS", 0):
   import atexit
   @atexit.register
   def print_match_stats():
-    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1]):
-      print(v, k.location)
+    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][1]):
+      print(f"{v[0]:6d} / {v[1]:6d} -- {k.location}", str(k).split("\n")[0])
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
