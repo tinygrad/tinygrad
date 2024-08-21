@@ -356,11 +356,6 @@ def _make_hip_code_for_op():
     return cast_bf16
   return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_hip}.items() }
 
-def _make_hip_dtype(base_type, name, cnt):
-  elems, header = ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
-  return f"typedef {base_type} {name}{cnt} __attribute__((ext_vector_type({cnt})));\n" + \
-         f"static inline __attribute__((device)) {name}{cnt} make_{name}{cnt}({header}) {{ return {{{elems}}}; }}"
-
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
@@ -382,11 +377,15 @@ class AMDRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
-  type_map = {dtypes.bfloat16: "hip_bfloat16"}
+  type_map = {dtypes.bfloat16: "hip_bfloat16", dtypes.half: "_Float16"}
+
+  def render_vector_prefix(self, dtype:DType) -> str:
+    vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar()),
+    return f"typedef {scal} {vec} __attribute__((ext_vector_type({dtype.count})));\nstatic inline __attribute__((device))"+\
+           f"{vec} make_{vec}({', '.join([f'{scal} {x}' for x in _nms[:dtype.count]])}) {{ return {{ {', '.join(_nms[:dtype.count])} }}; }}"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = ["#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(\"\"))", "typedef long unsigned int size_t;"]
-    vec_dts = [("float", "float", 2), ("float", "float", 4), ("float", "float", 8), ("signed int", "int", 4), ("signed int", "int", 2)]
 
     # TODO: add BF16 vec dts
     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""
@@ -406,18 +405,16 @@ static inline __attribute__((device)) bool operator<(hip_bfloat16 a, hip_bfloat1
 static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) == ((float)b); }
 """)
 
-    if any(uop.dtype == dtypes.half for uop in uops):
-      prefix.append("#define half _Float16")
-      vec_dts += [("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16)]
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype and uop.dtype.count > 1): prefix += [self.render_vector_prefix(dtype)]
 
-    prefix += [_make_hip_dtype(*x) for x in vec_dts]
-
-    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
-      if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
-      else: prefix.append(f"static inline __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
-  half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
+    # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
+    for name, _, dtype_in, dtype_out, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+      dto, dti = self.render_dtype(dtype_out.vec(8)), self.render_dtype(dtype_in.vec(16))
+      if dtype_out == dtypes.float: prefix.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
+      else: prefix.append(f"""static inline __attribute__((device)) {dto} __{name}({dti} a, {dti} b, {dto} c) {{
+  {dti} c_frag = {{}}; {dto} d; for (int n = 0; n < 8; n++) {{ c_frag[n*2] = c[n]; }}
   c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
-  for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
+  for (int n = 0; n < 8; n++) {{ d[n] = c_frag[n*2]; }} return d;\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str:
