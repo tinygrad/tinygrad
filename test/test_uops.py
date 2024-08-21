@@ -267,7 +267,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
     stores = [UOp.store(gmem0, idx, val, gate), UOp.store(gmem1, idx, val)]
-    uops = linearize_uop(stores)
+    uops = to_uops_list(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
@@ -285,7 +285,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
     stores = [UOp.store(gmem0, idx, val, gate), UOp.store(gmem1, idx, val, gate)]
-    uops = linearize_uop(stores)
+    uops = to_uops_list(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     ifs = [u for u in uops if u.op is UOps.IF]
     endifs = [u for u in uops if u.op is UOps.ENDIF]
