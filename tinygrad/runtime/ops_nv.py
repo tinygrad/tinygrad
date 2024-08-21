@@ -267,7 +267,7 @@ class NVProgram(HCQProgram):
                             shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
                             max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
                             barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
-                            program_address=self.program_addr, sass_version=0x89, qmd_major_version=device.qmd_ver,
+                            program_address=self.program_addr, sass_version=0x89, qmd_major_version=self.device.qmd_ver,
                             program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40)
 
     for i,(addr,sz) in self.constbufs.items():
@@ -413,7 +413,9 @@ class NVDevice(HCQCompiled):
     self.compute_class = next(clss for clss in [nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_COMPUTE_B, nv_gpu.TURING_COMPUTE_A] if clss in self.nvclasses)
     self.copy_class = next(clss for clss in [nv_gpu.AMPERE_DMA_COPY_B, nv_gpu.TURING_DMA_COPY_A] if clss in self.nvclasses)
     self.channel_gpfifo_class = next(clss for clss in [nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.TURING_CHANNEL_GPFIFO_A] if clss in self.nvclasses)
-    self.qmd_ver, self.qmd_t = (2, qmd_v2_t) if self.compute_class == nv_gpu.TURING_COMPUTE_A else (3, qmd_v3_t)
+
+    self.qmd_t: type[ctypes.CStruct] = qmd_v2_t if self.compute_class == nv_gpu.TURING_COMPUTE_A else qmd_v3_t
+    self.qmd_ver: int = 2 if self.compute_class == nv_gpu.TURING_COMPUTE_A else 3
 
   def __init__(self, device:str=""):
     if NVDevice.root is None:
