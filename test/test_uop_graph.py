@@ -1,10 +1,11 @@
+from typing import List
 import unittest
 from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps, UOps, UOp, NOp, PatternMatcher
-from tinygrad.codegen.uopgraph import linearize_uop, graph_rewrite, expander, reducer, constant_folder, float4_folding
+from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, constant_folder, float4_folding
 
 simple_pm = PatternMatcher([
   (NOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -12,6 +13,8 @@ simple_pm = PatternMatcher([
   (NOp.cvar('x') * NOp.cvar('y') * NOp.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
   ((NOp.var('x') + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x + x.const(c1.arg+c2.arg)),
 ])
+
+def to_uops_list(u:List[UOp]) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u)))
 
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):
@@ -94,7 +97,7 @@ class TestUOpGraph(TestUOps):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     out = UOp(UOps.ALU, dtypes.float, (c1, c2), BinaryOps.ADD)
-    uops = linearize_uop([out])
+    uops = to_uops_list([out])
     self.assertEqual(len(uops), 1)
     out = uops[-1]
     self.assertEqual(out.op, UOps.CONST)
@@ -106,7 +109,7 @@ class TestUOpGraph(TestUOps):
     vc = UOp(UOps.ALU, dtypes.bool, (v, c0), BinaryOps.CMPNE)
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     out = UOp(UOps.ALU, dtypes.float, (vc, c1, c1), TernaryOps.WHERE)
-    uops = linearize_uop([out])
+    uops = to_uops_list([out])
     self.assertEqual(len(uops), 1)
     out = uops[-1]
     self.assertEqual(out.op, UOps.CONST)
@@ -117,7 +120,7 @@ class TestUOpGraph(TestUOps):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     out = UOp(UOps.ALU, dtypes.float, (bf, c1, c2), TernaryOps.WHERE)
-    uops = linearize_uop([out])
+    uops = to_uops_list([out])
     self.assertEqual(len(uops), 1)
     out = uops[-1]
     self.assertEqual(out.op, UOps.CONST)
@@ -126,7 +129,7 @@ class TestUOpGraph(TestUOps):
   def test_const_cast(self):
     bf = UOp(UOps.CONST, dtypes.bool, arg=False)
     out = UOp(UOps.CAST, dtypes.int, (bf,))
-    uops = linearize_uop([out])
+    uops = to_uops_list([out])
     self.assertEqual(len(uops), 1)
     out = uops[-1]
     self.assertEqual(out.op, UOps.CONST)
@@ -140,7 +143,7 @@ class TestUOpGraph(TestUOps):
     x = UOp(UOps.GEP, dtypes.float, (vec, ), arg=0)
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
     out = UOp(UOps.STORE, None, (d0, idx, alu))
-    uops = linearize_uop([out])
+    uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is UOps.VECTORIZE]), 0)
 
   def test_gep_vec_fold(self):
@@ -151,7 +154,7 @@ class TestUOpGraph(TestUOps):
     def _test_vec(geps, count=4):
       vec = UOp(UOps.VECTORIZE, dtypes.float.vec(count), geps)
       out = UOp(UOps.STORE, None, (d0, idx, vec))
-      uops = linearize_uop([out])
+      uops = to_uops_list([out])
       if DEBUG >= 4:
         from tinygrad import Device
         print(Device[Device.DEFAULT].renderer.render("test", uops))
@@ -186,8 +189,7 @@ class TestUOpGraph(TestUOps):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
       vec = UOp(UOps.VECTORIZE, dtypes.float.vec(vec_size), tuple(consts))
-      geps = [UOp(UOps.GEP, dtypes.float, (vec,), i) for i in range(vec_size)]
-      uops = linearize_uop(geps)
+      uops = to_uops_list([UOp(UOps.GEP, dtypes.float, (vec,), i) for i in range(vec_size)])
       for uop, const in zip(uops, consts):
         self.assert_equiv_uops(uop, const)
 
@@ -197,7 +199,7 @@ class TestUOpGraph(TestUOps):
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i))
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
-      uops = linearize_uop([wmma])
+      uops = to_uops_list([wmma])
       self.assert_equiv_uops(uops[0], acc)
       self.assertEqual(len(uops), 1)
 
@@ -206,7 +208,7 @@ class TestUOpGraph(TestUOps):
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
-      uops = linearize_uop([wmma])
+      uops = to_uops_list([wmma])
       self.assert_equiv_uops(uops[0], acc)
       self.assertEqual(len(uops), 1)
 
@@ -218,7 +220,7 @@ class TestUOpGraph(TestUOps):
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
-      uops = linearize_uop([wmma])
+      uops = to_uops_list([wmma])
       self.assert_equiv_uops(uops[-1], wmma)
 
     for i in [4, 8]:
@@ -228,7 +230,7 @@ class TestUOpGraph(TestUOps):
                 tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=Variable(f'tmp{j}', 0.0, 1.0)) for j in range(i//2)))
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
-      uops = linearize_uop([wmma])
+      uops = to_uops_list([wmma])
       self.assert_equiv_uops(uops[-1], wmma)
 
     for i in [2, 4, 8]:
@@ -237,7 +239,7 @@ class TestUOpGraph(TestUOps):
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
-      uops = linearize_uop([wmma])
+      uops = to_uops_list([wmma])
       self.assert_equiv_uops(uops[-1], wmma)
 
     for i in [2, 4, 8]:
@@ -246,7 +248,7 @@ class TestUOpGraph(TestUOps):
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
       acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
-      uops = linearize_uop([wmma])
+      uops = to_uops_list([wmma])
       self.assert_equiv_uops(uops[-1], wmma)
 
   def test_cast_alu_fold(self):
@@ -256,7 +258,7 @@ class TestUOpGraph(TestUOps):
     ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
     alu = ld.lt(1).cast(dtypes.bool)
     out = UOp(UOps.STORE, None, (d0, idx, alu))
-    uops = linearize_uop([out])
+    uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is UOps.CAST]), 0)
 
   def test_double_cast_fold(self):
@@ -266,7 +268,7 @@ class TestUOpGraph(TestUOps):
     ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
     alu = ld.cast(dtypes.float).cast(dtypes.float)
     out = UOp(UOps.STORE, None, (d0, idx, alu))
-    uops = linearize_uop([out])
+    uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is UOps.CAST]), 1)
 
   def test_depth_2_const_fold(self):
@@ -275,7 +277,7 @@ class TestUOpGraph(TestUOps):
     c4 = UOp(UOps.CONST, dtypes.int, arg=4)
     vc = UOp(UOps.ALU, dtypes.int, (v, c2), BinaryOps.ADD)
     out = UOp(UOps.ALU, dtypes.int, (vc, c4), BinaryOps.ADD)
-    uops = linearize_uop([out])
+    uops = to_uops_list([out])
     self.assertEqual(len(uops), 5)
     out = uops[-1]
     self.assertEqual(out.op, UOps.ALU)
@@ -290,7 +292,7 @@ class TestUOpGraph(TestUOps):
     idx = UOp.const(dtypes.int, 0)
     ld0 = UOp(UOps.LOAD, dtypes.int, (glbl1, idx, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False)))
     ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True)))
-    uops = linearize_uop([UOp(UOps.STORE, None, (glbl0, idx, ld1+ld0))])
+    uops = to_uops_list([UOp(UOps.STORE, None, (glbl0, idx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
     self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
@@ -305,7 +307,7 @@ class TestUOpGraph(TestUOps):
     barrier = UOp(UOps.BARRIER, None, (st, ))
     ld0 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+1, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False), barrier))
     ld1 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+2, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True), barrier))
-    uops = linearize_uop([UOp(UOps.STORE, None, (glbl0, lidx, ld1+ld0))])
+    uops = to_uops_list([UOp(UOps.STORE, None, (glbl0, lidx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
     self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
@@ -319,7 +321,7 @@ class TestUOpGraph(TestUOps):
     val = UOp.const(dtypes.int, 42)
     st0 = UOp(UOps.STORE, None, (glbl, idx0, val, UOp.const(dtypes.bool, False)))
     st1 = UOp(UOps.STORE, None, (glbl, idx1, val, UOp.const(dtypes.bool, True)))
-    uops = linearize_uop([st0, st1])
+    uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len(uops), 4)
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
@@ -328,7 +330,7 @@ class TestUOpGraph(TestUOps):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     idx = UOp.const(dtypes.int, 0)
     bad_gate = UOp.const(dtypes.int, 1)
-    with self.assertRaises(AssertionError): linearize_uop([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
+    with self.assertRaises(AssertionError): to_uops_list([UOp(UOps.STORE, None, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
 
   def test_switched_range_order(self):
     glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
@@ -339,7 +341,7 @@ class TestUOpGraph(TestUOps):
     r2 = UOp(UOps.RANGE, dtypes.int, (c0, c2), (1, 1, False))
     alu = UOp(UOps.ALU, dtypes.int, (r2, r1), BinaryOps.MUL)
     store = UOp(UOps.STORE, None, (glbl, alu, cf))
-    uops = linearize_uop([store])
+    uops = to_uops_list([store])
     ranges = [x for x in uops if x.op is UOps.RANGE]
     endranges = [x for x in uops if x.op is UOps.ENDRANGE]
     # ranges are closed in the right order
