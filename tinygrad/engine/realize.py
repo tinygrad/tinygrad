@@ -148,18 +148,18 @@ class BufferXfer(BufferCopy):
 # **************** method cache ****************
 
 method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
-def get_runner(k:Kernel) -> CompiledRunner:
-  ckey = (k.opts.device, k.ast.key, BEAM.value, NOOPT.value, False)
+def get_runner(dname:str, k:Kernel) -> CompiledRunner:
+  ckey = (dname, k.ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (k.opts.device.split(":")[0], k.ast.key, BEAM.value, NOOPT.value, True)
+  bkey = (dname.split(":")[0], k.ast.key, BEAM.value, NOOPT.value, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=k.opts.device), bret.lib)
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
     prg: Program = k.to_program()
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
-      return UOpsFuzzerRunner(replace(prg, dname=k.opts.device))
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=k.opts.device))
+      return UOpsFuzzerRunner(replace(prg, dname=dname))
+    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
   return ret
 
 # **************** lowering functions ****************
@@ -190,7 +190,8 @@ class ExecItem:
 def lower_schedule_item(si:ScheduleItem) -> List[ExecItem]:
   assert len(set(x.device for x in si.bufs)) == 1 or (si.ast.op is UOps.EXT and si.ast.arg[0] is MetaOps.COPY)
   if si.ast.op is UOps.SINK:
-    runners = [get_runner(k) for k in get_kernels(Device[si.outputs[0].device].renderer, si.ast)]
+    dname = si.outputs[0].device
+    runners = [get_runner(dname, k) for k in get_kernels(Device[dname].renderer, si.ast)]
     return [ExecItem(r, [si.bufs[x] for x in r.p.globals], si.metadata) for r in runners]
   out, (op, arg) = si.outputs[0], si.ast.arg
   if op is MetaOps.COPY:
