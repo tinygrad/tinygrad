@@ -103,6 +103,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sub_self(self):
     a = Variable("a", 0, 8)
+    self.helper_test_variable(a-a, 0, 0, "0")
     self.helper_test_variable(a*3-a, 0, 16, "(a*2)")
 
   def test_mul_0(self):
