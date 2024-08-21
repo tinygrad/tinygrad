@@ -1,5 +1,5 @@
 # create a diff of two schedule graphs
-import shutil, importlib, uuid, os, logging, contextlib
+import shutil, importlib, uuid, os, logging, contextlib, itertools
 from collections import defaultdict
 from typing import DefaultDict, Dict, List, Set, Tuple
 from test.external.process_replay.utils import print_diff
@@ -45,15 +45,20 @@ def print_si_diff(si0:ScheduleItem, si1:ScheduleItem):
   print_diff(si0.ast, si1.ast)
   # skip lowering/runtime error
   with contextlib.suppress(Exception):
-    ei0, ei1 = lower_schedule_item(si0)[-1], lower_schedule_item(si1)[-1]
-    assert isinstance(ei0.prg, CompiledRunner) and isinstance(ei1.prg, CompiledRunner)
-    print_diff(ei0.prg.p.src, ei1.prg.p.src)
+    eis0, eis1 = lower_schedule_item(si0), lower_schedule_item(si1)
+    for ei in (*eis0, *eis1): assert isinstance(ei.prg, CompiledRunner)
+    for ei0, ei1 in itertools.zip_longest(eis0, eis1):
+      print_diff(ei0.prg.p.src if ei0 else "", ei1.prg.p.src if ei1 else "")
     # TODO: create new Buffers for process replay to test correctness
     if getenv("TIMING"):
+      tm0 = tm1 = 0
+      for ei0, ei1 in itertools.zip_longest(eis0, eis1):
+        if ei0: tm0 += ei0.run(wait=True)
+        if ei1: tm1 += ei1.run(wait=True)
       with Context(DEBUG=2):
         tm0 = ei0.run(wait=True)
         tm1 = ei1.run(wait=True)
-      assert tm0 is not None and tm1 is not None
+      assert tm0 != 0 and tm1 != 0
       tm_diff = ((tm0 - tm1) / tm0) * 100
       if tm_diff > 0: print(colored(f"{tm_diff:.2f}% faster", "green"))
       else: print(colored(f"{tm_diff:,.2f}% slower", "red"))
