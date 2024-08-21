@@ -71,10 +71,8 @@ class IndependentLowerer:
           # only get the lidxs that are being used
           lidx_map = {i:j for j,i in enumerate([i for i in grouped_axes if i in reuse_axes.values()])}
           lidxs = get_grouped_dims("lidx", tuple(list(full_shape[global_dims:first_reduce]) + [full_shape[i] for i in lidx_map]), opts.local_max)
-          mapped_lidxs = [lidxs[lidx_map[reuse_axes[i]]+first_reduce-global_dims] for i in grouped_axes]
-          # _mapped_lidxs = [(i, lidxs[lidx_map[reuse_axes[i]]+first_reduce-global_dims] / UOp.const(dtypes.int, full_shape[reuse_axes[i]] / full_shape[i])) for i in grouped_axes]
           self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
-            lidxs[:first_reduce-global_dims] + mapped_lidxs
+            lidxs[:first_reduce-global_dims] + [lidxs[lidx_map[reuse_axes[i]]+first_reduce-global_dims] for i in grouped_axes]
         else:
           lidxs = get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.global_max)
           self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
@@ -107,16 +105,14 @@ class IndependentLowerer:
     self.uop_cache[x] = ret
     return ret
 
-  def limit_idx(self, oidx,ridx):
-    assert ridx.op is UOps.RANGE and len(ridx.src) == 2 and ridx.src[0].op is UOps.CONST and ridx.src[1].op is UOps.CONST, "can't limit this idx!"
-    return oidx.lt(ridx.src[1].arg - ridx.src[0].arg)
-
   def _to_uop(self, x:UOp) -> UOp:
     if x.op in BUFFER_UOPS:
       idx, valid = x.st_arg.to_indexed_uops(self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs)
       if x.op is UOps.STORE and x.src[0].op is UOps.DEFINE_LOCAL:
         for i, (oidx, ridx) in enumerate(zip(self.idxs, self.ridxs)):
-          if oidx != ridx and x.st_arg.shape[i] != 1: valid = valid * self.limit_idx(oidx,ridx)
+          if oidx != ridx and x.st_arg.shape[i] != 1: 
+            assert ridx.op is UOps.RANGE and len(ridx.src) == 2 and ridx.src[0].op is UOps.CONST and ridx.src[1].op is UOps.CONST, "can't limit this idx!"
+            valid = valid * oidx.lt(ridx.src[1].arg - ridx.src[0].arg)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is UOps.CONST: return valid.where(UOp.const(x.dtype, x.arg), UOp.const(x.dtype, 0))
