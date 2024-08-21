@@ -377,6 +377,7 @@ def do_expand(root:UOp):
   expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x not in exclude_args)
   new_srcs: List[UOp] = []
   for rpk in _choices_from_args(expand_args):
+    if exclude_args: rpk = {**rpk, **{x:0 for x in exclude_args}}
     new_src: List[UOp] = []
     for src in root.src:
       if src.op is UOps.EXPAND:
