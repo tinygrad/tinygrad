@@ -417,7 +417,7 @@ def do_expand(root:UOp):
 acc_number = 0
 def do_reduce(root:UOp):
   global acc_number
-  reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].parents)
+  reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].sparents)
   ret = root.src[0]
   if len(reduce_parented):
     assert root.dtype is not None
@@ -495,7 +495,7 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
-no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE}, dtype=dtypes.pyint, name="x"),
+no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.pyint, name="x"),
     lambda x: UOp(x.op, dtypes.int32, x.src, x.arg))])
 
 # *** uop graph ***
@@ -527,8 +527,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # expand
   linearize_cnt += 1
   if linearize_cnt != getenv("DEBUG_EXPAND", 0):
-    sink = graph_rewrite(sink, folder+expander+float4_folding if opts is not None and opts.supports_float4 else folder+expander)
-    sink = graph_rewrite(sink, folder+expander+reducer)
+    sink = graph_rewrite(sink, folder+(expander+float4_folding if opts is not None and opts.supports_float4 else expander))
+    sink = graph_rewrite(sink, folder+reducer)
 
   # for PTX only
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
