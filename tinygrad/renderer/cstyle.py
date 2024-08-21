@@ -339,12 +339,13 @@ return c;}}""")
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
 
-code_for_op_hip = { UnaryOps.SQRT: lambda x, dtype: f"__ocml_sqrt_f{dtype.itemsize * 8}({x})",
-                    UnaryOps.SIN: lambda x, dtype: f"__ocml_sin_f{dtype.itemsize * 8}({x})",
-                    UnaryOps.LOG2: lambda x, dtype: f"__ocml_log2_f{dtype.itemsize * 8}({x})",
-                    UnaryOps.EXP2: lambda x, dtype: f"__ocml_exp2_f{dtype.itemsize * 8}({x})",
+                    # UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+code_for_op_hip = { UnaryOps.SQRT: lambda x, dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({x})",
+                    UnaryOps.SIN: lambda x, dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({x})",
+                    UnaryOps.LOG2: lambda x, dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({x})",
+                    UnaryOps.EXP2: lambda x, dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({x})",
                     # TODO: MAX with int uses fmax_f32?
-                    BinaryOps.MAX: lambda a, b, dtype: f"__ocml_fmax_f{dtype.itemsize * 8}({a},{b})"}
+                    BinaryOps.MAX: lambda a, b, dtype: f"__ocml_fmax_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({a},{b})"}
 
 def _make_hip_code_for_op():
   def wrapper(key, func):
