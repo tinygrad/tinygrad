@@ -261,7 +261,6 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
     res.extend(new_stores)
   return res
 
-match_stats: Optional[Dict] = None
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
     self.patterns = patterns
@@ -269,7 +268,6 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       if isinstance(p, NOp): p = p.upat
-      if match_stats is not None and p not in match_stats: match_stats[p] = [0,0,0.0]
       assert p.op is not None
       for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, p.early_reject()))
 
@@ -283,31 +281,34 @@ class PatternMatcher:
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
-  def rewrite_tracked(self, uop:UOp) -> Optional[UOp]:
-    assert match_stats is not None
-    ret = None
-    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
-    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      if not early_reject.issubset(ler): continue
-      match_stats[p][1] += 1
-      st = time.perf_counter()
-      if (matches := _match(uop, p, {})): ret = fxn(**matches[0])
-      match_stats[p][2] += time.perf_counter()-st
-      if ret is not None:
-        match_stats[p][0] += 1
-        return ret
-      # NOTE: if ret is None, we keep trying to match
-    return None
-
 if getenv("TRACK_MATCH_STATS", 0):
-  PatternMatcher.rewrite = PatternMatcher.rewrite_tracked  # type: ignore[method-assign]
   match_stats = dict()
+  class TrackedPattenMatcher(PatternMatcher):
+    def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
+      for p,_ in patterns:
+        if p not in match_stats: match_stats[p] = [0,0,0.0]
+      super().__init__(patterns)
+
+    def rewrite(self, uop:UOp) -> Optional[UOp]:
+      ret = None
+      ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
+      for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+        if not early_reject.issubset(ler): continue
+        match_stats[p][1] += 1
+        st = time.perf_counter()
+        if (matches := _match(uop, p, {})): ret = fxn(**matches[0])
+        match_stats[p][2] += time.perf_counter()-st
+        if ret is not None:
+          match_stats[p][0] += 1
+          return ret
+        # NOTE: if ret is None, we keep trying to match
+      return None
+  PatternMatcher = TrackedPattenMatcher  # type: ignore
   import atexit
   @functools.lru_cache(None)
   def lines(fn): return open(fn).readlines()
   @atexit.register
   def print_match_stats():
-    assert match_stats is not None
     for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][1]):
       txt = lines(k.location[0])[k.location[1]-1].strip()
       #txt = str(k).split("\n")[0]
