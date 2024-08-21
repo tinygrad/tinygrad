@@ -61,8 +61,8 @@ def make_qmd_struct_type(v):
     if len(fields) >= 2 and fields[-2][0].endswith('_lower') and fields[-1][0].endswith('_upper') and fields[-1][0][:-6] == fields[-2][0][:-6]:
       fields = fields[:-2] + [(fields[-1][0][:-6], ctypes.c_uint64, fields[-1][2] + fields[-2][2])]
   return init_c_struct_t(tuple(fields))
-qmd_struct_t = make_qmd_struct_type("V02_03")
-assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
+qmd_v2_t, qmd_v3_t = make_qmd_struct_type("V02_03"), make_qmd_struct_type("V03_00")
+assert ctypes.sizeof(qmd_v2_t) == 0x40 * 4 and ctypes.sizeof(qmd_v3_t) == 0x40 * 4
 
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
 
@@ -144,7 +144,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     cmd_idx = len(self) - 1
 
     ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
-    self.cmd_idx_to_qmd[cmd_idx] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
+    self.cmd_idx_to_qmd[cmd_idx] = qmd = type(prg.qmd).from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
     self.cmd_idx_to_local_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
 
@@ -154,19 +154,15 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
 
     if (prev_qmd:=self.cmd_idx_to_qmd.get(cmd_idx - 1)) is None:
       self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8]
-      # self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9]
-      self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS_B, 0x1), 2]
+      if qmd.qmd_major_version == 2: self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS_B, 0x1), 2]
+      else: self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9]
     else:
-      prev_qmd.dependent_qmd_pointer = qmd_addr >> 8
-      prev_qmd.dependent_qmd_schedule_enable = 1
-      prev_qmd.dependent_qmd_type = 1
-      # prev_qmd.dependent_qmd0_prefetch = 1
-      # prev_qmd.dependent_qmd0_enable = 1
-
-      # prev_qmd.dependent_qmd0_pointer = qmd_addr >> 8
-      # prev_qmd.dependent_qmd0_action = 1
-      # prev_qmd.dependent_qmd0_prefetch = 1
-      # prev_qmd.dependent_qmd0_enable = 1
+      if prev_qmd.qmd_major_version == 2:
+        prev_qmd.dependent_qmd_pointer = qmd_addr >> 8
+        prev_qmd.dependent_qmd_schedule_enable, prev_qmd.dependent_qmd_type = 1, 1
+      else:
+        prev_qmd.dependent_qmd0_pointer = qmd_addr >> 8
+        prev_qmd.dependent_qmd0_action, prev_qmd.dependent_qmd0_prefetch, prev_qmd.dependent_qmd0_enable = 1, 1, 1
 
   def _update_exec(self, cmd_idx, global_size, local_size):
     # Patch the exec cmd with new launch dims
@@ -176,8 +172,8 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
   def _signal(self, signal, value=0):
     if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 2)) is not None:
       for i in range(2):
-        if getattr(prev_qmd, f'release_enable{i}') == 0:
-          setattr(prev_qmd, f'release_enable{i}', 1)
+        if getattr(prev_qmd, (enable_field:=(f'release_enable{i}' if prev_qmd.qmd_major_version == 2 else f'release{i}_enable'))) == 0:
+          setattr(prev_qmd, enable_field, 1)
           setattr(prev_qmd, f'release{i}_address', signal.signal_addr)
           setattr(prev_qmd, f'release{i}_payload', value)
           self.cmd_idx_to_qmd[len(self) - 1] = prev_qmd
@@ -265,13 +261,13 @@ class NVProgram(HCQProgram):
     self.constbuffer_0[6:12] = [*data64_le(self.device.shared_mem_window), *data64_le(self.device.local_mem_window), *data64_le(0xfffdc0)]
 
     smem_config = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
-    self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
+    self.qmd = device.qmd_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
                             invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
-                            cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=2, constant_buffer_invalidate_0=1,
+                            cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, constant_buffer_invalidate_0=1,
                             shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
                             max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
                             barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
-                            program_address=self.program_addr, sass_version=0x89,
+                            program_address=self.program_addr, sass_version=0x89, qmd_major_version=device.qmd_ver,
                             program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40)
 
     for i,(addr,sz) in self.constbufs.items():
@@ -417,6 +413,7 @@ class NVDevice(HCQCompiled):
     self.compute_class = next(clss for clss in [nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_COMPUTE_B, nv_gpu.TURING_COMPUTE_A] if clss in self.nvclasses)
     self.copy_class = next(clss for clss in [nv_gpu.AMPERE_DMA_COPY_B, nv_gpu.TURING_DMA_COPY_A] if clss in self.nvclasses)
     self.channel_gpfifo_class = next(clss for clss in [nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.TURING_CHANNEL_GPFIFO_A] if clss in self.nvclasses)
+    self.qmd_ver, self.qmd_t = (2, qmd_v2_t) if self.compute_class == nv_gpu.TURING_COMPUTE_A else (3, qmd_v3_t)
 
   def __init__(self, device:str=""):
     if NVDevice.root is None:
