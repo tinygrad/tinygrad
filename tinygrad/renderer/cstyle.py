@@ -339,7 +339,6 @@ return c;}}""")
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
 
-                    # UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
 code_for_op_hip = { UnaryOps.SQRT: lambda x, dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({x})",
                     UnaryOps.SIN: lambda x, dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({x})",
                     UnaryOps.LOG2: lambda x, dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({x})",
