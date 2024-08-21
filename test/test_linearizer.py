@@ -3,6 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
+from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.ops import UOp, UOps
@@ -111,10 +112,7 @@ class TestLinearizer(unittest.TestCase):
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((1, 32)).expand((32, 32)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (1,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((32, 1)).to_uop()))
-    first_shape = first_x.st_arg.reduce(first_reduce.arg[1])
-    const_st = ShapeTracker.from_shape(()).reshape((1,)*len(first_shape)).expand(first_shape)
-    neg_first_reduce  = first_reduce * UOp(UOps.CONST, dtypes.float, (const_st.to_uop(),), -1.0)
-    diff = second_x + neg_first_reduce
+    diff = second_x + first_reduce*ast_const(dtypes.float, -1, (32, 1))
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (0,)))
     store = UOp(UOps.STORE, None, (g0, ShapeTracker.from_shape((1, 1)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
@@ -150,7 +148,7 @@ class TestLinearizer(unittest.TestCase):
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 32, 1, 5)).to_uop()))
-    diff = second_x - first_reduce
+    diff = second_x + first_reduce*ast_const(dtypes.float, -1, (27, 32, 1, 5))
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
@@ -212,7 +210,7 @@ class TestLinearizer(unittest.TestCase):
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x0.lazydata.st.reshape((27, 1, 1, 32, 5)).expand((27, 32, 32, 32, 5)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (3,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g2, x1.lazydata.st.reshape((27, 1, 32, 1, 5)).expand((27, 32, 32, 1, 5)).to_uop()))
-    diff = (second_x-first_reduce)
+    diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 32, 32, 1, 5)))
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (2,)))
     third_x = UOp(UOps.LOAD, dtypes.float, (g3, x2.lazydata.st.reshape((27, 32, 1, 1, 5)).to_uop()))
     mul = (third_x*second_reduce)
@@ -238,7 +236,8 @@ class TestLinearizer(unittest.TestCase):
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 1, 32, 8, 1, 16)).expand((8, 32, 32, 8, 16, 16)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2, 5)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 32, 1, 8, 16, 1)).to_uop()))
-    squares = (second_x-first_reduce)
+    neg_first_reduce = first_reduce * ast_const(dtypes.float, -1, (8, 32, 1, 8, 16, 1))
+    squares = (second_x+neg_first_reduce)
     squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (1, 4)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((8, 1, 1, 8, 1, 1)).to_uop(), squares_sum,))
     sink = UOp(UOps.SINK, src=(store,))
@@ -319,7 +318,7 @@ class TestLinearizer(unittest.TestCase):
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
     first_reduce_p = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x_p.alu(UnaryOps.EXP2),), (ReduceOps.SUM, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1)).to_uop()))
-    diff = (second_x-(first_reduce + first_reduce_p))
+    diff = (second_x+(first_reduce + first_reduce_p)*ast_const(dtypes.float, -1, (4, 32, 1)))
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((4, 1, 1)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
@@ -353,10 +352,10 @@ class TestLinearizer(unittest.TestCase):
     first_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
-    diff = (second_x-first_reduce)
+    diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
     store0 = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
-    second_out = second_reduce * UOp(UOps.CONST, dtypes.float, (ShapeTracker.from_shape((27,1,1,5)).to_uop(),), 1/15)
+    second_out = second_reduce * ast_const(dtypes.float, 1/15, (27, 1, 1, 5))
     store1 = UOp(UOps.STORE, src=(g1, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_out))
     sink = UOp(UOps.SINK, src=(store0, store1))
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
