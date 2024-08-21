@@ -816,12 +816,13 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_end_local(self):
-    load = MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker.from_shape((32,)))
-    store = MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker.from_shape((1,)))
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load),), arg=(0,)),), arg=store),
-
-    load_t = Tensor.full(load.st.shape, 1).contiguous().realize()
-    k = helper_linearizer_ast(ast, [load_t], wanna_output=[load_t.numpy().sum()])[1]
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=i) for i in range(2)]
+    load = UOp(UOps.LOAD, dtypes.int, (g1, ShapeTracker.from_shape((32,)).to_uop()))
+    reduce = UOp(UOps.REDUCE_AXIS, dtypes.int, (load,), (ReduceOps.SUM, (0,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((1,)).to_uop(), reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+    load_t = Tensor.full(load.st_arg.shape, 1).contiguous().realize()
+    k = helper_linearizer_ast(sink, [load_t], wanna_output=[load_t.numpy().sum()])[1]
     self.assertEqual(k.uops[-1].op, UOps.ENDIF)
     self.assertLess(k.uops.index([x for x in k.uops if x.op is UOps.STORE][-1]), k.uops.index(k.uops[-1]))
 
