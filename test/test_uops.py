@@ -15,7 +15,7 @@ from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
 def _uops_to_prg(uops_list):
-  uops = linearize_uop(UOp.sink(*uops_list)) #, opts=Device[Device.DEFAULT].renderer)
+  uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops,
