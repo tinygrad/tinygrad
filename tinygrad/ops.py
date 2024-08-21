@@ -195,16 +195,16 @@ class KernelInfo:
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
-  name:Optional[str] = None
-  src:Tuple[NOp, ...] = tuple()
-  allow_any_len:bool = False
+  name: Optional[str] = None
+  src: Tuple[NOp, ...] = tuple()
+  allow_any_len: bool = False
   @staticmethod
   def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, name=name)
   @staticmethod
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
-  def compile(self: NOp, name:Optional[str]=None) -> UPat:
+  def compile(self:NOp, name:Optional[str]=None) -> UPat:
     return UPat(name=self.name, dtype=self.dtype) if self.op is UOps.NOOP else UPat(self.op, self.arg, (list if self.commutative()
       else tuple)(src.compile() for src in self.src) or None, self.name or name, self.dtype, self.allow_any_len)
 
