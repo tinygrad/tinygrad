@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys
+import sys, time
 from collections import defaultdict
 from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING
 import math, operator, ctypes, struct, functools, hashlib, itertools
@@ -264,17 +264,22 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       if isinstance(p, NOp): p = p.upat
+      if match_stats is not None and p not in match_stats: match_stats[p] = [0,0,0.0]
       assert p.op is not None
       for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
-      if match_stats is not None and p not in match_stats: match_stats[p] = [0,0]
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
+    ret = None
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      if match_stats is not None: match_stats[p][1] += 1
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
+      if match_stats is not None:
+        match_stats[p][1] += 1
+        st = time.perf_counter()
+      if (matches := _match(uop, p, {})): ret = fxn(**matches[0])
+      if match_stats is not None: match_stats[p][2] += time.perf_counter()-st
+      if ret is not None:
         if match_stats is not None: match_stats[p][0] += 1
         return ret # NOTE: if it returns None, we keep trying to match
     return None
@@ -282,9 +287,14 @@ class PatternMatcher:
 if getenv("TRACK_MATCH_STATS", 0):
   match_stats = dict()
   import atexit
+  @functools.lru_cache(None)
+  def lines(fn): return open(fn).readlines()
   @atexit.register
   def print_match_stats():
-    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][1]): print(f"{v[0]:6d} / {v[1]:6d} -- {k.location}", str(k).split("\n")[0])
+    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][1]):
+      txt = lines(k.location[0])[k.location[1]-1].strip()
+      #txt = str(k).split("\n")[0]
+      print(f"{v[0]:6d} / {v[1]:6d} -- {v[2]*1000.:9.2f} ms -- {k.location}", txt)
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
