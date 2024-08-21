@@ -309,7 +309,7 @@ if getenv("TRACK_MATCH_STATS", 0):
   @atexit.register
   def print_match_stats():
     ret = [0,0,0.0]
-    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][1]):
+    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
       print(f"{v[0]:6d} / {v[1]:7d} -- {v[2]*1000.:9.2f} ms -- {k.location}", lines(k.location[0])[k.location[1]-1].strip())
       ret = [x+y for x,y in zip(ret, v)]
     print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[2]*1000.:9.2f} ms -- TOTAL")
