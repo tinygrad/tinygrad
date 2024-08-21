@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, time
-from collections import defaultdict
+from collections import defaultdict, Counter
 from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING
 import math, operator, ctypes, struct, functools, hashlib, itertools
 from enum import Enum, auto
@@ -266,14 +266,17 @@ class PatternMatcher:
       if isinstance(p, NOp): p = p.upat
       if match_stats is not None and p not in match_stats: match_stats[p] = [0,0,0.0]
       assert p.op is not None
-      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
+      early_reject = set((pp.op[0], pp.arg) for pp in p.src[0] if pp.op is not None and len(pp.op) == 1 and pp.arg is not None) if p.allowed_len > 0 else None
+      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, early_reject if early_reject is not None and len(early_reject) else None))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     ret = None
-    for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+    ler = set((u.op, u.arg) for u in uop.src)
+    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+      if early_reject is not None and not early_reject.issubset(ler): continue
       if match_stats is not None:
         match_stats[p][1] += 1
         st = time.perf_counter()
@@ -281,7 +284,8 @@ class PatternMatcher:
       if match_stats is not None: match_stats[p][2] += time.perf_counter()-st
       if ret is not None:
         if match_stats is not None: match_stats[p][0] += 1
-        return ret # NOTE: if it returns None, we keep trying to match
+        return ret
+      # NOTE: if ret is None, we keep trying to match
     return None
 
 if getenv("TRACK_MATCH_STATS", 0):
