@@ -1534,7 +1534,19 @@ class TestFloat4(unittest.TestCase):
 
   def test_half4_load_unrolled(self):
     # from llama 7B shard 4 gpus
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 0, 1024, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 32000, 1), strides=(0, 32000, 1, 0), offset=0, mask=None, contiguous=True),))))   # noqa: E501
+    ast = UOp(UOps.SINK, src=(
+      UOp(UOps.STORE, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0),
+        UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1), strides=(0, 32000, 1, 0), offset=0, mask=None, contiguous=True),))),  # noqa: E501
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (3,)), src=(
+          UOp(UOps.CAST, dtypes.float, src=(
+            UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
+              UOp(UOps.LOAD, dtypes.half, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1),
+                UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),))),)),  # noqa: E501
+              UOp(UOps.LOAD, dtypes.half, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2),
+                UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 0, 1024, 1), offset=0, mask=None, contiguous=False),))),)),)),)),)),)),))  # noqa: E501
 
     # TODO: fix this, expected might change but should be positive
     for expected, opts in [
