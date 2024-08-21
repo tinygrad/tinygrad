@@ -388,7 +388,8 @@ class Tensor:
     return Tensor._metaop(MetaOps.EMPTY, argfix(*shape), **kwargs)
 
   _seed: int = int(time.time())
-  _rng_counter: Optional[Tensor] = None
+  _device_seeds: Dict[str, int] = {}
+  _device_rng_counters: Dict[str, Tensor] = {}
   @staticmethod
   def manual_seed(seed=0):
     """
@@ -405,7 +406,7 @@ class Tensor:
     print(Tensor.rand(5).numpy())
     ```
     """
-    Tensor._seed, Tensor._rng_counter = seed, None
+    Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
   def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DTypeLike]=None, **kwargs) -> Tensor:
@@ -425,6 +426,15 @@ class Tensor:
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if (had_counter := Tensor._rng_counter is None): Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
 
+    # generate per device seeds and rng counter for devices we haven't seen yet
+    devices = tuple(Device.canonicalize(d) for d in (device if isinstance(device, tuple) else (device,)))
+    had_counter = set()
+    for d in devices:
+      if d not in Tensor._device_seeds:
+        Tensor._device_seeds[d] = hash(d)
+        Tensor._device_rng_counters[d] = Tensor([0], device=d, dtype=dtypes.uint32, requires_grad=False)
+      else: had_counter.add(d)
+
     if not THREEFRY:
       # for bfloat16, numpy rand passes buffer in float
       if to_dtype(dtype or dtypes.default_float) == dtypes.bfloat16:
@@ -433,26 +443,37 @@ class Tensor:
 
     # threefry
     if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    if not had_counter: Tensor._rng_counter.assign(Tensor._rng_counter + num)
-    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device))
-    counts2 = counts1 + math.ceil(num / 2)
 
-    # threefry random bits
-    x = counts2.cast(dtypes.uint64) << 32 | counts1.cast(dtypes.uint64)
-    x = F.Threefry.apply(*x._broadcasted(Tensor._seed))
-    counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
-    bits = counts1.cat(counts2)[:num]
+    # increment rng counter for devices
+    for d in devices:
+      if d in had_counter: Tensor._device_rng_counters[d].assign(Tensor._device_rng_counters[d] + num)
 
-    # bitcast to uint with same number of bits
-    _, nmant = dtypes.finfo(dtype)
-    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
-    bits = bits.bitcast(uint_dtype)
-    # only randomize the mantissa bits and set the exponent to 1
-    one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
-    bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
+    # per device threefry bits
+    outs = {}
+    for d in devices:
+      counts1 = (Tensor.arange(math.ceil(num / 2), device=d, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[d])
+      counts2 = counts1 + math.ceil(num / 2)
 
-    # bitcast back to the original dtype
-    out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
+      # threefry random bits
+      x = counts2.cast(dtypes.uint64) << 32 | counts1.cast(dtypes.uint64)
+      x = F.Threefry.apply(*x._broadcasted(Tensor._seed))
+      counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
+      bits = counts1.cat(counts2)[:num]
+
+      # bitcast to uint with same number of bits
+      _, nmant = dtypes.finfo(dtype)
+      uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
+      bits = bits.bitcast(uint_dtype)
+      # only randomize the mantissa bits and set the exponent to 1
+      one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
+      bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
+
+      # bitcast back to the original dtype
+      outs[d] = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
+
+    # merge outputs
+    
+
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
 
