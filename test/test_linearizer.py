@@ -8,7 +8,7 @@ from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.ops import UOp, UOps
 from tinygrad.device import Device, Buffer
-from extra.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, MetaOps, TernaryOps, ReduceOps, UnaryOps, to_uop
+from extra.ops import BinaryOps, BufferOps, MemBuffer, LazyOp, MetaOps, TernaryOps, ReduceOps, UnaryOps, to_uop
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 # from tinygrad.shape.symbolic import Variable
@@ -918,16 +918,18 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_load_cache_const_bufs(self):
     # make sure const buffers are differentiated from local and mem buffers
-    ST, DT = ShapeTracker(views=(View(shape=((1,)), strides=(0, 0), offset=0, mask=None, contiguous=False),)), dtypes.int
-    VAL = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=2, dtype=DT, st=ST))
+    ST, DT = ShapeTracker(views=(View(shape=((1,)), strides=(0, 0), offset=0, mask=None, contiguous=False),)).to_uop(), dtypes.int
+    VAL = UOp(UOps.CONST, DT, (ST,), 2)
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(DT), arg=i) for i in range(2)]
 
     # data1[0] + VAL
-    a = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=DT, st=ST)), VAL))
+    a = UOp(UOps.LOAD, DT, (g1, ST)) + VAL
     # (literal const 1) + VAL
-    b = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1, dtype=DT, st=ST)), VAL))
+    b = UOp(UOps.CONST, DT, (ST,), 1) + VAL
 
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.ADD, src=(a,b)),), arg=MemBuffer(idx=0, dtype=DT, st=ST))
-    lin = Kernel(ast)
+    store = UOp(UOps.STORE, src=(g0, ST, (a+b)))
+    sink = UOp(UOps.SINK, src=(store,))
+    lin = Kernel(sink)
     lin.linearize()
 
     assert len(lin.uops) <= 7, "too many uops"
