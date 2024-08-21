@@ -212,9 +212,10 @@ class NOp(UOp):
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
-  def compile(self:NOp, name:Optional[str]=None) -> UPat:
+  @functools.cached_property
+  def upat(self:NOp) -> UPat:
     return UPat(name=self.name, dtype=self.dtype, location=self.location) if self.op is UOps.NOOP else \
-      UPat(self.op, self.arg, (list if self.commutative() else tuple)(src.compile() for src in self.src) or None, self.name or name,
+      UPat(self.op, self.arg, (list if self.commutative() else tuple)(src.upat for src in self.src) or None, self.name,
            self.dtype, self.allow_any_len, location=self.location)
 
 class UPat:
@@ -262,10 +263,10 @@ class PatternMatcher:
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      if isinstance(p, NOp): p = p.compile()
+      if isinstance(p, NOp): p = p.upat
       assert p.op is not None
       for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
-      if match_stats is not None and str(p) not in match_stats: match_stats[p] = [0,0]
+      if match_stats is not None and p not in match_stats: match_stats[p] = [0,0]
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
@@ -283,8 +284,7 @@ if getenv("TRACK_MATCH_STATS", 0):
   import atexit
   @atexit.register
   def print_match_stats():
-    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][1]):
-      print(f"{v[0]:6d} / {v[1]:6d} -- {k.location}", str(k).split("\n")[0])
+    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][1]): print(f"{v[0]:6d} / {v[1]:6d} -- {k.location}", str(k).split("\n")[0])
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
