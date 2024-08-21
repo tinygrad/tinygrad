@@ -512,7 +512,7 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   return srcs[u]
 
 linearize_cnt = 0
-def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None):
+def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   global linearize_cnt, acc_number
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
   folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
@@ -534,7 +534,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None):
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
   return sink
 
-def linearize_uop(sink:UOp, skip_check=False) -> List[UOp]:
+def linearize_uop(sink:UOp, skip_check:bool=False) -> List[UOp]:
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
   # filter nodes that don't link to a sink
   # BFS toposort
