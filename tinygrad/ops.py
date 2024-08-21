@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys, time
 from collections import defaultdict
-from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING
+from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence
 import math, operator, ctypes, struct, functools, hashlib, itertools
 from enum import Enum, auto
 from dataclasses import dataclass, field
@@ -262,12 +262,11 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   return res
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
-    self.patterns = patterns
+  def __init__(self, patterns:Sequence[Tuple[Union[UPat, NOp], Callable]]):
+    self.patterns = [(p.upat if isinstance(p, NOp) else p, fxn) for p,fxn in patterns]
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      if isinstance(p, NOp): p = p.upat
       assert p.op is not None
       for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, p.early_reject()))
 
@@ -285,9 +284,9 @@ if getenv("TRACK_MATCH_STATS", 0):
   match_stats = dict()
   class TrackedPattenMatcher(PatternMatcher):
     def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
-      for p,_ in patterns:
-        if p not in match_stats: match_stats[p] = [0,0,0.0]
       super().__init__(patterns)
+      for p,_ in self.patterns:
+        if p not in match_stats: match_stats[p] = [0,0,0.0]
 
     def rewrite(self, uop:UOp) -> Optional[UOp]:
       ret = None
