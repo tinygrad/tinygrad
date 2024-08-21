@@ -2031,8 +2031,8 @@ class Tensor:
       d = self[..., y1, x1]
       y_lerp = y_indices - y0
       x_lerp = x_indices - x0
-      def weight_mul(idx, weight, COEF_PREC=16):
-        int_a = (0.5 + weight * (1 << 16)).cast(dtypes.uint64)
+      def weight_mul(idx, weight, COEF_PREC=15):
+        int_a = (0.5 + weight * (1 << COEF_PREC)).cast(dtypes.uint64)
         with_trick = ((int_a * idx) + (1 << (COEF_PREC - 1))) >> COEF_PREC
         return with_trick
       top = a + weight_mul((c - a), x_lerp)
@@ -2049,6 +2049,15 @@ class Tensor:
       elif mode == "linear":
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        # if self.dtype == dtypes.uint8:
+        #   def weight_mul(idx, weight, COEF_PREC=16):
+        #     int_a = (0.5 + weight * (1 << COEF_PREC)).cast(dtypes.uint64)
+        #     with_trick = ((int_a * idx) + (1 << (COEF_PREC - 1))) >> COEF_PREC
+        #     return with_trick
+        #   low = x.gather(i, low)
+        #   high = x.gather(i, high)
+        #   x = low + weight_mul((high - low), perc)
+        # else:
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
       else: raise ValueError(f"invalid {mode=}")
     if mode in {"nearest", "nearest-exact"}: x = x[(..., *indexes)]
