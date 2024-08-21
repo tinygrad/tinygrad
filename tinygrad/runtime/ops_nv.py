@@ -57,7 +57,7 @@ def make_qmd_struct_type(v):
   bits = sorted(bits, key=lambda x: x[1][1])
   for i,(name, data) in enumerate(bits):
     if i > 0 and (gap:=(data[1] - bits[i-1][1][0] - 1)) != 0: fields.append((f"_reserved{i}", ctypes.c_uint32, gap))
-    fields.append((name.replace(f"NVC6C0_QMD{v}_", "").replace(f"SEMAPHORE_RELEASE", "RELEASE").lower(), ctypes.c_uint32, data[0]-data[1]+1))
+    fields.append((name.replace(f"NVC6C0_QMD{v}_", "").replace("SEMAPHORE_RELEASE", "RELEASE").lower(), ctypes.c_uint32, data[0]-data[1]+1))
     if len(fields) >= 2 and fields[-2][0].endswith('_lower') and fields[-1][0].endswith('_upper') and fields[-1][0][:-6] == fields[-2][0][:-6]:
       fields = fields[:-2] + [(fields[-1][0][:-6], ctypes.c_uint64, fields[-1][2] + fields[-2][2])]
   return init_c_struct_t(tuple(fields))
