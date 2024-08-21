@@ -467,13 +467,10 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
 def merge_gates(sink:UOp) -> Optional[UOp]:
-  @functools.lru_cache(None)
-  def find_range(x:UOp) -> Optional[UOp]:
-    if x.op is UOps.RANGE: return x
-    return next((ret for s in x.src if (ret:=find_range(s)) is not None), None)
+  if not any(x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF for x in sink.src): return None
   if_src_to_if_op: Dict[UOp, UOp] = {}
   for x in sink.src:
-    if x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF and find_range(x.src[2]) and x.src[2] not in x.src[-1].src:
+    if x.op is UOps.STORE and len(x.src) == 4 and x.src[-1].op is UOps.IF and any(s2p.op is UOps.RANGE for s2p in x.src[2].sparents) and x.src[2] not in x.src[-1].src:  # noqa: E501
       if_to_update = if_src_to_if_op.get(x.src[-1].src[0], x.src[-1])
       if_src_to_if_op[x.src[-1].src[0]] = UOp(UOps.IF, None, (if_to_update.src[0],) + if_to_update.src[1:] + (x.src[2],), if_to_update.arg)
   if len(if_src_to_if_op) == 0: return None
