@@ -1,11 +1,11 @@
 from __future__ import annotations
+from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence
+import sys, time, math, operator, ctypes, struct, functools, hashlib, itertools
 from collections import defaultdict
-from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING
-import math, operator, ctypes, struct, functools, hashlib, itertools
 from enum import Enum, auto
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import pretty_print, prod
+from tinygrad.helpers import pretty_print, prod, getenv
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -193,24 +193,34 @@ class KernelInfo:
 
 # ***** pattern matcher *****
 
+def get_location() -> Tuple[str, int]:
+  frm = sys._getframe(1)
+  # no matchers in ops.py, find the real frame
+  while (frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>') and frm.f_back is not None: frm = frm.f_back
+  return frm.f_code.co_filename, frm.f_lineno
+
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
   name: Optional[str] = None
   src: Tuple[NOp, ...] = tuple()
   allow_any_len: bool = False
+  location: Tuple[str, int] = field(default_factory=get_location)
+
   @staticmethod
   def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, name=name)
   @staticmethod
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
-  def compile(self:NOp, name:Optional[str]=None) -> UPat:
-    return UPat(name=self.name, dtype=self.dtype) if self.op is UOps.NOOP else UPat(self.op, self.arg, (list if self.commutative()
-      else tuple)(src.compile() for src in self.src) or None, self.name or name, self.dtype, self.allow_any_len)
+  @functools.cached_property
+  def upat(self:NOp) -> UPat:
+    return UPat(name=self.name, dtype=self.dtype, location=self.location) if self.op is UOps.NOOP else \
+      UPat(self.op, self.arg, (list if self.commutative() else tuple)(src.upat for src in self.src) or None, self.name,
+           self.dtype, self.allow_any_len, location=self.location)
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
-               name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False):
+               name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False, location=None):
     self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
     self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
     self.arg, self.name = arg, name
@@ -223,6 +233,12 @@ class UPat:
     elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
 
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
+    self.location = location or get_location()
+
+  @functools.cached_property
+  def early_reject(self):
+    # TODO: this can be improved to support some allowed_len == 0 patterns
+    return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
 
   def __repr__(self):
     def rep(x):
@@ -246,22 +262,58 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   return res
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
-    self.patterns = patterns
-    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
+  def __init__(self, patterns:Sequence[Tuple[Union[UPat, NOp], Callable]]):
+    self.patterns = [(p.upat if isinstance(p, NOp) else p, fxn) for p,fxn in patterns]
+    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      if isinstance(p, NOp): p = p.compile()
       assert p.op is not None
-      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
+      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, p.early_reject))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
+    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+      if not early_reject.issubset(ler): continue
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
+
+if getenv("TRACK_MATCH_STATS", 0):
+  match_stats = dict()
+  class TrackedPattenMatcher(PatternMatcher):
+    def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
+      super().__init__(patterns)
+      for p,_ in self.patterns:
+        if p not in match_stats: match_stats[p] = [0,0,0.0]
+
+    def rewrite(self, uop:UOp) -> Optional[UOp]:
+      ret = None
+      ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
+      for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+        st = time.perf_counter()
+        if not early_reject.issubset(ler):
+          match_stats[p][2] += time.perf_counter()-st
+          continue
+        match_stats[p][1] += 1
+        if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
+          match_stats[p][0] += 1
+          match_stats[p][2] += time.perf_counter()-st
+          return ret # NOTE: if it returns None, we keep trying to match
+        match_stats[p][2] += time.perf_counter()-st
+      return None
+  PatternMatcher = TrackedPattenMatcher  # type: ignore
+  import atexit
+  @functools.lru_cache(None)
+  def lines(fn): return open(fn).readlines()
+  @atexit.register
+  def print_match_stats():
+    ret = [0,0,0.0]
+    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
+      print(f"{v[0]:6d} / {v[1]:7d} -- {v[2]*1000.:9.2f} ms -- {k.location}", lines(k.location[0])[k.location[1]-1].strip())
+      ret = [x+y for x,y in zip(ret, v)]
+    print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[2]*1000.:9.2f} ms -- TOTAL")
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
