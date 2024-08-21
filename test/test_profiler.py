@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context, ProfileLogger
 from tinygrad.device import Buffer, BufferOptions, HCQCompiled
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import get_runner, get_kernels
+from tinygrad.engine.realize import get_runners
 
 MOCKGPU = getenv("MOCKGPU")
 
@@ -78,7 +78,7 @@ class TestProfiler(unittest.TestCase):
     TestProfiler.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
 
-    TestProfiler.runner = get_runner(TestProfiler.d0.dname, get_kernels(Device[TestProfiler.d0.dname].renderer, si.ast)[-1])
+    TestProfiler.runner = get_runners(TestProfiler.d0.dname, si.ast)[-1]
     TestProfiler.b.lazydata.buffer.allocate()
 
     TestProfiler.kernargs_ba_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])

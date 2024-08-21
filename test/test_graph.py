@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import Context, CI, dedup, from_mv
 from tinygrad.dtype import dtypes
-from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner, get_kernels, CompiledRunner
+from tinygrad.engine.realize import ExecItem, BufferXfer, get_runners, CompiledRunner
 
 np.random.seed(1337)
 Tensor.manual_seed(1337)
@@ -22,7 +22,7 @@ def helper_exec_op(device, outbuf, inbufs):
       for i in range(1, len(inbufs)): s = s.xor(fst[i])
 
       si = create_schedule([s.lazydata])[-1]
-      prg = get_runner(device, get_kernels(Device[device].renderer, si.ast)[-1])
+      prg = get_runners(device, si.ast)[-1]
     cached_prgs[(device, len(inbufs))] = prg
 
   return ExecItem(cached_prgs[(device, len(inbufs))], [outbuf] + inbufs)
