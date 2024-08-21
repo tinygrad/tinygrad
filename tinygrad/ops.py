@@ -87,7 +87,7 @@ class UOp:
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
-  def __neg__(self): return self.alu(UnaryOps.NEG)
+  def __neg__(self): return self*(-1) if self.dtype != dtypes.bool else self.ne(True)
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __radd__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))

@@ -388,7 +388,7 @@ class TestLinearizerFailures(unittest.TestCase):
     ifs = [u for u in k.uops if u.op is UOps.IF]
     self.assertEqual(len(ifs), 1)
     #for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
-    self.assertLessEqual(len(ifs[0].src[0].sparents), 16)
+    self.assertLessEqual(len(ifs[0].src[0].sparents), 17)
 
   def test_failure_45(self):
     ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
