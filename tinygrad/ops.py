@@ -1,11 +1,11 @@
 from __future__ import annotations
+from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence
+import sys, time, math, operator, ctypes, struct, functools, hashlib, itertools
 from collections import defaultdict
-from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING
-import math, operator, ctypes, struct, functools, hashlib, itertools
 from enum import Enum, auto
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import merge_dicts, pretty_print, prod
+from tinygrad.helpers import pretty_print, prod, getenv
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -33,47 +33,6 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
-
-@dataclass(frozen=True)
-class KernelInfo:
-  local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
-  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to EXPAND)
-  dont_use_locals: bool = False # don't use local indexing
-
-# **************** ops in python ****************
-
-def hook_overflow(dv, fxn):
-  def wfxn(*args):
-    try: return fxn(*args)
-    except OverflowError: return dv
-  return wfxn
-
-python_alu: Dict[Op, Callable]  = {
-  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
-  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
-  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift, BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
-  BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
-  BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
-  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
-  TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
-
-def truncate_fp16(x):
-  try:
-    x = float(x)
-    struct.pack("@e", x)
-    return x
-  except OverflowError: return math.copysign(math.inf, x)
-
-truncate: Dict[DType, Callable] = {dtypes.bool: bool,
-  # TODO: bfloat16
-  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
-  dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
-  dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
-  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
-      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
-
-def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -123,11 +82,12 @@ class UOp:
     ret = self.src[0 if self.op is UOps.CONST else 1]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
+  def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
   def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
-  def __neg__(self): return self.alu(UnaryOps.NEG)
+  def __neg__(self): return self*(-1) if self.dtype != dtypes.bool else self.ne(True)
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __radd__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
@@ -165,7 +125,7 @@ class UOp:
   @staticmethod
   def store(*src:UOp, **kwargs): return type((src:=(*src, *kwargs.values()))[0])(UOps.STORE, None, src)
   @functools.cached_property
-  def parents(self) -> Dict[UOp, None]: return merge_dicts([{x:None for x in self.src}]+[x.parents for x in self.src])
+  def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
   @functools.cached_property
@@ -216,7 +176,7 @@ class UOp:
         Rmin, Rmax = (s1.vmin.arg, s1.vmax.arg) if s0.vmin.arg >= 0 else (s1.vmax.arg, s1.vmin.arg)
         assert math.isnan(Lmax*Rmax) or math.isnan(Lmin*Rmin) or Lmax*Rmax >= Lmin*Rmin, f"{Lmax=}, {Lmin=}, {Rmax=}, {Rmin=}"
         return self.sconst(Lmin*Rmin), self.sconst(Lmax*Rmax)
-      if self.arg is BinaryOps.MOD and s1.op is UOps.CONST and s1.arg > 0: return self.sconst(0), self.sconst(s1.arg-1)
+      if self.arg is BinaryOps.MOD and s1.vmin.arg > 0: return self.sconst(0), self.sconst(s1.vmax.arg-1)
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
         if s1.arg > 0: return self.sconst(s0.vmin.arg//s1.arg), self.sconst(s0.vmax.arg//s1.arg)
         if s1.arg < 0: return self.sconst(-(s0.vmax.arg//-s1.arg)), self.sconst(-(s0.vmin.arg//-s1.arg))
@@ -225,24 +185,42 @@ class UOp:
         (UOp.sconst(dtypes.bool, False), UOp.sconst(dtypes.bool, False)) if s0.vmin.arg >= s1.vmax.arg else (None, None)
     return None, None
 
+@dataclass(frozen=True)
+class KernelInfo:
+  local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
+  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to EXPAND)
+  dont_use_locals: bool = False # don't use local indexing
+
+# ***** pattern matcher *****
+
+def get_location() -> Tuple[str, int]:
+  frm = sys._getframe(1)
+  # no matchers in ops.py, find the real frame
+  while (frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>') and frm.f_back is not None: frm = frm.f_back
+  return frm.f_code.co_filename, frm.f_lineno
+
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
-  name:Optional[str] = None
-  src:Tuple[NOp, ...] = tuple()
-  allow_any_len:bool = False
+  name: Optional[str] = None
+  src: Tuple[NOp, ...] = tuple()
+  allow_any_len: bool = False
+  location: Tuple[str, int] = field(default_factory=get_location)
+
   @staticmethod
   def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, name=name)
   @staticmethod
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
-  def compile(self: NOp, name:Optional[str]=None) -> UPat:
-    return UPat(name=self.name, dtype=self.dtype) if self.op is UOps.NOOP else UPat(self.op, self.arg, (list if self.commutative()
-      else tuple)(src.compile() for src in self.src) or None, self.name or name, self.dtype, self.allow_any_len)
+  @functools.cached_property
+  def upat(self:NOp) -> UPat:
+    return UPat(name=self.name, dtype=self.dtype, location=self.location) if self.op is UOps.NOOP else \
+      UPat(self.op, self.arg, (list if self.commutative() else tuple)(src.upat for src in self.src) or None, self.name,
+           self.dtype, self.allow_any_len, location=self.location)
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
-               name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False):
+               name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False, location=None):
     self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
     self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
     self.arg, self.name = arg, name
@@ -255,6 +233,12 @@ class UPat:
     elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
 
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
+    self.location = location or get_location()
+
+  @functools.cached_property
+  def early_reject(self):
+    # TODO: this can be improved to support some allowed_len == 0 patterns
+    return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
 
   def __repr__(self):
     def rep(x):
@@ -278,33 +262,113 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   return res
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
-    self.patterns = patterns
-    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
+  def __init__(self, patterns:Sequence[Tuple[Union[UPat, NOp], Callable]]):
+    self.patterns = [(p.upat if isinstance(p, NOp) else p, fxn) for p,fxn in patterns]
+    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      if isinstance(p, NOp): p = p.compile()
       assert p.op is not None
-      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
+      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, p.early_reject))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
+    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+      if not early_reject.issubset(ler): continue
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
+
+if getenv("TRACK_MATCH_STATS", 0):
+  match_stats = dict()
+  class TrackedPattenMatcher(PatternMatcher):
+    def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
+      super().__init__(patterns)
+      for p,_ in self.patterns:
+        if p not in match_stats: match_stats[p] = [0,0,0.0]
+
+    def rewrite(self, uop:UOp) -> Optional[UOp]:
+      ret = None
+      ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
+      for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+        st = time.perf_counter()
+        if not early_reject.issubset(ler):
+          match_stats[p][2] += time.perf_counter()-st
+          continue
+        match_stats[p][1] += 1
+        if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
+          match_stats[p][0] += 1
+          match_stats[p][2] += time.perf_counter()-st
+          return ret # NOTE: if it returns None, we keep trying to match
+        match_stats[p][2] += time.perf_counter()-st
+      return None
+  PatternMatcher = TrackedPattenMatcher  # type: ignore
+  import atexit
+  @functools.lru_cache(None)
+  def lines(fn): return open(fn).readlines()
+  @atexit.register
+  def print_match_stats():
+    ret = [0,0,0.0]
+    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
+      print(f"{v[0]:6d} / {v[1]:7d} -- {v[2]*1000.:9.2f} ms -- {k.location}", lines(k.location[0])[k.location[1]-1].strip())
+      ret = [x+y for x,y in zip(ret, v)]
+    print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[2]*1000.:9.2f} ms -- TOTAL")
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
   replace: Dict[UOp, UOp] = {}
   def __inner_rewrite(n:UOp) -> UOp:
     if rn := replace.get(n): return rn
-    replace_source = (n.op, n.dtype, tuple(__inner_rewrite(y) for y in n.src), n.arg)
+    replace_source = (n.op, n.dtype, new_src:=tuple(__inner_rewrite(y) for y in n.src), n.arg)
     if found := nodes.get(replace_source): replace[n] = found
-    else: nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x:=UOp(*replace_source))) else x
+    else:
+      x = UOp(*replace_source) if new_src != n.src else n
+      nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x)) else x
     return found
   return __inner_rewrite(sink)
+
+# ***** ops in python *****
+
+def hook_overflow(dv, fxn):
+  def wfxn(*args):
+    try: return fxn(*args)
+    except OverflowError: return dv
+  return wfxn
+
+python_alu: Dict[Op, Callable]  = {
+  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
+  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
+  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
+  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift, BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
+  BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
+  BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
+  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
+  TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
+
+def truncate_fp16(x):
+  try:
+    x = float(x)
+    struct.pack("@e", x)
+    return x
+  except OverflowError: return math.copysign(math.inf, x)
+
+truncate: Dict[DType, Callable] = {dtypes.bool: bool,
+  # TODO: bfloat16
+  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
+  dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
+  dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
+  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
+      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
+
+def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+
+def uop_alu_resolve(u:UOp) -> sint:
+  if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
+  if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
+  raise RuntimeError(f"ALU resolve fail @ {u.op}")
+
+# ***** uop type spec *****
 
 def type_verify(uops):
   for u in uops:
@@ -312,10 +376,13 @@ def type_verify(uops):
     if uop is UOps.DEFINE_LOCAL: assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}"
     if uop is UOps.DEFINE_GLOBAL: assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}"
     if isinstance(dtype, ImageDType): assert uop is UOps.DEFINE_GLOBAL, f"{uop} can't be image"
+    if uop is UOps.SHAPETRACKER: assert len(src) == 0, f"SHAPETRACKER must only define a ShapeTracker arg {uop}"
+    if uop is UOps.REDUCE_AXIS: assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in ReduceOps, f"invalid arg for REDUCE_AXIS {arg}"
     if uop in {UOps.CONST, UOps.DEFINE_ACC}:
       if uop is UOps.CONST:
         assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
-        assert type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
+        # TODO: intermediate CONST of Variable is DEFINE_VAR
+        assert (isinstance(arg, Variable) and u.src) or (type(arg) is type(dtypes.as_const(arg, dtype))), f"type of {arg=} does not match {dtype}"
       if uop is UOps.DEFINE_ACC: assert dtype is not None and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
     if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
     if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
@@ -330,7 +397,8 @@ def type_verify(uops):
     if uop is UOps.ALU:
       if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
       elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
-        assert dtype == (bd:=(dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool)), f"{arg} output dtype mismatch {dtype=} != {bd=}"
+        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
+        assert dtype == bd, f"{arg} output dtype mismatch {dtype=} != {bd=}"
         assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
       elif arg is BinaryOps.IDIV:
         assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), f"input dtype is not int {src[0].dtype=}, {src[1].dtype=}"
@@ -340,14 +408,11 @@ def type_verify(uops):
         assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
       elif arg in BinaryOps: assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
       elif arg == TernaryOps.WHERE:
-        assert src[0].dtype == (bd:=(dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool)), \
-          f"{arg} selector dtype mismatch {src[0].dtype=} != {bd}"
+        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
+        assert src[0].dtype == bd, f"{arg} selector dtype mismatch {src[0].dtype=} != {bd}"
         assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
 
-def uop_alu_resolve(u:UOp) -> sint:
-  if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
-  if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
-  raise RuntimeError(f"ALU resolve fail @ {u.op}")
+# ***** uop helpers *****
 
 def print_uops(uops:List[UOp]):
   for i,u in enumerate(uops):

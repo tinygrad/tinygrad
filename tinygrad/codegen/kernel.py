@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Literal, Optional, List, Tuple, Union, cast, Dict, Final, DefaultDict
 
-from tinygrad.ops import BinaryOps, ReduceOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops
+from tinygrad.ops import BinaryOps, ReduceOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import DType, ImageDType, PtrDType
@@ -13,7 +13,7 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DE
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.uopgraph import linearize_uop
+from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
 from tinygrad.codegen.lowerer import ast_to_uop
 from enum import Enum, auto
 
@@ -746,7 +746,7 @@ class Kernel:
       print(self.applied_opts)
     verify_ast(modified_ast)
 
-    self.uops:List[UOp] = linearize_uop(ast_to_uop(modified_ast, self.opts), self.opts)
+    self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
     if DEBUG >= 5: print_uops(self.uops)
     if getenv("GRAPHUOPS"):
       from tinygrad.engine.graph import graph_uops
@@ -769,7 +769,8 @@ class Kernel:
     return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
 
-# the living definition of UOp st_arg
+# the living definition of intermediate UOps
+
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if uop in sts: return
   op, _, src, arg = uop.op, uop.dtype, uop.src, uop.arg
@@ -784,6 +785,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   # only reduceuop is allowed to change shape, limited to turning n to 1
   if op is UOps.REDUCE_AXIS: st = ShapeTracker.from_shape(sts[src[0]].reduce(arg[1][-1] if arg[0] is ReduceOps.WMMA else arg[1]))
   else:
+    assert op in {UOps.SHAPETRACKER, UOps.ALU, UOps.CAST, UOps.BITCAST, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
     # movementops are pushed to the edges with SHAPETRACKER
     # elementwise inherits shape
     st = arg if op is UOps.SHAPETRACKER else sts[src[-1]]
@@ -800,4 +802,5 @@ def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   for out in ast.src: _assert_valid_uop(out, out.st_arg, sts)
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
+  type_verify(list(sts))
   return sts
