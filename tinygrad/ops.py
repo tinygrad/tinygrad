@@ -309,9 +309,7 @@ if getenv("TRACK_MATCH_STATS", 0):
   @atexit.register
   def print_match_stats():
     for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][1]):
-      txt = lines(k.location[0])[k.location[1]-1].strip()
-      #txt = str(k).split("\n")[0]
-      print(f"{v[0]:6d} / {v[1]:6d} -- {v[2]*1000.:9.2f} ms -- {k.location}", txt)
+      print(f"{v[0]:6d} / {v[1]:6d} -- {v[2]*1000.:9.2f} ms -- {k.location}", lines(k.location[0])[k.location[1]-1].strip())
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
