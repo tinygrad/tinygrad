@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import to_mv, CI
 from tinygrad.device import Buffer, BufferOptions
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import get_runner
+from tinygrad.engine.realize import get_runner, get_kernels
 
 def _time_queue(q, d):
   st = time.perf_counter()
@@ -22,7 +22,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
-    TestHCQ.runner = get_runner(TestHCQ.d0.dname, si.ast)
+    TestHCQ.runner = get_runner(get_kernels(Device[TestHCQ.d0.dname].renderer, si.ast)[-1])
     TestHCQ.b.lazydata.buffer.allocate()
     # wow that's a lot of abstraction layers
     TestHCQ.addr = struct.pack("QQ", TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr)
