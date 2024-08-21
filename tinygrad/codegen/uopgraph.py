@@ -535,6 +535,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None):
   return sink
 
 def linearize_uop(sink:UOp, skip_check=False) -> List[UOp]:
+  assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
   # filter nodes that don't link to a sink
   # BFS toposort
   children: Dict[UOp, List[UOp]] = {}
