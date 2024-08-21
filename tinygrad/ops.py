@@ -292,15 +292,16 @@ if getenv("TRACK_MATCH_STATS", 0):
       ret = None
       ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
       for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-        if not early_reject.issubset(ler): continue
-        match_stats[p][1] += 1
         st = time.perf_counter()
-        if (matches := _match(uop, p, {})): ret = fxn(**matches[0])
-        match_stats[p][2] += time.perf_counter()-st
-        if ret is not None:
+        if not early_reject.issubset(ler):
+          match_stats[p][2] += time.perf_counter()-st
+          continue
+        match_stats[p][1] += 1
+        if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
           match_stats[p][0] += 1
-          return ret
-        # NOTE: if ret is None, we keep trying to match
+          match_stats[p][2] += time.perf_counter()-st
+          return ret # NOTE: if it returns None, we keep trying to match
+        match_stats[p][2] += time.perf_counter()-st
       return None
   PatternMatcher = TrackedPattenMatcher  # type: ignore
   import atexit
