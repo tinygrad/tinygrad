@@ -417,8 +417,14 @@ def do_expand(root:UOp):
 acc_number = 0
 def do_reduce(root:UOp):
   global acc_number
-  reduce_parents = root.src[0].parents  # NOTE: we can stop early if we find the parents
-  reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in reduce_parents)
+  set_unparented = set(root.src[1:])
+  @functools.lru_cache(None)
+  def find_parents(u:UOp):
+    if u in set_unparented: set_unparented.remove(u)
+    if not len(set_unparented): return
+    for p in u.src: find_parents(p)
+  find_parents(root.src[0])
+  reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x not in set_unparented)
   ret = root.src[0]
   if len(reduce_parented):
     assert root.dtype is not None
