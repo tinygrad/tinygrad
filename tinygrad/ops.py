@@ -1,8 +1,7 @@
 from __future__ import annotations
-import sys, time
-from collections import defaultdict
 from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence
-import math, operator, ctypes, struct, functools, hashlib, itertools
+import sys, time, math, operator, ctypes, struct, functools, hashlib, itertools
+from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
@@ -196,9 +195,8 @@ class KernelInfo:
 
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
-  while frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>':
-    assert frm.f_back is not None
-    frm = frm.f_back  # no matchers in ops.py
+  # no matchers in ops.py, find the real frame
+  while (frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>') and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
@@ -237,7 +235,9 @@ class UPat:
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
+  @functools.cached_property
   def early_reject(self):
+    # TODO: this can be improved to support some allowed_len == 0 patterns
     return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
 
   def __repr__(self):
@@ -268,7 +268,7 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, p.early_reject()))
+      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, p.early_reject))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
