@@ -1872,7 +1872,23 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_buf_index_not_found_tensor_core(self):
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPNE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    ast = UOp(UOps.SINK, src=(
+      UOp(UOps.STORE, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))),
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (0,)), src=(
+          UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+            UOp(UOps.CAST, dtypes.float, src=(
+              UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
+                UOp(UOps.LOAD, dtypes.int, src=(
+                  UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1),
+                  UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1243, 256), strides=(0, 1), offset=0, mask=None, contiguous=False),))),)), # noqa: E501
+                UOp(UOps.LOAD, dtypes.int, src=(
+                  UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=2),
+                  UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))),)),)),)), # noqa: E501
+            UOp(UOps.LOAD, dtypes.float, src=(
+              UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=3),
+              UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))),)),)),)),)),)) # noqa: E501
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     with self.assertRaises(KernelOptError):
       k.apply_opt(Opt(OptOps.TC, 0, 1))
