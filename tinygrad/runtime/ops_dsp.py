@@ -71,19 +71,31 @@ class DSPProgram:
     assert len(vals) == 0
     assert len(bufs) < 16
     pra = (qcom_dsp.union_remote_arg * (2+len(bufs)))()
-    test = (ctypes.c_int32 * len(bufs))()
+    test = (ctypes.c_int32 * len(bufs) * 2)()
     time_est = ctypes.c_uint64(0)
     pra[0].buf.pv = ctypes.addressof(test)
-    pra[0].buf.len = 4 * len(bufs)
+    pra[0].buf.len = 4 * len(bufs) * 2
     pra[1].buf.pv = ctypes.addressof(time_est)
     pra[1].buf.len = 8
-    for i,b in enumerate(bufs):
-      test[i] = b.size
-      pra[i+2].dma.fd = b.share_info.fd
-      pra[i+2].dma.len = b.size
+    
+    fds = (ctypes.c_int32 * (2+len(bufs)))()
+    attrs = (ctypes.c_uint32 * (2+len(bufs)))()
+    fds[0] = -1
+    fds[1] = -1
+    attrs[0] = 0
+    attrs[1] = 0
 
-    fds = (ctypes.c_int32 * (2+len(bufs)))(-1, -1, *[pra[i+2].dma.fd for i in range(len(bufs))])
-    attrs = (ctypes.c_uint32 * (2+len(bufs)))(0, 0, *[1 for i in range(len(bufs))])
+    for i,b in enumerate(bufs):
+      test[i * 2] = b.size
+      test[i * 2 + 1] = b.share_info.fd
+      fds[i + 2] = b.share_info.fd
+      attrs[i + 2] = 1
+
+      pra[i+2].dma.fd = 0x0
+      pra[i+2].dma.len = 0x0
+
+    # fds = (ctypes.c_int32 * (2+len(bufs)))(-1, -1, *[pra[i+2].dma.fd for i in range(len(bufs))])
+    # attrs = (ctypes.c_uint32 * (2+len(bufs)))(0, 0, *[1 for i in range(len(bufs))])
 
     # print([-1, -1, *[pra[i+2].dma.fd for i in range(len(bufs))]])
 
@@ -91,7 +103,7 @@ class DSPProgram:
 
     # ret = adsp.remote_handle64_invoke(self.handle, (1<<24) | (1<<16) | (1<<8) | len(bufs), pra)
     # print("invoke", ret)
-    assert ret == 0, f"!!! invoke returned {ret}"
+    # assert ret == 0, f"!!! invoke returned {ret}"
     # if ret != 0:
     #   print("errr,wow", ret)
     #   time.sleep(10)
@@ -316,4 +328,26 @@ class DSPDevice(Compiled):
         # assert False
         prev_res = 0
         # except: prev_res = 2
+      elif sc == 0x2010100:
+        heapid = in_args[0].cast('I')[0]
+        lflags = in_args[0].cast('I')[1]
+        rflags = in_args[0].cast('I')[2]
+        assert rflags == 0x1000
+
+        # print(in_args[0])
+
+        # print("WOOW", in_args[0].cast('Q')[2])
+        # print("WOOW2", in_args[0].cast('Q')[2])
+        # print("WOOW3", in_args[0].cast('Q')[3])
+        # print("WOOW3", in_args[0].cast('Q')[3])
+
+        vin = in_args[0].cast('Q')[2]
+        sz = in_args[0].cast('Q')[3]
+        # vin = to_mv(in_args[0].cast('Q')[2], 8).cast('Q')[0]
+        # sz = to_mv(in_args[0].cast('Q')[3], 8).cast('Q')[0]
+
+        st = qcom_dsp.FASTRPC_IOCTL_MMAP(self.rpc_fd, fd=-1, flags=rflags, vaddrin=0, size=sz)
+        out_args[0].cast('Q')[0] = 0
+        out_args[0].cast('Q')[1] = st.vaddrout
+        prev_res = 0
       else: raise RuntimeError(f"Unknown {sc=:X}")
