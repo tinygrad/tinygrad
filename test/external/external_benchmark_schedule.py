@@ -35,5 +35,6 @@ if __name__ == "__main__":
         with Timing("***** model lower in     "): uops = [ast_to_uop(k.get_optimized_ast(), k.opts) for k in kernels]
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):
           with Timing("***** model rewrite in   "): uops = [full_graph_rewrite(u, k.opts) for u in uops]
-        with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
-        print(sum(len(u) for u in uops))
+        if getenv("LINEARIZE", 1):
+          with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
+          print(sum(len(u) for u in uops))
