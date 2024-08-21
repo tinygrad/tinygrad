@@ -17,7 +17,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
 
-    TestHCQ.runner = get_runners(TestHCQ.d0.dname, si.ast))[-1]
+    TestHCQ.runner = get_runners(TestHCQ.d0.dname, si.ast)[-1]
     TestHCQ.b.lazydata.buffer.allocate()
 
     TestHCQ.kernargs_ba_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
