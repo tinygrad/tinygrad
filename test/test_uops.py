@@ -13,7 +13,7 @@ from tinygrad.codegen.uopgraph import linearize_uop
 from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
 def _uops_to_prg(uops_list):
-  uops = linearize_uop(uops_list, opts=Device[Device.DEFAULT].renderer)
+  uops = linearize_uop(UOp.sink(*uops_list)) #, opts=Device[Device.DEFAULT].renderer)
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops,
@@ -413,7 +413,7 @@ class TestIndexingOrdering(unittest.TestCase):
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = linearize_uop([st1, st0], skip_check=True)
+    uops = linearize_uop(UOp.sink(st1, st0), skip_check=True)
     stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 

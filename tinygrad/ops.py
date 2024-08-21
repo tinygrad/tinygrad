@@ -123,6 +123,7 @@ class UOp:
     ret = self.src[0 if self.op is UOps.CONST else 1]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
+  def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
   def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
