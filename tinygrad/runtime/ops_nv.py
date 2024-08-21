@@ -199,7 +199,7 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
     if src is not None: self._patch(cmd_idx, offset=1, data=data64(src))
 
   def _signal(self, signal, value=0):
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *data64(signal.signal_addr), value, 4]
+    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 3), *data64(signal.signal_addr), value]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
 
   def _update_signal(self, cmd_idx, signal=None, value=None):

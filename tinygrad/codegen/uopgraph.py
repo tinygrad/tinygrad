@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Dict, List, Set, Union, cast, TYPE_CHECKING, Any, DefaultDict, Callable
+from typing import Optional, Tuple, Dict, List, Set, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
@@ -197,7 +197,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
 
 def index_collapse(idx,rng,buf,add,mul,ld,reduce):
   if rng not in reduce.src: return None
-  return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx)),)+
+  return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx, ld.const(0), idx.ge(rng.src[0]) & idx.lt(rng.src[1]))),)+
              tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
 # this is symbolic 2.0
@@ -342,11 +342,6 @@ constant_folder = PatternMatcher([
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("gate").where(NOp.var("alt"), NOp.load(NOp.var("buf"), NOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
-  # VECTORIZE-PHI-GEP -> PHI-VECTORIZE
-  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(NOp.var("val"),), arg=i), NOp.var(f"v{i}"))) for i in range(4)), name="root"),
-   lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1, v2, v3))))),
-  (NOp(UOps.VECTORIZE, src=tuple(NOp(UOps.PHI, src=(NOp(UOps.GEP, src=(NOp.var("val"),), arg=i), NOp.var(f"v{i}"))) for i in range(2)), name="root"),
-   lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.VECTORIZE, val.dtype, (v0, v1))))),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (NOp(UOps.VECTORIZE, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
@@ -417,7 +412,7 @@ def do_expand(root:UOp):
 acc_number = 0
 def do_reduce(root:UOp):
   global acc_number
-  reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].parents)
+  reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].sparents)
   ret = root.src[0]
   if len(reduce_parented):
     assert root.dtype is not None
@@ -495,7 +490,7 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
-no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE}, dtype=dtypes.pyint, name="x"),
+no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.pyint, name="x"),
     lambda x: UOp(x.op, dtypes.int32, x.src, x.arg))])
 
 # *** uop graph ***
@@ -512,9 +507,8 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   return srcs[u]
 
 linearize_cnt = 0
-def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, skip_check=False) -> List[UOp]:
+def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   global linearize_cnt, acc_number
-  sink: UOp = sink_in if isinstance(sink_in, UOp) else UOp(UOps.SINK, None, tuple(sink_in))
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
   folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
 
@@ -528,12 +522,15 @@ def linearize_uop(sink_in:Union[UOp, List[UOp]], opts:Optional[Renderer]=None, s
   # expand
   linearize_cnt += 1
   if linearize_cnt != getenv("DEBUG_EXPAND", 0):
-    sink = graph_rewrite(sink, folder+expander+float4_folding if opts is not None and opts.supports_float4 else folder+expander)
-    sink = graph_rewrite(sink, folder+expander+reducer)
+    sink = graph_rewrite(sink, folder+(expander+float4_folding if opts is not None and opts.supports_float4 else expander))
+    sink = graph_rewrite(sink, folder+reducer)
 
   # for PTX only
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
+  return sink
 
+def linearize_uop(sink:UOp, skip_check:bool=False) -> List[UOp]:
+  assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
   # filter nodes that don't link to a sink
   # BFS toposort
   children: Dict[UOp, List[UOp]] = {}

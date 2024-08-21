@@ -9,11 +9,13 @@ from tinygrad.ops import UOps, NOp, UOp, UnaryOps, BinaryOps, TernaryOps, Reduce
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
-from tinygrad.codegen.uopgraph import linearize_uop
+from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
 from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
+def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
+
 def _uops_to_prg(uops_list):
-  uops = linearize_uop(uops_list, opts=Device[Device.DEFAULT].renderer)
+  uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops,
@@ -255,7 +257,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
     store = UOp(UOps.STORE, None, (gmem, idx, val, gate))
-    uops = linearize_uop([store])
+    uops = to_uops_list([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
@@ -334,7 +336,7 @@ class TestAssembly(unittest.TestCase):
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
-    uops = linearize_uop([a1,a2], opts=Device[Device.DEFAULT].renderer)
+    uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops[-1].arg, BinaryOps.SHL)
     self.assertEqual(uops[-2].arg, BinaryOps.MUL)
@@ -346,7 +348,7 @@ class TestAssembly(unittest.TestCase):
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
-    uops = linearize_uop([a1,a2], opts=Device[Device.DEFAULT].renderer)
+    uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops[-1].arg, BinaryOps.SHR)
     self.assertEqual(uops[-2].arg, BinaryOps.IDIV)
@@ -385,7 +387,7 @@ class TestIndexingOrdering(unittest.TestCase):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = linearize_uop([st1, st0], skip_check=True)
+    uops = to_uops_list([st1, st0], skip_check=True)
     stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
@@ -397,7 +399,7 @@ class TestIndexingOrdering(unittest.TestCase):
     st1_0 = UOp(UOps.STORE, dtypes.float, (buf0, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
     st0_1 = UOp(UOps.STORE, dtypes.float.vec(4), (buf1, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1_1 = UOp(UOps.STORE, dtypes.float, (buf1, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = linearize_uop([st0_0, st1_0, st0_1, st1_1], skip_check=True)
+    uops = to_uops_list([st0_0, st1_0, st0_1, st1_1], skip_check=True)
     stores = [st for st in uops if st.op is UOps.STORE]
     print("\n".join(map(str, stores)))
     # buf0 stores come first
@@ -413,7 +415,7 @@ class TestIndexingOrdering(unittest.TestCase):
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = linearize_uop([st1, st0], skip_check=True)
+    uops = linearize_uop(UOp.sink(st1, st0), skip_check=True)
     stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
