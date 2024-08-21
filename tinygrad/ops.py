@@ -235,11 +235,6 @@ class UPat:
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
-  @functools.cached_property
-  def early_reject(self):
-    # TODO: this can be improved to support some allowed_len == 0 patterns
-    return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
-
   def __repr__(self):
     def rep(x):
       form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
@@ -264,19 +259,17 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
 class PatternMatcher:
   def __init__(self, patterns:Sequence[Tuple[Union[UPat, NOp], Callable]]):
     self.patterns = [(p.upat if isinstance(p, NOp) else p, fxn) for p,fxn in patterns]
-    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set]]] = defaultdict(list)
+    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, p.early_reject))
+      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
-    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      if not early_reject.issubset(ler): continue
+    for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
@@ -290,9 +283,7 @@ if getenv("TRACK_MATCH_STATS", 0):
 
     def rewrite(self, uop:UOp) -> Optional[UOp]:
       ret = None
-      ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
-      for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-        if not early_reject.issubset(ler): continue
+      for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
         match_stats[p][1] += 1
         st = time.perf_counter()
         if (matches := _match(uop, p, {})): ret = fxn(**matches[0])
