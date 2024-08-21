@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, time
-from collections import defaultdict, Counter
+from collections import defaultdict
 from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING
 import math, operator, ctypes, struct, functools, hashlib, itertools
 from enum import Enum, auto
@@ -196,7 +196,9 @@ class KernelInfo:
 
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
-  while frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>': frm = frm.f_back  # no matchers in ops.py
+  while frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>':
+    assert frm.f_back is not None
+    frm = frm.f_back  # no matchers in ops.py
   return frm.f_code.co_filename, frm.f_lineno
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
@@ -235,6 +237,9 @@ class UPat:
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
+  def early_reject(self):
+    return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
+
   def __repr__(self):
     def rep(x):
       form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
@@ -256,45 +261,53 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
     res.extend(new_stores)
   return res
 
-match_stats = None
+match_stats: Optional[Dict] = None
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
     self.patterns = patterns
-    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
+    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       if isinstance(p, NOp): p = p.upat
       if match_stats is not None and p not in match_stats: match_stats[p] = [0,0,0.0]
       assert p.op is not None
-      early_reject = set((pp.op[0], pp.arg) for pp in p.src[0] if pp.op is not None and len(pp.op) == 1 and pp.arg is not None) if p.allowed_len > 0 else None
-      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, early_reject if early_reject is not None and len(early_reject) else None))
+      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, p.early_reject()))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    ret = None
-    ler = set((u.op, u.arg) for u in uop.src)
+    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
     for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      if early_reject is not None and not early_reject.issubset(ler): continue
-      if match_stats is not None:
-        match_stats[p][1] += 1
-        st = time.perf_counter()
+      if not early_reject.issubset(ler): continue
+      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
+    return None
+
+  def rewrite_tracked(self, uop:UOp) -> Optional[UOp]:
+    assert match_stats is not None
+    ret = None
+    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
+    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+      if not early_reject.issubset(ler): continue
+      match_stats[p][1] += 1
+      st = time.perf_counter()
       if (matches := _match(uop, p, {})): ret = fxn(**matches[0])
-      if match_stats is not None: match_stats[p][2] += time.perf_counter()-st
+      match_stats[p][2] += time.perf_counter()-st
       if ret is not None:
-        if match_stats is not None: match_stats[p][0] += 1
+        match_stats[p][0] += 1
         return ret
       # NOTE: if ret is None, we keep trying to match
     return None
 
 if getenv("TRACK_MATCH_STATS", 0):
+  PatternMatcher.rewrite = PatternMatcher.rewrite_tracked  # type: ignore[method-assign]
   match_stats = dict()
   import atexit
   @functools.lru_cache(None)
   def lines(fn): return open(fn).readlines()
   @atexit.register
   def print_match_stats():
+    assert match_stats is not None
     for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][1]):
       txt = lines(k.location[0])[k.location[1]-1].strip()
       #txt = str(k).split("\n")[0]
