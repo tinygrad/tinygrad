@@ -373,22 +373,14 @@ def _choices_from_args(args:Tuple[Tuple[int, int], ...]) -> List[Dict[int, int]]
 def do_expand(root:UOp):
   expands = [x for x in root.src if x.op is UOps.EXPAND]
   if len(expands) == 0: return None
-  expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
-  if root.op is UOps.WMMA:
-    # both the reduce and upcast args are not expanded here
-    dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1] or x[0] in [y[0] for y in flatten(root.arg[-2])])
-    expand_args = tuple(x for x in expand_args if x not in dont_expand_args)
-  else:
-    dont_expand_args = ()
+  exclude_args = tuple(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2]))) if root.op is UOps.WMMA else ()
+  expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x not in exclude_args)
   new_srcs: List[UOp] = []
-  lrpks = _choices_from_args(dont_expand_args)
   for rpk in _choices_from_args(expand_args):
     new_src: List[UOp] = []
     for src in root.src:
       if src.op is UOps.EXPAND:
-        lnew_src = tuple(src.src[_expand_arg_to_idx(src.arg, {**rpk, **lrpk})] for lrpk in lrpks)
-        # TODO: is this right for UOps.WMMA? when there's more than one, all lnew_src should be the same
-        new_src.append(lnew_src[0] if len(lnew_src) == 1 or root.op is UOps.WMMA else UOp(UOps.EXPAND, root.dtype, lnew_src, dont_expand_args))
+        new_src.append(src.src[_expand_arg_to_idx(src.arg, rpk)])
       else:
         new_src.append(src)
     new_srcs.append(UOp(root.op, root.dtype, tuple(new_src), root.arg))
