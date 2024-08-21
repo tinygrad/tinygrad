@@ -339,12 +339,12 @@ return c;}}""")
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
 
-code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+code_for_op_hip = { UnaryOps.SQRT: lambda x, dtype: f"__ocml_sqrt_f{dtype.itemsize * 8}({x})",
+                    UnaryOps.SIN: lambda x, dtype: f"__ocml_sin_f{dtype.itemsize * 8}({x})",
+                    UnaryOps.LOG2: lambda x, dtype: f"__ocml_log2_f{dtype.itemsize * 8}({x})",
+                    UnaryOps.EXP2: lambda x, dtype: f"__ocml_exp2_f{dtype.itemsize * 8}({x})",
                     # TODO: MAX with int uses fmax_f32?
-                    BinaryOps.MAX: lambda a,b,dtype: f"__ocml_fmax_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({a},{b})",}
+                    BinaryOps.MAX: lambda a, b, dtype: f"__ocml_fmax_f{dtype.itemsize * 8}({a},{b})"}
 
 def _make_hip_code_for_op():
   def wrapper(key, func):
@@ -364,7 +364,7 @@ class AMDRenderer(CStyleLanguage):
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
   ocml = [(f"__ocml_{name}_f{n}", f"{dt}, {dt}" if "fmax" == name else dt, dt, atr)
-            for dt, n in [("float", 32), ("double", 64), ("half", 16)]
+            for dt, n in [(dtype.name, dtype.itemsize * 8) for dtype in ((dtypes.float), (dtypes.double), (dtypes.half))]
             for name, atr in [("fmax", "const"), ("exp2", "pure"), ("log2", "pure"), ("sqrt", "const"), ("sin", "")]]
 
   kernel_prefix = "\n".join(f'extern "C" __attribute__((device{f", {atr}" if atr else ""})) {dto} {meth}({dti});' for meth,dti,dto,atr in ockl+ocml)
