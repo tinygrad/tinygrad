@@ -370,21 +370,18 @@ def _expand_arg_to_idx(args:Tuple[Tuple[int, int], ...], rpk:Dict[int, int]) -> 
 def _choices_from_args(args:Tuple[Tuple[int, int], ...]) -> List[Dict[int, int]]:
   return [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
 
+@functools.lru_cache(None)
+def _swizzle_args(cargs:Tuple[Tuple[int, int], ...], eargs:Tuple[Tuple[int, int], ...], exclude_args:Tuple[int, ...]) -> List[int]:
+  return [_expand_arg_to_idx(eargs, {**rpk, **{x:0 for x in exclude_args}} if exclude_args else rpk) for rpk in _choices_from_args(cargs)]
+
 def do_expand(root:UOp):
   expands = [x for x in root.src if x.op is UOps.EXPAND]
   if len(expands) == 0: return None
   exclude_args = tuple(dedup(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2])))) if root.op is UOps.WMMA else ()
   expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x[0] not in exclude_args)
-  new_srcs: List[UOp] = []
-  for rpk in _choices_from_args(expand_args):
-    if exclude_args: rpk = {**rpk, **{x:0 for x in exclude_args}}
-    new_src: List[UOp] = []
-    for src in root.src:
-      if src.op is UOps.EXPAND:
-        new_src.append(src.src[_expand_arg_to_idx(src.arg, rpk)])
-      else:
-        new_src.append(src)
-    new_srcs.append(UOp(root.op, root.dtype, tuple(new_src), root.arg))
+  esrcs = [[src.src[x] for x in _swizzle_args(expand_args, src.arg, exclude_args)] \
+           if src.op is UOps.EXPAND else itertools.repeat(src) for src in root.src]
+  new_srcs = [UOp(root.op, root.dtype, tuple(new_src), root.arg) for new_src in zip(*esrcs)]
   if root.op is UOps.EXPAND:
     # merge two expands
     expand_args, old_args = tuple(sorted(root.arg+expand_args)), expand_args
