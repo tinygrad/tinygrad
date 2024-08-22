@@ -7,7 +7,7 @@ from tinygrad import Device, dtypes
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import UOp, UOps
 from tinygrad.helpers import getenv
-from extra.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps
+from extra.ops import BinaryOps, ReduceOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
