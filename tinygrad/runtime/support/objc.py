@@ -141,7 +141,8 @@ class ObjcInstance(ObjcClass):
     self.methods_info = get_methods_rec(libobjc.object_getClass(self))
   def __del__(self):
     # print(f"Releasing {self}")
-    self.release()
+    # self.release()
+    pass  # not releasing for now
 
 NSString: Any = ObjcClass("NSString")
 
