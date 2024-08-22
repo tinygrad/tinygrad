@@ -347,8 +347,7 @@ class tqdm:
     suf = f'{prog_text} [{elapsed_text}, {it_text}{self.unit}/s]'
     sz = max(ncols-len(self.desc)-3-2-2-len(suf), 1)
     bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
-    print(bar[:ncols+1], flush=True, end='\n'*close, file=sys.stderr)
-    print(bar[: ncols + 1], flush=True, end="\n" * close if self.leave else "", file=sys.stderr)
+    print(bar[:ncols+1], flush=True, end="\n"*close if self.leave else "", file=sys.stderr)
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
