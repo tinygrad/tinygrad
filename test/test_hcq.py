@@ -260,7 +260,8 @@ class TestHCQ(unittest.TestCase):
   def test_multidevice_signal_wait(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
-    d1 = Device[f"{Device.DEFAULT}:1"]
+    try: d1 = Device[f"{Device.DEFAULT}:1"]
+    except: self.skipTest("no multidevice, test skipped")
 
     TestHCQ.d0.hw_copy_queue_t().signal(sig:=TestHCQ.d0.signal_t(value=0), value=0xfff) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
@@ -320,6 +321,9 @@ class TestHCQ(unittest.TestCase):
 
   def test_speed_cross_device_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
+    try: _ = Device[f"{Device.DEFAULT}:1"]
+    except: self.skipTest("no multidevice, test skipped")
 
     TestHCQ.d0._prof_setup()
 
@@ -398,7 +402,8 @@ class TestHCQ(unittest.TestCase):
   def test_small_copies_from_host_buf_transfer(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
-    _ = Device[f"{Device.DEFAULT}:1"]
+    try: _ = Device[f"{Device.DEFAULT}:1"]
+    except: self.skipTest("no multidevice, test skipped")
 
     buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(f"{Device.DEFAULT}:1", 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
