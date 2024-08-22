@@ -136,19 +136,28 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
   def test_failure_8(self):
-    ast = LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),))), src=(
-      LazyOp(UnaryOps.SQRT, arg=None, src=(
-        LazyOp(UnaryOps.RECIP, arg=None, src=(
-          LazyOp(BinaryOps.ADD, arg=None, src=(
-            LazyOp(BinaryOps.MUL, arg=None, src=(
-              LazyOp(ReduceOps.SUM, arg=(2,), src=(
-                LazyOp(BinaryOps.MUL, arg=None, src=(
-                  x6:=LazyOp(BinaryOps.ADD, arg=None, src=(
-                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 4096), strides=(0, 0, 1), offset=0, mask=None, contiguous=True),))), src=()),
-                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 4096), strides=(0, 0, 1), offset=0, mask=None, contiguous=True),))), src=()),)),
-                  x6,)),)),
-              LazyOp(BufferOps.CONST, arg=ConstBuffer(val=0.000244140625, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),))), src=()),)),
-            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1e-06, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.ALU, dtypes.float, arg=UnaryOps.SQRT, src=(
+          UOp(UOps.ALU, dtypes.float, arg=UnaryOps.RECIP, src=(
+            UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+              UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+                UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (2,)), src=(
+                  UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+                    x9:=UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+                      UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
+                        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 4096), strides=(0, 0, 1), offset=0, mask=None, contiguous=True),)), src=()),)),
+                      UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
+                        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 4096), strides=(0, 0, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+                     x9,)),)),
+                UOp(UOps.CONST, dtypes.float, arg=0.000244140625, src=(
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+              UOp(UOps.CONST, dtypes.float, arg=1e-06, src=(
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),)),)),))
     opts = [Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4)]
     # fatal error: bracket nesting level exceeded maximum of 256
     # note: use -fbracket-depth=N to increase maximum nesting level
