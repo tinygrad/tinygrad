@@ -102,13 +102,17 @@ def objc_type_to_ctype(t: str):
     raise ValueError(f"Unknown type {t}")
 
 def wrapper_return_objc_instance(f):
-  def _wrapper(p):
-    return lambda *args, **kwargs: None if (r:=f(p)(*args, **kwargs)) is None else ObjcInstance(r)
+  def _wrapper(*args, **kwargs):
+    res = f(*args, **kwargs)
+    if res: return ObjcInstance(res)
+    return None
   return _wrapper
 
 def wrapper_arg_error(f):
-  def _wrapper(p):
-    return lambda *args, **kwargs: (f(p)(*args[:-1], ctypes.byref(err:=ctypes.c_void_p()), **kwargs), err if err.value else None)
+  def _wrapper(*args, **kwargs):
+    err=ctypes.c_void_p()
+    res = f(*args[:-1], ctypes.byref(err), **kwargs)
+    return (res, err if err.value else None)
   return _wrapper
 
 @functools.lru_cache(maxsize=None)
@@ -116,10 +120,11 @@ def build_method(name, sel_name, restype, argtypes):
   """hashable args for lru_cache, this should only be ran once for each called method name"""
   # print(f"Building method {name} with sel_name {sel_name} restype {restype} argtypes {argtypes}")
   def f(p):
-    return functools.partial(objc_msgSend, p, sel_name, restype=objc_type_to_ctype(restype),
-      argtypes=[objc_type_to_ctype(t) for t in argtypes[2:]])
-  if restype == "@": f = wrapper_return_objc_instance(f)
-  if name.endswith("error_"): f = wrapper_arg_error(f)
+    _f = functools.partial(objc_msgSend, p, sel_name, restype=objc_type_to_ctype(restype),
+          argtypes=[objc_type_to_ctype(t) for t in argtypes[2:]])
+    if restype == "@": _f = wrapper_return_objc_instance(_f)
+    if name.endswith("error_"): _f = wrapper_arg_error(_f)
+    return _f
   return f
 
 
@@ -150,8 +155,7 @@ class ObjcInstance(ObjcClass):
     self.methods_info = get_methods_rec(libobjc.object_getClass(self))
   def __del__(self):
     # print(f"Releasing {self}")
-    # self.release()
-    pass  # not releasing for now
+    self.release()
 
 NSString: Any = ObjcClass("NSString")
 
