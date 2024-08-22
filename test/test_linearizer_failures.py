@@ -477,10 +477,16 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
   def test_failure_20(self):
-    ast = LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 4), strides=(4, 1), offset=0, mask=None, contiguous=True),))), src=(
-      LazyOp(BinaryOps.MUL, arg=None, src=(
-        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 4), strides=(0, 1), offset=0, mask=None, contiguous=False),))), src=()),
-        LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 4), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4, 4), strides=(4, 1), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+          UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+            UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
+            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4, 4), strides=(0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
+          UOp(UOps.CONST, dtypes.float, arg=1.0, src=(
+            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4, 4), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=0)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
