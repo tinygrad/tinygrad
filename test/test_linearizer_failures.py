@@ -1089,22 +1089,35 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
   def test_failure_46(self):
-    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
-      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
-        LazyOp(BinaryOps.MUL, arg=None, src=(
-          LazyOp(ReduceOps.SUM, arg=(1,), src=(
-            LazyOp(BinaryOps.MUL, arg=None, src=(
-              LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
-                LazyOp(BinaryOps.MUL, arg=None, src=(
-                  LazyOp(BinaryOps.CMPNE, arg=None, src=(
-                    LazyOp(BinaryOps.CMPNE, arg=None, src=(
-                      LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 1), offset=0, mask=None, contiguous=False),))), src=()),
-                      LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(512, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
-                    LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),
-                  LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(512, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
-              LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=4, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
-          LazyOp(UnaryOps.RECIP, arg=None, src=(
-            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=5, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=()),)),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(512, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (1,)), src=(
+            UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+              UOp(UOps.CAST, dtypes.float, arg=None, src=(
+                UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.MUL, src=(
+                  UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
+                    UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
+                      UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+                        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+                        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
+                      UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+                        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=2, src=()),
+                        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(512, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+                    UOp(UOps.CONST, dtypes.bool, arg=True, src=(
+                      UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+                  UOp(UOps.LOAD, dtypes.bool, arg=None, src=(
+                    UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=3, src=()),
+                    UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(512, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+              UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=4, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(512, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+          UOp(UOps.ALU, dtypes.float, arg=UnaryOps.RECIP, src=(
+            UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+              UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=5, src=()),
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(512, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=0, amt=2)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
