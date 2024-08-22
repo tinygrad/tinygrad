@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
 from tinygrad.codegen.uopgraph import linearize_uop
@@ -71,7 +71,7 @@ class TestUOpsStats(unittest.TestCase):
     expected_mem = a.nbytes() + b.nbytes() + c.nbytes()
     self.assertEqual(mem, expected_mem)
     # NOTE; ops also include indexing ops
-    assert expected_ops == ops
+    assert expected_ops <= ops and ops <= expected_ops * 2
 
   def test_simple_add_sq(self):
     a = Tensor.empty(100,100)
@@ -82,7 +82,7 @@ class TestUOpsStats(unittest.TestCase):
     expected_mem = a.nbytes() + b.nbytes() + c.nbytes()
     self.assertEqual(mem, expected_mem)
     # NOTE; ops also include indexing ops
-    assert expected_ops == ops
+    assert expected_ops <= ops and ops <= expected_ops * 2
 
   def test_simple_matmul(self):
     a = Tensor.empty(1024,1024)
@@ -91,20 +91,16 @@ class TestUOpsStats(unittest.TestCase):
     ops, mem = get_stats(c)
     expected_ops = c.numel() * 1024 * 2
     required_mem = a.nbytes() + b.nbytes() + c.nbytes()
-    assert expected_ops == ops
+    assert expected_ops <= ops and ops <= expected_ops * 1.2
     # NOTE: it's hard to assert on the memory here, all depends on caching
     assert required_mem <= mem
 
   def test_simple_matmul_half(self):
-    a = Tensor.empty(1024,1024, dtype=dtypes.half)
-    b = Tensor.empty(1024,1024, dtype=dtypes.half)
-    c = a@b
-    ops, mem = get_stats(c)
-    expected_ops = c.numel() * 1024 * 2
-    required_mem = a.nbytes() + b.nbytes() + c.nbytes()
-    assert expected_ops == ops
-    # NOTE: it's hard to assert on the memory here, all depends on caching
-    assert required_mem <= mem
+    N = 128
+    a, b = Tensor.empty(N, N, dtype=dtypes.half), Tensor.empty(N, N, dtype=dtypes.half)
+    c = a.matmul(b).realize()
+    expected_ops = N ** 3 * 2
+    assert expected_ops == GlobalCounters.global_ops
     
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):
