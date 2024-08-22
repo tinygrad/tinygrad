@@ -5,7 +5,7 @@ from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import pretty_print, prod, getenv
+from tinygrad.helpers import pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -208,8 +208,10 @@ class NOp(UOp):
   location: Tuple[str, int] = field(default_factory=get_location)
 
   @staticmethod
+  @functools.lru_cache(None)
   def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, name=name)
   @staticmethod
+  @functools.lru_cache(None)
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
@@ -227,7 +229,7 @@ class UPat:
     self.arg, self.name = arg, name
     self.src: Any = None
     # try all permutations if it's a list
-    if isinstance(src, list): self.src = list(itertools.permutations(src))
+    if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
     # only one if it's a tuple
     elif isinstance(src, tuple): self.src = [src]
     # repeat if it's a UPat
