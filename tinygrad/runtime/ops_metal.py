@@ -7,7 +7,6 @@ from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.support.metal import Metal, libdispatch
 from tinygrad.runtime.support.objc import nsstring_to_str
 
-
 def wait_check(cbuf: Any):
   cbuf.waitUntilCompleted()
   if (error := cbuf.error()) is not None:
