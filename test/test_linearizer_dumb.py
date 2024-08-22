@@ -133,18 +133,27 @@ class TestLinearizerDumb(unittest.TestCase):
   # from process replay https://github.com/tinygrad/tinygrad/actions/runs/10389229290/job/28766762085#step:18:6490
   @unittest.expectedFailure
   def test_unaligns_idxs(self):
-    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
-      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),))), src=(
-        LazyOp(ReduceOps.SUM, arg=(2,), src=(
-          LazyOp(BinaryOps.MUL, arg=None, src=(
-            LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
-              LazyOp(BinaryOps.CMPNE, arg=None, src=(
-                LazyOp(BinaryOps.CMPNE, arg=None, src=(
-                  LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.long, st=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),
-                  LazyOp(UnaryOps.CAST, arg=dtypes.long, src=(
-                    LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),
-                LazyOp(BufferOps.CONST, arg=ConstBuffer(val=True, dtype=dtypes.bool, st=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),
-            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (2,)), src=(
+          UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+            UOp(UOps.CAST, dtypes.float, arg=None, src=(
+              UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
+                UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
+                  UOp(UOps.LOAD, dtypes.long, arg=None, src=(
+                    UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.long), arg=1, src=()),
+                    UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                  UOp(UOps.CAST, dtypes.long, arg=None, src=(
+                    UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+                      UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=2, src=()),
+                      UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+                UOp(UOps.CONST, dtypes.bool, arg=True, src=(
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+            UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+              UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=3, src=()),
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.UNROLL, axis=0, amt=0), Opt(op=OptOps.LOCAL, axis=0, amt=3)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     for opt in opts: k.apply_opt(opt)
