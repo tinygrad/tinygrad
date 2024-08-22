@@ -690,28 +690,40 @@ class TestLinearizerFailures(unittest.TestCase):
       helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
   def test_failure_28(self):
-    ast = LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))), src=(
-      LazyOp(TernaryOps.WHERE, arg=None, src=(
-        LazyOp(BinaryOps.CMPLT, arg=None, src=(
-          x2:=LazyOp(UnaryOps.CAST, arg=dtypes.bfloat16, src=(
-            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))), src=()),)),
-          x4:=LazyOp(BufferOps.CONST, arg=ConstBuffer(val=230.0, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))), src=()),)),
-        LazyOp(BinaryOps.ADD, arg=None, src=(
-          LazyOp(BinaryOps.MUL, arg=None, src=(
-            LazyOp(BinaryOps.MUL, arg=None, src=(
-              x2,
-              LazyOp(BufferOps.CONST, arg=ConstBuffer(val=0.004347826086956522, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))), src=()),)),
-            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=0.199374800625, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))), src=()),)),
-          LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1.99375e-07, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))), src=()),)),
-        LazyOp(BinaryOps.ADD, arg=None, src=(
-          LazyOp(BinaryOps.MUL, arg=None, src=(
-            LazyOp(BinaryOps.MUL, arg=None, src=(
-              LazyOp(BinaryOps.ADD, arg=None, src=(
-                x2,
-                x4,)),
-              LazyOp(BufferOps.CONST, arg=ConstBuffer(val=0.0012987012987012987, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))), src=()),)),
-            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-0.19439062499999998, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))), src=()),)),
-          LazyOp(BufferOps.CONST, arg=ConstBuffer(val=0.199375, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))), src=()),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bfloat16), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.ALU, dtypes.bfloat16, arg=TernaryOps.WHERE, src=(
+          UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPLT, src=(
+            x5:=UOp(UOps.CAST, dtypes.bfloat16, arg=None, src=(
+              UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+            x9:=UOp(UOps.CONST, dtypes.bfloat16, arg=230.0, src=(
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+          UOp(UOps.ALU, dtypes.bfloat16, arg=BinaryOps.ADD, src=(
+            UOp(UOps.ALU, dtypes.bfloat16, arg=BinaryOps.MUL, src=(
+              UOp(UOps.ALU, dtypes.bfloat16, arg=BinaryOps.MUL, src=(
+                 x5,
+                UOp(UOps.CONST, dtypes.bfloat16, arg=0.004347826086956522, src=(
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+              UOp(UOps.CONST, dtypes.bfloat16, arg=0.199374800625, src=(
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+            UOp(UOps.CONST, dtypes.bfloat16, arg=1.99375e-07, src=(
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+          UOp(UOps.ALU, dtypes.bfloat16, arg=BinaryOps.ADD, src=(
+            UOp(UOps.ALU, dtypes.bfloat16, arg=BinaryOps.MUL, src=(
+              UOp(UOps.ALU, dtypes.bfloat16, arg=BinaryOps.MUL, src=(
+                UOp(UOps.ALU, dtypes.bfloat16, arg=BinaryOps.ADD, src=(
+                   x5,
+                   x9,)),
+                UOp(UOps.CONST, dtypes.bfloat16, arg=0.0012987012987012987, src=(
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+              UOp(UOps.CONST, dtypes.bfloat16, arg=-0.19439062499999998, src=(
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+            UOp(UOps.CONST, dtypes.bfloat16, arg=0.199375, src=(
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),)),))
     helper_test_lin(Kernel(ast), opts=[], failed_platforms=[])
 
   def test_failure_29(self):
