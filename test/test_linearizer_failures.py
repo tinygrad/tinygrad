@@ -917,13 +917,19 @@ class TestLinearizerFailures(unittest.TestCase):
   def test_failure_38(self):
     # beautiful mnist kernel number 87: 6 possible TC axis_choices (2 for axis_buf1 and 3 reduce) and first/second reduce axis fail for both axis_buf1 choices
     # fuzz: PYTHONPATH=. METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=1 FUZZ_NTH=87 DEBUG=2 python3 ./test/external/fuzz_linearizer.py --logfile /tmp/beautiful_mnist.kernels.txt
-    ast = LazyOp(op=MetaOps.KERNEL, src=(
-      LazyOp(op=BufferOps.STORE, src=(
-        LazyOp(op=ReduceOps.SUM, src=(
-          LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(
-            LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.uchar, st=ShapeTracker(views=(View(shape=(2, 1, 32, 24, 24, 1, 5, 5, 256), strides=(784, 0, 0, 28, 1, 0, 28, 1, 1568), offset=0, mask=None, contiguous=False),)))),), arg=dtypes.float),
-            LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 1, 32, 24, 24, 1, 5, 5, 256), strides=(18432, 0, 576, 24, 1, 0, 0, 0, 36864), offset=0, mask=None, contiguous=False),))))), arg=None),),
-        arg=(0, 3, 4)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 32, 1, 1, 1, 5, 5, 256), strides=(0, 0, 6400, 0, 0, 0, 1280, 256, 1), offset=0, mask=None, contiguous=True),)))),), arg=None)
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 32, 1, 1, 1, 5, 5, 256), strides=(0, 0, 6400, 0, 0, 0, 1280, 256, 1), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (0, 3, 4)), src=(
+          UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+            UOp(UOps.CAST, dtypes.float, arg=None, src=(
+              UOp(UOps.LOAD, dtypes.uchar, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.uchar), arg=1, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(2, 1, 32, 24, 24, 1, 5, 5, 256), strides=(784, 0, 0, 28, 1, 0, 28, 1, 1568), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+            UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+              UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(2, 1, 32, 24, 24, 1, 5, 5, 256), strides=(18432, 0, 576, 24, 1, 0, 0, 0, 36864), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
     for axis in [0,1,3,4]:
       opts = [Opt(op=OptOps.TC, axis=axis, amt=2)]
       helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
