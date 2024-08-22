@@ -1,4 +1,4 @@
-# https://gist.github.com/awni/87f49147b13b7e119d36401e7c678a49
+# slightly modified from https://gist.github.com/awni/87f49147b13b7e119d36401e7c678a49
 import numpy as np
 from tinygrad.helpers import to_mv
 from tinygrad.runtime.support.metal import Metal, libdispatch
@@ -25,8 +25,11 @@ if err:
     exit(1)
 
 ns_data = library.libraryDataContents()
-lib_data = to_mv(ns_data.bytes(), ns_data.length()).tobytes()
+lib_data: bytes = to_mv(ns_data.bytes(), ns_data.length()).tobytes()
+
+# delete library to be sure we load it from the lib_data bytes
 del library
+
 
 data = libdispatch.dispatch_data_create(lib_data, len(lib_data), None, None)
 library, err = device.newLibraryWithData_error_(data, None)
@@ -53,14 +56,12 @@ b = np.random.uniform(size=(n,)).astype(np.float32)
 
 
 def np_to_mtl_buffer(x):
-    opts = Metal.MTLResourceStorageModeShared
     return device.newBufferWithBytes_length_options_(
-        memoryview(x).tobytes(), x.nbytes, opts,
+        memoryview(x).tobytes(), x.nbytes, Metal.MTLResourceStorageModeShared,
     )
 
 def mtl_buffer(size):
-    opts = Metal.MTLResourceStorageModeShared
-    return device.newBufferWithLength_options_(size, opts)
+    return device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
 
 def mtl_buffer_to_np(buf):
     return np.frombuffer(to_mv(buf.contents(), buf.length()), dtype=np.float32)
@@ -79,7 +80,6 @@ compute_encoder.setBuffer_offset_atIndex_(a_buf, 0, 0)
 compute_encoder.setBuffer_offset_atIndex_(b_buf, 0, 1)
 compute_encoder.setBuffer_offset_atIndex_(c_buf, 0, 2)
 
-# print(compute_encoder.methods_info["dispatchThreads:threadsPerThreadgroup:"])
 compute_encoder.dispatchThreads_threadsPerThreadgroup_(grid_dims, group_dims)
 
 # End the encoding and commit the buffer
