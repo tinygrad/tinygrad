@@ -49,12 +49,13 @@ def dump_objc_methods(clz: ctypes.c_void_p):
   for i in range(method_count.value):
     method = methods_ptr[i]
     sel_name = libobjc.sel_getName(libobjc.method_getName(method)).decode('ascii')
-    return_type = libobjc.method_copyReturnType(method).decode('ascii')  # should free?
-    argtypes = tuple(libobjc.method_copyArgumentType(method, j).decode('ascii') for j in range(libobjc.method_getNumberOfArguments(method)))  # should free?
+    # TODO: does ctypes autofree those?
+    return_type = libobjc.method_copyReturnType(method).decode('ascii')
+    argtypes = tuple(libobjc.method_copyArgumentType(method, j).decode('ascii') for j in range(libobjc.method_getNumberOfArguments(method)))
+
     methods[sel_name] = {"restype": return_type, "argtypes": tuple(arg for arg in argtypes)}
   libc.free(methods_ptr)
   return methods
-
 
 SIMPLE_TYPES = {
     'c': ctypes.c_char,
@@ -86,7 +87,6 @@ def get_methods_rec(c: ctypes.c_void_p):
     c = libobjc.class_getSuperclass(c)
   return methods
 
-
 def objc_type_to_ctype(t: str):
   if len(t) == 1:
     return SIMPLE_TYPES[t]
@@ -101,6 +101,15 @@ def objc_type_to_ctype(t: str):
   else:
     raise ValueError(f"Unknown type {t}")
 
+def wrapper_return_objc_instance(f):
+  def _wrapper(p):
+    return lambda *args, **kwargs: None if (r:=f(p)(*args, **kwargs)) is None else ObjcInstance(r)
+  return _wrapper
+
+def wrapper_arg_error(f):
+  def _wrapper(p):
+    return lambda *args, **kwargs: (f(p)(*args[:-1], ctypes.byref(err:=ctypes.c_void_p()), **kwargs), err if err.value else None)
+  return _wrapper
 
 @functools.lru_cache(maxsize=None)
 def build_method(name, sel_name, restype, argtypes):
@@ -109,9 +118,9 @@ def build_method(name, sel_name, restype, argtypes):
   def f(p):
     return functools.partial(objc_msgSend, p, sel_name, restype=objc_type_to_ctype(restype),
       argtypes=[objc_type_to_ctype(t) for t in argtypes[2:]])
-  # ugly hack to conditionally wrap without self referencing recursion. e.g: "f = lambda *args: g(f(*args))"
-  _f = lambda p: ((lambda *args, **kwargs: ObjcInstance(r) if (r:=f(p)(*args, **kwargs)) is not None else None) if restype == "@" else f(p))
-  return lambda p: ((lambda *args, **kwargs: (_f(p)(*args[:-1], ctypes.byref(err:=ctypes.c_void_p()), **kwargs), err if err.value else None)) if name.endswith("error_") else _f(p))
+  if restype == "@": f = wrapper_return_objc_instance(f)
+  if name.endswith("error_"): f = wrapper_arg_error(f)
+  return f
 
 
 class ObjcClass(ctypes.c_void_p):
