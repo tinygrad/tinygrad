@@ -423,6 +423,6 @@ if __name__ == "__main__":
   if args.prompt == default_prompt and args.steps == 10 and args.seed == 0 and args.guidance == 6.0 and args.width == args.height == 1024 \
     and not args.weights:
     ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "sdxl_seed0.png")))
-    distance = (((x - ref_image).cast(dtypes.float) / ref_image.max())**2).mean().item()
+    distance = (((x.cast(dtypes.float) - ref_image.cast(dtypes.float)) / ref_image.max())**2).mean().item()
     assert distance < 4e-3, colored(f"validation failed with {distance=}", "red")
     print(colored(f"output validated with {distance=}", "green"))
