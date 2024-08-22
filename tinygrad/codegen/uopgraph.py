@@ -373,8 +373,8 @@ def _choices_from_args(args:Tuple[Tuple[int, int], ...]) -> List[Dict[int, int]]
 def do_expand(root:UOp):
   expands = [x for x in root.src if x.op is UOps.EXPAND]
   if len(expands) == 0: return None
-  exclude_args = tuple(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2]))) if root.op is UOps.WMMA else ()
-  expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x not in exclude_args)
+  exclude_args = tuple(dedup(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2])))) if root.op is UOps.WMMA else ()
+  expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x[0] not in exclude_args)
   new_srcs: List[UOp] = []
   for rpk in _choices_from_args(expand_args):
     if exclude_args: rpk = {**rpk, **{x:0 for x in exclude_args}}
