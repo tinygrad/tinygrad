@@ -620,11 +620,16 @@ class TestLinearizerFailures(unittest.TestCase):
 
   # this is the cause of the GPT2 BEAM instability. bisects to PR#3530 O(n) arange attempt
   def test_failure_25(self):
-    ast = LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1024, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
-      LazyOp(BinaryOps.ADD, arg=None, src=(
-        LazyOp(ReduceOps.SUM, arg=(1,), src=(
-          LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1025, 2047), strides=(0, 0), offset=0, mask=((0, 1025), (1023, 2047)), contiguous=False), View(shape=(1024, 1024), strides=(1, 2048), offset=0, mask=None, contiguous=False)))), src=()),)),
-        LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1024, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1024, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.SUM, (1,)), src=(
+            UOp(UOps.CONST, dtypes.int, arg=1, src=(
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1025, 2047), strides=(0, 0), offset=0, mask=((0, 1025), (1023, 2047)), contiguous=False), View(shape=(1024, 1024), strides=(1, 2048), offset=0, mask=None, contiguous=False))), src=()),)),)),
+          UOp(UOps.CONST, dtypes.int, arg=-1, src=(
+            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1024, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.GROUP, axis=0, amt=16), Opt(op=OptOps.UNROLL, axis=0, amt=4)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
