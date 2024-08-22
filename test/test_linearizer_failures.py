@@ -965,12 +965,16 @@ class TestLinearizerFailures(unittest.TestCase):
   def test_failure_40(self):
     # beautiful mnist kernel number 3:
     # fuzz: PYTHONPATH=. METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=2 DEBUG=2 FUZZ_NTH=3 python3 ./test/external/fuzz_linearizer.py --logfile /tmp/beautiful_mnist.kernels.txt
-    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
-      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(60000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
-        LazyOp(BinaryOps.ADD, arg=None, src=(
-          LazyOp(ReduceOps.SUM, arg=(1,), src=(
-            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(60001, 119999), strides=(0, 0), offset=0, mask=((0, 60001), (59999, 119999)), contiguous=False), View(shape=(60000, 60000), strides=(1, 120000), offset=0, mask=None, contiguous=False)))), src=()),)),
-          LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(60000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(60000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.SUM, (1,)), src=(
+            UOp(UOps.CONST, dtypes.int, arg=1, src=(
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(60001, 119999), strides=(0, 0), offset=0, mask=((0, 60001), (59999, 119999)), contiguous=False), View(shape=(60000, 60000), strides=(1, 120000), offset=0, mask=None, contiguous=False))), src=()),)),)),
+          UOp(UOps.CONST, dtypes.int, arg=-1, src=(
+            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(60000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     for amt in [16,32]:
       opts = [Opt(op=OptOps.GROUPTOP, axis=0, amt=amt), Opt(op=OptOps.UNROLL, axis=0, amt=0)]
       helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
