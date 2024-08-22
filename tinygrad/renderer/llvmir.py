@@ -97,7 +97,7 @@ class LLVMRenderer(Renderer):
             bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
         else:
           bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
-      elif uop is UOps.IF or uop is UOps.ENDIF: continue
+      elif uop in {UOps.IF, UOps.ENDIF}: continue
       elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[src[0]], ir.Constant(ir.IntType(32), 1))
