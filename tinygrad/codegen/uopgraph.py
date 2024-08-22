@@ -382,7 +382,7 @@ def do_expand(root:UOp):
   expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x[0] not in exclude_args)
   esrcs = [[src.src[x] for x in _swizzle_args(expand_args, src.arg, exclude_args)] \
            if src.op is UOps.EXPAND else itertools.repeat(src) for src in root.src]
-  new_srcs = [UOp(root.op, root.dtype, tuple(new_src), root.arg) for new_src in zip(*esrcs)]
+  new_srcs = [UOp(root.op, root.dtype, new_src, root.arg) for new_src in zip(*esrcs)]
   if root.op is UOps.EXPAND:
     # merge two expands
     expand_args, old_args = tuple(sorted(root.arg+expand_args)), expand_args
