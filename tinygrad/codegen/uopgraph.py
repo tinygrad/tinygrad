@@ -312,8 +312,6 @@ constant_folder = PatternMatcher([
   # (x%c)+(x//c)*c = x
   (NOp.var('x')%NOp.cvar('c')+(NOp.var('x')//NOp.cvar('c'))*NOp.cvar('c'), lambda x,c: x),
   # ** combine terms **
-  # -(x+y) -> -x + -y
-  (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
   # (x+c0)*c1 -> x*c1+c0*c1. only for signed int, float have inf*0=nan issue
   ((NOp.var("x") + NOp.cvar("c0")) * NOp.cvar("c1"), lambda x,c0,c1:
    x*c1+c0.arg*c1.arg if dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
