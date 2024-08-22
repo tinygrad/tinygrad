@@ -253,7 +253,6 @@ constant_folder = PatternMatcher([
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
   # other arange folders
   (NOp.cvar("c1") - (NOp.var("x") + NOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
-  (-(NOp.var("x") * NOp.cvar("c1")), lambda x, c1: x*-c1),
   # max folding
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # const rules
