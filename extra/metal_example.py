@@ -21,8 +21,8 @@ library, err = device.newLibraryWithSource_options_error_(r"""
 """, None, None)
 
 if err:
-    print(err)
-    exit(1)
+  print(err)
+  exit(1)
 
 ns_data = library.libraryDataContents()
 lib_data: bytes = to_mv(ns_data.bytes(), ns_data.length()).tobytes()
@@ -35,15 +35,15 @@ data = libdispatch.dispatch_data_create(lib_data, len(lib_data), None, None)
 library, err = device.newLibraryWithData_error_(data, None)
 
 if err:
-    print(err)
-    exit(1)
+  print(err)
+  exit(1)
 
 # Get the compiled "add" kernel
 function = library.newFunctionWithName_("add")
 kernel, err = device.newComputePipelineStateWithFunction_error_(function, None)
 if err:
-    print(err)
-    exit(1)
+  print(err)
+  exit(1)
 
 # Make the command buffer and compute command encoder
 command_buffer = command_queue.commandBuffer()
@@ -56,15 +56,15 @@ b = np.random.uniform(size=(n,)).astype(np.float32)
 
 
 def np_to_mtl_buffer(x):
-    return device.newBufferWithBytes_length_options_(
-        memoryview(x).tobytes(), x.nbytes, Metal.MTLResourceStorageModeShared,
-    )
+  return device.newBufferWithBytes_length_options_(
+      memoryview(x).tobytes(), x.nbytes, Metal.MTLResourceStorageModeShared,
+  )
 
 def mtl_buffer(size):
-    return device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
+  return device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
 
 def mtl_buffer_to_np(buf):
-    return np.frombuffer(to_mv(buf.contents(), buf.length()), dtype=np.float32)
+  return np.frombuffer(to_mv(buf.contents(), buf.length()), dtype=np.float32)
 
 # Dispatch the kernel with the correct number of threads
 compute_encoder.setComputePipelineState_(kernel)
