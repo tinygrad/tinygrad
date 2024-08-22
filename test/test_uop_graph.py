@@ -3,7 +3,7 @@ import unittest, time
 from test.helpers import TestUOps
 from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import PtrDType
-from tinygrad.helpers import DEBUG, Profiling
+from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps, UOps, UOp, NOp, PatternMatcher, KernelInfo
 from tinygrad.codegen.lowerer import ast_to_uop
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, constant_folder, float4_folding
@@ -42,11 +42,21 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
                   View(shape=(2, 4, 64, 8, 16, 16, 15, 3, 3, 4, 15), strides=(7200, 0, 230400, 900, 0, 14400, 15, 0, 0, 225, 1), offset=0,
                        mask=None, contiguous=False),)), src=()),)),)),)),)),)),))
     lower_sink = ast_to_uop(sink, Device[Device.DEFAULT].renderer)
+    cnt = [0]
+    old_init = UOp.__init__
+    def uop_hook(self, *args, **kwargs):
+      cnt[0] += 1
+      old_init(self, *args, **kwargs)
+    UOp.__init__ = uop_hook
     st = time.perf_counter()
-    with Profiling():
-      new_sink = full_graph_rewrite(lower_sink)
+    new_sink = full_graph_rewrite(lower_sink)
     et = time.perf_counter() - st
-    print(f"rewrote in {et*1000:.2f} ms, from {len(lower_sink.sparents)} -> {len(new_sink.sparents)}")
+    UOp.__init__ = old_init
+    print(f"rewrote in {et*1000:.2f} ms, from {len(lower_sink.sparents)} -> {len(new_sink.sparents)}, creating {cnt[0]} uops")
+    #from collections import Counter
+    #print(Counter(x.op for x in new_sink.sparents))
+    #from tinygrad.engine.graph import graph_uops
+    #graph_uops(linearize_uop(new_sink))
 
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):
