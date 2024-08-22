@@ -11,7 +11,7 @@ from tinygrad.helpers import CI
 from test.external.fuzz_linearizer import compare_linearizer
 from test.helpers import is_dtype_supported
 
-from extra.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer, MetaOps
+from extra.ops import BinaryOps, UnaryOps, ReduceOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
