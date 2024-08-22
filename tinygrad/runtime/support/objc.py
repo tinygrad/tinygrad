@@ -106,11 +106,8 @@ def objc_type_to_ctype(t: str):
 @functools.lru_cache(maxsize=None)
 def build_method(name, sel_name, restype, argtypes):
   """hashable args for lru_cache, this should only be ran once for each called method name"""
-  print(f"Building method {name} with sel_name {sel_name} restype {restype} argtypes {argtypes}")
-  f = lambda p: functools.partial(objc_msgSend,
-      p,
-      sel_name,
-      restype=objc_type_to_ctype(restype),
+  # print(f"Building method {name} with sel_name {sel_name} restype {restype} argtypes {argtypes}")
+  f = lambda p: functools.partial(objc_msgSend, p, sel_name, restype=objc_type_to_ctype(restype),
       argtypes=[objc_type_to_ctype(t) for t in argtypes[2:]])
   # ugly hack to conditionally wrap without self referencing recursion. e.g: "f = lambda *args: g(f(*args))"
   _f = lambda p: ((lambda *args, **kwargs: ObjcInstance(r) if (r:=f(p)(*args, **kwargs)) is not None else None) if restype == "@" else f(p))

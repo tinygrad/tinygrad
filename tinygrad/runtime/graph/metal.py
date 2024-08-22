@@ -1,5 +1,4 @@
 from typing import List, Any, Dict, cast, Optional
-import ctypes
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, unwrap2
 from tinygrad.device import Buffer
