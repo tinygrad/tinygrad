@@ -407,14 +407,12 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
 
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
 
-    # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
-    for name,_,dtype_in,dtype_out,_,_,_,_ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      dto, dti = self.render_dtype(dtype_out.vec(8)), self.render_dtype(dtype_in.vec(16))
-      if dtype_out == dtypes.float: prefix.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
-      else: prefix.append(f"""static inline __attribute__((device)) {dto} __{name}({dti} a, {dti} b, {dto} c) {{
-  {dti} c_frag = {{}}; {dto} d; for (int n = 0; n < 8; n++) {{ c_frag[n*2] = c[n]; }}
+    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
+      if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
+      else: prefix.append(f"static inline __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
+  half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
   c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
-  for (int n = 0; n < 8; n++) {{ d[n] = c_frag[n*2]; }} return d;\n}}""")
+  for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str:
