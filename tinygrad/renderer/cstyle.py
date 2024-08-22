@@ -405,7 +405,7 @@ static inline __attribute__((device)) bool operator<(hip_bfloat16 a, hip_bfloat1
 static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) == ((float)b); }
 """)
 
-    for dtype in dedup(uop.dtype for uop in uops if uop.dtype and uop.dtype.count > 1): prefix += [self.render_vector_prefix(dtype)]
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype and uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
 
     # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
     for name, _, dtype_in, dtype_out, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
