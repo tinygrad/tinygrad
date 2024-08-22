@@ -500,7 +500,7 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.PADTO, axis=0, amt=32)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
-  @unittest.skipIf(Device.DEFAULT in ("LLVM", "METAL", "CLANG"), "flaky")
+  #@unittest.skipIf(Device.DEFAULT in ("LLVM", "METAL", "CLANG"), "flaky")
   def test_failure_22(self):
     ast = UOp(UOps.SINK, None, arg=None, src=(
       UOp(UOps.STORE, None, arg=None, src=(
@@ -597,8 +597,13 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts, failed_platforms=["METAL", "CUDA"])
 
   def test_failure_23(self):
-    ast = LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),))), src=(
-      LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+          UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
+          UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=2)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
