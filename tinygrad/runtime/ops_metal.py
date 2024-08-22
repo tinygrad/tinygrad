@@ -1,10 +1,11 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 from typing import List, Any, Tuple, Optional
-from tinygrad.helpers import prod, getenv, DEBUG, unwrap2, to_mv, nsstring_to_str
+from tinygrad.helpers import prod, getenv, DEBUG, unwrap2, to_mv
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.support.metal import Metal, libdispatch
+from tinygrad.runtime.support.objc import nsstring_to_str
 
 
 def wait_check(cbuf: Any):

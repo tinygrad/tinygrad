@@ -65,7 +65,7 @@ class MetalGraph(GraphRunner):
 
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
-    encoder.useResources_count_usage_((ctypes.c_void_p * len(all_resources))(*[r.ptr for r in all_resources]), len(all_resources), Metal.MTLResourceUsageRead | Metal.MTLResourceUsageWrite)
+    encoder.useResources_count_usage_(all_resources, len(all_resources), Metal.MTLResourceUsageRead | Metal.MTLResourceUsageWrite)
     encoder.executeCommandsInBuffer_withRange_(self.icb, Metal.MTLIndirectCommandBufferExecutionRangeMake(0, len(self.jit_cache)))
     encoder.endEncoding()
     command_buffer.commit()
