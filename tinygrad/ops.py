@@ -218,7 +218,7 @@ class NOp(UOp):
   @functools.cached_property
   def upat(self:NOp) -> UPat:
     return UPat(name=self.name, dtype=self.dtype, location=self.location) if self.op is UOps.NOOP else \
-      UPat(self.op, self.arg, (list if self.commutative() else tuple)(src.upat for src in self.src) or None, self.name,
+      UPat(self.op, self.arg, (list if self.commutative() else tuple)([src.upat for src in self.src]) or None, self.name,
            self.dtype, self.allow_any_len, location=self.location)
 
 class UPat:
