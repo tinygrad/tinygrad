@@ -870,14 +870,18 @@ class TestLinearizerFailures(unittest.TestCase):
   # from world fuzz_linearizer: PYTHONPATH=. METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=1 FUZZ_N=100 FUZZ_NTH=84 python3 ./test/external/fuzz_linearizer.py
   def test_failure_36(self):
     # UOps.UNMUL left after linearize
-    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
-      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.uchar, st=ShapeTracker(views=(View(shape=(5, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
-        LazyOp(UnaryOps.CAST, arg=dtypes.uchar, src=(
-          LazyOp(BinaryOps.ADD, arg=None, src=(
-            LazyOp(ReduceOps.SUM, arg=(1,), src=(
-              LazyOp(UnaryOps.CAST, arg=dtypes.uint, src=(
-                LazyOp(BufferOps.CONST, arg=ConstBuffer(val=1, dtype=dtypes.uchar, st=ShapeTracker(views=(View(shape=(6, 9), strides=(0, 0), offset=0, mask=((0, 6), (4, 9)), contiguous=False), View(shape=(5, 5), strides=(1, 10), offset=0, mask=None, contiguous=False)))), src=()),)),)),
-            LazyOp(BufferOps.CONST, arg=ConstBuffer(val=-1, dtype=dtypes.uint, st=ShapeTracker(views=(View(shape=(5, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.uchar), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(5, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.CAST, dtypes.uchar, arg=None, src=(
+          UOp(UOps.ALU, dtypes.uint, arg=BinaryOps.ADD, src=(
+            UOp(UOps.REDUCE_AXIS, dtypes.uint, arg=(ReduceOps.SUM, (1,)), src=(
+              UOp(UOps.CAST, dtypes.uint, arg=None, src=(
+                UOp(UOps.CONST, dtypes.uchar, arg=1, src=(
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(6, 9), strides=(0, 0), offset=0, mask=((0, 6), (4, 9)), contiguous=False), View(shape=(5, 5), strides=(1, 10), offset=0, mask=None, contiguous=False))), src=()),)),)),)),
+            UOp(UOps.CONST, dtypes.uint, arg=-1, src=(
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(5, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=0, amt=0)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
