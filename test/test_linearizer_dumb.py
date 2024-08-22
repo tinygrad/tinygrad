@@ -80,10 +80,14 @@ class TestLinearizerDumb(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
   def test_expander_new_srcs(self):
-    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
-    LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(25, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),))), src=(
-      LazyOp(ReduceOps.SUM, arg=(1,), src=(
-        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(26, 49), strides=(0, -1), offset=48, mask=((0, 26), (24, 49)), contiguous=False), View(shape=(25, 25), strides=(1, 50), offset=0, mask=None, contiguous=False)))), src=()),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(25, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (1,)), src=(
+          UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+            UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
+            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(26, 49), strides=(0, -1), offset=48, mask=((0, 26), (24, 49)), contiguous=False), View(shape=(25, 25), strides=(1, 50), offset=0, mask=None, contiguous=False))), src=()),)),)),)),))
     opts = [Opt(op=OptOps.GROUP, axis=0, amt=0), Opt(op=OptOps.PADTO, axis=0, amt=32), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=0)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.required_optimizations()
