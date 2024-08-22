@@ -193,9 +193,17 @@ class TestSchedule(unittest.TestCase):
     with Tensor.train(False):
       img = Tensor.empty(1,3,8,8)
       c1 = nn.Conv2d(3,32,3)
-      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      bn = nn.BatchNorm2d(32, track_running_stats=True)
       out = bn(c1(img)).relu()
       check_schedule(out, 1, [c1.weight, c1.bias])
+
+  def test_fold_conv_batchnorm_notrain_no_running_stats(self):
+    with Tensor.train(False):
+      img = Tensor.empty(1,3,8,8)
+      c1 = nn.Conv2d(3,32,3)
+      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      out = bn(c1(img)).relu()
+      check_schedule(out, 4, [c1.weight, c1.bias])
 
   def test_fold_conv_batchnorm(self):
     with Tensor.train():
@@ -1269,14 +1277,14 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT not in view_supported_devices, "subbuffer not supported")
   def test_bitcast_subbufer(self):
     x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.e(UnaryOps.NEG).cast(dtypes.int32, True, allow_buffer_view=True)
+    a = x.e(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=True)
     b = x.cast(dtypes.int32, True, allow_buffer_view=True)
     b = a.e(BinaryOps.ADD, b)
     check_schedule(b, 2) # this should fuse when it makes sense
 
   def test_bitcast_disable_subbufer(self):
     x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.e(UnaryOps.NEG).cast(dtypes.int32, True, allow_buffer_view=False)
+    a = x.e(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
     b = x.cast(dtypes.int32, True, allow_buffer_view=False)
     b = a.e(BinaryOps.ADD, b)
     check_schedule(b, 1)
