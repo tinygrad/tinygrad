@@ -847,14 +847,21 @@ class TestLinearizerFailures(unittest.TestCase):
 
   # from fuzzing on metal
   def test_failure_34(self, unroll=False):
-    ast = LazyOp(op=MetaOps.KERNEL, src=(
-      LazyOp(op=BufferOps.STORE, src=(
-        LazyOp(op=BinaryOps.MAX, src=(
-          LazyOp(op=ReduceOps.SUM, src=(
-            LazyOp(op=BinaryOps.MUL, src=(
-              LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 1, 6, 10, 3, 1, 2, 5), strides=(77, 0, 0, 7, 1, 0, 7, 1), offset=0, mask=None, contiguous=False),)))),
-              LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 1, 6, 10, 3, 1, 2, 5), strides=(0, 0, 10, 0, 0, 0, 5, 1), offset=0, mask=None, contiguous=False),))))), arg=None),),
-            arg=(6, 7)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 1, 6, 10, 3, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(4, 1, 6, 10, 3, 1, 1, 1), strides=(180, 0, 30, 3, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)))),), arg=None)
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4, 1, 6, 10, 3, 1, 1, 1), strides=(180, 0, 30, 3, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MAX, src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (6, 7)), src=(
+            UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+              UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4, 1, 6, 10, 3, 1, 2, 5), strides=(77, 0, 0, 7, 1, 0, 7, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
+              UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4, 1, 6, 10, 3, 1, 2, 5), strides=(0, 0, 10, 0, 0, 0, 5, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+          UOp(UOps.CONST, dtypes.float, arg=0.0, src=(
+            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4, 1, 6, 10, 3, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.TC, axis=0, amt=2), Opt(op=OptOps.UNROLL, axis=0, amt=0)] if unroll else [Opt(op=OptOps.TC, axis=0, amt=2)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
