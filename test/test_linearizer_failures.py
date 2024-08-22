@@ -321,15 +321,23 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
   # both kernels are correct from a code standpoint, but generate different results due to precision errors (switching to float results in output matches)
-  @unittest.skip("AST has implicit movement ops")
   def test_failure_13(self):
-    ast = LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(2, 1, 384, 1), strides=(384, 0, 1, 0), offset=0, mask=None, contiguous=True),))), src=(
-      LazyOp(BinaryOps.ADD, arg=None, src=(
-        LazyOp(ReduceOps.SUM, arg=(3,), src=(
-          LazyOp(BinaryOps.MUL, arg=None, src=(
-            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(2, 1, 384, 51864), strides=(51864, 0, 0, 1), offset=0, mask=None, contiguous=False),))), src=()),
-            LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(2, 1, 384, 51864), strides=(0, 0, 1, 384), offset=0, mask=None, contiguous=False),))), src=()),)),)),
-        LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(2, 1, 384, 1), strides=(0, 0, 1, 0), offset=19584, mask=None, contiguous=False),))), src=()),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(2, 1, 384, 1), strides=(384, 0, 1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.ALU, dtypes.half, arg=BinaryOps.ADD, src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.half, arg=(ReduceOps.SUM, (3,)), src=(
+            UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
+              UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(2, 1, 384, 51864), strides=(51864, 0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
+              UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(2, 1, 384, 51864), strides=(0, 0, 1, 384), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+          UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+            UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=3, src=()),
+            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(2, 1, 384, 1), strides=(0, 0, 1, 0), offset=19584, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.GROUP, axis=0, amt=4)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=["METAL", "GPU", "CUDA"])
 
