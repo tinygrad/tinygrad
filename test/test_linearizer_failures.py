@@ -402,11 +402,17 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
   def test_failure_16(self):
-    ast = LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 13, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=True),))), src=(
-      LazyOp(BinaryOps.MUL, arg=None, src=(
-        LazyOp(ReduceOps.SUM, arg=(2,), src=(
-          LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 13, 1024), strides=(0, 1024, 1), offset=0, mask=None, contiguous=True),))), src=()),)),
-        LazyOp(BufferOps.CONST, arg=ConstBuffer(val=0.0009765625, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 13, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))), src=()),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 13, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (2,)), src=(
+            UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+              UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 13, 1024), strides=(0, 1024, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+          UOp(UOps.CONST, dtypes.float, arg=0.0009765625, src=(
+            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 13, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=0), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=1, amt=4)]
     # COMPILE_ERROR on METAL/GPU (probably HIP/CUDA too) in fuzz_linearizer ast 154: bracket nesting level exceeded maximum of 256
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
