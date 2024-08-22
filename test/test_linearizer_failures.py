@@ -787,13 +787,20 @@ class TestLinearizerFailures(unittest.TestCase):
   def test_failure_32(self):
     # kernel from beaming resnet
     # Memory access fault on tinybox red
-    ast = LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(256, 1, 256, 14, 14, 1, 1, 1), strides=(50176, 0, 196, 14, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))), src=(
-      LazyOp(UnaryOps.CAST, arg=dtypes.half, src=(
-        LazyOp(ReduceOps.SUM, arg=(7, 6, 5), src=(
-          LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
-            LazyOp(BinaryOps.MUL, arg=None, src=(
-              LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 256, 1, 256, 4, 16, 4, 16), strides=(0, 50176, 0, 196, 0, 14, 0, 1), offset=-15, mask=((0, 1), (0, 256), (0, 1), (0, 256), (0, 4), (1, 15), (0, 4), (1, 15)), contiguous=False), View(shape=(256, 1, 256, 14, 14, 256, 3, 3), strides=(1048576, 0, 0, 64, 1, 4096, 1088, 17), offset=0, mask=None, contiguous=False)))), src=()),
-              LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(256, 1, 256, 14, 14, 256, 3, 3), strides=(0, 0, 2304, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(256, 1, 256, 14, 14, 1, 1, 1), strides=(50176, 0, 196, 14, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.CAST, dtypes.half, arg=None, src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (7, 6, 5)), src=(
+            UOp(UOps.CAST, dtypes.float, arg=None, src=(
+              UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
+                UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                  UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1, src=()),
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 256, 1, 256, 4, 16, 4, 16), strides=(0, 50176, 0, 196, 0, 14, 0, 1), offset=-15, mask=((0, 1), (0, 256), (0, 1), (0, 256), (0, 4), (1, 15), (0, 4), (1, 15)), contiguous=False), View(shape=(256, 1, 256, 14, 14, 256, 3, 3), strides=(1048576, 0, 0, 64, 1, 4096, 1088, 17), offset=0, mask=None, contiguous=False))), src=()),)),
+                UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                  UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(256, 1, 256, 14, 14, 256, 3, 3), strides=(0, 0, 2304, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.TC, axis=2, amt=2), Opt(op=OptOps.UPCAST, axis=2, amt=7), Opt(op=OptOps.UNROLL, axis=1, amt=0), Opt(op=OptOps.LOCAL, axis=1, amt=16)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[], atol=0.1, rtol=0.05)
 
