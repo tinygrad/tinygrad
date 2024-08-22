@@ -1139,13 +1139,19 @@ class TestLinearizerFailures(unittest.TestCase):
   @unittest.skipUnless(not CI and Device.DEFAULT in ("NV", "CUDA"), "for real NV")
   def test_failure_48(self):
     # with UOP_IS_SYMBOLIC=1, generates the wrong IDIV (fixed!)
-    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(
-      LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 64, 1, 1, 256, 1, 1, 256), strides=(0, 0, 65536, 0, 0, 256, 0, 0, 1), offset=0, mask=None, contiguous=True),))), src=(
-        LazyOp(ReduceOps.SUM, arg=(3, 4), src=(
-          LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
-            LazyOp(BinaryOps.MUL, arg=None, src=(
-              LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 1, 64, 56, 56, 256, 1, 1, 256), strides=(0, 0, 0, 56, 1, 3136, 0, 0, 802816), offset=0, mask=None, contiguous=False),))), src=()),
-              LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 1, 64, 56, 56, 256, 1, 1, 256), strides=(0, 0, 3136, 56, 1, 0, 0, 0, 200704), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 64, 1, 1, 256, 1, 1, 256), strides=(0, 0, 65536, 0, 0, 256, 0, 0, 1), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (3, 4)), src=(
+          UOp(UOps.CAST, dtypes.float, arg=None, src=(
+            UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
+              UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 64, 56, 56, 256, 1, 1, 256), strides=(0, 0, 0, 56, 1, 3136, 0, 0, 802816), offset=0, mask=None, contiguous=False),)), src=()),)),
+              UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 64, 56, 56, 256, 1, 1, 256), strides=(0, 0, 3136, 56, 1, 0, 0, 0, 200704), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),))
     opts = [Opt(op=OptOps.TC, axis=0, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=2)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
