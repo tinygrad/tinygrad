@@ -65,7 +65,7 @@ class UOp:
     return (self.op is UOps.ALU and \
       self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
   @functools.cached_property
-  def cmp_tuple(self):
+  def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
@@ -239,7 +239,7 @@ class UPat:
     self.location = location or get_location()
 
   @functools.cached_property
-  def early_reject(self):
+  def early_reject(self) -> Set[Tuple[UOps, Any]]:
     # TODO: this can be improved to support some allowed_len == 0 patterns
     return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
 
@@ -283,29 +283,32 @@ class PatternMatcher:
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
-if getenv("TRACK_MATCH_STATS", 0):
-  match_stats = dict()
-  class TrackedPattenMatcher(PatternMatcher):
-    def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
-      super().__init__(patterns)
-      for p,_ in self.patterns:
-        if p not in match_stats: match_stats[p] = [0,0,0.0]
+# *** tracking pattern matcher ***
 
-    def rewrite(self, uop:UOp) -> Optional[UOp]:
-      ret = None
-      ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
-      for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-        st = time.perf_counter()
-        if not early_reject.issubset(ler):
-          match_stats[p][2] += time.perf_counter()-st
-          continue
-        match_stats[p][1] += 1
-        if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
-          match_stats[p][0] += 1
-          match_stats[p][2] += time.perf_counter()-st
-          return ret # NOTE: if it returns None, we keep trying to match
+match_stats:Dict[UPat, List[Union[int, float]]] = dict()
+class TrackedPattenMatcher(PatternMatcher):
+  def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
+    super().__init__(patterns)
+    for p,_ in self.patterns:
+      if p not in match_stats: match_stats[p] = [0,0,0.0]
+
+  def rewrite(self, uop:UOp) -> Optional[UOp]:
+    ret = None
+    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
+    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+      st = time.perf_counter()
+      if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
-      return None
+        continue
+      match_stats[p][1] += 1
+      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
+        match_stats[p][0] += 1
+        match_stats[p][2] += time.perf_counter()-st
+        return ret # NOTE: if it returns None, we keep trying to match
+      match_stats[p][2] += time.perf_counter()-st
+    return None
+
+if getenv("TRACK_MATCH_STATS", 0):
   PatternMatcher = TrackedPattenMatcher  # type: ignore
   import atexit
   @functools.lru_cache(None)
@@ -317,6 +320,8 @@ if getenv("TRACK_MATCH_STATS", 0):
       print(f"{v[0]:6d} / {v[1]:7d} -- {v[2]*1000.:9.2f} ms -- {k.location}", lines(k.location[0])[k.location[1]-1].strip())
       ret = [x+y for x,y in zip(ret, v)]
     print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[2]*1000.:9.2f} ms -- TOTAL")
+
+# *** simple graph rewrite engine ***
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
