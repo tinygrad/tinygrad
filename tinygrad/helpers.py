@@ -315,8 +315,9 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 # *** tqdm
 
 class tqdm:
-  def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:Optional[int]=None, rate:int=100):
-    self.iterable, self.disable, self.unit, self.unit_scale, self.rate = iterable, disable, unit, unit_scale, rate
+  def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:Optional[int]=None,
+               rate:int=100, leave:bool=True):
+    self.iterable, self.disable, self.unit, self.unit_scale, self.rate, self.leave = iterable, disable, unit, unit_scale, rate, leave
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, getattr(iterable, "__len__", lambda:0)() if total is None else total
     self.set_description(desc)
     self.update(0)
@@ -324,7 +325,14 @@ class tqdm:
     for item in self.iterable:
       yield item
       self.update(1)
-    self.update(close=True)
+    self.close()
+
+  def close(self): self.update(close=True) if self.leave else self.clear()
+
+  def clear(self):
+    if not self.disable:
+      print("\r" + " " * shutil.get_terminal_size().columns, end="", file=sys.stderr)
+      print("\r", end="", file=sys.stderr)
   def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
@@ -340,6 +348,7 @@ class tqdm:
     sz = max(ncols-len(self.desc)-3-2-2-len(suf), 1)
     bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
     print(bar[:ncols+1], flush=True, end='\n'*close, file=sys.stderr)
+    print(bar[: ncols + 1], flush=True, end="\n" * close if self.leave else "", file=sys.stderr)
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
