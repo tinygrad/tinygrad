@@ -1,6 +1,5 @@
 from __future__ import annotations
 import functools
-from dataclasses import replace
 from typing import List, Tuple, cast, Optional, Dict
 from tinygrad.shape.shapetracker import ShapeTracker, variable_to_uop
 from tinygrad.shape.symbolic import sint
@@ -128,6 +127,6 @@ class IndependentLowerer:
         ret = UOp(UOps.CONTRACT, cast(DType, x.dtype).vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
         ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(cast(DType, ret.dtype).count)])
       return UOp(UOps.REDUCE, x.dtype, (ret,) + tuple(reduce_range), alu_op) if len(reduce_range) else ret
-    return replace(x, src=in_uops)
+    return UOp(x.op, x.dtype, in_uops, x.arg)
 
 def ast_to_uop(ast:UOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)

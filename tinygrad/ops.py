@@ -5,7 +5,7 @@ from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import pretty_print, prod, getenv
+from tinygrad.helpers import pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -64,7 +64,7 @@ class UOp:
     return (self.op is UOps.ALU and \
       self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
   @functools.cached_property
-  def cmp_tuple(self):
+  def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
@@ -196,6 +196,8 @@ def get_location() -> Tuple[str, int]:
   # no matchers in ops.py, find the real frame
   while (frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>') and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
+@functools.lru_cache(None)
+def lines(fn): return open(fn).readlines()
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
@@ -205,15 +207,17 @@ class NOp(UOp):
   location: Tuple[str, int] = field(default_factory=get_location)
 
   @staticmethod
+  @functools.lru_cache(None)
   def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, name=name)
   @staticmethod
+  @functools.lru_cache(None)
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
   @functools.cached_property
   def upat(self:NOp) -> UPat:
     return UPat(name=self.name, dtype=self.dtype, location=self.location) if self.op is UOps.NOOP else \
-      UPat(self.op, self.arg, (list if self.commutative() else tuple)(src.upat for src in self.src) or None, self.name,
+      UPat(self.op, self.arg, (list if self.commutative() else tuple)([src.upat for src in self.src]) or None, self.name,
            self.dtype, self.allow_any_len, location=self.location)
 
 class UPat:
@@ -224,7 +228,7 @@ class UPat:
     self.arg, self.name = arg, name
     self.src: Any = None
     # try all permutations if it's a list
-    if isinstance(src, list): self.src = list(itertools.permutations(src))
+    if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
     # only one if it's a tuple
     elif isinstance(src, tuple): self.src = [src]
     # repeat if it's a UPat
@@ -234,10 +238,11 @@ class UPat:
     self.location = location or get_location()
 
   @functools.cached_property
-  def early_reject(self):
+  def early_reject(self) -> Set[Tuple[UOps, Any]]:
     # TODO: this can be improved to support some allowed_len == 0 patterns
     return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
 
+  def printable(self:UPat): return lines(self.location[0])[self.location[1]-1].strip()
   def __repr__(self):
     def rep(x):
       form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
@@ -278,40 +283,45 @@ class PatternMatcher:
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
-if getenv("TRACK_MATCH_STATS", 0):
-  match_stats = dict()
-  class TrackedPattenMatcher(PatternMatcher):
-    def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
-      super().__init__(patterns)
-      for p,_ in self.patterns:
-        if p not in match_stats: match_stats[p] = [0,0,0.0]
+# *** tracking pattern matcher ***
 
-    def rewrite(self, uop:UOp) -> Optional[UOp]:
-      ret = None
-      ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
-      for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-        st = time.perf_counter()
-        if not early_reject.issubset(ler):
-          match_stats[p][2] += time.perf_counter()-st
-          continue
-        match_stats[p][1] += 1
-        if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
-          match_stats[p][0] += 1
-          match_stats[p][2] += time.perf_counter()-st
-          return ret # NOTE: if it returns None, we keep trying to match
+TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 0)
+match_stats:Dict[UPat, List[Union[int, float]]] = dict()
+class TrackedPattenMatcher(PatternMatcher):
+  def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
+    super().__init__(patterns)
+    for p,_ in self.patterns:
+      if p not in match_stats: match_stats[p] = [0,0,0.0]
+
+  def rewrite(self, uop:UOp) -> Optional[UOp]:
+    ret = None
+    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
+    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+      st = time.perf_counter()
+      if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
-      return None
+        continue
+      match_stats[p][1] += 1
+      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
+        match_stats[p][0] += 1
+        match_stats[p][2] += (et:=time.perf_counter()-st)
+        if TRACK_MATCH_STATS >= 2: print(f"{et*1e6:7.2f} us -- ", p.printable())
+        return ret # NOTE: if it returns None, we keep trying to match
+      match_stats[p][2] += time.perf_counter()-st
+    return None
+
+if TRACK_MATCH_STATS:
   PatternMatcher = TrackedPattenMatcher  # type: ignore
   import atexit
-  @functools.lru_cache(None)
-  def lines(fn): return open(fn).readlines()
   @atexit.register
   def print_match_stats():
     ret = [0,0,0.0]
     for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
-      print(f"{v[0]:6d} / {v[1]:7d} -- {v[2]*1000.:9.2f} ms -- {k.location}", lines(k.location[0])[k.location[1]-1].strip())
+      print(f"{v[0]:6d} / {v[1]:7d} -- {v[2]*1000.:9.2f} ms -- {k.location}", k.printable())
       ret = [x+y for x,y in zip(ret, v)]
     print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[2]*1000.:9.2f} ms -- TOTAL")
+
+# *** simple graph rewrite engine ***
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
