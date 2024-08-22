@@ -2,13 +2,13 @@ import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.ops import UOps
+from tinygrad.ops import UOp, UOps
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
 from extra.ops import LazyOp, BufferOps, ReduceOps, BinaryOps, MemBuffer, ConstBuffer
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -46,7 +46,12 @@ class TestTimeLinearizer(unittest.TestCase):
     Ensure that the kernel count is not incremented by time_linearizer when clearing l2
     """
     # ast of Tensor.zeros(16).contiguous().realize()
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    ast = UOp(UOps.SINK, src=(
+      UOp(UOps.STORE, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))),
+        UOp(UOps.CONST, dtypes.float, arg=0.0, src=(
+          UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),))),)),)),))
     lin = Kernel(ast)
     bufs = bufs_from_lin(lin)
 
