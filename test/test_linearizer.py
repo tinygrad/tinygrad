@@ -592,6 +592,7 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast(sink, [dataset, idxs], wanna_output=[real_index])
 
   # AssertionError: repeated stores in uops
+  @unittest.skip("TODO: rewrite without using NEG")
   def test_argmax_multireduce_axis0(self):
     t = Tensor.randn(10, 20).realize()
     t_max = t.max((0,)).realize()
@@ -628,6 +629,7 @@ class TestLinearizer(unittest.TestCase):
             UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)) # noqa E501
     helper_linearizer_ast(ast, [t, t_max], wanna_output=[real_argmax])
 
+  @unittest.skip("TODO: rewrite without using NEG")
   def test_argmax_multireduce_flat(self):
     t = Tensor.randn(10, 20).realize()
     t_max = t.max().realize()
