@@ -20,7 +20,9 @@ class IndirectCommandBufferExecutionRange(ctypes.Structure):
               ("length", ctypes.c_ulong)]
 
 class Metal:
-  MTLCreateSystemDefaultDevice = lambda: ObjcInstance(metal.MTLCreateSystemDefaultDevice())
+  @staticmethod
+  def MTLCreateSystemDefaultDevice():
+    return ObjcInstance(metal.MTLCreateSystemDefaultDevice())
   MTLResourceStorageModeShared = 0
   MTLSize = MTLSize
   MTLCompileOptions = ObjcClass("MTLCompileOptions")

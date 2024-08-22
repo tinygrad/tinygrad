@@ -20,10 +20,10 @@ libobjc.object_getClass.restype, libobjc.object_getClass.argtypes = ctypes.c_voi
 libobjc.class_getSuperclass.restype, libobjc.class_getSuperclass.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
 libobjc.object_dispose.argtypes = [ctypes.c_void_p]
 
-def convert_arg(arg, type):
-  if isinstance(arg, str) and type is ctypes.c_char_p: return arg.encode()
-  if isinstance(arg, str) and type is ctypes.c_void_p: return NSString.stringWithUTF8String_(arg)
-  if isinstance(arg, list) or isinstance(arg, tuple) and type is ctypes.c_void_p: return (ctypes.c_void_p * len(arg))(*arg)
+def convert_arg(arg, arg_type):
+  if isinstance(arg, str) and arg_type is ctypes.c_char_p: return arg.encode()
+  if isinstance(arg, str) and arg_type is ctypes.c_void_p: return NSString.stringWithUTF8String_(arg)
+  if isinstance(arg, list) or isinstance(arg, tuple) and arg_type is ctypes.c_void_p: return (ctypes.c_void_p * len(arg))(*arg)
   return arg
 
 @functools.lru_cache(maxsize=None)
@@ -44,7 +44,6 @@ def dump_objc_methods(clz: ctypes.c_void_p):
   method_count = ctypes.c_uint()
   methods_ptr = libobjc.class_copyMethodList(clz, ctypes.byref(method_count))
   assert methods_ptr is not None, f"Failed to get methods for class {clz}"
-  class_name = libobjc.class_getName(clz).decode('ascii')
 
   methods = {}
   for i in range(method_count.value):
@@ -107,7 +106,8 @@ def objc_type_to_ctype(t: str):
 def build_method(name, sel_name, restype, argtypes):
   """hashable args for lru_cache, this should only be ran once for each called method name"""
   # print(f"Building method {name} with sel_name {sel_name} restype {restype} argtypes {argtypes}")
-  f = lambda p: functools.partial(objc_msgSend, p, sel_name, restype=objc_type_to_ctype(restype),
+  def f(p):
+    return functools.partial(objc_msgSend, p, sel_name, restype=objc_type_to_ctype(restype),
       argtypes=[objc_type_to_ctype(t) for t in argtypes[2:]])
   # ugly hack to conditionally wrap without self referencing recursion. e.g: "f = lambda *args: g(f(*args))"
   _f = lambda p: ((lambda *args, **kwargs: ObjcInstance(r) if (r:=f(p)(*args, **kwargs)) is not None else None) if restype == "@" else f(p))
@@ -136,7 +136,7 @@ class ObjcClass(ctypes.c_void_p):
 class ObjcInstance(ObjcClass):
   def __init__(self, ptr: Union[int, ctypes.c_void_p, None]):
     v = ptr.value if isinstance(ptr, ctypes.c_void_p) else ptr
-    assert v, f"Can't create ObjcInstance with null ptr"
+    assert v, "Can't create ObjcInstance with null ptr"
     super(ctypes.c_void_p, self).__init__(v)
     self.methods_info = get_methods_rec(libobjc.object_getClass(self))
   def __del__(self):
