@@ -326,9 +326,7 @@ class tqdm:
       yield item
       self.update(1)
     self.close()
-
   def close(self): self.update(close=True) if self.leave else self.clear()
-
   def clear(self):
     if not self.disable:
       print("\r" + " " * shutil.get_terminal_size().columns, end="", file=sys.stderr)
