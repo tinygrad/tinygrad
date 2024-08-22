@@ -380,8 +380,8 @@ class AMDRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
 
   def render_vector_prefix(self, dtype:DType) -> str:
-    vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar()),
-    return f"typedef {scal} {vec} __attribute__((ext_vector_type({dtype.count})));\nstatic inline __attribute__((device)) "+\
+    vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
+    return f"typedef {scal} {vec} __attribute__((ext_vector_type({dtype.count})));\nstatic inline __attribute__((device)) "+ \
            f"{vec} make_{vec}({', '.join([f'{scal} {x}' for x in _nms[:dtype.count]])}) {{ return {{ {', '.join(_nms[:dtype.count])} }}; }}"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
@@ -408,7 +408,7 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
 
     # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
-    for name, _, dtype_in, dtype_out, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+    for name,_,dtype_in,dtype_out,_,_,_,_ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       dto, dti = self.render_dtype(dtype_out.vec(8)), self.render_dtype(dtype_in.vec(16))
       if dtype_out == dtypes.float: prefix.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
       else: prefix.append(f"""static inline __attribute__((device)) {dto} __{name}({dti} a, {dti} b, {dto} c) {{
