@@ -983,11 +983,20 @@ class TestLinearizerFailures(unittest.TestCase):
   @unittest.skipIf(CI, "for real AMD GPU")
   def test_failure_41(self):
     # One more resnet crash with a page fault on AMD. Checked on rocm6.1.3, -O1 works, -O2 fails
-    ast = LazyOp(MetaOps.KERNEL, arg=None, src=(LazyOp(BufferOps.STORE, arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(256, 1, 128, 28, 28, 1, 1, 1), strides=(100352, 0, 784, 28, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))), src=(LazyOp(UnaryOps.CAST, arg=dtypes.half, src=(
-       LazyOp(ReduceOps.SUM, arg=(5, 6, 7), src=(
-         LazyOp(UnaryOps.CAST, arg=dtypes.float, src=(
-           LazyOp(BinaryOps.MUL, arg=None, src=(
-             LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 256, 1, 128, 4, 58, 4, 58), strides=(0, 401408, 0, 3136, 0, 56, 0, 1), offset=-57, mask=((0, 1), (0, 256), (0, 1), (0, 128), (0, 4), (1, 57), (0, 4), (1, 57)), contiguous=False), View(shape=(256, 1, 128, 28, 28, 128, 3, 3), strides=(6889472, 0, 0, 464, 2, 53824, 13688, 59), offset=0, mask=None, contiguous=False)))), src=()), LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(256, 1, 128, 28, 28, 128, 3, 3), strides=(0, 0, 1152, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)),)),)),))
+    ast = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(256, 1, 128, 28, 28, 1, 1, 1), strides=(100352, 0, 784, 28, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.CAST, dtypes.half, arg=None, src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (5, 6, 7)), src=(
+            UOp(UOps.CAST, dtypes.float, arg=None, src=(
+              UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
+                UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                  UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1, src=()),
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 256, 1, 128, 4, 58, 4, 58), strides=(0, 401408, 0, 3136, 0, 56, 0, 1), offset=-57, mask=((0, 1), (0, 256), (0, 1), (0, 128), (0, 4), (1, 57), (0, 4), (1, 57)), contiguous=False), View(shape=(256, 1, 128, 28, 28, 128, 3, 3), strides=(6889472, 0, 0, 464, 2, 53824, 13688, 59), offset=0, mask=None, contiguous=False))), src=()),)),
+                UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                  UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(256, 1, 128, 28, 28, 128, 3, 3), strides=(0, 0, 1152, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
     opts=[Opt(op=OptOps.TC, axis=5, amt=2), Opt(op=OptOps.UNROLL, axis=0, amt=0)]
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["AMD", "HIP", "METAL"])
 
