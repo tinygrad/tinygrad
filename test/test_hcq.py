@@ -261,7 +261,7 @@ class TestHCQ(unittest.TestCase):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
     try: d1 = Device[f"{Device.DEFAULT}:1"]
-    except: self.skipTest("no multidevice, test skipped")
+    except Exception: self.skipTest("no multidevice, test skipped")
 
     TestHCQ.d0.hw_copy_queue_t().signal(sig:=TestHCQ.d0.signal_t(value=0), value=0xfff) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
@@ -323,7 +323,7 @@ class TestHCQ(unittest.TestCase):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
     try: _ = Device[f"{Device.DEFAULT}:1"]
-    except: self.skipTest("no multidevice, test skipped")
+    except Exception: self.skipTest("no multidevice, test skipped")
 
     TestHCQ.d0._prof_setup()
 
@@ -403,7 +403,7 @@ class TestHCQ(unittest.TestCase):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
     try: _ = Device[f"{Device.DEFAULT}:1"]
-    except: self.skipTest("no multidevice, test skipped")
+    except Exception: self.skipTest("no multidevice, test skipped")
 
     buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(f"{Device.DEFAULT}:1", 1, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
