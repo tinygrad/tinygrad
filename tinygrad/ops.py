@@ -199,6 +199,8 @@ def get_location() -> Tuple[str, int]:
   # no matchers in ops.py, find the real frame
   while (frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>') and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
+@functools.lru_cache(None)
+def lines(fn): return open(fn).readlines()
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
@@ -243,6 +245,7 @@ class UPat:
     # TODO: this can be improved to support some allowed_len == 0 patterns
     return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
 
+  def printable(self:UPat): return lines(self.location[0])[self.location[1]-1].strip()
   def __repr__(self):
     def rep(x):
       form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
@@ -285,6 +288,7 @@ class PatternMatcher:
 
 # *** tracking pattern matcher ***
 
+TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedPattenMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
@@ -303,21 +307,20 @@ class TrackedPattenMatcher(PatternMatcher):
       match_stats[p][1] += 1
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
         match_stats[p][0] += 1
-        match_stats[p][2] += time.perf_counter()-st
+        match_stats[p][2] += (et:=time.perf_counter()-st)
+        if TRACK_MATCH_STATS >= 2: print(f"{et*1e6:7.2f} us -- ", p.printable())
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None
 
-if getenv("TRACK_MATCH_STATS", 0):
+if TRACK_MATCH_STATS:
   PatternMatcher = TrackedPattenMatcher  # type: ignore
   import atexit
-  @functools.lru_cache(None)
-  def lines(fn): return open(fn).readlines()
   @atexit.register
   def print_match_stats():
     ret = [0,0,0.0]
     for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
-      print(f"{v[0]:6d} / {v[1]:7d} -- {v[2]*1000.:9.2f} ms -- {k.location}", lines(k.location[0])[k.location[1]-1].strip())
+      print(f"{v[0]:6d} / {v[1]:7d} -- {v[2]*1000.:9.2f} ms -- {k.location}", k.printable())
       ret = [x+y for x,y in zip(ret, v)]
     print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[2]*1000.:9.2f} ms -- TOTAL")
 
