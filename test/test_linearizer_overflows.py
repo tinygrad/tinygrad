@@ -9,7 +9,7 @@ from tinygrad.engine.search import time_linearizer, bufs_from_lin
 # stuff needed to unpack a kernel
 from tinygrad.ops import UOp, UOps
 from tinygrad.dtype import PtrDType
-from extra.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer
+from extra.ops import BinaryOps, UnaryOps, ReduceOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
