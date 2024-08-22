@@ -6,7 +6,7 @@ from tinygrad.ops import UOp, UOps
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
-from extra.ops import LazyOp, BufferOps, ReduceOps, BinaryOps, MemBuffer, ConstBuffer
+from extra.ops import ReduceOps, BinaryOps
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import Context, GlobalCounters
