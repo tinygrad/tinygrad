@@ -1,24 +1,7 @@
 from typing import Dict, Union, Any
 import functools, ctypes, ctypes.util
+import tinygrad.runtime.autogen.objc as libobjc
 # note: The Objective-C runtime does not expose enough information to provide completely automatic bindings of all APIs. source: https://pyobjc.readthedocs.io/en/latest/metadata/index.html
-
-# import tinygrad.runtime.autogen.objc as objc
-libobjc = ctypes.CDLL(ctypes.util.find_library("objc"))
-libobjc.objc_msgSend.restype, libobjc.objc_msgSend.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p]
-libobjc.objc_getClass.restype, libobjc.objc_getClass.argtypes = ctypes.c_void_p, [ctypes.c_char_p]
-libobjc.class_copyMethodList.restype, libobjc.class_copyMethodList.argtypes = ctypes.POINTER(ctypes.c_void_p), [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint)]
-libobjc.class_getName.restype, libobjc.class_getName.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
-libobjc.sel_registerName.restype, libobjc.sel_registerName.argtypes = ctypes.c_void_p, [ctypes.c_char_p]
-libobjc.sel_getName.restype, libobjc.sel_getName.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
-libobjc.method_getName.restype, libobjc.method_getName.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
-libobjc.method_getTypeEncoding.restype, libobjc.method_getTypeEncoding.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
-libobjc.method_copyReturnType.restype, libobjc.method_copyReturnType.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
-libobjc.method_getNumberOfArguments.restype, libobjc.method_getNumberOfArguments.argtypes = ctypes.c_uint, [ctypes.c_void_p]
-libobjc.method_copyArgumentType.restype, libobjc.method_copyArgumentType.argtypes = ctypes.c_char_p, [ctypes.c_void_p, ctypes.c_uint]
-libobjc.object_getClassName.restype, libobjc.object_getClassName.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
-libobjc.object_getClass.restype, libobjc.object_getClass.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
-libobjc.class_getSuperclass.restype, libobjc.class_getSuperclass.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
-libobjc.object_dispose.argtypes = [ctypes.c_void_p]
 
 def convert_arg(arg, arg_type):
   if isinstance(arg, str) and arg_type is ctypes.c_char_p: return arg.encode()
@@ -27,7 +10,7 @@ def convert_arg(arg, arg_type):
   return arg
 
 @functools.lru_cache(maxsize=None)
-def sel_registerName(sel: str) -> ctypes.c_void_p:
+def sel_registerName(sel: str) -> libobjc.SEL:
   return libobjc.sel_registerName(sel.encode())
 
 def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=[]):
@@ -40,7 +23,7 @@ def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=[
 libc = ctypes.CDLL(None)
 libc.free.argtypes = [ctypes.c_void_p]
 
-def dump_objc_methods(clz: ctypes.c_void_p):
+def dump_objc_methods(clz: libobjc.Class):
   method_count = ctypes.c_uint()
   methods_ptr = libobjc.class_copyMethodList(clz, ctypes.byref(method_count))
   assert methods_ptr is not None, f"Failed to get methods for class {clz}"
@@ -48,12 +31,15 @@ def dump_objc_methods(clz: ctypes.c_void_p):
   methods = {}
   for i in range(method_count.value):
     method = methods_ptr[i]
-    sel_name = libobjc.sel_getName(libobjc.method_getName(method)).decode('ascii')
-    # TODO: does ctypes autofree those?
-    return_type = libobjc.method_copyReturnType(method).decode('ascii')
-    argtypes = tuple(libobjc.method_copyArgumentType(method, j).decode('ascii') for j in range(libobjc.method_getNumberOfArguments(method)))
+    sel_name = ctypes.string_at(libobjc.sel_getName(libobjc.method_getName(method))).decode('ascii')
+    return_type_p = libobjc.method_copyReturnType(method)
+    return_type = ctypes.string_at(return_type_p).decode('ascii')
+    argtypes_ps = tuple(libobjc.method_copyArgumentType(method, j) for j in range(libobjc.method_getNumberOfArguments(method)))
 
-    methods[sel_name] = {"restype": return_type, "argtypes": tuple(arg for arg in argtypes)}
+    methods[sel_name] = {"restype": return_type, "argtypes": tuple(ctypes.string_at(arg).decode('ascii') for arg in argtypes_ps)}
+
+    # [libc.free(p) for p in argtypes_ps]
+    libc.free(ctypes.cast(return_type_p, ctypes.c_void_p))
   libc.free(methods_ptr)
   return methods
 
@@ -80,11 +66,12 @@ SIMPLE_TYPES = {
 }
 
 @functools.lru_cache(maxsize=None)
-def get_methods_rec(c: ctypes.c_void_p):
+def get_methods_rec(c: int):
+  p = ctypes.cast(ctypes.c_void_p(c), libobjc.Class)
   methods = {}
-  while c:
-    methods.update(dump_objc_methods(c))
-    c = libobjc.class_getSuperclass(c)
+  while p:
+    methods.update(dump_objc_methods(p))
+    p = libobjc.class_getSuperclass(p)
   return methods
 
 def objc_type_to_ctype(t: str):
@@ -110,7 +97,7 @@ def wrapper_return_objc_instance(f):
 
 def wrapper_arg_error(f):
   def _wrapper(*args, **kwargs):
-    err=ctypes.c_void_p()
+    err = ctypes.c_void_p()
     res = f(*args[:-1], ctypes.byref(err), **kwargs)
     return (res, err if err.value else None)
   return _wrapper
@@ -130,14 +117,17 @@ def build_method(name, sel_name, restype, argtypes):
 
 class ObjcClass(ctypes.c_void_p):
   def __init__(self, name:str):
-    super().__init__(libobjc.objc_getClass(name.encode()))
+    p: int | None = ctypes.cast(libobjc.objc_getClass(name.encode()), ctypes.c_void_p).value
+    super().__init__(p)
     assert self.value, f"Class {name} not found"
-    self.methods_info: Dict[str, Dict[str, Any]] = get_methods_rec(_metaclass_ptr:=libobjc.object_getClass(self))
+    _metaclass_ptr = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(p), libobjc.id))
+    self.methods_info: Dict[str, Dict[str, Any]] = get_methods_rec(ctypes.cast(_metaclass_ptr, ctypes.c_void_p).value)
 
   def __hash__(self) -> int:
     return self.value
 
   def __getattr__(self, name:str) -> Any:
+    # print(f"__getattr__({self}, {name})")
     sel_name = name.replace("_", ":")
     if sel_name in self.methods_info:
       method_info = self.methods_info[sel_name]
@@ -149,10 +139,11 @@ class ObjcClass(ctypes.c_void_p):
 
 class ObjcInstance(ObjcClass):
   def __init__(self, ptr: Union[int, ctypes.c_void_p, None]):
-    v = ptr.value if isinstance(ptr, ctypes.c_void_p) else ptr
+    v: int | None = ptr.value if isinstance(ptr, ctypes.c_void_p) else ptr
     assert v, "Can't create ObjcInstance with null ptr"
     super(ctypes.c_void_p, self).__init__(v)
-    self.methods_info = get_methods_rec(libobjc.object_getClass(self))
+    c = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(v), libobjc.id))
+    self.methods_info = get_methods_rec(ctypes.cast(c, ctypes.c_void_p).value)
   def __del__(self):
     # print(f"Releasing {self}")
     self.release()
