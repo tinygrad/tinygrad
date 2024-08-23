@@ -403,6 +403,14 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
     self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
 
+  def test_mul_negs_cancelled(self):
+    gidx = Variable("gidx", 0, 31)
+    lidx = Variable("lidx", 0, 31)
+    alu0 = gidx*(-32) + lidx *(-4)
+    alu1 = alu0*(lidx*(-1))
+    alu2 = alu1.lt(40000)
+    self.helper_test_variable(alu2, 1, 1, "1")
+
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
