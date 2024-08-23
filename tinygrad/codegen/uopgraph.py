@@ -455,7 +455,7 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
 def merge_gates(sink:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def has_range(x:UOp) -> bool: return any(s2p.op is UOps.RANGE for s2p in x.sparents)
-  if not any(x.op is UOps.STORE and len(x.src) == 4 for x in sink.src): return None
+  if len([x.op is UOps.STORE and len(x.src) == 4 for x in sink.src]) <= 1: return None
   if_src_to_if_op: Dict[UOp, UOp] = {}
   for x in sink.src:
     if x.op is UOps.STORE and len(x.src) == 4 and has_range(x.src[2]) and x.src[2] not in x.src[-1].src:
