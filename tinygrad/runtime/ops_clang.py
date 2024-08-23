@@ -1,24 +1,46 @@
-import ctypes, subprocess, pathlib, tempfile
+import ctypes, subprocess, pathlib, tempfile, mmap
+from typing import Tuple, Any
 from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
+from tinygrad.helpers import OSX, cpu_time_execution, DEBUG, cpu_objdump, mv_address
 from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.runtime.autogen import libc
+from tinygrad.runtime.support.elf import elf_loader
+import tinygrad.runtime.autogen.macho as macho
+
+def macho_loader(blob: bytes) -> Tuple[memoryview, Any, Any]:
+  header = macho.struct_mach_header_64.from_buffer_copy(blob)
+  curr_loc = ctypes.sizeof(macho.struct_mach_header_64)
+  sections = []
+  for _ in range(header.ncmds):
+    cmd = macho.struct_load_command.from_buffer_copy(blob, curr_loc)
+    if cmd.cmd == macho.LC_SEGMENT_64:
+      seg = macho.struct_segment_command_64.from_buffer_copy(blob, curr_loc)
+      sections += (macho.struct_section_64 * seg.nsects).from_buffer_copy(blob, curr_loc + ctypes.sizeof(macho.struct_segment_command_64))
+    curr_loc += cmd.cmdsize
+  image = bytearray(max([sh.addr + sh.size for sh in sections]))
+  for sh in sections: image[sh.addr:sh.addr+sh.size] = blob[sh.offset:sh.offset+sh.size]
+  return memoryview(image), None, None
 
 class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(['clang', '-shared', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
-                               '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
+      # need to specify entrypoint so that ld doesn't complain (it's not fatal, so do we care?)
+      name = ('_' if OSX else '') + src[(start:=src.find('void')+5):src[start:].find('(')+start]
+      subprocess.check_output(['clang', '-v', '-static', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
+                               '-fno-math-errno', '-e', name, '-Wl,-segaddr,text,0,-pagezero_size,0,-preload' if OSX else '-Wl,-Ttext=0', '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
   def __init__(self, name:str, lib:bytes):
     if DEBUG >= 6: cpu_objdump(lib)
     self.name, self.lib = name, lib
-    # write to disk so we can load it
-    with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
-      pathlib.Path(cached_file_path.name).write_bytes(lib)
-      self.fxn = ctypes.CDLL(str(cached_file_path.name))[name]
+    image, _, _ = macho_loader(lib) if OSX else elf_loader(lib)
+    addr = libc.mmap(0, len(image), mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_ANON | mmap.MAP_PRIVATE, -1, 0)
+    assert addr != 0xffffffffffffffff
+    ctypes.memmove(addr, mv_address(image), len(image))
+    assert libc.mprotect(addr, len(image), mmap.PROT_READ | mmap.PROT_EXEC) != 0xffffffffffffffff
+    self.fxn = ctypes.CFUNCTYPE(None)(addr)
 
   def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 

@@ -23,7 +23,7 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[
   # Prealloc image for all fixed addresses.
   image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0]))
   for sh in progbits:
-    if sh.header.sh_addr != 0: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
+    if sh.header.sh_addr != 0 or sh.name == '.text': image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
     else:
       image += b'\0' * (((align:=max(sh.header.sh_addralign, force_section_align)) - len(image) % align) % align) + sh.content
       sh.header.sh_addr = len(image) - len(sh.content)
