@@ -70,6 +70,7 @@ class Program:
 
 class Renderer:
   device: str = ""
+  arch: int = 0
   suffix: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True

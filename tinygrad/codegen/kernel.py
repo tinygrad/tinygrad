@@ -332,9 +332,8 @@ class Kernel:
           for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
             if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
           for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-        elif self.opts.device[:-3] in {"CUDA", "NV"}:
-          unroll_sz = 4 if int(self.opts.device[-2:]) == 75 else 8
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, unroll_sz), append_opt=False)
+        elif self.opts.device in {"CUDA", "NV"}:
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 4 if self.opts.arch == 75 else 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
           # NOTE: LOCALS and UPCAST can be swapped here. it doesn't seem faster
           self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
@@ -671,8 +670,8 @@ class Kernel:
             reduce_axes, upcast_axes = [0], [[(1, 2)], [(1, 2)], [(1, 2)]]
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
-          elif self.opts.device[:-3] in {"CUDA", "NV"}:
-            if int(self.opts.device[-2:]) == 75:
+          elif self.opts.device in {"CUDA", "NV"}:
+            if self.opts.arch == 75:
               # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-1688
               reduce_axes, upcast_axes = [0, 1], [[(0, 4)], [(3, 2)], [(2, 2), (3, 2)]]
               fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (4,2,2,2), (2,2,2,2,2),
