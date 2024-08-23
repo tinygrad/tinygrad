@@ -27,8 +27,9 @@ class ClangCompiler(Compiler):
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
       # need to specify entrypoint so that ld doesn't complain (it's not fatal, so do we care?)
       name = ('_' if OSX else '') + src[(start:=src.find('void')+5):src[start:].find('(')+start]
-      subprocess.check_output(['clang', '-v', '-static', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
-                               '-fno-math-errno', '-e', name, '-Wl,-segaddr,text,0,-pagezero_size,0,-preload' if OSX else '-Wl,-Ttext=0', '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
+      subprocess.check_output(['clang', '-static', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
+                               '-fno-math-errno', '-e', name, '-Wl,-segaddr,text,0,-pagezero_size,0,-preload' if OSX else '-Wl,-Ttext=0', '-', '-o',
+                               str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
