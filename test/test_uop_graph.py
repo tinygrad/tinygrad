@@ -1,11 +1,13 @@
 from typing import List
-import unittest
+import unittest, time
 from test.helpers import TestUOps
-from tinygrad import dtypes, Variable
+from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps, UOps, UOp, NOp, PatternMatcher
+from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps, UOps, UOp, NOp, PatternMatcher, KernelInfo
+from tinygrad.codegen.lowerer import ast_to_uop
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, constant_folder, float4_folding
+from tinygrad.shape.shapetracker import ShapeTracker, View
 
 simple_pm = PatternMatcher([
   (NOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -15,6 +17,46 @@ simple_pm = PatternMatcher([
 ])
 
 def to_uops_list(u:List[UOp]) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u)))
+
+class TestGraphRewriteEfficiency(unittest.TestCase):
+  def test_expand_rewrite(self):
+    sink = UOp(UOps.SINK, None, arg=KernelInfo(local_dims=2, upcasted=4, dont_use_locals=False), src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(2, 4, 64, 8, 16, 1, 1, 3, 3, 4, 1),
+                                                                  strides=(1179648, 9216, 1, 147456, 576, 0, 0, 64, 192, 36864, 0),
+                                                                  offset=0, mask=None, contiguous=False),)), src=()),
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (5, 6, 10)), src=(
+          UOp(UOps.CAST, dtypes.float, arg=None, src=(
+            UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
+              UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(
+                  View(shape=(1, 1024, 1, 64, 4, 17, 4, 17), strides=(0, 14400, 0, 225, 0, 15, 0, 1), offset=-16,
+                       mask=((0, 1), (0, 1024), (0, 1), (0, 64), (0, 4), (1, 16), (0, 4), (1, 16)), contiguous=False),
+                  View(shape=(2, 4, 64, 8, 16, 16, 15, 3, 3, 4, 15), strides=(0, 73984, 4734976, 0, 4624, 295936, 68, 18, 1224, 0, 1), offset=0,
+                       mask=None, contiguous=False))), src=()),)),
+              UOp(UOps.LOAD, dtypes.half, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
+                UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(
+                  View(shape=(2, 4, 64, 8, 16, 16, 15, 3, 3, 4, 15), strides=(7200, 0, 230400, 900, 0, 14400, 15, 0, 0, 225, 1), offset=0,
+                       mask=None, contiguous=False),)), src=()),)),)),)),)),)),))
+    lower_sink = ast_to_uop(sink, Device[Device.DEFAULT].renderer)
+    cnt = [0]
+    old_init = UOp.__init__
+    def uop_hook(self, *args, **kwargs):
+      cnt[0] += 1
+      old_init(self, *args, **kwargs)
+    UOp.__init__ = uop_hook
+    st = time.perf_counter()
+    new_sink = full_graph_rewrite(lower_sink)
+    et = time.perf_counter() - st
+    UOp.__init__ = old_init
+    print(f"rewrote in {et*1000:.2f} ms, from {len(lower_sink.sparents)} -> {len(new_sink.sparents)}, creating {cnt[0]} uops")
+    #from collections import Counter
+    #print(Counter(x.op for x in new_sink.sparents))
+    #from tinygrad.engine.graph import graph_uops
+    #graph_uops(linearize_uop(new_sink))
 
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):

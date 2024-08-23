@@ -1,6 +1,5 @@
 from __future__ import annotations
 import functools
-from dataclasses import replace
 from typing import List, Tuple, cast, Optional, Dict
 from tinygrad.shape.shapetracker import ShapeTracker, variable_to_uop
 from tinygrad.shape.symbolic import sint
@@ -122,12 +121,12 @@ class IndependentLowerer:
         return UOp(UOps.EXPAND, x.dtype, tuple(UOp(UOps.GEP, x.dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axes[2])
       # NOTE: always using ridxs is fine here
       reduce_range, reduce_expand = partition([self.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)
-      alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, x.arg[0])]
+      alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, x.arg[0])]
       ret = in_uops[0]
       if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
         ret = UOp(UOps.CONTRACT, cast(DType, x.dtype).vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
         ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(cast(DType, ret.dtype).count)])
       return UOp(UOps.REDUCE, x.dtype, (ret,) + tuple(reduce_range), alu_op) if len(reduce_range) else ret
-    return replace(x, src=in_uops)
+    return UOp(x.op, x.dtype, in_uops, x.arg)
 
 def ast_to_uop(ast:UOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)

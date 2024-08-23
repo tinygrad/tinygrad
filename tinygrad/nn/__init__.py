@@ -32,8 +32,8 @@ class BatchNorm:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
-    else: self.weight, self.bias = None, None
+    self.weight: Optional[Tensor] = Tensor.ones(sz) if affine else None
+    self.bias: Optional[Tensor] = Tensor.zeros(sz) if affine else None
 
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
     if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
