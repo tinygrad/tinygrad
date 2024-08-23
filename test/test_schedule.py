@@ -5,12 +5,12 @@
 import unittest
 import time
 import numpy as np
-from typing import List, Optional, Union, cast
+from typing import Dict, List, Optional, Union, cast
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, MetaOps, UnaryOps, UOps
+from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, get_output_st, reshape_uop
@@ -1624,6 +1624,23 @@ class TestScheduleRewrite(unittest.TestCase):
     new_uop = reshape_uop(ast.src[0].src[2], (4, 1), {}, {})
     self.assertEqual(get_output_st(new_uop, {}), ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertLess(time.perf_counter()-start, 1.0)
+
+  def test_uop_sts_reshape(self):
+    uop_sts: Dict[UOp, ShapeTracker] = {}
+    a = Tensor([1,2,3,4]).realize()+2
+    ast = a.schedule()[0].ast
+    val = ast.src[0].src[2]
+    ret = get_output_st(val, uop_sts)
+    assert uop_sts[val] == ret == ShapeTracker.from_shape((4,))
+    new_val = reshape_uop(val, (4, 1), uop_sts, {})
+    self.assertNotIn(new_val, uop_sts)
+
+  def test_reshape_noop(self):
+    a = Tensor([1,2,3,4]).realize()+2
+    ast = a.schedule()[0].ast
+    val = ast.src[0].src[2]
+    new_val = reshape_uop(val, (4,), {}, {})
+    self.assertIs(new_val, val)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
