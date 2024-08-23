@@ -1757,7 +1757,7 @@ class Tensor:
       def encode_shape_to_subscripts(shape, used_subscripts):
         available_subscripts = sorted(set(string.ascii_letters) - set(used_subscripts))
         if len(available_subscripts) < len(shape):
-          raise RuntimeError(f"Not enough unique characters to encode the maximum value in shape: {max(shape)}")
+          raise RuntimeError(f"Not enough unique characters to encode {len(shape)} new subscripts.")
         return ''.join(available_subscripts[dim % len(available_subscripts)] for dim in shape)
 
       def identify_ellipsis_shape(subscripts, subscripts_shape):
