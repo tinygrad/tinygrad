@@ -2050,7 +2050,7 @@ class Tensor:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
 
-    The interpolation algorithm is selected with `mode` which currently only supports `linear`.
+    The interpolation algorithm is selected with `mode` which currently only supports `linear and nearest`.
     To run `bilinear` or `trilinear`, pass in a 2D or 3D size.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -2067,7 +2067,7 @@ class Tensor:
     x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
-      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32), [1] * self.ndim
+      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
       reshape[i] = expand[i] = size[i]
       if mode == "nearest":
         index = (scale * arr).floor().clip(0, self.shape[i] - 1)

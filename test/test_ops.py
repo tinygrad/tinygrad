@@ -1812,7 +1812,7 @@ class TestOps(unittest.TestCase):
         lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
 
   def test_interpolate_nearest_2d(self):
-    for in_sz, out_sz in [((3,5),(5,13)), ((52,),(29,)), ((29,),(52,))]:
+    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
