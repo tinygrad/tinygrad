@@ -3,8 +3,7 @@ from typing import Optional, Tuple, Dict, List, Set, cast, TYPE_CHECKING, Any, D
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import UnaryOps, BinaryOps
-from tinygrad.ops import exec_alu, UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, graph_rewrite, type_verify, print_uops, simple_folder
+from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, graph_rewrite, type_verify, print_uops
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -202,7 +201,7 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce):
              tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
 # this is symbolic 2.0
-constant_folder = simple_folder+PatternMatcher([
+constant_folder = PatternMatcher([
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat(UOps.ALU, BinaryOps.ADD, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
   (UPat(UOps.ALU, BinaryOps.MUL, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
@@ -264,6 +263,22 @@ constant_folder = simple_folder+PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
   (NOp.cvar('gate').where(NOp.var('c0'), NOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
+  # ** constant folding **
+  (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
+  # ** self folding **
+  (NOp.var('x') + 0, lambda x: x),    # x+0 -> x
+  (NOp.var('x') * 1, lambda x: x),    # x*1 -> x
+  (NOp.var('x') // NOp.var('x'), lambda x: x.const(1)), # x//x -> 1
+  (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
+  (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
+  (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
+  (NOp.var('x', dtype=dtypes.bool) & NOp.cvar('c'), lambda x,c: x if c.arg else c),
+  (NOp.var('x', dtype=dtypes.bool) | NOp.cvar('c'), lambda x,c: c if c.arg else x),
+  # ** zero folding **
+  # x*0 -> 0 or 0*x -> 0
+  # if x is nan or inf it should render the nan value.
+  # NOTE: this can be wrong for loaded NaN
+  (NOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # min==max -> CONST (slow!)
   (UPat({UOps.ALU, UOps.DEFINE_VAR}, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
   # ** load/store folding **

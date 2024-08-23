@@ -119,9 +119,7 @@ class UOp:
       return UOp(UOps.VECTORIZE, dtype, src=tuple(UOp(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
-    ret = type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
-    if type(self) is UOp and (nret:=simple_folder.rewrite(ret)): ret = nret
-    return ret
+    return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return type(src[0])(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod
@@ -195,8 +193,7 @@ class KernelInfo:
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
   # no matchers in ops.py, find the real frame
-  while ((frm.f_code.co_filename.endswith("/ops.py") and frm.f_lineno < 250) or frm.f_code.co_filename == '<string>') and frm.f_back is not None:
-    frm = frm.f_back
+  while (frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>') and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
 def lines(fn): return open(fn).readlines()
@@ -284,26 +281,6 @@ class PatternMatcher:
       if not early_reject.issubset(ler): continue
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
-
-# simple folder can't return non-const new uops
-simple_folder = PatternMatcher([
-  # ** constant folding **
-  (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
-  # ** self folding **
-  (NOp.var('x') + 0, lambda x: x),    # x+0 -> x
-  (NOp.var('x') * 1, lambda x: x),    # x*1 -> x
-  (NOp.var('x') // NOp.var('x'), lambda x: x.const(1)), # x//x -> 1
-  (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
-  (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
-  (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
-  (NOp.var('x', dtype=dtypes.bool) & NOp.cvar('c'), lambda x,c: x if c.arg else c),
-  (NOp.var('x', dtype=dtypes.bool) | NOp.cvar('c'), lambda x,c: c if c.arg else x),
-  # ** zero folding **
-  # x*0 -> 0 or 0*x -> 0
-  # if x is nan or inf it should render the nan value.
-  # NOTE: this can be wrong for loaded NaN
-  (NOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
-])
 
 # *** tracking pattern matcher ***
 
