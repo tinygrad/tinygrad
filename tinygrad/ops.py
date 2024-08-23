@@ -254,11 +254,11 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
      (pat.dtype is not None and uop.dtype not in pat.dtype) or \
      (pat.arg is not None and pat.arg != uop.arg) or \
-     (pat.op is not None and uop.op not in pat.op): return []
+     (pat.op is not None and uop.op not in pat.op) or \
+     (pat.allowed_len != 0 and len(uop.src) != pat.allowed_len): return []
   if pat.src is None: return [store]
   res: List[Dict[str, UOp]] = []
   for vp in pat.src:
-    if pat.allowed_len != 0 and len(uop.src) != pat.allowed_len: return []
     new_stores = [store.copy()]
     for uu, vv in zip(uop.src, vp): new_stores = [rstore for nstore in new_stores for rstore in _match(uu, vv, nstore)]
     res.extend(new_stores)
@@ -279,7 +279,7 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
     for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      if (p.allowed_len != 0 and p.allowed_len != len(uop.src)) or not early_reject.issubset(ler): continue
+      if not early_reject.issubset(ler): continue
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
@@ -298,7 +298,7 @@ class TrackedPattenMatcher(PatternMatcher):
     ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
     for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       st = time.perf_counter()
-      if (p.allowed_len != 0 and p.allowed_len != len(uop.src)) or not early_reject.issubset(ler):
+      if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
