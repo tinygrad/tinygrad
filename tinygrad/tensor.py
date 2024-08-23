@@ -1,6 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import dataclasses
+import string
 import time, math, itertools, functools, struct, sys, inspect, pathlib
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
@@ -1725,6 +1726,40 @@ class Tensor:
                                                                        ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
     inputs = inputs_str.split(',')
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
+
+    def expand_ellipsis(inputs, xs, inputs_str, output):
+      def encode_shape_to_subscripts(shape, used_subscripts):
+        available_subscripts = sorted(set(string.ascii_letters) - set(used_subscripts))
+        if len(available_subscripts) < len(shape):
+          raise RuntimeError(f"Not enough unique characters to encode the maximum value in shape: {max(shape)}")
+        return ''.join(available_subscripts[dim % len(available_subscripts)] for dim in shape)
+
+      def identify_ellipsis_shape(subscripts, subscripts_shape):
+        non_ellipsis = subscripts.replace('...', '')
+        start = subscripts.index('...')
+        return subscripts_shape[start:start + len(subscripts_shape) - len(non_ellipsis)]
+
+      def is_broadcastable(shape1, shape2):
+        return all(s1 == s2 or s1 == 1 or s2 == 1 for s1, s2 in zip(shape1[::-1], shape2[::-1]))
+
+      if any(operand.count('...') > 1 for operand in inputs + [output]):
+        raise RuntimeError("Each input operand may contain at most one ellipsis")
+
+      ellipsis_shapes = []
+      for i, (letters, tensor) in enumerate(zip(inputs, xs)): # process lhs
+        if '...' in letters:
+          ellipsis_shape = identify_ellipsis_shape(letters, tensor.shape)
+          ellipsis_subscripts = encode_shape_to_subscripts(ellipsis_shape, inputs_str)
+          inputs[i] = letters.replace('...', ellipsis_subscripts)
+          ellipsis_shapes.append(ellipsis_shape)
+      if '...' in output: # process rhs
+        ellipsis_broadcasted_shape = _broadcast_shape(*ellipsis_shapes)
+        if not all(is_broadcastable(shape, ellipsis_broadcasted_shape) for shape in ellipsis_shapes):
+          raise RuntimeError("The shape of the ellipsis (the size of the dimensions covered by them) must broadcast together")
+        output = output.replace('...', encode_shape_to_subscripts(ellipsis_broadcasted_shape, inputs_str))
+      return inputs, output
+
+    inputs, output = expand_ellipsis(inputs, xs, inputs_str, output)
 
     # map the value of each letter in the formula
     letter_val = sorted(merge_dicts([dict(zip(letters, tensor.shape)) for letters, tensor in zip(inputs, xs)]).items())
