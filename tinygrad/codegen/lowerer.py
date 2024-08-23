@@ -110,7 +110,7 @@ class IndependentLowerer:
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[2])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
-    if x.op is UOps.WMMA_AXIS:
+    if x.op is UOps.WMMA:
       upcast_axes = x.arg[-2]
       wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
       ret = UOp(UOps.WMMA, dtype=cast(DType, x.dtype).vec(wmma_sz[2]), src=(
