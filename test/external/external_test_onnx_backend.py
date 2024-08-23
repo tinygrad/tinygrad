@@ -40,9 +40,6 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
-# no support for reduce with multiply (needs llop)
-backend_test.exclude('test_reduce_prod_*')
-
 # TODO figure out why it's returning wrong values, geohotstan's uneducated guess is it's due to imprecision from float64 (double) -> float32
 # see Type Constraints: https://onnx.ai/onnx/operators/onnx_aionnxpreviewtraining_Adam.html#type-constraints
 backend_test.exclude('test_adam_multiple_cpu')
