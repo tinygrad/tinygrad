@@ -302,9 +302,11 @@ class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  def __init__(self, arch:str): 
+  tensor_cores_80 = [TensorCore(dims=((8,16,16)), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])] # noqa: E501
+  tensor_cores_75 = [TensorCore(dims=((8,16,8)), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])] # noqa: E501
+  def __init__(self, arch:str):
     self.arch = int(arch[3:])
-    self.tensor_cores = [TensorCore(dims=((8,16,16) if self.arch>=80 else (8,16,8)), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])] if self.arch >= 75 else [] # noqa: E501
+    self.tensor_cores = self.tensor_cores_80 if self.arch > 75 else self.tensor_cores_75 if self.arch == 75 else [] 
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
