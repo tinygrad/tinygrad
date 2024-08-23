@@ -239,9 +239,8 @@ class UPat:
 
   @functools.cached_property
   def early_reject(self) -> Set[Tuple[UOps, Any]]:
-    if isinstance(self.in_src, UPat):
-      return set([(self.in_src.op[0], self.in_src.arg)]) if self.in_src.op is not None and len(self.in_src.op) == 1 else set()
-    return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
+    upat_match = [self.in_src] if isinstance(self.in_src, UPat) else ([] if self.in_src is None else self.src[0])
+    return set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
   def printable(self:UPat): return lines(self.location[0])[self.location[1]-1].strip()
   def __repr__(self):
