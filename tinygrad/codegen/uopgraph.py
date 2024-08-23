@@ -251,9 +251,6 @@ constant_folder = PatternMatcher([
   (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).where(
     NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"), NOp.const(None, 0.0)),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
-  # other arange folders
-  (NOp.cvar("c1") - (NOp.var("x") + NOp.cvar("c2")), lambda c1, c2, x: (c1-c2)-x),  # c1 - (x + c2) -> (c1-c2) - x
-  (-(NOp.var("x") * NOp.cvar("c1")), lambda x, c1: x*-c1),
   # max folding
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # const rules
@@ -340,7 +337,7 @@ constant_folder = PatternMatcher([
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
-  (NOp(UOps.VECTORIZE, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
+  (NOp(UOps.VECTORIZE, src=(NOp.var("root_src"),), name="root"), lambda root, root_src: root_src if str(root.dtype) == str(root_src.dtype) else None),
   # fold gated LOAD/STORE
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True)), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True), NOp.var("barrier")),
@@ -370,28 +367,19 @@ def _expand_arg_to_idx(args:Tuple[Tuple[int, int], ...], rpk:Dict[int, int]) -> 
 def _choices_from_args(args:Tuple[Tuple[int, int], ...]) -> List[Dict[int, int]]:
   return [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
 
+@functools.lru_cache(None)
+def _swizzle_args(cargs:Tuple[Tuple[int, int], ...], eargs:Tuple[Tuple[int, int], ...], exclude_args:Tuple[int, ...]) -> List[int]:
+  return [_expand_arg_to_idx(eargs, {**rpk, **{x:0 for x in exclude_args}} if exclude_args else rpk) for rpk in _choices_from_args(cargs)]
+
 def do_expand(root:UOp):
   expands = [x for x in root.src if x.op is UOps.EXPAND]
   if len(expands) == 0: return None
-  expand_args = tuple(sorted(dedup(flatten([x.arg for x in expands]))))
-  if root.op is UOps.WMMA:
-    # both the reduce and upcast args are not expanded here
-    dont_expand_args = tuple(x for x in expand_args if x[0] in root.arg[-1] or x[0] in [y[0] for y in flatten(root.arg[-2])])
-    expand_args = tuple(x for x in expand_args if x not in dont_expand_args)
-  else:
-    dont_expand_args = ()
-  new_srcs: List[UOp] = []
-  lrpks = _choices_from_args(dont_expand_args)
-  for rpk in _choices_from_args(expand_args):
-    new_src: List[UOp] = []
-    for src in root.src:
-      if src.op is UOps.EXPAND:
-        lnew_src = tuple(src.src[_expand_arg_to_idx(src.arg, {**rpk, **lrpk})] for lrpk in lrpks)
-        # TODO: is this right for UOps.WMMA? when there's more than one, all lnew_src should be the same
-        new_src.append(lnew_src[0] if len(lnew_src) == 1 or root.op is UOps.WMMA else UOp(UOps.EXPAND, root.dtype, lnew_src, dont_expand_args))
-      else:
-        new_src.append(src)
-    new_srcs.append(UOp(root.op, root.dtype, tuple(new_src), root.arg))
+  # NOTE: we 0 out the reduce axis for WMMA. in theory they should all be the same, but is this always correct?
+  exclude_args = tuple(dedup(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2])))) if root.op is UOps.WMMA else ()
+  expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x[0] not in exclude_args)
+  esrcs = [[src.src[x] for x in _swizzle_args(expand_args, src.arg, exclude_args)] \
+           if src.op is UOps.EXPAND else itertools.repeat(src) for src in root.src]
+  new_srcs = [UOp(root.op, root.dtype, new_src, root.arg) for new_src in zip(*esrcs)]
   if root.op is UOps.EXPAND:
     # merge two expands
     expand_args, old_args = tuple(sorted(root.arg+expand_args)), expand_args
@@ -453,7 +441,7 @@ expander = PatternMatcher([
   (NOp(UOps.STORE, name="root"), create_gate),
   # do expansion
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
-         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
+         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (NOp(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
   (NOp(UOps.SINK, name="root"),
