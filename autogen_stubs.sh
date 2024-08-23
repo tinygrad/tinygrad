@@ -214,6 +214,24 @@ generate_libc() {
   fixup $BASE/libc.py
 }
 
+generate_objc() {
+  cp runtime.h /tmp/runtime.h
+  gsed -i "s/\^ \_Nonnull block/\* \_Nonnull block/g" /tmp/runtime.h
+  clang2py -k cdefstum \
+    $(xcrun --show-sdk-path)/usr/include/objc/objc.h \
+    $(xcrun --show-sdk-path)/usr/include/objc/message.h \
+    /tmp/runtime.h \
+    --clang-args="-I$(xcrun --show-sdk-path)/usr/include" \
+    -o $BASE/objc.py
+
+  gsed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/objc.py
+  gsed -i "s\FIXME_STUB\libobjc\g" $BASE/objc.py
+  gsed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('objc'))\g" $BASE/objc.py
+  rm /tmp/runtime.h
+
+  # fixup $BASE/objc.py
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -225,6 +243,7 @@ elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
+elif [ "$1" == "objc" ]; then generate_objc
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
 else echo "usage: $0 <type>"
 fi
