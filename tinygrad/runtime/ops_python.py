@@ -177,7 +177,7 @@ class PythonProgram:
               # A (4 elements on 32 threads)
               def a_elem(x, i, j, goff): return x[(i%2)+(j//4)+(i//4)*2][goff+((i//2)%4)+(j%4)*2]
               # B (2 elements on 32 threads)
-              def b_elem(x, i, j, goff): return x[(j%2)+(j//4)][goff+(j//2)%2+(i)]
+              def b_elem(x, i, j, goff): return x[(j%2)+(j//2)][goff+(j//2)%2+(i)]
               # (i, j), C, D (4 elements on 32 threads)
               def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*4)
               ul[i] = wmma_helper(32, 16, 4, 2, 4, a_elem, b_elem, c_map)
