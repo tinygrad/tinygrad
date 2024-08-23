@@ -225,6 +225,7 @@ class UPat:
     self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
     self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
     self.arg, self.name = arg, name
+    self.in_src = src
     self.src: Any = None
     # try all permutations if it's a list
     if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
@@ -238,7 +239,8 @@ class UPat:
 
   @functools.cached_property
   def early_reject(self) -> Set[Tuple[UOps, Any]]:
-    # TODO: this can be improved to support some allowed_len == 0 patterns
+    if isinstance(self.in_src, UPat):
+      return set([(self.in_src.op[0], self.in_src.arg)]) if self.in_src.op is not None and len(self.in_src.op) == 1 else set()
     return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
 
   def printable(self:UPat): return lines(self.location[0])[self.location[1]-1].strip()
