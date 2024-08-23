@@ -23,6 +23,8 @@ def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
   m[i] = v
 
+arch: int = 80
+
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
     self.uops: List[Tuple[UOps, Optional[DType], List[int], Any]] = pickle.loads(lib)
@@ -163,13 +165,22 @@ class PythonProgram:
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CUDA":
-            # A (8 elements on 32 threads)
-            def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4]
-            # B (4 elements on 32 threads)
-            def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4]
-            # (i, j), C, D (4 elements on 32 threads)
-            def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
-            ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+            if arch >= 80:
+              # A (8 elements on 32 threads)
+              def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4]
+              # B (4 elements on 32 threads)
+              def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4]
+              # (i, j), C, D (4 elements on 32 threads)
+              def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
+              ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+            else:
+              # A (4 elements on 32 threads)
+              def a_elem(x, i, j, goff): return x[(i%2)+(j//4)*2+(i//4)*4][goff+((i//2)%4)+(j%4)*4]
+              # B (2 elements on 32 threads)
+              def b_elem(x, i, j, goff): return x[(j%2)+(j//4)*2][goff+(j//2)%2+(i)*2]
+              # (i, j), C, D (4 elements on 32 threads)
+              def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*4)
+              ul[i] = wmma_helper(32, 16, 4, 2, 4, a_elem, b_elem, c_map)
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
             def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]
@@ -193,7 +204,10 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_CUDA"): self.device, self.arch, self.tensor_cores = "CUDA", 80, CUDARenderer.tensor_cores
-    if getenv("EMULATE_CUDA_75"): self.device, self.arch, self.tensor_cores = "CUDA", 75, CUDARenderer.tensor_cores_75
+    if getenv("EMULATE_CUDA_75"):
+      self.device, self.arch, self.tensor_cores = "CUDA", 75, CUDARenderer.tensor_cores_75
+      global arch
+      arch = 75
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
 
   def render(self, name:str, uops:List[UOp]) -> str:
