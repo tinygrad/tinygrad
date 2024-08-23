@@ -150,6 +150,14 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).exp().sum())
     np.testing.assert_allclose(Tensor.ones(4).pad(((1, 1),)).exp().sum().numpy(), 4 * math.e + 2)
 
+  def test_const_prod(self):
+    _check_ast_count(0, Tensor.full((2, 3), fill_value=2).prod())
+    np.testing.assert_equal(Tensor.full((2, 3), fill_value=2).prod().numpy(), 2**(2*3))
+    _check_ast_count(0, Tensor.full((4, 5, 6), fill_value=2).prod(axis=0))
+    np.testing.assert_equal(Tensor.full((4, 5, 6), fill_value=2).prod(axis=0).numpy(), np.full((5, 6), 2**4))
+    _check_ast_count(0, Tensor(4).prod())
+    np.testing.assert_equal(Tensor(4).prod().numpy(), 4)
+
   def test_const_max(self):
     _check_ast_count(0, Tensor.ones(4, 5, 6).max())
     np.testing.assert_equal(Tensor.ones(4, 5, 6).max().numpy(), 1)

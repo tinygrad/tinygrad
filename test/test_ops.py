@@ -878,6 +878,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(0,2)))
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)))
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=1))
+    helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=1, keepdim=True))
     helper_test_op([()], lambda x: x.sum())
     helper_test_op([()], lambda x: x.sum(0))
     helper_test_op([()], lambda x: x.sum(-1))
@@ -890,6 +891,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(0,)))
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(1,)))
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(0,1)))
+
+  def test_prod(self):
+    helper_test_op(None, lambda x: x.prod(), vals=[[1.0, 2.0, 3.0]])
+    helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=3), lambda x: x.prod(axis=3))
+    helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=1), lambda x: x.prod(axis=1))
+    helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=1, keepdim=True), lambda x: x.prod(axis=1, keepdim=True))
+    helper_test_op([()], lambda x: x.prod())
+    helper_test_op([()], lambda x: x.prod(0))
+    helper_test_op([()], lambda x: x.prod(-1))
 
   def test_min(self):
     helper_test_op([(3,3)], lambda x: x.min())
