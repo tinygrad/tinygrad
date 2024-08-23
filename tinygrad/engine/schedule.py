@@ -19,7 +19,7 @@ sys.setrecursionlimit(10000)
 # optionally log the ops to disk
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 # use graph rewrite for reduceop fusion
-AST_REWRITE = getenv("AST_REWRITE", 0)
+AST_REWRITE = getenv("AST_REWRITE", 1)
 
 # *** ScheduleItem return type ***
 
