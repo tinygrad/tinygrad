@@ -42,7 +42,7 @@ class UOps(Enum):
   NOOP = auto(); GEP = auto() # noqa: E702
   # math ops
   CAST = auto(); BITCAST = auto(); VECTORIZE = auto() # noqa: E702
-  ALU = auto(); REDUCE = auto(); REDUCE_AXIS = auto(); WMMA = auto() # noqa: E702
+  ALU = auto(); REDUCE = auto(); REDUCE_AXIS = auto(); WMMA = auto(); WMMA_AXIS = auto() # noqa: E702
   # memory/assignment ops
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   # control flow ops
