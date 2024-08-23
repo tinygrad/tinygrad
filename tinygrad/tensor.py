@@ -2062,15 +2062,20 @@ class Tensor:
     ```
     """
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
-    assert mode == "linear", "only supports linear interpolate"
+    assert mode in ["nearest", "linear"], "only supports nearest and linear interpolate"
+    assert not (mode == "nearest" and align_corners), "align_corners not supported for nearest interpolation"
     x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
-      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32), [1] * self.ndim
       reshape[i] = expand[i] = size[i]
-      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-      x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      if mode == "nearest":
+        index = (scale * arr).floor().clip(0, self.shape[i] - 1)
+        x = x.gather(i, index.reshape(reshape).expand(expand))
+      else:
+        index = (scale * arr if align_corners else (scale * (arr + 0.5)) - 0.5).clip(0, self.shape[i] - 1)
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        x = x.gather(i, low).lerp(x.gather(i, high), perc)
     return x.cast(self.dtype)
 
   # ***** unary ops *****

@@ -1805,6 +1805,24 @@ class TestOps(unittest.TestCase):
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="trilinear", align_corners=True),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True), atol=1e-4)
 
+  def test_interpolate_nearest_1d(self):
+    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
+
+  def test_interpolate_nearest_2d(self):
+    for in_sz, out_sz in [((3,5),(5,13)), ((52,),(29,)), ((29,),(52,))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
+
+  def test_interpolate_nearest_3d(self):
+    for in_sz, out_sz in [((5,2,8),(3,6,4))]:
+      helper_test_op([(2,3)+in_sz],
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest"),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
+
   def test_cat(self):
     for dim in range(-2, 3):
       helper_test_op([(45,65,9), (45,65,9), (45,65,9)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
