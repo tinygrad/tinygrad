@@ -132,7 +132,7 @@ class TestPatternMatcher(TestUOps):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     c3 = UOp(UOps.CONST, dtypes.float, arg=3.0)
-    c4 = UOp(UOps.ALU, dtypes.float, (c1,), UnaryOps.NEG)
+    c4 = UOp(UOps.ALU, dtypes.float, (c1,), UnaryOps.EXP2)
     c5 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
     c6 = UOp(UOps.ALU, dtypes.float, (c1,c2,c3), TernaryOps.MULACC)
     self.assertEqual(matcher.rewrite(c4), None)

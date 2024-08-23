@@ -151,6 +151,14 @@ class Sum(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
 
+class Prod(Function):
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
+    self.x, self.ret = x, x.r(ReduceOps.PROD, axis)
+    return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return grad_output.e(BinaryOps.MUL, self.ret).expand(self.x.shape).e(BinaryOps.MUL, self.x.e(UnaryOps.RECIP))
+
 class Max(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
     self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
