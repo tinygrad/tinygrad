@@ -175,12 +175,12 @@ class PythonProgram:
               ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
             else:
               # A (4 elements on 32 threads)
-              def a_elem(x, i, j, goff): return x[(i%2)+(j//4)+(i//4)*2][goff+((i//2)%4)+(j%4)*2]
+              def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4]
               # B (2 elements on 32 threads)
-              def b_elem(x, i, j, goff): return x[(j%2)+(j//2)][goff+(j//2)%2+(i)]
+              def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4]
               # (i, j), C, D (4 elements on 32 threads)
-              def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*4)
-              ul[i] = wmma_helper(32, 16, 4, 2, 4, a_elem, b_elem, c_map)
+              def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
+              ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
             def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]
