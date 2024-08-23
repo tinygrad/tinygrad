@@ -754,8 +754,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,8,9),(3,8,9)], lambda a,b: torch.einsum('...id, ...jd -> ...ij', [a,b]),
                                                 lambda a,b: Tensor.einsum('...id, ...jd -> ...ij', [a,b]))
     # ellipsis will come first in the output before the subscript labels, if rhs is not specified
-    helper_test_op([(3,8,9),(3,8,9)], lambda a,b: torch.einsum('...id, ...jd ->', [a,b]),
-                                            lambda a,b: Tensor.einsum('...id, ...jd ->', [a,b]))
+    helper_test_op([(3,8,9),(3,8,9)], lambda a,b: torch.einsum('...id, ...jd', [a,b]),
+                                            lambda a,b: Tensor.einsum('...id, ...jd', [a,b]))
     # multiple ellipsis with different shapes
     helper_test_op([(2, 3, 4, 5), (5, 2, 4)], lambda a, b: torch.einsum('a...c,ca...->...', [a, b]),
                    lambda a, b: Tensor.einsum('a...c,ca...->...', [a, b]))

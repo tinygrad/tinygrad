@@ -1778,11 +1778,11 @@ class Tensor:
           ellipsis_subscripts = encode_shape_to_subscripts(ellipsis_shape, inputs_str)
           inputs[i] = letters.replace('...', ellipsis_subscripts)
           ellipsis_shapes.append(ellipsis_shape)
-      if '...' in output: # process rhs
+      if ellipsis_shapes: # process rhs
         ellipsis_broadcasted_shape = _broadcast_shape(*ellipsis_shapes)
         if not all(is_broadcastable(shape, ellipsis_broadcasted_shape) for shape in ellipsis_shapes):
           raise RuntimeError("The shape of the ellipsis (the size of the dimensions covered by them) must broadcast together")
-        output = output.replace('...', encode_shape_to_subscripts(ellipsis_broadcasted_shape, inputs_str))
+        output = encode_shape_to_subscripts(ellipsis_broadcasted_shape, inputs_str) + output
       return inputs, output
 
     inputs, output = expand_ellipsis(inputs, xs, inputs_str, output)
