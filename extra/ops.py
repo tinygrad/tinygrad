@@ -42,7 +42,6 @@ class LazyOp:
   @functools.cached_property
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
-    if self.op is ReduceOps.WMMA: return self.arg[3]   # WMMA can change the type
     if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
     return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPNE} else self.src[-1].dtype
   @functools.cached_property
@@ -84,7 +83,7 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
     for x in op.src: assert_valid(x, st)
     # only reduceop is allowed to change shape, limited to turning n to 1
     if op.op in ReduceOps:
-      axis = op.arg[-1] if op.op is ReduceOps.WMMA else op.arg
+      axis = op.arg
       assert isinstance(axis, tuple) and all(isinstance(i, int) for i in axis), f"reduceop must have axis {op.arg}"
       st = ShapeTracker.from_shape(sts[op.src[0]].reduce(axis))
     else:

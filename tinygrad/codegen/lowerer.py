@@ -110,15 +110,15 @@ class IndependentLowerer:
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[2])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
+    if x.op is UOps.WMMA:
+      upcast_axes = x.arg[-2]
+      wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
+      ret = UOp(UOps.WMMA, dtype=cast(DType, x.dtype).vec(wmma_sz[2]), src=(
+        UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=upcast_axes[0]),
+        UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=upcast_axes[1]),
+        UOp.const(cast(DType, x.dtype).vec(wmma_sz[2]), 0.0)), arg=x.arg)
+      return UOp(UOps.EXPAND, x.dtype, tuple(UOp(UOps.GEP, x.dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axes[2])
     if x.op is UOps.REDUCE_AXIS:
-      if x.arg[0] is ReduceOps.WMMA:
-        upcast_axes = x.arg[1][-2]
-        wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
-        ret = UOp(UOps.WMMA, dtype=cast(DType, x.dtype).vec(wmma_sz[2]), src=(
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[0].dtype).vec(wmma_sz[0]), src=(in_uops[0],), arg=upcast_axes[0]),
-          UOp(UOps.CONTRACT, dtype=cast(DType, in_uops[1].dtype).vec(wmma_sz[1]), src=(in_uops[1],), arg=upcast_axes[1]),
-          UOp.const(cast(DType, x.dtype).vec(wmma_sz[2]), 0.0)), arg=x.arg[1])
-        return UOp(UOps.EXPAND, x.dtype, tuple(UOp(UOps.GEP, x.dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axes[2])
       # NOTE: always using ridxs is fine here
       reduce_range, reduce_expand = partition([self.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)
       alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, x.arg[0])]
