@@ -750,10 +750,23 @@ class TestOps(unittest.TestCase):
                                                 lambda a,b: Tensor.einsum('zqrs,tuqvr->zstuv', a,b), atol=1e-5)
     # bilinear transformation
     helper_test_op([(2,3),(5,3,7),(2,7)], lambda a,b,c: torch.einsum('ik,jkl,il->ij', [a,b,c]), lambda a,b,c: Tensor.einsum('ik,jkl,il->ij', [a,b,c]))
-    # test ellipsis # TODO: FIXME
-    with self.assertRaises(Exception):
-      helper_test_op([(16,29,256),(16,29,256)], lambda a,b: torch.einsum('...id, ...jd -> ...ij', [a,b]),
+    # ellipsis
+    helper_test_op([(16,29,256),(16,29,256)], lambda a,b: torch.einsum('...id, ...jd -> ...ij', [a,b]),
                                                 lambda a,b: Tensor.einsum('...id, ...jd -> ...ij', [a,b]))
+    # ellipsis will come first in the output before the subscript labels, if rhs is not specified
+    helper_test_op([(16,29,256),(16,29,256)], lambda a,b: torch.einsum('...id, ...jd ->', [a,b]),
+                                            lambda a,b: Tensor.einsum('...id, ...jd ->', [a,b]))
+    # multiple ellipsis with different shapes
+    helper_test_op([(2, 3, 4, 5), (5, 2, 4)], lambda a, b: torch.einsum('a...c,ca...->...', [a, b]),
+                   lambda a, b: Tensor.einsum('a...c,ca...->...', [a, b]))
+    # multiple ellipsis in one operand are not allowed
+    with self.assertRaises(RuntimeError):
+      helper_test_op([(16, 29, 256), (16, 29, 256)], lambda a, b: torch.einsum('...id..., ...jd ->', [a, b]),
+                     lambda a, b: Tensor.einsum('...id..., ...jd ->', [a, b]))
+    # multiple ellipsis must broadcast together
+    with self.assertRaises(RuntimeError):
+      helper_test_op([(2,3,4,5), (5,2,66)], lambda a, b: torch.einsum('a...c,ca...->...', [a, b]),
+                     lambda a, b: Tensor.einsum('a...c,ca...->...', [a, b]))
 
   def test_einsum_shape_check(self):
     a = Tensor.zeros(3,8,10,5)
