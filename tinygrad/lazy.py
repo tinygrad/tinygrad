@@ -173,12 +173,15 @@ class LazyBuffer:
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = self.st.reduce(axis)
     # TODO: this logic should move to the scheduler
-    if 0 in self.shape and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: dtypes.min(self.dtype)}[op], new_shape)
+    if 0 in self.shape and 0 not in new_shape:
+      return self.const({ReduceOps.SUM: 0.0, ReduceOps.PROD: 1.0, ReduceOps.MAX: dtypes.min(self.dtype)}[op], new_shape)
 
     # const folding
     # TODO: fold this for symbolic?
     if self.is_unrealized_unmasked_const() and all_int(self.shape):
-      return self.const(self.base.arg * {ReduceOps.SUM: prod(self.shape[i] for i in axis), ReduceOps.MAX: 1}[op], new_shape)
+      if op is ReduceOps.SUM: return self.const(self.base.arg * prod(self.shape[i] for i in axis), new_shape)
+      if op is ReduceOps.PROD: return self.const(self.base.arg ** prod(self.shape[i] for i in axis), new_shape)
+      if op is ReduceOps.MAX: return self.const(self.base.arg, new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
