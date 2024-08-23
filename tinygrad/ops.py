@@ -25,7 +25,7 @@ class TernaryOps(Enum):
   WHERE = auto(); MULACC = auto() # noqa: E702
 class ReduceOps(Enum):
   """A -> B (reduce)"""
-  SUM = auto(); MAX = auto(); WMMA = auto() # noqa: E702
+  SUM = auto(); PROD = auto(); MAX = auto(); WMMA = auto() # noqa: E702
 class MetaOps(Enum):
   EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]

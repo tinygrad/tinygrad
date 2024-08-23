@@ -459,7 +459,7 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:Tuple[sint, ...], fill_value:ConstType, **kwargs):
+  def full(shape:Tuple[sint, ...], fill_value:ConstType, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with the given value.
 
@@ -476,7 +476,7 @@ class Tensor:
     return Tensor(fill_value, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
-  def zeros(*shape, **kwargs):
+  def zeros(*shape, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with zeros.
 
@@ -493,7 +493,7 @@ class Tensor:
     return Tensor.full(argfix(*shape), 0.0, **kwargs)
 
   @staticmethod
-  def ones(*shape, **kwargs):
+  def ones(*shape, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with ones.
 
@@ -510,7 +510,7 @@ class Tensor:
     return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
-  def arange(start, stop=None, step=1, **kwargs):
+  def arange(start, stop=None, step=1, **kwargs) -> Tensor:
     """
     Returns a 1-D tensor of size `ceil((stop - start) / step)` with values from `[start, stop)`, with spacing between values given by `step`.
 
@@ -542,7 +542,7 @@ class Tensor:
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
-  def eye(n:int, m:Optional[int]=None, **kwargs):
+  def eye(n:int, m:Optional[int]=None, **kwargs) -> Tensor:
     """
     Returns a 2-D tensor with `n` rows and `m` columns, with ones on the diagonal and zeros elsewhere.
 
@@ -560,7 +560,7 @@ class Tensor:
     if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
     return Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)._slice((None,(0,n if m is None else m)))
 
-  def full_like(self, fill_value:ConstType, **kwargs):
+  def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
     Creates a tensor with the same shape as `self`, filled with the given value.
     If `dtype` is not specified, the dtype of `self` is used.
@@ -575,7 +575,7 @@ class Tensor:
     """
     return Tensor.full(self.shape, fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
 
-  def zeros_like(self, **kwargs):
+  def zeros_like(self, **kwargs) -> Tensor:
     """
     Creates a tensor with the same shape as `self`, filled with zeros.
 
@@ -589,7 +589,7 @@ class Tensor:
     """
     return self.full_like(0, **kwargs)
 
-  def ones_like(self, **kwargs):
+  def ones_like(self, **kwargs) -> Tensor:
     """
     Creates a tensor with the same shape as `self`, filled with ones.
 
@@ -1330,7 +1330,7 @@ class Tensor:
 
   def sum(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DTypeLike]=None):
     """
-    Sums the elements of the tensor along the specified axis or axes.
+    Returns the sum of the elements of the tensor along the specified axis or axes.
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along
     which the maximum is computed and whether the reduced dimensions are retained.
@@ -1354,6 +1354,32 @@ class Tensor:
     """
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
     return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
+
+  def prod(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DTypeLike]=None):
+    """
+    Returns the product of the elements of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
+
+    You can pass in `acc_dtype` keyword argument to control the data type of the accumulation.
+    If not specified, the accumulation data type is chosen based on the input tensor's data type.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, -2, -3, 1, 2, 3]).reshape(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.prod().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.prod(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.prod(axis=1).numpy())
+    ```
+    """
+    return self.cast(acc_dtype or self.dtype)._reduce(F.Prod, axis, keepdim)
 
   def max(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
