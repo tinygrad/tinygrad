@@ -54,10 +54,6 @@ class TensorCoreOptions:
 class Kernel:
   def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
     if ast.op is UOps.SINK: self.ast = ast
-    # NOTE: 3 lines until test_linearizer and friends move to uop ast
-    else:
-      from extra.ops import to_uop
-      self.ast = to_uop(ast)
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     try: uop_sts_map = verify_ast(self.ast)
