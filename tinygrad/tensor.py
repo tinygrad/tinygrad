@@ -1746,66 +1746,57 @@ class Tensor:
     print(Tensor.einsum("ij,ij->", x, y).numpy())
     ```
     """
-    xs:Tuple[Tensor] = argfix(*raw_xs)
-    formula = formula.replace(" ", "")
-    inputs_str, output = formula.split("->") if "->" in formula else (formula, \
-                                                                       ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
-    inputs = inputs_str.split(',')
-    assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
-
-    def expand_ellipsis(inputs, xs, inputs_str, output):
-      def encode_shape_to_subscripts(shape, used_subscripts):
-        available_subscripts = sorted(set(string.ascii_letters) - set(used_subscripts))
-        if len(available_subscripts) < len(shape):
-          raise RuntimeError(f"Not enough unique characters to encode {len(shape)} new subscripts.")
-        return ''.join(available_subscripts[dim % len(available_subscripts)] for dim in shape)
-
+    def expand_ellipsis(operands, rhs, xs):
       def identify_ellipsis_shape(subscripts, subscripts_shape):
-        non_ellipsis = subscripts.replace('...', '')
-        start = subscripts.index('...')
-        return subscripts_shape[start:start + len(subscripts_shape) - len(non_ellipsis)]
+        start = subscripts.index('…')
+        return subscripts_shape[start:start + len(subscripts_shape) - (len(subscripts) - 1)]
 
       def is_broadcastable(shape1, shape2):
         return all(s1 == s2 or s1 == 1 or s2 == 1 for s1, s2 in zip(shape1[::-1], shape2[::-1]))
 
-      if any(operand.count('...') > 1 for operand in inputs + [output]):
+      if any(operand.count("…") > 1 for operand in operands + [rhs]):
         raise RuntimeError("Each input operand may contain at most one ellipsis")
 
       ellipsis_shapes = []
-      for i, (letters, tensor) in enumerate(zip(inputs, xs)): # process lhs
-        if '...' in letters:
-          ellipsis_shape = identify_ellipsis_shape(letters, tensor.shape)
-          ellipsis_subscripts = encode_shape_to_subscripts(ellipsis_shape, inputs_str)
-          inputs[i] = letters.replace('...', ellipsis_subscripts)
+      for i, (subscripts, tensor) in enumerate(zip(operands, xs)):  # process lhs
+        if "…" in subscripts:
+          ellipsis_shape = identify_ellipsis_shape(subscripts, tensor.shape)
+          operands[i] = subscripts[:subscripts.index("…")] + list(map(str, ellipsis_shape)) + subscripts[subscripts.index("…") + 1:]
           ellipsis_shapes.append(ellipsis_shape)
-      if ellipsis_shapes: # process rhs
+      if ellipsis_shapes:  # process rhs
         ellipsis_broadcasted_shape = _broadcast_shape(*ellipsis_shapes)
         if not all(is_broadcastable(shape, ellipsis_broadcasted_shape) for shape in ellipsis_shapes):
-          raise RuntimeError("The shape of the ellipsis (the size of the dimensions covered by them) must broadcast together")
-        if '...' in output:
-          output = output.replace('...', encode_shape_to_subscripts(ellipsis_broadcasted_shape, inputs_str))
-        else: # implicit expansion
-          output = encode_shape_to_subscripts(ellipsis_broadcasted_shape, inputs_str) + output
-      return inputs, output
+          raise RuntimeError(
+            "The shape of the ellipsis (the size of the dimensions covered by them) must broadcast together")
+        if '…' in rhs:
+          rhs[rhs.index("…"):rhs.index("…") + 1] = list(map(str, ellipsis_broadcasted_shape))
+        else:  # implicit expansion
+          rhs = list(map(str, ellipsis_broadcasted_shape)) + rhs
+      return operands, rhs
 
-    inputs, output = expand_ellipsis(inputs, xs, inputs_str, output)
+    xs:Tuple[Tensor] = argfix(*raw_xs)
+    formula = formula.replace(" ", "").replace("...", "…")
+    operands, rhs = formula.split("->") if "->" in formula else (formula, ''.join(c for c in sorted(set(formula)) if formula.count(c) == 1 and c.isalpha()))
+    operands, rhs = [list(operand) for operand in operands.split(',')], list(rhs)
+    assert len(xs) == len(operands), f"number of inputs doesn't match number of operands in formula, expected {len(operands)}, got {len(xs)}"
+    operands, rhs = expand_ellipsis(operands, rhs, xs)
 
     # map the value of each letter in the formula
-    letter_val = sorted(merge_dicts([dict(zip(letters, tensor.shape)) for letters, tensor in zip(inputs, xs)]).items())
+    subscript_val = sorted(merge_dicts([dict(zip(letters, tensor.shape)) for letters, tensor in zip(operands, xs)]).items())
 
     xs_:List[Tensor] = []
-    lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in inputs]
-    for x,(order,letters) in zip(xs, [list(zip(*l)) for l in lhs]):
+    lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in operands]
+    for x,(order,subscripts) in zip(xs, [list(zip(*l)) for l in lhs]):
       # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
-      xs_.append(x.permute(order).reshape([val if letter in letters else 1 for letter,val in letter_val]).expand([val for _,val in letter_val]))
+      xs_.append(x.permute(order).reshape([val if subscript in subscripts else 1 for subscript,val in subscript_val]).expand([val for _,val in subscript_val]))
 
     # determine the inverse permutation to revert back to original order
-    rhs_letter_order = argsort(list(output))
-    rhs_order = argsort(rhs_letter_order)
+    rhs_subscript_order = argsort(list(rhs))
+    rhs_order = argsort(rhs_subscript_order)
 
     # sum over all axes that's not in the output, then permute to the output order
     return functools.reduce(lambda a,b:a*b, xs_) \
-      .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in output],acc_dtype=acc_dtype).permute(rhs_order)
+      .sum(axis=[axis for axis,(subscript,_) in enumerate(subscript_val) if subscript not in rhs],acc_dtype=acc_dtype).permute(rhs_order)
 
   # ***** processing ops *****
 
