@@ -6,9 +6,8 @@ from dataclasses import replace
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.ops import UOp, UOps
+from tinygrad.ops import UOp, UOps, BinaryOps, TernaryOps, UnaryOps
 from tinygrad.device import Device, Buffer
-from extra.ops import BinaryOps, BufferOps, TernaryOps, UnaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 # from tinygrad.shape.symbolic import Variable
@@ -374,7 +373,7 @@ class TestLinearizer(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 15, 5, dtype=dtypes.float).realize()
     g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
-    first_x = UOp(BufferOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
+    first_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
