@@ -337,7 +337,7 @@ constant_folder = PatternMatcher([
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
-  (NOp(UOps.VECTORIZE, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
+  (NOp(UOps.VECTORIZE, src=(NOp.var("root_src"),), name="root"), lambda root, root_src: root_src if str(root.dtype) == str(root_src.dtype) else None),
   # fold gated LOAD/STORE
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True)), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True), NOp.var("barrier")),
@@ -441,7 +441,7 @@ expander = PatternMatcher([
   (NOp(UOps.STORE, name="root"), create_gate),
   # do expansion
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
-         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root"), do_expand),
+         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (NOp(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
   (NOp(UOps.SINK, name="root"),
