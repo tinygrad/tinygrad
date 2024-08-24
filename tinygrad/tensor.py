@@ -924,7 +924,7 @@ class Tensor:
   #   2. Bool indexing is not supported
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
-  def __getitem__(self, indices) -> Tensor:
+  def __getitem__(self, indices, ret_mask: bool = False) -> Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
@@ -1025,6 +1025,8 @@ class Tensor:
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
+
+    if ret_mask: return mask, first_dim, len(big_shape)
     return ret
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
@@ -1032,17 +1034,39 @@ class Tensor:
       self.__getitem__(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
-    assert all(lb.st.contiguous for lb in self.lazydata.lbs), "setitem target needs to be contiguous"
+    #assert all(lb.st.contiguous for lb in self.lazydata.lbs), "setitem target needs to be contiguous"
     if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, list)) for i in indices)):
-      raise NotImplementedError("Advanced indexing setitem is not currently supported")
+      mask, first_dim, len_bigshape = self.realize().__getitem__(indices, ret_mask=True)
+      # TODO: must be a better way to do this
+      new_shape = [1] * mask.ndim
+      used_indices = set()
+      # add missing dimensions for correct broadcasting
+      for elem in v.shape:
+        for i, ref_elem in enumerate(mask.shape):
+          if ref_elem == elem and i not in used_indices:
+            new_shape[i] = elem
+            used_indices.add(i)
+            break
+      
+      v = v.reshape(new_shape).cast(self.dtype)._broadcast_to(_broadcast_shape(mask.shape, tuple(new_shape)))
+      # axis to be reduced to match self.shape
+      axis = tuple(range(first_dim, first_dim + len_bigshape))
+      # TODO: handle repeated indexes instead of summing them
+      # reduce mask and replace self with v(mask applied + reduced) for each True element in mask
+      assign_to = mask.any(axis=axis).where(mask.where(v, 0).sum(axis=axis), self)
+      # TODO: there must be a better way to do this
+      hack = self.lazydata.st
+      self.assign(assign_to.contiguous()).realize()
+      self.lazydata.st = hack
 
-    assign_to = self.realize().__getitem__(indices)
-    # NOTE: contiguous to prevent const folding.
-    v = v.cast(assign_to.dtype)._broadcast_to(_broadcast_shape(assign_to.shape, v.shape)).contiguous()
-    assign_to.assign(v).realize()
+    else:
+      assign_to = self.realize().__getitem__(indices)
+      # NOTE: contiguous to prevent const folding.
+      v = v.cast(assign_to.dtype)._broadcast_to(_broadcast_shape(assign_to.shape, v.shape)).contiguous()
+      assign_to.assign(v).realize()
 
   # NOTE: using _slice is discouraged and things should migrate to pad and shrink
   def _slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
