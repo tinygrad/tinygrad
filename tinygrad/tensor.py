@@ -1035,10 +1035,10 @@ class Tensor:
       return
     # NOTE: check that setitem target is valid first
     #assert all(lb.st.contiguous for lb in self.lazydata.lbs), "setitem target needs to be contiguous"
-    if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
+    if not isinstance(v, (Tensor, list, np.ndarray, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, list)) for i in indices)):
+    if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, tuple, list)) for i in indices)):
       mask, first_dim, len_bigshape = self.realize().__getitem__(indices, ret_mask=True)
       # TODO: must be a better way to do this
       new_shape = [1] * mask.ndim
