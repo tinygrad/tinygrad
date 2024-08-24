@@ -400,7 +400,8 @@ def do_reduce(root:UOp):
   ret = root.src[0]
   if len(reduce_parented):
     assert root.dtype is not None
-    const = UOp.const(root.dtype, 0 if root.arg is BinaryOps.ADD else dtypes.min(root.dtype.scalar()))
+    # TODO: helper to reuse this in 0 size folding
+    const = UOp.const(root.dtype, {BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(root.dtype.scalar())}[root.arg])
     acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(reduce_parented), (acc_number,))
     acc_number += 1
     ret = UOp(UOps.PHI, root.dtype, (acc, acc.alu(root.arg, ret)))
