@@ -3,8 +3,7 @@ from collections import defaultdict
 import numpy as np
 from dataclasses import replace
 from typing import DefaultDict, Dict, List, Tuple
-from tinygrad.codegen.uops import END_FOR_UOP, UOp
-from tinygrad.codegen.uopgraph import UOpGraph
+from tinygrad.ops import END_FOR_UOP, UOp, print_uops
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import DEBUG, colored
@@ -49,10 +48,9 @@ class UOpsFuzzerRunner(CompiledRunner):
 
     for i, path in enumerate(fuzz_paths):
       # setup prg
-      uops = UOpGraph([])
-      uops._uops = list(path)
-      if DEBUG >= 5: uops.print()
-      self.p = replace(self.p, name=(name:=f"{init_name}fuzz{i}"), src=Device[self.p.dname].renderer.render(name, uops.uops), uops=uops.uops)
+      uops = list(path)
+      if DEBUG >= 5: print_uops(uops)
+      self.p = replace(self.p, name=(name:=f"{init_name}fuzz{i}"), src=Device[self.p.dname].renderer.render(name, uops), uops=uops)
       if DEBUG >= 4: print(self.p.src)
       self.lib = Device[self.p.dname].compiler.compile_cached(self.p.src)
       self.clprg = Device[self.p.dname].runtime(name, self.lib)

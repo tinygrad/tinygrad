@@ -5,21 +5,21 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu # noqa F401
+from tinygrad.ops import UOps, NOp, UOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu # noqa F401
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
-from tinygrad.codegen.uops import UOps, NOp, UOp
-from tinygrad.codegen.uopgraph import UOpGraph
+from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
+from tinygrad.shape.symbolic import Variable
 from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
-def _uops_to_prg(uops_list, print_uops=False):
-  uops = UOpGraph(uops_list)
-  uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
-  src = Device[Device.DEFAULT].renderer.render("test", uops.uops)
-  if print_uops: uops.print()
+def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
+
+def _uops_to_prg(uops_list):
+  uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
+  src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops.uops,
+  return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -28,7 +28,7 @@ def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], ar
 
 def _test_single_value(vals, op, dts):
   uops = []
-  output_dtype = dts[-1] if op is TernaryOps.WHERE else dtypes.bool if op is BinaryOps.CMPLT else dts[0]
+  output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
@@ -44,7 +44,7 @@ def _test_single_value(vals, op, dts):
 
 def _test_single_value_const(vals, op, dts):
   uops = []
-  output_dtype = dts[-1] if op is TernaryOps.WHERE else dtypes.bool if op is BinaryOps.CMPLT else dts[0]
+  output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
@@ -62,7 +62,7 @@ def _test_uops_result(output_dtype, uops, res):
   # res = output_fn(uops)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg([out], print_uops=True)
+  prg = _uops_to_prg([out])
   prg.exec([buf])
   ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
@@ -101,7 +101,6 @@ class TestUOps(unittest.TestCase):
             self._equal(f([a,b,c], op, dts), fxn(a,b,c))
 
 class TestFloatUOps(TestUOps):
-  def test_neg(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a)
   @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
   def test_exp2(self): self._test_uop_fxn(UnaryOps.EXP2, lambda a: np.exp2(a))
   @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
@@ -115,6 +114,7 @@ class TestFloatUOps(TestUOps):
   def test_mul(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: a*b)
   def test_max(self): self._test_bop_fxn(BinaryOps.MAX, lambda a,b: max(a,b))
   def test_cmplt(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: a<b)
+  def test_cmpne(self): self._test_bop_fxn(BinaryOps.CMPNE, lambda a,b: a!=b)
   # MOD isn't tested on floats
 
   def test_where(self):
@@ -125,7 +125,6 @@ class TestFloatUOps(TestUOps):
     self._test_top_fxn(TernaryOps.MULACC, lambda a,b,c: a*b+c, (dtypes.float, dtypes.float, dtypes.float))
 
 class TestNonFloatUOps(TestUOps):
-  def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, (dtypes.int32, ))
   def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
   def test_mul_int32(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: int(a)*int(b), (dtypes.int32, dtypes.int32))
   @unittest.skipUnless(getenv("PTX"), "only ptx uses bitshifts")
@@ -139,7 +138,8 @@ class TestNonFloatUOps(TestUOps):
   def test_mod_int32(self):
     self._test_bop_fxn(BinaryOps.MOD,
                        lambda a,b: abs(int(a))%abs(int(b))*(1,-1)[a<0], (dtypes.int32, dtypes.int32), no_b_zero=True)
-  def test_cmplt_int32(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: float(a<b), (dtypes.int32, dtypes.int32))
+  def test_cmplt_int32(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: int(a)<int(b), (dtypes.int32, dtypes.int32))
+  def test_cmpne_int32(self): self._test_bop_fxn(BinaryOps.CMPNE, lambda a,b: int(a)!=int(b), (dtypes.int32, dtypes.int32))
   @unittest.skipUnless(is_dtype_supported(dtypes.bool), "dtype not supported")
   def test_mul_bool(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: bool(a) and bool(b), (dtypes.bool, dtypes.bool))
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
@@ -165,7 +165,6 @@ class TestBoolUOps(TestUOps):
           for c in [False, True]:
             self._equal(f([a,b,c], op, (dtypes.bool, )*3), fxn(a,b,c))
 
-  def test_not_bool(self): self._test_uop_bool_fxn(UnaryOps.NEG, lambda a: not a)
   def test_add_bool(self): self._test_bop_bool_fxn(BinaryOps.ADD, lambda a,b: a or b)
   def test_mul_bool(self): self._test_bop_bool_fxn(BinaryOps.MUL, lambda a,b: a and b)
   def test_xor_bool(self): self._test_bop_bool_fxn(BinaryOps.XOR, lambda a,b: a != b)
@@ -198,15 +197,17 @@ class TestExecALU(TestUOps):
     np.testing.assert_allclose(exec_alu(UnaryOps.RECIP, dtypes.float32, ((34**2),)), 1/(34**2))
     np.testing.assert_allclose(exec_alu(UnaryOps.RECIP, dtypes.float32, (10,)), 1/10)
 
-  def test_bool_neg(self):
-    self.assertEqual(exec_alu(UnaryOps.NEG, dtypes.bool, (False,)), True)
-    self.assertEqual(exec_alu(UnaryOps.NEG, dtypes.bool, (True,)), False)
-
   def test_bool_cmplt(self):
     self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (False, False)), False)
     self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (False, True)), True)
     self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, False)), False)
     self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, True)), False)
+
+  def test_bool_cmpne(self):
+    self.assertEqual(exec_alu(BinaryOps.CMPNE, dtypes.bool, (False, False)), False)
+    self.assertEqual(exec_alu(BinaryOps.CMPNE, dtypes.bool, (False, True)), True)
+    self.assertEqual(exec_alu(BinaryOps.CMPNE, dtypes.bool, (True, False)), True)
+    self.assertEqual(exec_alu(BinaryOps.CMPNE, dtypes.bool, (True, True)), False)
 
   def test_bool_where(self):
     self.assertEqual(exec_alu(TernaryOps.WHERE, dtypes.bool, (False, False, False)), False)
@@ -250,7 +251,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
     store = UOp(UOps.STORE, None, (gmem, idx, val, gate))
-    uops = UOpGraph([store])
+    uops = to_uops_list([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
@@ -268,7 +269,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
     stores = [UOp.store(gmem0, idx, val, gate), UOp.store(gmem1, idx, val)]
-    uops = UOpGraph(stores)
+    uops = linearize_uop(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
@@ -287,7 +288,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
     stores = [UOp.store(gmem0, idx, val, gate), UOp.store(gmem1, idx, val, gate)]
-    uops = UOpGraph(stores)
+    uops = linearize_uop(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     ifs = [u for u in uops if u.op is UOps.IF]
     endifs = [u for u in uops if u.op is UOps.ENDIF]
@@ -329,11 +330,10 @@ class TestAssembly(unittest.TestCase):
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
-    uops = UOpGraph([a1,a2])
-    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
+    uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHL)
-    self.assertEqual(uops.uops[-2].arg, BinaryOps.MUL)
+    self.assertEqual(uops[-1].arg, BinaryOps.SHL)
+    self.assertEqual(uops[-2].arg, BinaryOps.MUL)
 
   def test_bitshift_right(self):
     g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 0)
@@ -342,11 +342,10 @@ class TestAssembly(unittest.TestCase):
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
     a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
     a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
-    uops = UOpGraph([a1,a2])
-    uops.linearize(Device[Device.DEFAULT].renderer.extra_matcher)
+    uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHR)
-    self.assertEqual(uops.uops[-2].arg, BinaryOps.IDIV)
+    self.assertEqual(uops[-1].arg, BinaryOps.SHR)
+    self.assertEqual(uops[-2].arg, BinaryOps.IDIV)
 
 class TestUOpCompare(unittest.TestCase):
   def test_alu_same_src_different_arg(self):
@@ -368,12 +367,16 @@ class TestUOpStr(TestEqUOps):
     t = t + t * Tensor.rand(10)
     # nice big complicated uop
     with Context(NOOPT=1):
-      sink = get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops.sink
+      sink = UOp(UOps.SINK, None, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
     self.assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
     assert str(eval(str(a))) == str(a)
+
+  def test_variable_const(self):
+    uop = UOp(UOps.CONST, dtypes.int, (), arg=Variable("a",1,10))
+    assert str(eval(str(uop))) == str(uop)
 
 class TestIndexingOrdering(unittest.TestCase):
   # NOTE: these tests skip type_verify since they add dtype to STORE
@@ -382,8 +385,8 @@ class TestIndexingOrdering(unittest.TestCase):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = UOpGraph([st1, st0]).linearize(skip_check=True)
-    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    uops = to_uops_list([st1, st0], skip_check=True)
+    stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
   @unittest.expectedFailure
@@ -394,8 +397,8 @@ class TestIndexingOrdering(unittest.TestCase):
     st1_0 = UOp(UOps.STORE, dtypes.float, (buf0, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
     st0_1 = UOp(UOps.STORE, dtypes.float.vec(4), (buf1, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1_1 = UOp(UOps.STORE, dtypes.float, (buf1, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = UOpGraph([st0_0, st1_0, st0_1, st1_1]).linearize(skip_check=True)
-    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    uops = to_uops_list([st0_0, st1_0, st0_1, st1_1], skip_check=True)
+    stores = [st for st in uops if st.op is UOps.STORE]
     print("\n".join(map(str, stores)))
     # buf0 stores come first
     self.assertEqual(stores[0].src[0].arg, stores[1].src[0].arg)
@@ -410,8 +413,8 @@ class TestIndexingOrdering(unittest.TestCase):
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = UOpGraph([st1, st0]).linearize(skip_check=True)
-    stores = [st for st in uops.uops if st.op is UOps.STORE]
+    uops = linearize_uop(UOp.sink(st1, st0), skip_check=True)
+    stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
 if __name__ == '__main__':

@@ -7,12 +7,11 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin, kern_str_to_
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
-from tinygrad.ops import UnaryOps
+from tinygrad.ops import UnaryOps, UOp, UOps
 from test.helpers import is_dtype_supported
 
 def tuplize_uops(uops:List[UOp]) -> Tuple:
@@ -156,7 +155,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
         if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        try: tuops = tuplize_uops(test_lin.linearize().uops.uops)
+        try: tuops = tuplize_uops(test_lin.linearize().uops)
         except BaseException as e:
           print(test_lin.ast)
           print(test_lin.applied_opts)

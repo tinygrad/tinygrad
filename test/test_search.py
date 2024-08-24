@@ -2,7 +2,7 @@ import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.uops import UOps
+from tinygrad.ops import UOps
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
@@ -26,7 +26,17 @@ class TestTimeLinearizer(unittest.TestCase):
   def test_bufs_from_lin(self):
     si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is UOps.SINK][0]
     rawbufs = bufs_from_lin(lin:=Kernel(si.ast))
-    assert len(rawbufs) == len(lin.membufs)
+    assert len(rawbufs) == len(lin.membufs) == 2
+    assert all(r is not None for r in rawbufs)
+    assert all(isinstance(r, Buffer) for r in rawbufs)
+    assert all(r.size > 0 for r in rawbufs)
+
+  def test_bufs_from_lin_alt(self):
+    a = Tensor.randn(4, 4)
+    b = a+a[0]
+    si = [si for si in b.schedule() if si.ast.op is UOps.SINK][0]
+    rawbufs = bufs_from_lin(k:=Kernel(si.ast))
+    assert len(rawbufs) == len(k.membufs) == 2
     assert all(r is not None for r in rawbufs)
     assert all(isinstance(r, Buffer) for r in rawbufs)
     assert all(r.size > 0 for r in rawbufs)
