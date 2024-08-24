@@ -33,6 +33,8 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
 
+REDUCE_ALU: Dict[ReduceOps, BinaryOps] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.MAX:BinaryOps.MAX}
+
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
