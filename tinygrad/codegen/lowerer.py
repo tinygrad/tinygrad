@@ -4,7 +4,7 @@ from typing import List, Tuple, cast, Optional, Dict
 from tinygrad.shape.shapetracker import ShapeTracker, variable_to_uop
 from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes, DType
-from tinygrad.ops import ReduceOps, KernelInfo, BinaryOps, BUFFER_UOPS, UOp, UOps
+from tinygrad.ops import KernelInfo, BinaryOps, BUFFER_UOPS, UOp, UOps
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, get_contraction, prod, partition, flatten
 
@@ -121,7 +121,7 @@ class IndependentLowerer:
     if x.op is UOps.REDUCE_AXIS:
       # NOTE: always using ridxs is fine here
       reduce_range, reduce_expand = partition([self.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)
-      alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, x.arg[0])]
+      alu_op: BinaryOps = x.arg[0]
       ret = in_uops[0]
       if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
         ret = UOp(UOps.CONTRACT, cast(DType, x.dtype).vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
