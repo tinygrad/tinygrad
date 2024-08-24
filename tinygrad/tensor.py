@@ -1026,7 +1026,7 @@ class Tensor:
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
 
-    if ret_mask: return mask, first_dim, len(big_shape)
+    if ret_mask: return mask, first_dim
     return ret
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
@@ -1039,7 +1039,7 @@ class Tensor:
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, tuple, list)) for i in indices)):
-      mask, first_dim, len_bigshape = self.realize().__getitem__(indices, ret_mask=True)
+      mask, first_dim = self.realize().__getitem__(indices, ret_mask=True)
       # TODO: must be a better way to do this
       new_shape = [1] * mask.ndim
       used_indices = set()
@@ -1053,7 +1053,7 @@ class Tensor:
       
       v = v.reshape(new_shape).cast(self.dtype)._broadcast_to(_broadcast_shape(mask.shape, tuple(new_shape)))
       # axis to be reduced to match self.shape
-      axis = tuple(range(first_dim, first_dim + len_bigshape))
+      axis = tuple(range(first_dim, first_dim + (mask.ndim - self.ndim)))
       # TODO: handle repeated indexes instead of summing them
       # reduce mask and replace self with v(mask applied + reduced) for each True element in mask
       assign_to = mask.any(axis=axis).where(mask.where(v, 0).sum(axis=axis), self)
