@@ -119,19 +119,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
   top_reduce = reduce_srcs[-1] if len(reduce_srcs) != 0 else None
   if buf.op in ReduceOps:
     axis = buf.arg
-    if not st.contiguous:
-      # push the movementop to the input
-      tmp, rshape = _permute_reduce(input_st, axis)
-      prshape = prod(rshape)
-      strides = strides_for_shape(rshape)
-      nv: List[View] = []
-      for v in st.views:
-        nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
-                              v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
-      input_st = tmp + ShapeTracker(tuple(nv))
-      # update the axis
-      _, new_rshape = _permute_reduce(input_st, axis)
-      axis = tuple(range(len(input_st.shape)-len(new_rshape), len(input_st.shape)))
+    if not st.contiguous: input_st, axis = swizzle_reduceop(input_st, st, axis)
     elif top_reduce is not None:
       top_reduce_input_st, top_reduce_axes = reduce_info[top_reduce]
       if buf.srcs[0] is not buf.srcs[0].base and buf.srcs[0].base is top_reduce[0] and buf.op is top_reduce[0].op:
@@ -164,6 +152,21 @@ def reshape_uop(u:UOp, new_shape:Tuple[sint, ...], uop_sts:Dict[UOp, ShapeTracke
   new_srcs = tuple(reshape_uop(x, new_shape, uop_sts, cache) for x in u.src)
   cache[u] = reshaped = u if new_srcs == u.src else replace(u, src=new_srcs)
   return reshaped
+
+def swizzle_reduceop(input_st:ShapeTracker, swizzle:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[int, ...]]:
+  # push the movementop to the buffer uop
+  tmp, rshape = _permute_reduce(input_st, axis)
+  prshape = prod(rshape)
+  strides = strides_for_shape(rshape)
+  nv: List[View] = []
+  for v in swizzle.views:
+    nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
+                          v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
+  # update input_st and axis
+  new_input_st = tmp + ShapeTracker(tuple(nv))
+  _, new_rshape = _permute_reduce(new_input_st, axis)
+  new_axis = tuple(range(len(new_input_st.shape)-len(new_rshape), len(new_input_st.shape)))
+  return new_input_st, new_axis
 
 # ***** reduceop fusor *****
 
