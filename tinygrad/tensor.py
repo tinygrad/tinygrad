@@ -1775,9 +1775,9 @@ class Tensor:
 
     xs:Tuple[Tensor] = argfix(*raw_xs)
     formula = formula.replace(" ", "").replace("...", "…")
-    operands, rhs_string = formula.split("->") if "->" in formula else (formula,
+    operand_strings, rhs_string = formula.split("->") if "->" in formula else (formula,
       ''.join(c for c in sorted(set(formula)) if formula.count(c) == 1 and c.isalpha()))
-    operands, rhs = [list(operand) for operand in operands.split(',')], list(rhs_string)
+    operands, rhs = [list(operand) for operand in operand_strings.split(',')], list(rhs_string)
     assert len(xs) == len(operands), f"number of inputs doesn't match number of operands in formula, expected {len(operands)}, got {len(xs)}"
     operands, rhs = expand_ellipsis(operands, rhs, xs)
 
