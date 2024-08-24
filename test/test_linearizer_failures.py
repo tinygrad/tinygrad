@@ -1,8 +1,7 @@
 # ruff: noqa: E501
 import unittest, random
 import numpy as np
-from tinygrad.codegen.kernel import KernelOptError
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.kernel import Kernel, KernelOptError
 from tinygrad.ops import UOp, UOps, BinaryOps, UnaryOps, TernaryOps
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
