@@ -3,7 +3,7 @@ import unittest, random
 import numpy as np
 from tinygrad.codegen.kernel import KernelOptError
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.ops import UOp, UOps
+from tinygrad.ops import UOp, UOps, BinaryOps, UnaryOps, ReduceOps, TernaryOps
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.dtype import PtrDType
@@ -11,7 +11,6 @@ from tinygrad.helpers import CI
 from test.external.fuzz_linearizer import compare_linearizer
 from test.helpers import is_dtype_supported
 
-from extra.ops import BinaryOps, UnaryOps, ReduceOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
