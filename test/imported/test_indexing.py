@@ -276,8 +276,7 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[1, 2],
                                                                           [4, 5]]))
 
-    # TODO: advanced setitem
-    '''
+    
     # setting values
     reference[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(reference[ri([0]), ri([1])], np.array([-1]))
@@ -287,7 +286,7 @@ class TestIndexing(unittest.TestCase):
     reference[rows, columns] = np.array([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(reference[rows, columns],
                       np.array([[4, 6], [2, 3]]))
-    '''
+    
 
     # Verify still works with Transposed (i.e. non-contiguous) Tensors
 
@@ -323,8 +322,7 @@ class TestIndexing(unittest.TestCase):
                   [1, 2]])
     numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[0, 4], [5, 11]]))
 
-    # TODO: advanced setitem
-    '''
+    
     # setting values
     reference[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(reference[ri([0]), ri([1])],
@@ -335,7 +333,7 @@ class TestIndexing(unittest.TestCase):
     reference[rows, columns] = np.array([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(reference[rows, columns],
                       np.array([[4, 6], [2, 3]]))
-    '''
+    
 
     # stride != 1
 
@@ -388,24 +386,22 @@ class TestIndexing(unittest.TestCase):
 
     numpy_testing_assert_equal_helper(strided[ri([0]), ri([1])],
                       np.array([11]))
-    # TODO advanced setitem
-    '''
+    
     strided[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(strided[ri([0]), ri([1])],
                       Tensor([-1]))
-    '''
+    
 
     reference = Tensor.arange(0., 24).reshape(3, 8)
     strided = set_(reference, (2,2), (7,1), 10)
 
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
                       np.array([11, 17]))
-    # TODO advanced setitem
-    '''
+    
     strided[ri([0, 1]), ri([1, 0])] = Tensor([-1, 2])
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
                       Tensor([-1, 2]))
-    '''
+    
 
     reference = Tensor.arange(0., 24).realize().reshape(3, 8)
     strided = set_(reference, (2,2), (7,1), 10)
@@ -416,12 +412,11 @@ class TestIndexing(unittest.TestCase):
                   [0, 1]])
     numpy_testing_assert_equal_helper(strided[rows, columns],
                       np.array([[10, 11], [17, 18]]))
-    # TODO advanced setitem
-    '''
+    
     strided[rows, columns] = Tensor([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(strided[rows, columns],
                       Tensor([[4, 6], [2, 3]]))
-    '''
+    
 
     # Tests using less than the number of dims, and ellipsis
 
@@ -524,12 +519,9 @@ class TestIndexing(unittest.TestCase):
       assert_get_eq(reference, indexer)
       assert_backward_eq(reference, indexer)
 
-    # TODO advanced setitem
-    '''
     for indexer in indices_to_test:
       assert_set_eq(reference, indexer, 44)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-    '''
 
     reference = Tensor.arange(0., 160).reshape(4, 8, 5)
 
@@ -579,11 +571,10 @@ class TestIndexing(unittest.TestCase):
 
     for indexer in indices_to_test:
       assert_get_eq(reference, indexer)
-      # TODO advanced setitem
-      '''
+      
       assert_set_eq(reference, indexer, 212)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-      '''
+      
       assert_backward_eq(reference, indexer)
 
     reference = Tensor.arange(0., 1296).reshape(3, 9, 8, 6)
@@ -653,11 +644,10 @@ class TestIndexing(unittest.TestCase):
 
     for indexer in indices_to_test:
       assert_get_eq(reference, indexer)
-      # TODO advanced setitem
-      '''
+      
       assert_set_eq(reference, indexer, 1333)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-      '''
+      
     indices_to_test += [
       [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
       [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
