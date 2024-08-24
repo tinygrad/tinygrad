@@ -5,9 +5,8 @@
 import unittest
 from tinygrad import Device, dtypes
 from tinygrad.dtype import PtrDType
-from tinygrad.ops import UOp, UOps
+from tinygrad.ops import UOp, UOps, BinaryOps, TernaryOps
 from tinygrad.helpers import getenv
-from extra.ops import BinaryOps, ReduceOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
@@ -22,7 +21,7 @@ class TestLinearizerDumb(unittest.TestCase):
         UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MAX, src=(
           UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
             UOp(UOps.CAST, dtypes.half, arg=None, src=(
-              UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (5, 6, 7)), src=(
+              UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (5, 6, 7)), src=(
                 UOp(UOps.CAST, dtypes.float, arg=None, src=(
                   UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
                     UOp(UOps.LOAD, dtypes.half, arg=None, src=(
@@ -66,7 +65,7 @@ class TestLinearizerDumb(unittest.TestCase):
               UOp(UOps.CONST, dtypes.bool, arg=True, src=(
                 UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
           UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
-            UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.SUM, (1,)), src=(
+            UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (1,)), src=(
               UOp(UOps.CONST, dtypes.int, arg=-1, src=(
                 UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1001, 1999), strides=(0, 0), offset=0, mask=((0, 1001), (999, 1999)), contiguous=False), View(shape=(1000, 1000), strides=(1, 2000), offset=0, mask=None, contiguous=False))), src=()),)),)),
             UOp(UOps.CONST, dtypes.int, arg=1000, src=(
@@ -84,7 +83,7 @@ class TestLinearizerDumb(unittest.TestCase):
       UOp(UOps.STORE, None, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(25, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=()),
-        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (1,)), src=(
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (1,)), src=(
           UOp(UOps.LOAD, dtypes.float, arg=None, src=(
             UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
             UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(26, 49), strides=(0, -1), offset=48, mask=((0, 26), (24, 49)), contiguous=False), View(shape=(25, 25), strides=(1, 50), offset=0, mask=None, contiguous=False))), src=()),)),)),)),))
@@ -106,14 +105,14 @@ class TestLinearizerDumb(unittest.TestCase):
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=0, src=()),
         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4096, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
         UOp(UOps.CAST, dtypes.half, arg=None, src=(
-          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (1,)), src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (1,)), src=(
             UOp(UOps.CAST, dtypes.float, arg=None, src=(
               UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
                 UOp(UOps.CAST, dtypes.half, arg=None, src=(
                   UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
                     UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
                       UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
-                        UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.SUM, (2,)), src=(
+                        UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (2,)), src=(
                           UOp(UOps.CONST, dtypes.int, arg=1, src=(
                             UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32001, 63999), strides=(0, 0), offset=0, mask=((0, 32001), (31999, 63999)), contiguous=False), View(shape=(4096, 32000, 32000), strides=(0, 1, 64000), offset=0, mask=None, contiguous=False))), src=()),)),)),
                         UOp(UOps.CONST, dtypes.int, arg=-1, src=(
@@ -137,7 +136,7 @@ class TestLinearizerDumb(unittest.TestCase):
       UOp(UOps.STORE, None, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
-        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (2,)), src=(
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (2,)), src=(
           UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
             UOp(UOps.CAST, dtypes.float, arg=None, src=(
               UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
@@ -169,7 +168,7 @@ class TestLinearizerDumb(unittest.TestCase):
       UOp(UOps.STORE, None, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),
-        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (0, 1)), src=(
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (0, 1)), src=(
           UOp(UOps.ALU, dtypes.float, arg=TernaryOps.WHERE, src=(
             UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
               UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
@@ -201,7 +200,7 @@ class TestLinearizerDumb(unittest.TestCase):
       UOp(UOps.STORE, None, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 1, 1, 4, 3, 3), strides=(2340, 468, 36, 0, 0, 0, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=True),)), src=()),
-        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (6,)), src=(
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (6,)), src=(
           UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
             UOp(UOps.LOAD, dtypes.float, arg=None, src=(
               UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
