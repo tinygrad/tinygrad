@@ -2,7 +2,7 @@ import time, math, unittest
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 import functools
@@ -894,6 +894,7 @@ class TestOps(unittest.TestCase):
 
   def test_prod(self):
     helper_test_op(None, lambda x: x.prod(), vals=[[1.0, 2.0, 3.0]])
+    with Context(NOOPT=1): helper_test_op(None, lambda x: x.prod(), vals=[[1.0, 2.0, 3.0]])
     helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=3), lambda x: x.prod(axis=3))
     helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=1), lambda x: x.prod(axis=1))
     helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=1, keepdim=True), lambda x: x.prod(axis=1, keepdim=True))

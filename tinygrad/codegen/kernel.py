@@ -2,9 +2,9 @@ from __future__ import annotations
 import itertools, functools
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Literal, Optional, List, Tuple, Union, cast, Dict, Final, DefaultDict
+from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 
-from tinygrad.ops import BinaryOps, ReduceOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
+from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import DType, ImageDType, PtrDType
@@ -308,7 +308,7 @@ class Kernel:
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
-    if use_tensor_cores and self.opts.has_local and self.reduceop is not None and self.reduceop.arg[0] is ReduceOps.SUM:
+    if use_tensor_cores and self.opts.has_local and self.reduceop is not None and self.reduceop.arg[0] is BinaryOps.ADD:
       for tc in self.opts.tensor_cores:
         tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
         # can only fuse reduces with the same tc options
@@ -463,7 +463,7 @@ class Kernel:
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ops have f(0) = 0
       if self.first_reduce <= axis:
-        check((r:=cast(UOp, self.reduceop)).arg[0] is ReduceOps.SUM and \
+        check((r:=cast(UOp, self.reduceop)).arg[0] is BinaryOps.ADD and \
             all(op.arg not in UNSAFE_PAD_OPS for sop in r.src for op in sop.parents), "cannot pad")
       padded = False
       for i,st in enumerate(self.sts):
@@ -493,7 +493,7 @@ class Kernel:
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
     MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
     if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
-        self.reduceop is not None and self.reduceop.arg[0] is ReduceOps.SUM and len(self.full_shape) >= 2 and self.opts.has_shared and \
+        self.reduceop is not None and self.reduceop.arg[0] is BinaryOps.ADD and len(self.full_shape) >= 2 and self.opts.has_shared and \
         (mulop:=self.reduceop.src[0]).arg is BinaryOps.MUL and mulop.src[0].op is UOps.LOAD and mulop.src[1].op is UOps.LOAD:
       st0, st1 = self.sts[self.bufs.index(mulop.src[0])], self.sts[self.bufs.index(mulop.src[1])]
       strides0, strides1 = st0.real_strides(), st1.real_strides()
@@ -644,13 +644,13 @@ class Kernel:
         return replace(op, src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is UOps.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
-        reduceop: Union[Literal[ReduceOps.SUM], Literal[ReduceOps.MAX]] = op.arg[0]
+        alu_op: BinaryOps = op.arg[0]
         axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
           if rsrc.op is UOps.CAST: rsrc = rsrc.src[0]
-          assert rsrc.arg is BinaryOps.MUL
+          assert rsrc.op is UOps.ALU and rsrc.arg is BinaryOps.MUL
 
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd, tcd = self.global_dims, self.first_upcast
@@ -705,13 +705,13 @@ class Kernel:
               # for TC=2, we can't do the shapetracker fixup
               srcs = [fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])]
             # MUL/SUM instead of WMMA
-            ret = UOp(UOps.REDUCE_AXIS, tc.dtype_out, (srcs[0].alu(BinaryOps.MUL, srcs[1]).cast(tc.dtype_out),), (reduceop, wmma_arg[-1]))
+            ret = UOp(UOps.REDUCE_AXIS, tc.dtype_out, (srcs[0].alu(BinaryOps.MUL, srcs[1]).cast(tc.dtype_out),), (alu_op, wmma_arg[-1]))
           else:
             ret = UOp(UOps.WMMA, tc.dtype_out, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
           new_reduce_axes = tuple(i for i in axis if i-self.first_upcast not in reduce_axes)
-          return replace(op, src=(ret,), arg=(reduceop, new_reduce_axes)) if new_reduce_axes else ret
+          return replace(op, src=(ret,), arg=(alu_op, new_reduce_axes)) if new_reduce_axes else ret
         if self.group_for_reduces:
-          start = UOp(UOps.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(op.arg[0], axis))
+          start = UOp(UOps.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(alu_op, axis))
           second_axis = tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) \
                       if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
           # NOTE: if there's a grouped reduce, but no reduce axes for this reduce, we can skip it
@@ -727,7 +727,7 @@ class Kernel:
           if op is self.reduceops[-1]: return grouped_reduce
           st_uop = ShapeTracker.from_shape(tuple([1 if i in second_axis else a for i,a in enumerate(local_shape)])).to_uop()
           return UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
-        arg = (reduceop, axis)
+        arg = (alu_op, axis)
       elif op.op is UOps.SINK:
         arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
