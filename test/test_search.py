@@ -2,11 +2,10 @@ import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.ops import UOp, UOps
+from tinygrad.ops import UOp, UOps, BinaryOps
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
-from extra.ops import ReduceOps, BinaryOps
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import Context, GlobalCounters
@@ -107,7 +106,7 @@ class TestBEAM(unittest.TestCase):
       UOp(UOps.STORE, None, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 256), strides=(0, 0, 1), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
-        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.MAX, (1,)), src=(
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.MAX, (1,)), src=(
           UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
             UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
               UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
