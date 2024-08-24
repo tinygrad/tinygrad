@@ -1788,7 +1788,7 @@ class Tensor:
     lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in operands]
     for x,(order,subscripts) in zip(xs, [list(zip(*l)) for l in lhs]):
       # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
-      xs_.append(x.permute(order).reshape([val if subscript in subscripts else 1 for subscript,val in subscript_val]).expand([val for _,val in subscript_val]))
+      xs_.append(x.permute(order).reshape([val if s in subscripts else 1 for s,val in subscript_val]).expand([val for _,val in subscript_val]))
 
     # determine the inverse permutation to revert back to original order
     rhs_subscript_order = argsort(list(rhs))
@@ -1796,7 +1796,7 @@ class Tensor:
 
     # sum over all axes that's not in the output, then permute to the output order
     return functools.reduce(lambda a,b:a*b, xs_) \
-      .sum(axis=[axis for axis,(subscript,_) in enumerate(subscript_val) if subscript not in rhs],acc_dtype=acc_dtype).permute(rhs_order)
+      .sum(axis=[axis for axis,(s,_) in enumerate(subscript_val) if s not in rhs],acc_dtype=acc_dtype).permute(rhs_order)
 
   # ***** processing ops *****
 
