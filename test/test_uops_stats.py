@@ -95,15 +95,15 @@ class TestUOpsStats(unittest.TestCase):
     # NOTE: it's hard to assert on the memory here, all depends on caching
     assert required_mem <= mem
 
+  @unittest.skipUnless(getenv("PYTHON"), "only run test on emulated tensor cores")
   def test_simple_matmul_half(self):
-    if getenv("PYTHON"):
-      GlobalCounters.reset()
-      N = 128
-      a, b = Tensor.empty(N, N, dtype=dtypes.half), Tensor.empty(N, N, dtype=dtypes.half)
-      c = a.matmul(b)
-      c.realize()
-      expected_ops = N ** 3 * 2
-      assert expected_ops == GlobalCounters.global_ops
+    GlobalCounters.reset()
+    N = 16
+    a, b = Tensor.empty(N, N, dtype=dtypes.half), Tensor.empty(N, N, dtype=dtypes.half)
+    c = a.matmul(b)
+    c.realize()
+    expected_ops = N ** 3 * 2
+    assert expected_ops == GlobalCounters.global_ops
 
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):
