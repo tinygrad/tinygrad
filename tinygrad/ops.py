@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence
-import sys, time, math, operator, ctypes, struct, functools, hashlib, itertools
+import sys, time, math, operator, ctypes, struct, functools, itertools
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
@@ -72,8 +72,8 @@ class UOp:
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   @functools.cached_property
-  def key(self) -> bytes:
-    return hashlib.sha256(functools.reduce(lambda x,y: x+y, [s.key for s in self.src], str((self.op, self.dtype, self.arg)).encode())).digest()
+  def key(self) -> int:
+    return hash((tuple(s.key for s in self.src), self.op, self.dtype, self.arg))
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self):
     return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else repr(self.arg) if isinstance(self.arg, Variable) else self.arg

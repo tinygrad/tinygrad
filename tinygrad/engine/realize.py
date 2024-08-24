@@ -146,7 +146,7 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
+method_cache: Dict[Tuple[str, int, int, int, bool], CompiledRunner] = {}
 def get_runner(dname:str, ast:UOp) -> CompiledRunner:
   ckey = (dname, ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
