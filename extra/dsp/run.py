@@ -4,8 +4,6 @@ from tinygrad.runtime.autogen import libc, qcom_dsp
 def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 from hexdump import hexdump
 
-processor = platform.processor()
-
 def get_struct(argp, stype):
   return ctypes.cast(ctypes.c_void_p(argp), ctypes.POINTER(stype)).contents
 
@@ -168,18 +166,11 @@ def install_hook(c_function, python_function):
   orig_func = (ctypes.c_char*4096)()
   python_function_addr = ctypes.cast(ctypes.byref(python_function), ctypes.POINTER(ctypes.c_ulong)).contents.value
   # AARCH64 trampoline to ioctl
-  if processor == "aarch64":
-    # 0x0000000000000000:  70 00 00 10    adr x16, #0xc
-    # 0x0000000000000004:  10 02 40 F9    ldr x16, [x16]
-    # 0x0000000000000008:  00 02 1F D6    br  x16
-    tramp = b"\x70\x00\x00\x10\x10\x02\x40\xf9\x00\x02\x1f\xd6"
-    tramp += struct.pack("Q", python_function_addr)
-  elif processor == "x86_64":
-    # 0x0000000000000000:  49 BB aa aa aa aa aa aa aa aa    movabs r11, <address>
-    # 0x000000000000000a:  41 FF E3                         jmp    r11
-    tramp = b"\x49\xBB" + struct.pack("Q", python_function_addr) + b"\x41\xFF\xE3"
-  else:
-    raise Exception(f"processor {processor} not supported")
+  # 0x0000000000000000:  70 00 00 10    adr x16, #0xc
+  # 0x0000000000000004:  10 02 40 F9    ldr x16, [x16]
+  # 0x0000000000000008:  00 02 1F D6    br  x16
+  tramp = b"\x70\x00\x00\x10\x10\x02\x40\xf9\x00\x02\x1f\xd6"
+  tramp += struct.pack("Q", python_function_addr)
 
   # get real ioctl address
   ioctl_address = ctypes.cast(ctypes.byref(c_function), ctypes.POINTER(ctypes.c_ulong))
