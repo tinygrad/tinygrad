@@ -942,7 +942,7 @@ class Tensor:
   #   2. Bool indexing is not supported
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
-  def __getitem__(self, indices, ret_mask: bool = False) -> Tensor:
+  def __getitem__(self, indices, adv_set: bool = False) -> Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
@@ -1038,13 +1038,13 @@ class Tensor:
       # inject 1's for the extra dims added in create masks
       reshape_arg = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
       # sum reduce the extra dims introduced in create masks
-      ret = (ret.reshape(reshape_arg) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
+      ret = (ret.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
 
-    if ret_mask: return mask, first_dim
+    if adv_set: return mask, ret.shape, first_dim, sum_axis
     return ret
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
@@ -1057,24 +1057,17 @@ class Tensor:
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, tuple, list)) for i in indices)):
-      mask, first_dim = self.realize().__getitem__(indices, ret_mask=True)
-      # TODO: must be a better way to do this
-      new_shape = [1] * mask.ndim
-      used_indices = set()
-      # add missing dimensions for correct broadcasting
-      for elem in v.shape:
-        for i, ref_elem in enumerate(mask.shape):
-          if ref_elem == elem and i not in used_indices:
-            new_shape[i] = elem
-            used_indices.add(i)
-            break
-      
-      v = v.reshape(new_shape).cast(self.dtype)._broadcast_to(_broadcast_shape(mask.shape, tuple(new_shape)))
+      mask, ret_shape, first_dim, sum_axis = self.realize().__getitem__(indices, adv_set=True)
+      # broadcast to resulting shape from getitem
+      v = v._broadcast_to(_broadcast_shape(ret_shape, v.shape)).contiguous()
+      # add back reduced dims from sum and broadcast to mask's shape
+      for dim in sum_axis: v = v.unsqueeze(dim)
+      v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(mask.shape, v.shape))
       # axis to be reduced to match self.shape
       axis = tuple(range(first_dim, first_dim + (mask.ndim - self.ndim)))
       # apply mask to v
       v_reduced = mask.where(v, 0)
-      # reduce v such that if repeated indeces are assigned in v the last one remains
+      # reduce v such that if repeated indices are assigned in v the last one remains
       for dim in axis: v_reduced = functools.reduce(lambda x,y: y.where(y, x), v_reduced.split(1, dim))
       # reduce mask and select element from v(get rid of extra dims from reduce) for each True element in mask else select from self
       assign_to = mask.any(axis).where(v_reduced.squeeze(), self)
