@@ -356,56 +356,12 @@ if __name__ == "__main__":
   thread = Thread(target=listner_worker)
   thread.start()
 
-  # a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
-  # a2 = memoryview(bytearray(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
-  # o1 = memoryview(bytearray(0x8))
-  # o2 = memoryview(bytearray(0xff))
-  # z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
-  # prg_handle = o1.cast('I')[0]
-
-  # for i in range(150):
-  #   print("init", i)
-  #   os.symlink("libcalculator_skel.so", f"libcalculator_skel{i}.so")
-
-  #   fp = f"file:///libcalculator_skel{i}.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"
-  #   a1 = memoryview(array.array('I', [len(fp), 0xff]))
-  #   a2 = memoryview(bytearray(f"{fp}".encode()))
-  #   o1 = memoryview(bytearray(0x8))
-  #   o2 = memoryview(bytearray(0xff))
-  #   z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
-
-  #   os.unlink(f"libcalculator_skel{i}.so")
-  
-  # for i in range(300):
-
-  #   a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
-  #   a2 = memoryview(bytearray(b"file:///libcalculato1_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
-  #   o1 = memoryview(bytearray(0x8))
-  #   o2 = memoryview(bytearray(0xff))
-  #   z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
-  #   prg_handle = o1.cast('I')[0]
-
-  # a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
-  # a2 = memoryview(bytearray(b"file:///libcalculato2_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
-  # o1 = memoryview(bytearray(0x8))
-  # o2 = memoryview(bytearray(0xff))
-  # z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
-  # prg_handle = o1.cast('I')[0]
-
-  # a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
-  # a2 = memoryview(bytearray(b"file:///libcalculato3_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
-  # o1 = memoryview(bytearray(0x8))
-  # o2 = memoryview(bytearray(0xff))
-  # z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
-  # prg_handle = o1.cast('I')[0]
-
-  # a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
-  # a2 = memoryview(bytearray(b"file:///libcalculat43_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
-  # o1 = memoryview(bytearray(0x8))
-  # o2 = memoryview(bytearray(0xff))
-  # z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
-  # prg_handle = o1.cast('I')[0]
-
+  a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
+  a2 = memoryview(bytearray(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
+  o1 = memoryview(bytearray(0x8))
+  o2 = memoryview(bytearray(0xff))
+  z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
+  prg_handle = o1.cast('I')[0]
 
   # test
   test = (ctypes.c_int32 * 100)()
