@@ -83,7 +83,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
 
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
-    swizzle = () if st.contiguous else (UOp(UOps.SWIZZLE, src=(st.to_uop(),)),) if AST_REWRITE else ()
+    swizzle = (UOp(UOps.SWIZZLE, src=(st.to_uop(),)),) if not st.contiguous and AST_REWRITE else ()
     rinfo: Optional[Tuple[ShapeTracker, Tuple[int, ...]]] = (ShapeTracker.from_shape(buf.srcs[0].shape), buf.arg) \
         if AST_REWRITE else reduce_info.get((buf, st))
     rsrc = _recursive_uop(buf.srcs[0], st:=(rinfo[0] if rinfo else st), outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
