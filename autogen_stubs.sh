@@ -235,6 +235,7 @@ generate_qcom() {
     extra/dsp/ion.h \
     extra/dsp/msm_ion.h \
     extra/dsp/adsprpc_shared.h \
+    extra/dsp/remote_default.h \
     -o $BASE/qcom_dsp.py
 
   fixup $BASE/qcom_dsp.py
