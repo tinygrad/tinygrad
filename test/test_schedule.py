@@ -13,7 +13,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import create_schedule, get_output_st, reshape_uop
+from tinygrad.engine.schedule import create_schedule, get_output_st, st_fixup
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported, Context
 from tinygrad.lazy import LazyBuffer, view_supported_devices
@@ -1621,7 +1621,7 @@ class TestScheduleRewrite(unittest.TestCase):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     ast = a.schedule()[0].ast
-    new_uop = reshape_uop(ast.src[0].src[2], (4, 1), {}, {})
+    new_uop = st_fixup(ast.src[0].src[2], lambda st:st.reshape((4, 1)), {}, {})
     self.assertEqual(get_output_st(new_uop, {}), ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertLess(time.perf_counter()-start, 1.0)
 
@@ -1632,14 +1632,14 @@ class TestScheduleRewrite(unittest.TestCase):
     val = ast.src[0].src[2]
     ret = get_output_st(val, uop_sts)
     assert uop_sts[val] == ret == ShapeTracker.from_shape((4,))
-    new_val = reshape_uop(val, (4, 1), uop_sts, {})
+    new_val = st_fixup(val, lambda st:st.reshape((4, 1)), uop_sts, {})
     self.assertNotIn(new_val, uop_sts)
 
   def test_reshape_noop(self):
     a = Tensor([1,2,3,4]).realize()+2
     ast = a.schedule()[0].ast
     val = ast.src[0].src[2]
-    new_val = reshape_uop(val, (4,), {}, {})
+    new_val = st_fixup(val, lambda st:st.reshape((4,)), {}, {})
     self.assertIs(new_val, val)
 
 if __name__ == '__main__':
