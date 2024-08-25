@@ -197,7 +197,7 @@ if __name__ == "__main__":
   # /dsp/cdsp/fastrpc_shell_3
 
   handle = ctypes.c_int64(-1)
-  z = adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp"),
+  z = adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:///tmppzfv77t6?entry&_modver=1.0&_dom=cdsp"),
                             ctypes.byref(handle))
   
   # for i in range(15):
