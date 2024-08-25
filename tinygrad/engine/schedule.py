@@ -1,7 +1,7 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
+from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, \
@@ -141,19 +141,14 @@ def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> ShapeTracker:
   uop_sts[uop] = st = ShapeTracker.from_shape(src_sts[0].reduce(uop.arg[1])) if uop.op is UOps.REDUCE_AXIS else src_sts[0]
   return st
 
-def reshape_uop(u:UOp, new_shape:Tuple[sint, ...], uop_sts:Dict[UOp, ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
-  if (reshaped:=cache.get(u)): return reshaped
-  if (st:=uop_sts.get(u)) and st.shape == new_shape: return u
-  if u.op is UOps.SHAPETRACKER: return u if u.arg.shape == new_shape else replace(u, arg=u.arg.reshape(new_shape))
-  new_srcs = tuple(reshape_uop(x, new_shape, uop_sts, cache) for x in u.src)
-  cache[u] = reshaped = u if new_srcs == u.src else replace(u, src=new_srcs)
-  return reshaped
-
-def replace_st(u:UOp, new_st:ShapeTracker, uop_sts:Dict[UOp, ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
-  if (pushed:=cache.get(u)): return pushed
-  if (st:=uop_sts.get(u)) and st == new_st: return u
-  if u.op is UOps.SHAPETRACKER: return u if u.arg == new_st else replace(u, arg=new_st)
-  new_srcs = tuple(replace_st(x, new_st, uop_sts, cache) for x in u.src)
+def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], uop_sts:Dict[UOp, ShapeTracker],
+               cache:Dict[UOp, UOp], eq:Callable[[Tuple[ShapeTracker, ShapeTracker]], bool]=all_same) -> UOp:
+  if (n:=cache.get(u)): return n
+  if (st:=uop_sts.get(u)) and eq((st, apply_to_st(st))): return u
+  if u.op is UOps.SHAPETRACKER:
+    new_st = apply_to_st(u.arg)
+    return u if u.arg == new_st else replace(u, arg=new_st)
+  new_srcs = tuple(st_fixup(x, apply_to_st, uop_sts, cache, eq) for x in u.src)
   cache[u] = reshaped = u if new_srcs == u.src else replace(u, src=new_srcs)
   return reshaped
 
@@ -182,7 +177,7 @@ def swizzle_reduceop(input_st:ShapeTracker, swizzle:ShapeTracker, axis:Tuple[int
 def apply_swizzle(root:UOp, rsrc:UOp, swizzle:UOp) -> UOp:
   uop_sts: Dict[UOp, ShapeTracker] = {}
   new_input_st, new_axis = swizzle_reduceop(get_output_st(rsrc, uop_sts), swizzle.arg, root.arg[1])
-  return replace(root, src=(replace_st(rsrc, new_input_st, uop_sts, {}),), arg=(root.arg[0], new_axis))
+  return replace(root, src=(st_fixup(rsrc, lambda _:new_input_st, uop_sts, {}),), arg=(root.arg[0], new_axis))
 
 def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   reduceops = [x for x in root.parents if x.op is UOps.REDUCE_AXIS]
@@ -190,7 +185,7 @@ def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   uop_sts: Dict[UOp, ShapeTracker] = {}
   rshape = get_output_st(reduceops[0], uop_sts).shape
   if rshape == root.st_arg.shape: return None
-  return reshape_uop(root, rshape, uop_sts, {})
+  return st_fixup(root, lambda st:st.reshape(rshape), uop_sts, {})
 
 reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(name="rsrc"), UPat(UOps.SWIZZLE, src=(UPat(name="swizzle"),))), name="root"), apply_swizzle),
