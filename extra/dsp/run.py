@@ -186,7 +186,7 @@ def install_hook(c_function, python_function):
 
 libc = ctypes.CDLL(ctypes.util.find_library("libc"))
 install_hook(libc.ioctl, ioctl)
-adsp = ctypes.CDLL(ctypes.util.find_library("cdsprpc"))
+adsp = ctypes.CDLL(ctypes.util.find_library("adsprpc"))
 # print(adsp)
 
 def send_rpc_invoke(filename):
