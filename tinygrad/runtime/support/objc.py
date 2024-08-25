@@ -38,7 +38,7 @@ def dump_objc_methods(clz: libobjc.Class):
 
     methods[sel_name] = {"restype": return_type, "argtypes": tuple(ctypes.string_at(arg).decode('ascii') for arg in argtypes_ps)}
 
-    # [libc.free(p) for p in argtypes_ps]
+    [libc.free(p) for p in argtypes_ps]
     libc.free(ctypes.cast(return_type_p, ctypes.c_void_p))
   libc.free(methods_ptr)
   return methods
@@ -123,11 +123,13 @@ class ObjcClass(ctypes.c_void_p):
     _metaclass_ptr = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(p), libobjc.id))
     self.methods_info: Dict[str, Dict[str, Any]] = get_methods_rec(ctypes.cast(_metaclass_ptr, ctypes.c_void_p).value)
 
+  def __repr__(self) -> str:
+    return f"<{ctypes.string_at(libobjc.object_getClassName(ctypes.cast(ctypes.c_void_p(self.value), libobjc.id))).decode()} at 0x{self.value:x}>"
+
   def __hash__(self) -> int:
     return self.value
 
   def __getattr__(self, name:str) -> Any:
-    # print(f"__getattr__({self}, {name})")
     sel_name = name.replace("_", ":")
     if sel_name in self.methods_info:
       method_info = self.methods_info[sel_name]
@@ -144,6 +146,7 @@ class ObjcInstance(ObjcClass):
     super(ctypes.c_void_p, self).__init__(v)
     c = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(v), libobjc.id))
     self.methods_info = get_methods_rec(ctypes.cast(c, ctypes.c_void_p).value)
+
   def __del__(self):
     # print(f"Releasing {self}")
     self.release()
