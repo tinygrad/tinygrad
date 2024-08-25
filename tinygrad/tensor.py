@@ -2071,7 +2071,7 @@ class Tensor:
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
       if mode == "nearest":
-        index = ((scale*arr) if align_corners else (scale*(arr+0.5)- 0.5)).round().clip(0, self.shape[i] - 1)
+        index = ((scale*(arr+0.5)- 0.5)).round().clip(0, self.shape[i] - 1)
         reshape[i] = expand[i] = size[i]
         x = x.gather(i, index.reshape(reshape).expand(expand))
       elif mode == "linear":
