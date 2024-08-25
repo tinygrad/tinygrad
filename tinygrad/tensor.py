@@ -1072,9 +1072,12 @@ class Tensor:
       v = v.reshape(new_shape).cast(self.dtype)._broadcast_to(_broadcast_shape(mask.shape, tuple(new_shape)))
       # axis to be reduced to match self.shape
       axis = tuple(range(first_dim, first_dim + (mask.ndim - self.ndim)))
-      # TODO: handle repeated indexes instead of summing them
-      # reduce mask and replace self with v(mask applied + reduced) for each True element in mask
-      assign_to = mask.any(axis=axis).where(mask.where(v, 0).sum(axis=axis), self)
+      # apply mask to v
+      v_reduced = mask.where(v, 0)
+      # reduce v such that if repeated indeces are assigned in v the last one remains
+      for dim in axis: v_reduced = functools.reduce(lambda x,y: y.where(y, x), v_reduced.split(1, dim))
+      # reduce mask and select element from v(get rid of extra dims from reduce) for each True element in mask else select from self
+      assign_to = mask.any(axis).where(v_reduced.squeeze(), self)
       # TODO: there must be a better way to do this
       hack = self.lazydata.st
       self.assign(assign_to.contiguous()).realize()

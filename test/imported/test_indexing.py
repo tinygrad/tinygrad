@@ -276,7 +276,6 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[1, 2],
                                                                           [4, 5]]))
 
-    
     # setting values
     reference[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(reference[ri([0]), ri([1])], np.array([-1]))
@@ -287,7 +286,6 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(reference[rows, columns],
                       np.array([[4, 6], [2, 3]]))
     
-
     # Verify still works with Transposed (i.e. non-contiguous) Tensors
 
     reference = Tensor([[0, 1, 2, 3],
@@ -322,7 +320,6 @@ class TestIndexing(unittest.TestCase):
                   [1, 2]])
     numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[0, 4], [5, 11]]))
 
-    
     # setting values
     reference[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(reference[ri([0]), ri([1])],
@@ -333,7 +330,6 @@ class TestIndexing(unittest.TestCase):
     reference[rows, columns] = np.array([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(reference[rows, columns],
                       np.array([[4, 6], [2, 3]]))
-    
 
     # stride != 1
 
@@ -386,22 +382,18 @@ class TestIndexing(unittest.TestCase):
 
     numpy_testing_assert_equal_helper(strided[ri([0]), ri([1])],
                       np.array([11]))
-    
     strided[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(strided[ri([0]), ri([1])],
                       Tensor([-1]))
     
-
     reference = Tensor.arange(0., 24).reshape(3, 8)
     strided = set_(reference, (2,2), (7,1), 10)
 
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
                       np.array([11, 17]))
-    
     strided[ri([0, 1]), ri([1, 0])] = Tensor([-1, 2])
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
                       Tensor([-1, 2]))
-    
 
     reference = Tensor.arange(0., 24).realize().reshape(3, 8)
     strided = set_(reference, (2,2), (7,1), 10)
@@ -412,7 +404,6 @@ class TestIndexing(unittest.TestCase):
                   [0, 1]])
     numpy_testing_assert_equal_helper(strided[rows, columns],
                       np.array([[10, 11], [17, 18]]))
-    
     strided[rows, columns] = Tensor([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(strided[rows, columns],
                       Tensor([[4, 6], [2, 3]]))
@@ -654,10 +645,7 @@ class TestIndexing(unittest.TestCase):
     ]
     for indexer in indices_to_test:
       assert_get_eq(reference, indexer)
-      # TODO advanced setitem
-      '''
       assert_set_eq(reference, indexer, 1333)
-      '''
       assert_backward_eq(reference, indexer)
 
   # TODO setitem backward
