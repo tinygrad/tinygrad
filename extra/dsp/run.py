@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os, ctypes, ctypes.util, struct, platform, time
-from tinygrad.runtime.autogen import libc, adsprpc, qcom_dsp
+from tinygrad.runtime.autogen import libc, qcom_dsp
 def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 from hexdump import hexdump
 
@@ -26,7 +26,7 @@ def ioctl(fd, request, argp):
 
   if fn == "/dev/adsprpc-smd":
     if nr == 1:
-      st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
+      st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke)
       method = (st.sc>>24) & 0xFF
       in_args = (st.sc>>16) & 0xFF
       out_args = (st.sc>>8) & 0xFF
@@ -50,11 +50,11 @@ def ioctl(fd, request, argp):
   #     st = ctypes.c_uint32.from_address(argp)
   #     print("bef FASTRPC_IOCTL_GETINFO", st.value)
   #   elif nr == 2:
-  #     st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_mmap)
+  #     st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_mmap)
   #     print("bef FASTRPC_IOCTL_MMAP", format_struct(st))
   #   elif nr == 1:
   #     # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
-  #     st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
+  #     st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke)
   #     print("bef FASTRPC_IOCTL_INVOKE", format_struct(st))
   #     method = (st.sc>>24) & 0xFF
   #     in_args = (st.sc>>16) & 0xFF
@@ -83,12 +83,12 @@ def ioctl(fd, request, argp):
   #           if arg >= in_args: ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
   #     #print(format_struct(st.pra)))
   #   elif nr == 6:
-  #     print("bef FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
+  #     print("bef FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_init)))
   #     print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
   #     # print(bytearray(to_mv(ini.file, ini.filelen)))
   #   elif nr == 7:
-  #     print("bef FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
-  #   elif nr == 12: print("bef FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
+  #     print("bef FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke_attrs)))
+  #   elif nr == 12: print("bef FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_control)))
   #   else:
   #     print(f"bef UNPARSED {nr}")
   # else:
@@ -113,11 +113,11 @@ def ioctl(fd, request, argp):
       st = ctypes.c_uint32.from_address(argp)
       print(ret, "FASTRPC_IOCTL_GETINFO", st.value)
     elif nr == 2:
-      st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_mmap)
+      st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_mmap)
       print(ret, "FASTRPC_IOCTL_MMAP", format_struct(st))
     elif nr == 1:
       # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
-      st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
+      st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke)
       print(ret, "FASTRPC_IOCTL_INVOKE", format_struct(st))
       # 0xFF000000 = Method index and attribute (the highest byte)
       # 0x00FF0000 = Number of input arguments
@@ -152,12 +152,12 @@ def ioctl(fd, request, argp):
             #   hexdump(to_mv(z, 0x200))
       #print(format_struct(st.pra)))
     elif nr == 6:
-      print(ret, "FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
+      print(ret, "FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_init)))
       print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
       # print(bytearray(to_mv(ini.file, ini.filelen)))
     elif nr == 7:
-      print(ret, "FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
-    elif nr == 12: print(ret, "FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
+      print(ret, "FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke_attrs)))
+    elif nr == 12: print(ret, "FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_control)))
     else:
       print(f"{ret} UNPARSED {nr}")
   else:
@@ -204,30 +204,36 @@ def send_rpc_invoke(filename):
 if __name__ == "__main__":
   print("calculator_open")
   # /dsp/cdsp/fastrpc_shell_3
+
   handle = ctypes.c_int64(-1)
-  z = adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp"),
+  z = adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:////tmp/tmpfdxqhu4h?entry&_modver=1.0&_dom=cdsp"),
                             ctypes.byref(handle))
   
-  for i in range(15):
-    try: print(i, os.readlink(f"/proc/self/fd/{i}"))
-    except: pass
+  # for i in range(15):
+  #   try: print(i, os.readlink(f"/proc/self/fd/{i}"))
+  #   except: pass
   
   print("handle", z, hex(handle.value))
-  assert handle.value != -1
-  test = (ctypes.c_int32 * 100)()
-  for i in range(100): test[i] = i
-  print("calculator_sum")
-  pra = (adsprpc.union_remote_arg64 * 3)()
-  #arg_0 = ctypes.c_int32(100)
-  arg_0 = ctypes.c_int32(100)
-  arg_2 = ctypes.c_int64(-1)
-  pra[0].buf.pv = ctypes.addressof(arg_0)
-  pra[0].buf.len = 4
-  pra[1].buf.pv = ctypes.addressof(test)
-  pra[1].buf.len = 0x190
-  pra[2].buf.pv = ctypes.addressof(arg_2)
-  pra[2].buf.len = 8
-  adsp.remote_handle64_invoke(handle, (2<<24) | (2<<16) | (1<<8), pra)
-  print(arg_2.value)
-  print("done")
+  # assert handle.value != -1
+  # test = (ctypes.c_int32 * 100)()
+  # for i in range(100): test[i] = i
+  # print("calculator_sum")
+  # pra = (qcom_dsp.union_remote_arg64 * 3)()
+  # #arg_0 = ctypes.c_int32(100)
+  # arg_0 = ctypes.c_int32(100)
+  # arg_2 = ctypes.c_int64(-1)
+  # pra[0].buf.pv = ctypes.addressof(arg_0)
+  # pra[0].buf.len = 4
+  # pra[1].buf.pv = ctypes.addressof(test)
+  # pra[1].buf.len = 0x190
+  # pra[2].buf.pv = ctypes.addressof(arg_2)
+  # pra[2].buf.len = 8
+  # adsp.remote_handle64_invoke(handle, (2<<24) | (2<<16) | (1<<8), pra)
+  # print(arg_2.value)
+  # print("done")
+
+  print("closing")
+  x = adsp.remote_handle64_close(handle)
+  print(x)
+  print("dun")
   os._exit(0)
