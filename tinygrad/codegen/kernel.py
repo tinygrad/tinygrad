@@ -426,8 +426,6 @@ class Kernel:
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
-      if prod(self.full_shape[self.upcasted:]) * amt > 8: return
-
       check(axis < self.first_upcast, "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
       # TODO: fix upcast_count to put purples before yellows. broken because of METAL tensor cores
@@ -438,8 +436,6 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCAST:                     # yellow
-      if prod(self.full_shape[self.upcasted:]) * amt > 8: return
-
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.threads)), "can't upcast TC locals")
       check(amt <= 16, "don't upcast more than 16")

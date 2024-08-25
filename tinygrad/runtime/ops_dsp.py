@@ -15,9 +15,8 @@ class DSPProgram:
     with tempfile.NamedTemporaryFile(delete=False) as output_file:
       output_file.write(lib)
       output_file.flush()
-
+    if DEBUG >= 6: os.system(f"llvm-objdump -mhvx -d {output_file.name}")
     self.device, self.lib, self.unique_filepath = device, lib, output_file.name
-    self.device._register_lib(self.unique_filepath, self.lib)
 
   def __del__(self):
     self.device._unregister_lib(self.unique_filepath)
@@ -35,9 +34,7 @@ class DSPProgram:
 
     pra[0].buf.pv, pra[0].buf.len = mv_address(var_vals_mv), var_vals_mv.nbytes
     pra[1].buf.pv, pra[1].buf.len = mv_address(timer), timer.nbytes
-    for i,b in enumerate(bufs):
-      pra[i+2].dma.fd = b.share_info.fd
-      pra[i+2].dma.len = b.size
+    for i,b in enumerate(bufs): pra[i+2].dma.fd, pra[i+2].dma.len = b.share_info.fd, b.size
 
     handle = self.device._ensure_lib_opened(self.unique_filepath)
     if (ret:=adsp.remote_handle64_invoke(handle, (2<<24) | (1<<16) | (1<<8) | len(bufs), pra)) != 0:
@@ -73,9 +70,7 @@ class DSPDevice(Compiled):
     self.loaded_libs, self.lru_lib_order = {}, []
 
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128B"]
-    super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp2", args=compiler_args), functools.partial(DSPProgram, self))
-
-  def _register_lib(self, libname, lib): pass
+    super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp", args=compiler_args), functools.partial(DSPProgram, self))
 
   def _close_lib(self, libname):
     if (ret:=adsp.remote_handle64_close(self.loaded_libs[libname])) != 0: raise RuntimeError(f"Failed to close library {libname}: {ret}")

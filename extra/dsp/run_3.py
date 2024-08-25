@@ -23,76 +23,6 @@ def ioctl(fd, request, argp):
   fn = os.readlink(f"/proc/self/fd/{fd}")
   idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
 
-  # if fn == "/dev/adsprpc-smd":
-  #   if nr == 1:
-  #     st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke)
-  #     method = (st.sc>>24) & 0xFF
-  #     in_args = (st.sc>>16) & 0xFF
-  #     out_args = (st.sc>>8) & 0xFF
-  #     if out_args:
-  #       for arg in range(in_args, in_args+out_args):
-  #         ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
-
-  # if fn == "/dev/ion":
-  #   if nr == 0:
-  #     st = get_struct(argp, qcom_dsp.struct_ion_allocation_data)
-  #     print("bef ION_IOC_ALLOC", format_struct(st))
-  #   elif nr == 1:
-  #     st = get_struct(argp, qcom_dsp.struct_ion_handle_data)
-  #     print("bef ION_IOC_FREE", format_struct(st))
-  #   elif nr == 2:
-  #     st = get_struct(argp, qcom_dsp.struct_ion_fd_data)
-  #     print("bef ION_IOC_MAP", format_struct(st))
-  # elif fn == "/dev/adsprpc-smd":
-  #   assert chr(itype) == 'R'
-  #   if nr == 8:
-  #     st = ctypes.c_uint32.from_address(argp)
-  #     print("bef FASTRPC_IOCTL_GETINFO", st.value)
-  #   elif nr == 2:
-  #     st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_mmap)
-  #     print("bef FASTRPC_IOCTL_MMAP", format_struct(st))
-  #   elif nr == 1:
-  #     # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
-  #     st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke)
-  #     print("bef FASTRPC_IOCTL_INVOKE", format_struct(st))
-  #     method = (st.sc>>24) & 0xFF
-  #     in_args = (st.sc>>16) & 0xFF
-  #     out_args = (st.sc>>8) & 0xFF
-  #     in_h = (st.sc>>4) & 0xF
-  #     out_h = (st.sc>>0) & 0xF
-
-  #     # if in_args == 2:
-  #     #   if st.pra[1].buf.len == 0x52:
-  #     #     print("sleep", libc.gettid())
-  #     #     time.sleep(20)
-
-  #     # if 
-
-  #     print(f"\tm:{method} ia:{in_args} oa:{out_args} ih:{in_h} oh:{out_h}")
-  #     if in_args or out_args:
-  #       for arg in range(in_args+out_args):
-  #         print(arg, format_struct(st.pra[arg]))
-  #         # print(arg, f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
-  #         # print("input" if arg < in_args else "output", f"arg (0x{st.pra[arg].buf.pv:X} len=0x{st.pra[arg].buf.len:X})")
-  #         if st.pra[arg].buf.len == 0x258:
-  #           print(bytearray(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)))
-
-  #         if st.pra[arg].buf.pv is not None:
-  #           hexdump(to_mv(st.pra[arg].buf.pv, st.pra[arg].buf.len)[:0x40])
-  #           if arg >= in_args: ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
-  #     #print(format_struct(st.pra)))
-  #   elif nr == 6:
-  #     print("bef FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_init)))
-  #     print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
-  #     # print(bytearray(to_mv(ini.file, ini.filelen)))
-  #   elif nr == 7:
-  #     print("bef FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke_attrs)))
-  #   elif nr == 12: print("bef FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_control)))
-  #   else:
-  #     print(f"bef UNPARSED {nr}")
-  # else:
-  #   print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=}", fn)
-
   # print("enter", libc.gettid())
   ret = libc.syscall(0x1d, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
   # print("done", libc.gettid())
@@ -330,8 +260,6 @@ if __name__ == "__main__":
   with contextlib.suppress(RuntimeError, OSError): qcom_dsp.ION_IOC_FREE(ionfd, handle=0)
   info = qcom_dsp.FASTRPC_IOCTL_GETINFO(rpcfd, 3)
   # x = qcom_dsp.FASTRPC_IOCTL_SETMODE(rpcfd, 0, __force_as_val=True)
-  # print(x)
-  # print(info)
 
   # init shell?
   fastrpc_shell = memoryview(bytearray(pathlib.Path('/vendor/dsp/cdsp/fastrpc_shell_3').read_bytes()))
@@ -379,80 +307,6 @@ if __name__ == "__main__":
   pra[2].buf.len = 8
   qcom_dsp.FASTRPC_IOCTL_INVOKE(rpcfd, handle=prg_handle, sc=(2<<24) | (2<<16) | (1<<8), pra=pra)
 
-  temp_dir = '/tmp'
-
-  cnt = 0
-  for filename in os.listdir(temp_dir):
-    if filename.startswith('qbbkk_'):
-      if filename not in {"qbbkk_8x40_mve"}: continue
-
-      print(filename, cnt)
-      fp = f"file:////tmp/{filename}?entry&_modver=1.0&_dom=cdsp\0"
-      a1 = memoryview(array.array('I', [len(fp), 0xff]))
-      a2 = memoryview(bytearray(f"{fp}".encode()))
-      o1 = memoryview(bytearray(0x8))
-      o2 = memoryview(bytearray(0xff))
-      z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
-      prg_handle = o1.cast('I')[0]
-      print(hex(prg_handle))
-      cnt += 1
-      # qcom_dsp.FASTRPC_IOCTL_INVOKE(rpcfd, handle=prg_handle, sc=(2<<24) | (2<<16) | (1<<8), pra=pra)
-
-  assert False
-  # for i in range(100000):
-  #   # os.symlink("libcalculator_skel.so", f"libcalculator_skel{i}.so")
-
-  #   fp = f"file:///libcalculator_skel.so?entry&_modver=1.0&_dom=cdsp\0"
-  #   a1 = memoryview(array.array('I', [len(fp), 0xff]))
-  #   a2 = memoryview(bytearray(f"{fp}".encode()))
-  #   o1 = memoryview(bytearray(0x8))
-  #   o2 = memoryview(bytearray(0xff))
-  #   z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
-  #   prg_handle = o1.cast('I')[0]
-  #   qcom_dsp.FASTRPC_IOCTL_INVOKE(rpcfd, handle=prg_handle, sc=(2<<24) | (2<<16) | (1<<8), pra=pra)
-
-    # os.unlink(f"libcalculator_skel{i}.so")
-
-  print(arg_2.value)
-  print("done")
-  os._exit(0)
-
-  assert False
-
-  # thread.join()
-
-  # a1 = memoryview(bytearray(b'\x00\x00\x00\x00\xFF\xFF\xFF\xFF\x00\x00\x00\x00\x00\x00\x00\x00'))
-  # a2 = memoryview(bytearray())
-  # o1 = memoryview(bytearray(0x10))
-  # o2 = memoryview(bytearray())
-  # rpc_invoke(rpcfd, handle=3, method=4, ins=[a1, a2], outs=[o1, o2])
-
-  os._exit(0)
-
-
-
-  
-
-  # /dsp/cdsp/fastrpc_shell_3
-  handle = ctypes.c_int64(-1)
-  z = adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp"),
-                            ctypes.byref(handle))
-  print("handle", z, hex(handle.value))
-  assert handle.value != -1
-  test = (ctypes.c_int32 * 100)()
-  for i in range(100): test[i] = i
-  print("calculator_sum")
-  pra = (qcom_dsp.union_remote_arg * 3)()
-  #arg_0 = ctypes.c_int32(100)
-  arg_0 = ctypes.c_int32(100)
-  arg_2 = ctypes.c_int64(-1)
-  pra[0].buf.pv = ctypes.addressof(arg_0)
-  pra[0].buf.len = 4
-  pra[1].buf.pv = ctypes.addressof(test)
-  pra[1].buf.len = 0x190
-  pra[2].buf.pv = ctypes.addressof(arg_2)
-  pra[2].buf.len = 8
-  adsp.remote_handle64_invoke(handle, (2<<24) | (2<<16) | (1<<8), pra)
   print(arg_2.value)
   print("done")
   os._exit(0)

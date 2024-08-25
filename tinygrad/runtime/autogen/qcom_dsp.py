@@ -119,17 +119,9 @@ class Union(ctypes.Union, AsDictMixin):
 
 
 import fcntl, functools
-libc = ctypes.CDLL(ctypes.util.find_library("libc"))
 
-def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, *args, **kwargs):
-  __force_as_val = kwargs.pop("__force_as_val") if "__force_as_val" in kwargs else False
-  made = __user_struct(*args, **kwargs)
-#   ret = fcntl.ioctl(__fd, (__idir<<30) | (ctypes.sizeof(made := __user_struct(*args, **kwargs))<<16) | (__base<<8) | __nr, made)
-  req = (__idir<<30) | (ctypes.sizeof(made)<<16) | (__base<<8) | __nr
-  # print(hex(ctypes.addressof(made)))
-  # print(__force_as_val, made if __force_as_val else ctypes.addressof(made))
-  # print(ctypes.c_void_p(made if __force_as_val else ctypes.addressof(made)))
-  ret = libc.ioctl(ctypes.c_int(__fd), ctypes.c_ulong(req), ctypes.c_void_p(made.value if __force_as_val else ctypes.addressof(made)))
+def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, **kwargs):
+  ret = fcntl.ioctl(__fd, (__idir<<30) | (ctypes.sizeof(made := __user_struct(**kwargs))<<16) | (__base<<8) | __nr, made)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
   return made
 
@@ -157,6 +149,25 @@ class FunctionFactoryStub:
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
 _libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL('FIXME_STUB')
+def string_cast(char_pointer, encoding='utf-8', errors='strict'):
+    value = ctypes.cast(char_pointer, ctypes.c_char_p).value
+    if value is not None and encoding is not None:
+        value = value.decode(encoding, errors=errors)
+    return value
+
+
+def char_pointer_cast(string, encoding='utf-8'):
+    if encoding is not None:
+        try:
+            string = string.encode(encoding)
+        except AttributeError:
+            # In Python3, bytes has no encode attribute
+            pass
+    string = ctypes.c_char_p(string)
+    return ctypes.cast(string, ctypes.POINTER(ctypes.c_char))
+
+
+
 
 
 _UAPI_LINUX_ION_H = True # macro
@@ -423,18 +434,20 @@ FASTRPC_INIT_ATTACH = 0 # macro
 FASTRPC_INIT_CREATE = 1 # macro
 FASTRPC_INIT_CREATE_STATIC = 2 # macro
 FASTRPC_INIT_ATTACH_SENSORS = 3 # macro
-def REMOTE_SCALARS_INBUFS(sc):  # macro
-   return (((sc)>>16)&0x0ff)
-def REMOTE_SCALARS_OUTBUFS(sc):  # macro
-   return (((sc)>>8)&0x0ff)
-def REMOTE_SCALARS_INHANDLES(sc):  # macro
-   return (((sc)>>4)&0x0f)
-def REMOTE_SCALARS_OUTHANDLES(sc):  # macro
-   return ((sc)&0x0f)
+def REMOTE_SCALARS_INBUFS(dwScalars):  # macro
+   return (((dwScalars)>>16)&0x0ff)
+def REMOTE_SCALARS_OUTBUFS(dwScalars):  # macro
+   return (((dwScalars)>>8)&0x0ff)
+def REMOTE_SCALARS_INHANDLES(dwScalars):  # macro
+   return (((dwScalars)>>4)&0x0f)
+def REMOTE_SCALARS_OUTHANDLES(dwScalars):  # macro
+   return ((dwScalars)&0x0f)
 def REMOTE_SCALARS_LENGTH(sc):  # macro
    return (REMOTE_SCALARS_INBUFS(sc)+REMOTE_SCALARS_OUTBUFS(sc)+REMOTE_SCALARS_INHANDLES(sc)+REMOTE_SCALARS_OUTHANDLES(sc))
-def REMOTE_SCALARS_MAKE(method, __in, out):  # macro
-   return REMOTE_SCALARS_MAKEX(0,method,__in,out,0,0)
+def REMOTE_SCALARS_MAKEX(nAttr, nMethod, nIn, nOut, noIn, noOut):  # macro
+   return ((((nAttr)&0x7)<<29)|(((nMethod)&0x1f)<<24)|(((nIn)&0xff)<<16)|(((nOut)&0xff)<<8)|(((noIn)&0x0f)<<4)|((noOut)&0x0f))
+def REMOTE_SCALARS_MAKE(nMethod, nIn, nOut):  # macro
+   return REMOTE_SCALARS_MAKEX(0,nMethod,nIn,nOut,0,0)
 # def VERIFY_EPRINTF(format, args):  # macro
 #    return (void)0
 # def VERIFY_IPRINTF(args):  # macro
@@ -447,7 +460,6 @@ def __TOSTR__(x):  # macro
 # def VERIFY(err, val):  # macro
 #    return {VERIFY_IPRINTF(__FILE__":"__TOSTR__(__LINE__)"info: calling: "#val"\n");((val)==0){(err)=(err)==0?-1:(err);VERIFY_EPRINTF(__FILE__":"__TOSTR__(__LINE__)"error: %d: "#val"\n",(err));}{VERIFY_IPRINTF(__FILE__":"__TOSTR__(__LINE__)"info: passed: "#val"\n");}\}(0)
 # remote_arg64_t = remote_arg64 # macro
-# remote_arg_t = remote_arg # macro
 FASTRPC_CONTROL_LATENCY = (1) # macro
 FASTRPC_CONTROL_SMMU = (2) # macro
 FASTRPC_CONTROL_KALLOC = (3) # macro
@@ -756,8 +768,6 @@ struct_smq_invoke_rsp._fields_ = [
 uint32_t = ctypes.c_uint32
 FASTRPC_IOCTL_SETMODE = _IOWR ( 'R' , 5 , uint32_t ) # macro (from list)
 FASTRPC_IOCTL_GETINFO = _IOWR ( 'R' , 8 , uint32_t ) # macro (from list)
-def REMOTE_SCALARS_MAKEX(attr, method, __in, out, oin, oout):  # macro
-   return ((((uint32_t)(attr)&0x7)<<29)|(((uint32_t)(method)&0x1f)<<24)|(((uint32_t)(__in)&0xff)<<16)|(((uint32_t)(out)&0xff)<<8)|(((uint32_t)(oin)&0x0f)<<4)|((uint32_t)(oout)&0x0f))
 try:
     smq_invoke_buf_start = _libraries['FIXME_STUB'].smq_invoke_buf_start
     smq_invoke_buf_start.restype = ctypes.POINTER(struct_smq_invoke_buf)
@@ -770,18 +780,558 @@ try:
     smq_phy_page_start.argtypes = [uint32_t, ctypes.POINTER(struct_smq_invoke_buf)]
 except AttributeError:
     pass
+REMOTE_DEFAULT_H = True # macro
+def REMOTE_SCALARS_METHOD_ATTR(dwScalars):  # macro
+   return (((dwScalars)>>29)&0x7)
+def REMOTE_SCALARS_METHOD(dwScalars):  # macro
+   return (((dwScalars)>>24)&0x1f)
+def __QAIC_REMOTE(ff):  # macro
+   return ff
+__QAIC_REMOTE_EXPORT = True # macro
+__QAIC_REMOTE_ATTRIBUTE = True # macro
+NUM_DOMAINS = 4 # macro
+NUM_SESSIONS = 2 # macro
+DOMAIN_ID_MASK = 3 # macro
+DEFAULT_DOMAIN_ID = 0 # macro
+ADSP_DOMAIN_ID = 0 # macro
+MDSP_DOMAIN_ID = 1 # macro
+SDSP_DOMAIN_ID = 2 # macro
+CDSP_DOMAIN_ID = 3 # macro
+ADSP_DOMAIN = "&_dom=adsp" # macro
+MDSP_DOMAIN = "&_dom=mdsp" # macro
+SDSP_DOMAIN = "&_dom=sdsp" # macro
+CDSP_DOMAIN = "&_dom=cdsp" # macro
+FASTRPC_WAKELOCK_CONTROL_SUPPORTED = 1 # macro
+REMOTE_MODE_PARALLEL = 0 # macro
+REMOTE_MODE_SERIAL = 1 # macro
+# ITRANSPORT_PREFIX = "'\":;./\\" # macro
+remote_handle = ctypes.c_uint32
+remote_handle64 = ctypes.c_uint64
+fastrpc_async_jobid = ctypes.c_uint64
+class struct_c__SA_remote_buf(Structure):
+    pass
+
+struct_c__SA_remote_buf._pack_ = 1 # source:False
+struct_c__SA_remote_buf._fields_ = [
+    ('pv', ctypes.POINTER(None)),
+    ('nLen', ctypes.c_uint64),
+]
+
+remote_buf = struct_c__SA_remote_buf
+class struct_c__SA_remote_dma_handle(Structure):
+    pass
+
+struct_c__SA_remote_dma_handle._pack_ = 1 # source:False
+struct_c__SA_remote_dma_handle._fields_ = [
+    ('fd', ctypes.c_int32),
+    ('offset', ctypes.c_uint32),
+]
+
+remote_dma_handle = struct_c__SA_remote_dma_handle
+class union_c__UA_remote_arg(Union):
+    pass
+
+union_c__UA_remote_arg._pack_ = 1 # source:False
+union_c__UA_remote_arg._fields_ = [
+    ('buf', remote_buf),
+    ('h', ctypes.c_uint32),
+    ('h64', ctypes.c_uint64),
+    ('dma', remote_dma_handle),
+    ('PADDING_0', ctypes.c_ubyte * 8),
+]
+
+remote_arg = union_c__UA_remote_arg
+remote_arg_t = remote_arg # macro
+
+# values for enumeration 'fastrpc_async_notify_type'
+fastrpc_async_notify_type__enumvalues = {
+    0: 'FASTRPC_ASYNC_NO_SYNC',
+    1: 'FASTRPC_ASYNC_CALLBACK',
+    2: 'FASTRPC_ASYNC_POLL',
+    3: 'FASTRPC_ASYNC_TYPE_MAX',
+}
+FASTRPC_ASYNC_NO_SYNC = 0
+FASTRPC_ASYNC_CALLBACK = 1
+FASTRPC_ASYNC_POLL = 2
+FASTRPC_ASYNC_TYPE_MAX = 3
+fastrpc_async_notify_type = ctypes.c_uint32 # enum
+class struct_fastrpc_async_callback(Structure):
+    pass
+
+struct_fastrpc_async_callback._pack_ = 1 # source:False
+struct_fastrpc_async_callback._fields_ = [
+    ('fn', ctypes.CFUNCTYPE(None, ctypes.c_uint64, ctypes.POINTER(None), ctypes.c_int32)),
+    ('context', ctypes.POINTER(None)),
+]
+
+fastrpc_async_callback_t = struct_fastrpc_async_callback
+class struct_fastrpc_async_descriptor(Structure):
+    pass
+
+class union_fastrpc_async_descriptor_0(Union):
+    _pack_ = 1 # source:False
+    _fields_ = [
+    ('cb', fastrpc_async_callback_t),
+     ]
+
+struct_fastrpc_async_descriptor._pack_ = 1 # source:False
+struct_fastrpc_async_descriptor._anonymous_ = ('_0',)
+struct_fastrpc_async_descriptor._fields_ = [
+    ('type', fastrpc_async_notify_type),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('jobid', ctypes.c_uint64),
+    ('_0', union_fastrpc_async_descriptor_0),
+]
+
+fastrpc_async_descriptor_t = struct_fastrpc_async_descriptor
+
+# values for enumeration 'fastrpc_process_type'
+fastrpc_process_type__enumvalues = {
+    0: 'PROCESS_TYPE_SIGNED',
+    1: 'PROCESS_TYPE_UNSIGNED',
+}
+PROCESS_TYPE_SIGNED = 0
+PROCESS_TYPE_UNSIGNED = 1
+fastrpc_process_type = ctypes.c_uint32 # enum
+try:
+    remote_handle_open = _libraries['FIXME_STUB'].remote_handle_open
+    remote_handle_open.restype = ctypes.c_int32
+    remote_handle_open.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    remote_handle64_open = _libraries['FIXME_STUB'].remote_handle64_open
+    remote_handle64_open.restype = ctypes.c_int32
+    remote_handle64_open.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
+    remote_handle_invoke = _libraries['FIXME_STUB'].remote_handle_invoke
+    remote_handle_invoke.restype = ctypes.c_int32
+    remote_handle_invoke.argtypes = [remote_handle, uint32_t, ctypes.POINTER(union_c__UA_remote_arg)]
+except AttributeError:
+    pass
+try:
+    remote_handle64_invoke = _libraries['FIXME_STUB'].remote_handle64_invoke
+    remote_handle64_invoke.restype = ctypes.c_int32
+    remote_handle64_invoke.argtypes = [remote_handle64, uint32_t, ctypes.POINTER(union_c__UA_remote_arg)]
+except AttributeError:
+    pass
+try:
+    remote_handle_invoke_async = _libraries['FIXME_STUB'].remote_handle_invoke_async
+    remote_handle_invoke_async.restype = ctypes.c_int32
+    remote_handle_invoke_async.argtypes = [remote_handle, ctypes.POINTER(struct_fastrpc_async_descriptor), uint32_t, ctypes.POINTER(union_c__UA_remote_arg)]
+except AttributeError:
+    pass
+try:
+    remote_handle64_invoke_async = _libraries['FIXME_STUB'].remote_handle64_invoke_async
+    remote_handle64_invoke_async.restype = ctypes.c_int32
+    remote_handle64_invoke_async.argtypes = [remote_handle64, ctypes.POINTER(struct_fastrpc_async_descriptor), uint32_t, ctypes.POINTER(union_c__UA_remote_arg)]
+except AttributeError:
+    pass
+try:
+    remote_handle_close = _libraries['FIXME_STUB'].remote_handle_close
+    remote_handle_close.restype = ctypes.c_int32
+    remote_handle_close.argtypes = [remote_handle]
+except AttributeError:
+    pass
+try:
+    remote_handle64_close = _libraries['FIXME_STUB'].remote_handle64_close
+    remote_handle64_close.restype = ctypes.c_int32
+    remote_handle64_close.argtypes = [remote_handle64]
+except AttributeError:
+    pass
+
+# values for enumeration 'handle_control_req_id'
+handle_control_req_id__enumvalues = {
+    1: 'DSPRPC_CONTROL_LATENCY',
+    2: 'DSPRPC_GET_DSP_INFO',
+    3: 'DSPRPC_CONTROL_WAKELOCK',
+    4: 'DSPRPC_GET_DOMAIN',
+}
+DSPRPC_CONTROL_LATENCY = 1
+DSPRPC_GET_DSP_INFO = 2
+DSPRPC_CONTROL_WAKELOCK = 3
+DSPRPC_GET_DOMAIN = 4
+handle_control_req_id = ctypes.c_uint32 # enum
+
+# values for enumeration 'remote_rpc_latency_flags'
+remote_rpc_latency_flags__enumvalues = {
+    0: 'RPC_DISABLE_QOS',
+    1: 'RPC_PM_QOS',
+    2: 'RPC_ADAPTIVE_QOS',
+    3: 'RPC_POLL_QOS',
+}
+RPC_DISABLE_QOS = 0
+RPC_PM_QOS = 1
+RPC_ADAPTIVE_QOS = 2
+RPC_POLL_QOS = 3
+remote_rpc_latency_flags = ctypes.c_uint32 # enum
+remote_rpc_control_latency_t = remote_rpc_latency_flags
+remote_rpc_control_latency_t__enumvalues = remote_rpc_latency_flags__enumvalues
+class struct_remote_rpc_control_latency(Structure):
+    pass
+
+struct_remote_rpc_control_latency._pack_ = 1 # source:False
+struct_remote_rpc_control_latency._fields_ = [
+    ('enable', remote_rpc_control_latency_t),
+    ('latency', ctypes.c_uint32),
+]
+
+
+# values for enumeration 'remote_dsp_attributes'
+remote_dsp_attributes__enumvalues = {
+    0: 'DOMAIN_SUPPORT',
+    1: 'UNSIGNED_PD_SUPPORT',
+    2: 'HVX_SUPPORT_64B',
+    3: 'HVX_SUPPORT_128B',
+    4: 'VTCM_PAGE',
+    5: 'VTCM_COUNT',
+    6: 'ARCH_VER',
+    7: 'HMX_SUPPORT_DEPTH',
+    8: 'HMX_SUPPORT_SPATIAL',
+    9: 'ASYNC_FASTRPC_SUPPORT',
+    10: 'STATUS_NOTIFICATION_SUPPORT',
+    11: 'FASTRPC_MAX_DSP_ATTRIBUTES',
+}
+DOMAIN_SUPPORT = 0
+UNSIGNED_PD_SUPPORT = 1
+HVX_SUPPORT_64B = 2
+HVX_SUPPORT_128B = 3
+VTCM_PAGE = 4
+VTCM_COUNT = 5
+ARCH_VER = 6
+HMX_SUPPORT_DEPTH = 7
+HMX_SUPPORT_SPATIAL = 8
+ASYNC_FASTRPC_SUPPORT = 9
+STATUS_NOTIFICATION_SUPPORT = 10
+FASTRPC_MAX_DSP_ATTRIBUTES = 11
+remote_dsp_attributes = ctypes.c_uint32 # enum
+class struct_remote_dsp_capability(Structure):
+    pass
+
+struct_remote_dsp_capability._pack_ = 1 # source:False
+struct_remote_dsp_capability._fields_ = [
+    ('domain', ctypes.c_uint32),
+    ('attribute_ID', ctypes.c_uint32),
+    ('capability', ctypes.c_uint32),
+]
+
+fastrpc_capability = struct_remote_dsp_capability
+class struct_remote_rpc_control_wakelock(Structure):
+    pass
+
+struct_remote_rpc_control_wakelock._pack_ = 1 # source:False
+struct_remote_rpc_control_wakelock._fields_ = [
+    ('enable', ctypes.c_uint32),
+]
+
+class struct_remote_rpc_get_domain(Structure):
+    pass
+
+struct_remote_rpc_get_domain._pack_ = 1 # source:False
+struct_remote_rpc_get_domain._fields_ = [
+    ('domain', ctypes.c_int32),
+]
+
+remote_rpc_get_domain_t = struct_remote_rpc_get_domain
+try:
+    remote_handle_control = _libraries['FIXME_STUB'].remote_handle_control
+    remote_handle_control.restype = ctypes.c_int32
+    remote_handle_control.argtypes = [uint32_t, ctypes.POINTER(None), uint32_t]
+except AttributeError:
+    pass
+try:
+    remote_handle64_control = _libraries['FIXME_STUB'].remote_handle64_control
+    remote_handle64_control.restype = ctypes.c_int32
+    remote_handle64_control.argtypes = [remote_handle64, uint32_t, ctypes.POINTER(None), uint32_t]
+except AttributeError:
+    pass
+
+# values for enumeration 'session_control_req_id'
+session_control_req_id__enumvalues = {
+    1: 'FASTRPC_THREAD_PARAMS',
+    2: 'DSPRPC_CONTROL_UNSIGNED_MODULE',
+    4: 'FASTRPC_RELATIVE_THREAD_PRIORITY',
+    6: 'FASTRPC_REMOTE_PROCESS_KILL',
+    7: 'FASTRPC_SESSION_CLOSE',
+    8: 'FASTRPC_CONTROL_PD_DUMP',
+    9: 'FASTRPC_REMOTE_PROCESS_EXCEPTION',
+    10: 'FASTRPC_REMOTE_PROCESS_TYPE',
+    11: 'FASTRPC_REGISTER_STATUS_NOTIFICATIONS',
+}
+FASTRPC_THREAD_PARAMS = 1
+DSPRPC_CONTROL_UNSIGNED_MODULE = 2
+FASTRPC_RELATIVE_THREAD_PRIORITY = 4
+FASTRPC_REMOTE_PROCESS_KILL = 6
+FASTRPC_SESSION_CLOSE = 7
+FASTRPC_CONTROL_PD_DUMP = 8
+FASTRPC_REMOTE_PROCESS_EXCEPTION = 9
+FASTRPC_REMOTE_PROCESS_TYPE = 10
+FASTRPC_REGISTER_STATUS_NOTIFICATIONS = 11
+session_control_req_id = ctypes.c_uint32 # enum
+class struct_remote_rpc_thread_params(Structure):
+    pass
+
+struct_remote_rpc_thread_params._pack_ = 1 # source:False
+struct_remote_rpc_thread_params._fields_ = [
+    ('domain', ctypes.c_int32),
+    ('prio', ctypes.c_int32),
+    ('stack_size', ctypes.c_int32),
+]
+
+class struct_remote_rpc_control_unsigned_module(Structure):
+    pass
+
+struct_remote_rpc_control_unsigned_module._pack_ = 1 # source:False
+struct_remote_rpc_control_unsigned_module._fields_ = [
+    ('domain', ctypes.c_int32),
+    ('enable', ctypes.c_int32),
+]
+
+class struct_remote_rpc_relative_thread_priority(Structure):
+    pass
+
+struct_remote_rpc_relative_thread_priority._pack_ = 1 # source:False
+struct_remote_rpc_relative_thread_priority._fields_ = [
+    ('domain', ctypes.c_int32),
+    ('relative_thread_priority', ctypes.c_int32),
+]
+
+class struct_remote_rpc_process_clean_params(Structure):
+    pass
+
+struct_remote_rpc_process_clean_params._pack_ = 1 # source:False
+struct_remote_rpc_process_clean_params._fields_ = [
+    ('domain', ctypes.c_int32),
+]
+
+class struct_remote_rpc_session_close(Structure):
+    pass
+
+struct_remote_rpc_session_close._pack_ = 1 # source:False
+struct_remote_rpc_session_close._fields_ = [
+    ('domain', ctypes.c_int32),
+]
+
+class struct_remote_rpc_control_pd_dump(Structure):
+    pass
+
+struct_remote_rpc_control_pd_dump._pack_ = 1 # source:False
+struct_remote_rpc_control_pd_dump._fields_ = [
+    ('domain', ctypes.c_int32),
+    ('enable', ctypes.c_int32),
+]
+
+class struct_remote_process_type(Structure):
+    pass
+
+struct_remote_process_type._pack_ = 1 # source:False
+struct_remote_process_type._fields_ = [
+    ('domain', ctypes.c_int32),
+    ('process_type', ctypes.c_int32),
+]
+
+remote_rpc_process_exception = struct_remote_rpc_process_clean_params
+
+# values for enumeration 'remote_rpc_status_flags'
+remote_rpc_status_flags__enumvalues = {
+    0: 'FASTRPC_USER_PD_UP',
+    1: 'FASTRPC_USER_PD_EXIT',
+    2: 'FASTRPC_USER_PD_FORCE_KILL',
+    3: 'FASTRPC_USER_PD_EXCEPTION',
+    4: 'FASTRPC_DSP_SSR',
+}
+FASTRPC_USER_PD_UP = 0
+FASTRPC_USER_PD_EXIT = 1
+FASTRPC_USER_PD_FORCE_KILL = 2
+FASTRPC_USER_PD_EXCEPTION = 3
+FASTRPC_DSP_SSR = 4
+remote_rpc_status_flags = ctypes.c_uint32 # enum
+remote_rpc_status_flags_t = remote_rpc_status_flags
+remote_rpc_status_flags_t__enumvalues = remote_rpc_status_flags__enumvalues
+fastrpc_notif_fn_t = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.c_int32, ctypes.c_int32, remote_rpc_status_flags)
+class struct_remote_rpc_notif_register(Structure):
+    pass
+
+struct_remote_rpc_notif_register._pack_ = 1 # source:False
+struct_remote_rpc_notif_register._fields_ = [
+    ('context', ctypes.POINTER(None)),
+    ('domain', ctypes.c_int32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('notifier_fn', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.c_int32, ctypes.c_int32, remote_rpc_status_flags)),
+]
+
+remote_rpc_notif_register_t = struct_remote_rpc_notif_register
+try:
+    remote_session_control = _libraries['FIXME_STUB'].remote_session_control
+    remote_session_control.restype = ctypes.c_int32
+    remote_session_control.argtypes = [uint32_t, ctypes.POINTER(None), uint32_t]
+except AttributeError:
+    pass
+try:
+    remote_mmap = _libraries['FIXME_STUB'].remote_mmap
+    remote_mmap.restype = ctypes.c_int32
+    remote_mmap.argtypes = [ctypes.c_int32, uint32_t, uint32_t, ctypes.c_int32, ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    remote_munmap = _libraries['FIXME_STUB'].remote_munmap
+    remote_munmap.restype = ctypes.c_int32
+    remote_munmap.argtypes = [uint32_t, ctypes.c_int32]
+except AttributeError:
+    pass
+
+# values for enumeration 'remote_mem_map_flags'
+remote_mem_map_flags__enumvalues = {
+    0: 'REMOTE_MAP_MEM_STATIC',
+    1: 'REMOTE_MAP_MAX_FLAG',
+}
+REMOTE_MAP_MEM_STATIC = 0
+REMOTE_MAP_MAX_FLAG = 1
+remote_mem_map_flags = ctypes.c_uint32 # enum
+uint64_t = ctypes.c_uint64
+size_t = ctypes.c_uint64
+try:
+    remote_mem_map = _libraries['FIXME_STUB'].remote_mem_map
+    remote_mem_map.restype = ctypes.c_int32
+    remote_mem_map.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, uint64_t, size_t, ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
+    remote_mem_unmap = _libraries['FIXME_STUB'].remote_mem_unmap
+    remote_mem_unmap.restype = ctypes.c_int32
+    remote_mem_unmap.argtypes = [ctypes.c_int32, uint64_t, size_t]
+except AttributeError:
+    pass
+
+# values for enumeration 'remote_buf_attributes'
+remote_buf_attributes__enumvalues = {
+    2: 'FASTRPC_ATTR_NON_COHERENT',
+    4: 'FASTRPC_ATTR_COHERENT',
+    8: 'FASTRPC_ATTR_KEEP_MAP',
+    16: 'FASTRPC_ATTR_NOMAP',
+    32: 'FASTRPC_ATTR_FORCE_NOFLUSH',
+    64: 'FASTRPC_ATTR_FORCE_NOINVALIDATE',
+    128: 'FASTRPC_ATTR_TRY_MAP_STATIC',
+}
+FASTRPC_ATTR_NON_COHERENT = 2
+FASTRPC_ATTR_COHERENT = 4
+FASTRPC_ATTR_KEEP_MAP = 8
+FASTRPC_ATTR_NOMAP = 16
+FASTRPC_ATTR_FORCE_NOFLUSH = 32
+FASTRPC_ATTR_FORCE_NOINVALIDATE = 64
+FASTRPC_ATTR_TRY_MAP_STATIC = 128
+remote_buf_attributes = ctypes.c_uint32 # enum
+try:
+    remote_register_buf_attr = _libraries['FIXME_STUB'].remote_register_buf_attr
+    remote_register_buf_attr.restype = None
+    remote_register_buf_attr.argtypes = [ctypes.POINTER(None), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    remote_register_buf = _libraries['FIXME_STUB'].remote_register_buf
+    remote_register_buf.restype = None
+    remote_register_buf.argtypes = [ctypes.POINTER(None), ctypes.c_int32, ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    remote_register_dma_handle_attr = _libraries['FIXME_STUB'].remote_register_dma_handle_attr
+    remote_register_dma_handle_attr.restype = ctypes.c_int32
+    remote_register_dma_handle_attr.argtypes = [ctypes.c_int32, uint32_t, uint32_t]
+except AttributeError:
+    pass
+try:
+    remote_register_dma_handle = _libraries['FIXME_STUB'].remote_register_dma_handle
+    remote_register_dma_handle.restype = ctypes.c_int32
+    remote_register_dma_handle.argtypes = [ctypes.c_int32, uint32_t]
+except AttributeError:
+    pass
+try:
+    remote_register_fd = _libraries['FIXME_STUB'].remote_register_fd
+    remote_register_fd.restype = ctypes.POINTER(None)
+    remote_register_fd.argtypes = [ctypes.c_int32, ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    fastrpc_async_get_status = _libraries['FIXME_STUB'].fastrpc_async_get_status
+    fastrpc_async_get_status.restype = ctypes.c_int32
+    fastrpc_async_get_status.argtypes = [fastrpc_async_jobid, ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    fastrpc_release_async_job = _libraries['FIXME_STUB'].fastrpc_release_async_job
+    fastrpc_release_async_job.restype = ctypes.c_int32
+    fastrpc_release_async_job.argtypes = [fastrpc_async_jobid]
+except AttributeError:
+    pass
+try:
+    remote_set_mode = _libraries['FIXME_STUB'].remote_set_mode
+    remote_set_mode.restype = ctypes.c_int32
+    remote_set_mode.argtypes = [uint32_t]
+except AttributeError:
+    pass
+
+# values for enumeration 'fastrpc_map_flags'
+fastrpc_map_flags__enumvalues = {
+    0: 'FASTRPC_MAP_STATIC',
+    1: 'FASTRPC_MAP_RESERVED',
+    2: 'FASTRPC_MAP_FD',
+    3: 'FASTRPC_MAP_FD_DELAYED',
+    4: 'FASTRPC_MAP_MAX',
+}
+FASTRPC_MAP_STATIC = 0
+FASTRPC_MAP_RESERVED = 1
+FASTRPC_MAP_FD = 2
+FASTRPC_MAP_FD_DELAYED = 3
+FASTRPC_MAP_MAX = 4
+fastrpc_map_flags = ctypes.c_uint32 # enum
+try:
+    fastrpc_mmap = _libraries['FIXME_STUB'].fastrpc_mmap
+    fastrpc_mmap.restype = ctypes.c_int32
+    fastrpc_mmap.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(None), ctypes.c_int32, size_t, fastrpc_map_flags]
+except AttributeError:
+    pass
+try:
+    fastrpc_munmap = _libraries['FIXME_STUB'].fastrpc_munmap
+    fastrpc_munmap.restype = ctypes.c_int32
+    fastrpc_munmap.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
 __all__ = \
-    ['ADSPRPC_SHARED_H', 'CAMERA_SECURE_CP_USAGE', 'DEVICE_NAME',
-    'DISPLAY_SECURE_CP_USAGE', 'FASTRPC_ATTR_COHERENT',
+    ['ADSPRPC_SHARED_H', 'ADSP_DOMAIN', 'ADSP_DOMAIN_ID', 'ARCH_VER',
+    'ASYNC_FASTRPC_SUPPORT', 'CAMERA_SECURE_CP_USAGE', 'CDSP_DOMAIN',
+    'CDSP_DOMAIN_ID', 'DEFAULT_DOMAIN_ID', 'DEVICE_NAME',
+    'DISPLAY_SECURE_CP_USAGE', 'DOMAIN_ID_MASK', 'DOMAIN_SUPPORT',
+    'DSPRPC_CONTROL_LATENCY', 'DSPRPC_CONTROL_UNSIGNED_MODULE',
+    'DSPRPC_CONTROL_WAKELOCK', 'DSPRPC_GET_DOMAIN',
+    'DSPRPC_GET_DSP_INFO', 'FASTRPC_ASYNC_CALLBACK',
+    'FASTRPC_ASYNC_NO_SYNC', 'FASTRPC_ASYNC_POLL',
+    'FASTRPC_ASYNC_TYPE_MAX', 'FASTRPC_ATTR_COHERENT',
+    'FASTRPC_ATTR_COHERENT', 'FASTRPC_ATTR_FORCE_NOFLUSH',
+    'FASTRPC_ATTR_FORCE_NOINVALIDATE', 'FASTRPC_ATTR_KEEP_MAP',
     'FASTRPC_ATTR_KEEP_MAP', 'FASTRPC_ATTR_NOMAP',
+    'FASTRPC_ATTR_NOMAP', 'FASTRPC_ATTR_NON_COHERENT',
     'FASTRPC_ATTR_NON_COHERENT', 'FASTRPC_ATTR_NOVA',
-    'FASTRPC_CONTROL_KALLOC', 'FASTRPC_CONTROL_LATENCY',
-    'FASTRPC_CONTROL_SMMU', 'FASTRPC_GLINK_GUID',
+    'FASTRPC_ATTR_TRY_MAP_STATIC', 'FASTRPC_CONTROL_KALLOC',
+    'FASTRPC_CONTROL_LATENCY', 'FASTRPC_CONTROL_PD_DUMP',
+    'FASTRPC_CONTROL_SMMU', 'FASTRPC_DSP_SSR', 'FASTRPC_GLINK_GUID',
     'FASTRPC_INIT_ATTACH', 'FASTRPC_INIT_ATTACH_SENSORS',
     'FASTRPC_INIT_CREATE', 'FASTRPC_INIT_CREATE_STATIC',
-    'FASTRPC_MODE_PARALLEL', 'FASTRPC_MODE_PROFILE',
-    'FASTRPC_MODE_SERIAL', 'FASTRPC_MODE_SESSION', 'FASTRPC_SMD_GUID',
-    'FIXED_HIGH', 'FIXED_LOW', 'FIXED_MIDDLE', 'INVALID_HEAP_ID',
+    'FASTRPC_MAP_FD', 'FASTRPC_MAP_FD_DELAYED', 'FASTRPC_MAP_MAX',
+    'FASTRPC_MAP_RESERVED', 'FASTRPC_MAP_STATIC',
+    'FASTRPC_MAX_DSP_ATTRIBUTES', 'FASTRPC_MODE_PARALLEL',
+    'FASTRPC_MODE_PROFILE', 'FASTRPC_MODE_SERIAL',
+    'FASTRPC_MODE_SESSION', 'FASTRPC_REGISTER_STATUS_NOTIFICATIONS',
+    'FASTRPC_RELATIVE_THREAD_PRIORITY',
+    'FASTRPC_REMOTE_PROCESS_EXCEPTION', 'FASTRPC_REMOTE_PROCESS_KILL',
+    'FASTRPC_REMOTE_PROCESS_TYPE', 'FASTRPC_SESSION_CLOSE',
+    'FASTRPC_SMD_GUID', 'FASTRPC_THREAD_PARAMS',
+    'FASTRPC_USER_PD_EXCEPTION', 'FASTRPC_USER_PD_EXIT',
+    'FASTRPC_USER_PD_FORCE_KILL', 'FASTRPC_USER_PD_UP',
+    'FASTRPC_WAKELOCK_CONTROL_SUPPORTED', 'FIXED_HIGH', 'FIXED_LOW',
+    'FIXED_MIDDLE', 'HMX_SUPPORT_DEPTH', 'HMX_SUPPORT_SPATIAL',
+    'HVX_SUPPORT_128B', 'HVX_SUPPORT_64B', 'INVALID_HEAP_ID',
     'ION_ADSP_HEAP_ID', 'ION_ADSP_HEAP_NAME', 'ION_AUDIO_HEAP_ID',
     'ION_AUDIO_HEAP_NAME', 'ION_CAMERA_HEAP_ID',
     'ION_CAMERA_HEAP_NAME', 'ION_CP_MFC_HEAP_ID', 'ION_CP_MM_HEAP_ID',
@@ -813,12 +1363,47 @@ __all__ = \
     'ION_SF_HEAP_NAME', 'ION_SYSTEM_CONTIG_HEAP_ID',
     'ION_SYSTEM_HEAP_ID', 'ION_SYSTEM_HEAP_NAME',
     'ION_VMALLOC_HEAP_NAME', 'ION_WB_HEAP_NAME', 'MAX_USAGE',
-    'NOT_FIXED', 'UNKNOWN', 'VIDEO_BITSTREAM', 'VIDEO_NONPIXEL',
-    'VIDEO_PIXEL', '_IO', '_IOR', '_IOW', '_IOWR',
-    '_UAPI_LINUX_ION_H', '_UAPI_MSM_ION_H', 'cp_mem_usage',
+    'MDSP_DOMAIN', 'MDSP_DOMAIN_ID', 'NOT_FIXED', 'NUM_DOMAINS',
+    'NUM_SESSIONS', 'PROCESS_TYPE_SIGNED', 'PROCESS_TYPE_UNSIGNED',
+    'REMOTE_DEFAULT_H', 'REMOTE_MAP_MAX_FLAG',
+    'REMOTE_MAP_MEM_STATIC', 'REMOTE_MODE_PARALLEL',
+    'REMOTE_MODE_SERIAL', 'RPC_ADAPTIVE_QOS', 'RPC_DISABLE_QOS',
+    'RPC_PM_QOS', 'RPC_POLL_QOS', 'SDSP_DOMAIN', 'SDSP_DOMAIN_ID',
+    'STATUS_NOTIFICATION_SUPPORT', 'UNKNOWN', 'UNSIGNED_PD_SUPPORT',
+    'VIDEO_BITSTREAM', 'VIDEO_NONPIXEL', 'VIDEO_PIXEL', 'VTCM_COUNT',
+    'VTCM_PAGE', '_IO', '_IOR', '_IOW', '_IOWR', '_UAPI_LINUX_ION_H',
+    '_UAPI_MSM_ION_H', '__QAIC_REMOTE_ATTRIBUTE',
+    '__QAIC_REMOTE_EXPORT', 'cp_mem_usage',
+    'fastrpc_async_callback_t', 'fastrpc_async_descriptor_t',
+    'fastrpc_async_get_status', 'fastrpc_async_jobid',
+    'fastrpc_async_notify_type', 'fastrpc_capability',
+    'fastrpc_map_flags', 'fastrpc_mmap', 'fastrpc_munmap',
+    'fastrpc_notif_fn_t', 'fastrpc_process_type',
+    'fastrpc_release_async_job', 'handle_control_req_id',
     'ion_fixed_position', 'ion_heap_ids', 'ion_heap_type',
-    'ion_user_handle_t', 'msm_ion_heap_types', 'smq_invoke_buf_start',
-    'smq_phy_page_start', 'struct_fastrpc_ctrl_kalloc',
+    'ion_user_handle_t', 'msm_ion_heap_types', 'remote_arg',
+    'remote_arg_t', 'remote_buf', 'remote_buf_attributes',
+    'remote_dma_handle', 'remote_dsp_attributes', 'remote_handle',
+    'remote_handle64', 'remote_handle64_close',
+    'remote_handle64_control', 'remote_handle64_invoke',
+    'remote_handle64_invoke_async', 'remote_handle64_open',
+    'remote_handle_close', 'remote_handle_control',
+    'remote_handle_invoke', 'remote_handle_invoke_async',
+    'remote_handle_open', 'remote_mem_map', 'remote_mem_map_flags',
+    'remote_mem_unmap', 'remote_mmap', 'remote_munmap',
+    'remote_register_buf', 'remote_register_buf_attr',
+    'remote_register_dma_handle', 'remote_register_dma_handle_attr',
+    'remote_register_fd', 'remote_rpc_control_latency_t',
+    'remote_rpc_control_latency_t__enumvalues',
+    'remote_rpc_get_domain_t', 'remote_rpc_latency_flags',
+    'remote_rpc_notif_register_t', 'remote_rpc_process_exception',
+    'remote_rpc_status_flags', 'remote_rpc_status_flags_t',
+    'remote_rpc_status_flags_t__enumvalues', 'remote_session_control',
+    'remote_set_mode', 'session_control_req_id', 'size_t',
+    'smq_invoke_buf_start', 'smq_phy_page_start',
+    'struct_c__SA_remote_buf', 'struct_c__SA_remote_dma_handle',
+    'struct_fastrpc_async_callback',
+    'struct_fastrpc_async_descriptor', 'struct_fastrpc_ctrl_kalloc',
     'struct_fastrpc_ctrl_latency', 'struct_fastrpc_ctrl_smmu',
     'struct_fastrpc_ioctl_control', 'struct_fastrpc_ioctl_init',
     'struct_fastrpc_ioctl_init_attrs', 'struct_fastrpc_ioctl_invoke',
@@ -833,8 +1418,20 @@ __all__ = \
     'struct_ion_handle_data', 'struct_ion_prefetch_data',
     'struct_ion_prefetch_regions', 'struct_remote_buf',
     'struct_remote_buf64', 'struct_remote_dma_handle',
-    'struct_remote_dma_handle64', 'struct_smq_invoke',
+    'struct_remote_dma_handle64', 'struct_remote_dsp_capability',
+    'struct_remote_process_type', 'struct_remote_rpc_control_latency',
+    'struct_remote_rpc_control_pd_dump',
+    'struct_remote_rpc_control_unsigned_module',
+    'struct_remote_rpc_control_wakelock',
+    'struct_remote_rpc_get_domain',
+    'struct_remote_rpc_notif_register',
+    'struct_remote_rpc_process_clean_params',
+    'struct_remote_rpc_relative_thread_priority',
+    'struct_remote_rpc_session_close',
+    'struct_remote_rpc_thread_params', 'struct_smq_invoke',
     'struct_smq_invoke_buf', 'struct_smq_invoke_rsp',
     'struct_smq_msg', 'struct_smq_null_invoke', 'struct_smq_phy_page',
-    'uint32_t', 'union_fastrpc_ioctl_control_0', 'union_remote_arg',
+    'uint32_t', 'uint64_t', 'union_c__UA_remote_arg',
+    'union_fastrpc_async_descriptor_0',
+    'union_fastrpc_ioctl_control_0', 'union_remote_arg',
     'union_remote_arg64']
