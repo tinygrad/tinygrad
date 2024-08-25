@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os, ctypes, ctypes.util, struct, platform, pathlib, contextlib, mmap, array
 from threading import Thread
-from tinygrad.runtime.autogen import adsprpc, qcom_dsp
+from tinygrad.runtime.autogen import qcom_dsp
 from tinygrad.helpers import round_up, mv_address, to_mv
 from hexdump import hexdump
 
@@ -25,15 +25,15 @@ def ioctl(fd, request, argp):
   fn = os.readlink(f"/proc/self/fd/{fd}")
   idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
 
-  if fn == "/dev/adsprpc-smd":
-    if nr == 1:
-      st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
-      method = (st.sc>>24) & 0xFF
-      in_args = (st.sc>>16) & 0xFF
-      out_args = (st.sc>>8) & 0xFF
-      if out_args:
-        for arg in range(in_args, in_args+out_args):
-          ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
+  # if fn == "/dev/adsprpc-smd":
+  #   if nr == 1:
+  #     st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke)
+  #     method = (st.sc>>24) & 0xFF
+  #     in_args = (st.sc>>16) & 0xFF
+  #     out_args = (st.sc>>8) & 0xFF
+  #     if out_args:
+  #       for arg in range(in_args, in_args+out_args):
+  #         ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
 
   # if fn == "/dev/ion":
   #   if nr == 0:
@@ -51,11 +51,11 @@ def ioctl(fd, request, argp):
   #     st = ctypes.c_uint32.from_address(argp)
   #     print("bef FASTRPC_IOCTL_GETINFO", st.value)
   #   elif nr == 2:
-  #     st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_mmap)
+  #     st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_mmap)
   #     print("bef FASTRPC_IOCTL_MMAP", format_struct(st))
   #   elif nr == 1:
   #     # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
-  #     st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
+  #     st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke)
   #     print("bef FASTRPC_IOCTL_INVOKE", format_struct(st))
   #     method = (st.sc>>24) & 0xFF
   #     in_args = (st.sc>>16) & 0xFF
@@ -84,12 +84,12 @@ def ioctl(fd, request, argp):
   #           if arg >= in_args: ctypes.memset(st.pra[arg].buf.pv, 0, st.pra[arg].buf.len)
   #     #print(format_struct(st.pra)))
   #   elif nr == 6:
-  #     print("bef FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
+  #     print("bef FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_init)))
   #     print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
   #     # print(bytearray(to_mv(ini.file, ini.filelen)))
   #   elif nr == 7:
-  #     print("bef FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
-  #   elif nr == 12: print("bef FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
+  #     print("bef FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke_attrs)))
+  #   elif nr == 12: print("bef FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_control)))
   #   else:
   #     print(f"bef UNPARSED {nr}")
   # else:
@@ -114,11 +114,11 @@ def ioctl(fd, request, argp):
       st = ctypes.c_uint32.from_address(argp)
       print(ret, "FASTRPC_IOCTL_GETINFO", st.value)
     elif nr == 2:
-      st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_mmap)
+      st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_mmap)
       print(ret, "FASTRPC_IOCTL_MMAP", format_struct(st))
     elif nr == 1:
       # https://research.checkpoint.com/2021/pwn2own-qualcomm-dsp/
-      st = get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke)
+      st = get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke)
       print(ret, "FASTRPC_IOCTL_INVOKE", format_struct(st))
       # 0xFF000000 = Method index and attribute (the highest byte)
       # 0x00FF0000 = Number of input arguments
@@ -153,12 +153,12 @@ def ioctl(fd, request, argp):
             #   hexdump(to_mv(z, 0x200))
       #print(format_struct(st.pra)))
     elif nr == 6:
-      print(ret, "FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_init)))
+      print(ret, "FASTRPC_IOCTL_INIT", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_init)))
       print(os.readlink(f"/proc/self/fd/{ini.filefd}"))
       # print(bytearray(to_mv(ini.file, ini.filelen)))
     elif nr == 7:
-      print(ret, "FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, adsprpc.struct_fastrpc_ioctl_invoke_attrs)))
-    elif nr == 12: print(ret, "FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, adsprpc.struct_fastrpc_ioctl_control)))
+      print(ret, "FASTRPC_IOCTL_INVOKE_ATTRS", format_struct(ini:=get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_invoke_attrs)))
+    elif nr == 12: print(ret, "FASTRPC_IOCTL_CONTROL", format_struct(get_struct(argp, qcom_dsp.struct_fastrpc_ioctl_control)))
     else:
       print(f"{ret} UNPARSED {nr}")
   else:
@@ -195,7 +195,7 @@ def install_hook(c_function, python_function):
   return orig_func
 
 libc = ctypes.CDLL(ctypes.util.find_library("libc"))
-# install_hook(libc.ioctl, ioctl)
+install_hook(libc.ioctl, ioctl)
 from tinygrad.runtime.autogen import libc
 
 # adsp = ctypes.CDLL(ctypes.util.find_library("adsprpc"))
@@ -308,15 +308,37 @@ def listner_worker():
       # assert False
       prev_res = 0
       # except: prev_res = 2
+    elif sc == 0x2010100:
+      heapid = in_args[0].cast('I')[0]
+      lflags = in_args[0].cast('I')[1]
+      rflags = in_args[0].cast('I')[2]
+      assert rflags == 0x1000
+
+      # print(in_args[0])
+
+      # print("WOOW", in_args[0].cast('Q')[2])
+      # print("WOOW2", in_args[0].cast('Q')[2])
+      # print("WOOW3", in_args[0].cast('Q')[3])
+      # print("WOOW3", in_args[0].cast('Q')[3])
+
+      vin = in_args[0].cast('Q')[2]
+      sz = in_args[0].cast('Q')[3]
+      # vin = to_mv(in_args[0].cast('Q')[2], 8).cast('Q')[0]
+      # sz = to_mv(in_args[0].cast('Q')[3], 8).cast('Q')[0]
+
+      st = qcom_dsp.FASTRPC_IOCTL_MMAP(rpcfd, fd=-1, flags=rflags, vaddrin=0, size=sz)
+      out_args[0].cast('Q')[0] = 0
+      out_args[0].cast('Q')[1] = st.vaddrout
+      prev_res = 0
     else: raise RuntimeError(f"Unknown {sc=:X}")
 
 if __name__ == "__main__":
   ionfd = os.open('/dev/ion', os.O_RDONLY)
   rpcfd = os.open('/dev/adsprpc-smd', os.O_RDONLY | os.O_NONBLOCK)
 
-  with contextlib.suppress(RuntimeError): qcom_dsp.ION_IOC_FREE(ionfd, handle=0)
+  with contextlib.suppress(RuntimeError, OSError): qcom_dsp.ION_IOC_FREE(ionfd, handle=0)
   info = qcom_dsp.FASTRPC_IOCTL_GETINFO(rpcfd, 3)
-  # x = qcom_dsp.FASTRPC_IOCTL_SETMODE(rpcfd, 1, __force_as_val=True)
+  # x = qcom_dsp.FASTRPC_IOCTL_SETMODE(rpcfd, 0, __force_as_val=True)
   # print(x)
   # print(info)
 
@@ -343,12 +365,56 @@ if __name__ == "__main__":
   thread = Thread(target=listner_worker)
   thread.start()
 
-  a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
-  a2 = memoryview(bytearray(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
-  o1 = memoryview(bytearray(0x8))
-  o2 = memoryview(bytearray(0xff))
-  z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
-  prg_handle = o1.cast('I')[0]
+  # a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
+  # a2 = memoryview(bytearray(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
+  # o1 = memoryview(bytearray(0x8))
+  # o2 = memoryview(bytearray(0xff))
+  # z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
+  # prg_handle = o1.cast('I')[0]
+
+  # for i in range(150):
+  #   print("init", i)
+  #   os.symlink("libcalculator_skel.so", f"libcalculator_skel{i}.so")
+
+  #   fp = f"file:///libcalculator_skel{i}.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"
+  #   a1 = memoryview(array.array('I', [len(fp), 0xff]))
+  #   a2 = memoryview(bytearray(f"{fp}".encode()))
+  #   o1 = memoryview(bytearray(0x8))
+  #   o2 = memoryview(bytearray(0xff))
+  #   z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
+
+  #   os.unlink(f"libcalculator_skel{i}.so")
+  
+  # for i in range(300):
+
+  #   a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
+  #   a2 = memoryview(bytearray(b"file:///libcalculato1_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
+  #   o1 = memoryview(bytearray(0x8))
+  #   o2 = memoryview(bytearray(0xff))
+  #   z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
+  #   prg_handle = o1.cast('I')[0]
+
+  # a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
+  # a2 = memoryview(bytearray(b"file:///libcalculato2_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
+  # o1 = memoryview(bytearray(0x8))
+  # o2 = memoryview(bytearray(0xff))
+  # z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
+  # prg_handle = o1.cast('I')[0]
+
+  # a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
+  # a2 = memoryview(bytearray(b"file:///libcalculato3_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
+  # o1 = memoryview(bytearray(0x8))
+  # o2 = memoryview(bytearray(0xff))
+  # z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
+  # prg_handle = o1.cast('I')[0]
+
+  # a1 = memoryview(bytearray(b'\x52\x00\x00\x00\xFF\x00\x00\x00'))
+  # a2 = memoryview(bytearray(b"file:///libcalculat43_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp\0"))
+  # o1 = memoryview(bytearray(0x8))
+  # o2 = memoryview(bytearray(0xff))
+  # z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
+  # prg_handle = o1.cast('I')[0]
+
 
   # test
   test = (ctypes.c_int32 * 100)()
@@ -365,6 +431,40 @@ if __name__ == "__main__":
   pra[2].buf.pv = ctypes.addressof(arg_2)
   pra[2].buf.len = 8
   qcom_dsp.FASTRPC_IOCTL_INVOKE(rpcfd, handle=prg_handle, sc=(2<<24) | (2<<16) | (1<<8), pra=pra)
+
+  temp_dir = '/tmp'
+
+  cnt = 0
+  for filename in os.listdir(temp_dir):
+    if filename.startswith('qbbkk_'):
+      if filename not in {"qbbkk_8x40_mve"}: continue
+
+      print(filename, cnt)
+      fp = f"file:////tmp/{filename}?entry&_modver=1.0&_dom=cdsp\0"
+      a1 = memoryview(array.array('I', [len(fp), 0xff]))
+      a2 = memoryview(bytearray(f"{fp}".encode()))
+      o1 = memoryview(bytearray(0x8))
+      o2 = memoryview(bytearray(0xff))
+      z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
+      prg_handle = o1.cast('I')[0]
+      print(hex(prg_handle))
+      cnt += 1
+      # qcom_dsp.FASTRPC_IOCTL_INVOKE(rpcfd, handle=prg_handle, sc=(2<<24) | (2<<16) | (1<<8), pra=pra)
+
+  assert False
+  # for i in range(100000):
+  #   # os.symlink("libcalculator_skel.so", f"libcalculator_skel{i}.so")
+
+  #   fp = f"file:///libcalculator_skel.so?entry&_modver=1.0&_dom=cdsp\0"
+  #   a1 = memoryview(array.array('I', [len(fp), 0xff]))
+  #   a2 = memoryview(bytearray(f"{fp}".encode()))
+  #   o1 = memoryview(bytearray(0x8))
+  #   o2 = memoryview(bytearray(0xff))
+  #   z = rpc_invoke(rpcfd, handle=0, method=0, ins=[a1, a2], outs=[o1, o2])
+  #   prg_handle = o1.cast('I')[0]
+  #   qcom_dsp.FASTRPC_IOCTL_INVOKE(rpcfd, handle=prg_handle, sc=(2<<24) | (2<<16) | (1<<8), pra=pra)
+
+    # os.unlink(f"libcalculator_skel{i}.so")
 
   print(arg_2.value)
   print("done")
@@ -395,7 +495,7 @@ if __name__ == "__main__":
   test = (ctypes.c_int32 * 100)()
   for i in range(100): test[i] = i
   print("calculator_sum")
-  pra = (adsprpc.union_remote_arg * 3)()
+  pra = (qcom_dsp.union_remote_arg * 3)()
   #arg_0 = ctypes.c_int32(100)
   arg_0 = ctypes.c_int32(100)
   arg_2 = ctypes.c_int64(-1)
