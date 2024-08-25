@@ -197,31 +197,31 @@ if __name__ == "__main__":
   # /dsp/cdsp/fastrpc_shell_3
 
   handle = ctypes.c_int64(-1)
-  z = adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:////tmp/tmpfdxqhu4h?entry&_modver=1.0&_dom=cdsp"),
+  z = adsp.remote_handle64_open(ctypes.create_string_buffer(b"file:///libcalculator_skel.so?calculator_skel_handle_invoke&_modver=1.0&_dom=cdsp"),
                             ctypes.byref(handle))
   
   # for i in range(15):
   #   try: print(i, os.readlink(f"/proc/self/fd/{i}"))
   #   except: pass
-  
+
   print("handle", z, hex(handle.value))
-  # assert handle.value != -1
-  # test = (ctypes.c_int32 * 100)()
-  # for i in range(100): test[i] = i
-  # print("calculator_sum")
-  # pra = (qcom_dsp.union_remote_arg64 * 3)()
-  # #arg_0 = ctypes.c_int32(100)
-  # arg_0 = ctypes.c_int32(100)
-  # arg_2 = ctypes.c_int64(-1)
-  # pra[0].buf.pv = ctypes.addressof(arg_0)
-  # pra[0].buf.len = 4
-  # pra[1].buf.pv = ctypes.addressof(test)
-  # pra[1].buf.len = 0x190
-  # pra[2].buf.pv = ctypes.addressof(arg_2)
-  # pra[2].buf.len = 8
-  # adsp.remote_handle64_invoke(handle, (2<<24) | (2<<16) | (1<<8), pra)
-  # print(arg_2.value)
-  # print("done")
+  assert handle.value != -1
+  test = (ctypes.c_int32 * 100)()
+  for i in range(100): test[i] = i
+  print("calculator_sum")
+  pra = (qcom_dsp.union_remote_arg64 * 3)()
+  #arg_0 = ctypes.c_int32(100)
+  arg_0 = ctypes.c_int32(100)
+  arg_2 = ctypes.c_int64(-1)
+  pra[0].buf.pv = ctypes.addressof(arg_0)
+  pra[0].buf.len = 4
+  pra[1].buf.pv = ctypes.addressof(test)
+  pra[1].buf.len = 0x190
+  pra[2].buf.pv = ctypes.addressof(arg_2)
+  pra[2].buf.len = 8
+  adsp.remote_handle64_invoke(handle, (2<<24) | (2<<16) | (1<<8), pra)
+  print(arg_2.value)
+  print("done")
 
   print("closing")
   x = adsp.remote_handle64_close(handle)
