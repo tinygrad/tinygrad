@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, List
 import ctypes, os, mmap, tempfile, functools, array
 from tinygrad.device import BufferOptions, Compiled, Allocator
-from tinygrad.helpers import from_mv, getenv, DEBUG, mv_address
+from tinygrad.helpers import from_mv, getenv, DEBUG, mv_address, to_mv
 from tinygrad.runtime.ops_clang import ClangCompiler
 from tinygrad.renderer.cstyle import DSPRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
@@ -58,21 +58,22 @@ class DSPAllocator(Allocator):
     va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
     return DSPBuffer(va_addr, size, share_info)
 
-  def _free(self, opaque, options:BufferOptions):
+  def _free(self, opaque:DSPBuffer, options:BufferOptions):
     libc.munmap(opaque.va_addr, opaque.size)
     os.close(opaque.share_info.fd)
     qcom_dsp.ION_IOC_FREE(self.device.ion_fd, handle=opaque.share_info.handle)
 
-  def copyin(self, dest, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
-  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
+  def as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
+  def copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
+  def copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
-class PSPDevice(Compiled):
+class DSPDevice(Compiled):
   def __init__(self, device:str=""):
     self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
     self.loaded_libs, self.lru_lib_order = {}, []
 
-    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b"]
-    super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp", args=compiler_args), functools.partial(DSPProgram, self))
+    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128B"]
+    super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp2", args=compiler_args), functools.partial(DSPProgram, self))
 
   def _register_lib(self, libname, lib): pass
 
