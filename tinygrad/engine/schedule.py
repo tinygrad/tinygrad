@@ -141,16 +141,15 @@ def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> ShapeTracker:
   uop_sts[uop] = st = ShapeTracker.from_shape(src_sts[0].reduce(uop.arg[1])) if uop.op is UOps.REDUCE_AXIS else src_sts[0]
   return st
 
-def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], uop_sts:Dict[UOp, ShapeTracker],
-               cache:Dict[UOp, UOp], eq:Callable[[Tuple[ShapeTracker, ShapeTracker]], bool]=all_same) -> UOp:
+def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], uop_sts:Dict[UOp, ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
   if (n:=cache.get(u)): return n
-  if (st:=uop_sts.get(u)) and eq((st, apply_to_st(st))): return u
+  if (st:=uop_sts.get(u)) and st == apply_to_st(st): return u
   if u.op is UOps.SHAPETRACKER:
     new_st = apply_to_st(u.arg)
     return u if u.arg == new_st else replace(u, arg=new_st)
-  new_srcs = tuple(st_fixup(x, apply_to_st, uop_sts, cache, eq) for x in u.src)
-  cache[u] = reshaped = u if new_srcs == u.src else replace(u, src=new_srcs)
-  return reshaped
+  new_srcs = tuple(st_fixup(x, apply_to_st, uop_sts, cache) for x in u.src)
+  cache[u] = ret = u if new_srcs == u.src else replace(u, src=new_srcs)
+  return ret
 
 def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
   permute_axis = tuple(i for i in range(len(input_st.shape)) if i not in axis)+axis
