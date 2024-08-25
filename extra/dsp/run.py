@@ -185,7 +185,7 @@ def install_hook(c_function, python_function):
   return orig_func
 
 libc = ctypes.CDLL(ctypes.util.find_library("libc"))
-install_hook(libc.ioctl, ioctl)
+# install_hook(libc.ioctl, ioctl)
 adsp = ctypes.CDLL(ctypes.util.find_library("adsprpc"))
 # print(adsp)
 
