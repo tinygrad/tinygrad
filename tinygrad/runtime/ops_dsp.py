@@ -82,6 +82,7 @@ class DSPDevice(Compiled):
 
   def _ensure_lib_opened(self, libname):
     if libname not in self.loaded_libs:
+      # DSP can load up to ~128 libs, so close them in LRU order to load newer ones.
       if len(self.lru_lib_order) > 100: self._close_lib(self.lru_lib_order[0])
       bname = ctypes.create_string_buffer(f"file:///{libname}?entry&_modver=1.0&_dom=cdsp".encode())
       if (r:=adsp.remote_handle64_open(bname, ctypes.byref(h:=ctypes.c_int64()))) != 0: raise RuntimeError(f"Failed to load library: {libname}, {r}")
