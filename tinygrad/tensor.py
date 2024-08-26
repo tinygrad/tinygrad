@@ -1061,9 +1061,7 @@ class Tensor:
     if isinstance(res, Tensor):
       # NOTE: contiguous to prevent const folding.
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      st = res.lazydata.st
       res.assign(v).realize()
-      res.lazydata.st = st
       return
     # advanced setitem
     mask, ret_shape, first_dim, sum_axis = res
