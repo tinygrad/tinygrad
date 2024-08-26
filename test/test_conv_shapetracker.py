@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.codegen.uops import UOps
+from tinygrad.ops import UOps
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.engine.schedule import create_schedule
@@ -18,7 +18,7 @@ class TestConvShapetracker(unittest.TestCase):
     # run it again to get the kernels
     sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen) if si.ast.op is UOps.SINK]
     assert len(sched) == 1, f"conv should only have one kernel, getting {len(sched)}"
-    for st in [x.src[-1].arg for x in sched[0].ast.parents if x.op is UOps.LOAD]:
+    for st in [x.st_arg for x in sched[0].ast.parents if x.op is UOps.LOAD]:
       assert len(st.views) == 1
 
   def test_conv_2x2_backward_one_view(self):
@@ -28,7 +28,7 @@ class TestConvShapetracker(unittest.TestCase):
     si = X.grad.schedule()[-1]
     print(si)
     ldb = [x for x in si.ast.parents if x.op is UOps.LOAD][0]
-    st: ShapeTracker = ldb.src[-1].arg.simplify()
+    st: ShapeTracker = ldb.st_arg.simplify()
     # NOTE: st.real_size() is broken
     print(si.inputs[0].size)
     #self.assertEqual(si.inputs[0].size, st.real_size())
