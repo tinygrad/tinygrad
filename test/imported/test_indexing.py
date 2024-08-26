@@ -214,11 +214,8 @@ class TestIndexing(unittest.TestCase):
     reference = consec((10,))
     validate_indexing(reference)
 
-    # setting values
-    # TODO: advanced setitem
-    '''
+    # setting values    
     validate_setting(reference)
-    '''
 
     # Tensor with stride != 1
     # strided is [1, 3, 5, 7]
@@ -784,7 +781,7 @@ class TestIndexing(unittest.TestCase):
   '''
 
   # TODO fancy setitem
-  '''
+  """
   def test_index_put_accumulate_duplicate_indices(self):
     for i in range(1, 512):
       # generate indices by random walk, this will create indices with
@@ -795,7 +792,7 @@ class TestIndexing(unittest.TestCase):
       # input = torch.randn(indices.abs().max() + 1)
       input = Tensor.randn(indices.abs().max().item() + 1)
       # values = torch.randn(indices.size(0))
-      values = Tensor.randn(indices.shape(0))
+      values = Tensor.randn(indices.size(0))
       output = index_put_(input, (indices,), values, accumulate=True)
 
       input_list = input.numpy().tolist()
@@ -805,7 +802,7 @@ class TestIndexing(unittest.TestCase):
         input_list[i] += v
 
       numpy_testing_assert_equal_helper(output, input_list)
-  '''
+  """
 
   def test_index_ind_dtype(self):
     x = Tensor.randn(4, 4)
@@ -825,8 +822,6 @@ class TestIndexing(unittest.TestCase):
     res = x[:, ind_int]
     numpy_testing_assert_equal_helper(ref, res)
     # no repeating indices for index_put
-    # TODO fancy setitem
-    '''
     src = Tensor.randn(4)
     ind_long = Tensor.arange(4, dtype=dtypes.int64)
     ind_int = ind_long.cast(dtypes.int32)
@@ -836,16 +831,12 @@ class TestIndexing(unittest.TestCase):
       index_put_(inp_ref, (ind_long, ind_long), src, accum)
       index_put_(inp_res, (ind_int, ind_int), src, accum)
       numpy_testing_assert_equal_helper(inp_ref, inp_res)
-    '''
 
-  # TODO empty setitem
-  '''
   def test_index_put_accumulate_empty(self):
     # Regression test for https://github.com/pytorch/pytorch/issues/94667
     input = Tensor.rand([], dtype=dtypes.float32)
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(IndexError):
       index_put_(input, [], np.array([1.0]), True)
-  '''
 
   @unittest.skip("bool indexing not supported")
   def test_multiple_byte_mask(self):
@@ -907,11 +898,8 @@ class TestIndexing(unittest.TestCase):
     res = src[[0, 2, 1], :, :]
     numpy_testing_assert_equal_helper(res.shape, src.shape)
     # test index_put, no accum
-    # TODO fancy setitem
-    '''
     src[[0, 2, 1], :, :] = res
     numpy_testing_assert_equal_helper(res.shape, src.shape)
-    '''
 
   def test_int_indices2d(self):
     # From the NumPy indexing example
@@ -1213,8 +1201,6 @@ class TestIndexing(unittest.TestCase):
 
     self.assertRaises(IndexError, runner)
 
-  # TODO fancy setitem
-  '''
   def test_cpu_indices(self):
     idx = Tensor([0, 1])
     b = Tensor.zeros(2)
@@ -1225,7 +1211,6 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(x, ref)
     out = x[idx]  # index
     numpy_testing_assert_equal_helper(out, Tensor.zeros(2))
-  '''
 
   def test_take_along_dim(self):
     def _test_against_numpy(t: Tensor, indices: Tensor, dim):
@@ -1498,10 +1483,7 @@ class TestNumpy(unittest.TestCase):
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)
     self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
-    # TODO: fancy setitem
-    '''
     self.assertRaises(IndexError, a.contiguous().__setitem__, ([0, 1], [0, 1, 2]), 0)
-    '''
 
   # TODO out of bound getitem does not raise error
   '''
@@ -1527,8 +1509,6 @@ class TestNumpy(unittest.TestCase):
     self.assertTrue((a[:3, :3] == all_(Tensor([2., 3., 4.]))))
   '''
 
-  # TODO fancy setitem
-  '''
   def test_broadcast_subspace(self):
     a = Tensor.zeros((100, 100))
     v = Tensor.arange(0., 100)[:, None]
@@ -1536,7 +1516,6 @@ class TestNumpy(unittest.TestCase):
     a[b] = v
     expected = b.float().unsqueeze(1).expand(100, 100)
     numpy_testing_assert_equal_helper(a, expected)
-  '''
 
   # TODO fancy setitem
   '''
