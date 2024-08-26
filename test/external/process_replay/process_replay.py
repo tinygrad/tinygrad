@@ -113,6 +113,7 @@ def process_replay():
       logging.warning(f"schedule_diff_{VERSION} isn't accessible in master, did DB_VERSION change?")
       exit(0)
     if has_diff:
+      logging.info("***** schedule diff")
       row_count = cur.execute(f"select count(*) from 'schedule_diff_{VERSION}'").fetchone()[0]
       conn.commit()
       cur.close()
@@ -125,6 +126,7 @@ def process_replay():
         if ASSERT_DIFF: raise Exception("kernel process replay detected changes")
 
   # *** kernel diff
+  logging.info("***** kernel diff")
   conn = db_connection()
   cur = conn.cursor()
   try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
