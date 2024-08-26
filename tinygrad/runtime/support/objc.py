@@ -71,14 +71,14 @@ def get_methods_rec(c: int):
   methods = {}
   while p:
     methods.update(dump_objc_methods(p))
-    p = libobjc.class_getSuperclass(ctypes.cast(p, libobjc.Class))
+    p = libobjc.class_getSuperclass(p)
   return methods
 
 def objc_type_to_ctype(t: str):
   if len(t) == 1: return SIMPLE_TYPES[t]
   if t[0] == "^": return ctypes.POINTER(objc_type_to_ctype(t[1:]))
   if t[0] in ["r", "V"]: return objc_type_to_ctype(t[1:])
-  if t.startswith("{") and "=" in t and t.endswith("}"): return ctypes.Structure  # wooo! safety is out the window now
+  if t[0] == "{" and "=" in t and t[-1] == "}": return ctypes.Structure  # wooo! safety is out the window now
   raise ValueError(f"Unknown type {t}")
 
 def wrapper_return_objc_instance(f):
@@ -112,19 +112,18 @@ class ObjcObject(ctypes.c_void_p):
   def __init__(self, p:int, manual_release=False):
     assert p, "Can't create ObjcObject with null ptr"
     super().__init__(p)
-    _metaclass_ptr = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(p), libobjc.id))
-    self.methods_info = get_methods_rec(ctypes.cast(_metaclass_ptr, ctypes.c_void_p).value)
+    self.methods_info = get_methods_rec(libobjc.object_getClass(self))
     self.manual_release = manual_release
     self.released = False
 
   @classmethod
   def from_classname(cls, name:str):
-    p = ctypes.cast(libobjc.objc_getClass(name.encode()), ctypes.c_void_p).value
+    p = libobjc.objc_getClass(name.encode())
     assert p, f"Class {name} not found"
     return cls(p, manual_release=True)
 
   def __repr__(self) -> str:
-    return f"<{ctypes.string_at(libobjc.object_getClassName(ctypes.cast(ctypes.c_void_p(self.value), libobjc.id))).decode()} at 0x{self.value:x}>"
+    return f"<{ctypes.string_at(libobjc.object_getClassName(ctypes.c_void_p(self.value))).decode()} at 0x{self.value:x}>"
 
   def __hash__(self) -> int:
     return 0 if self.value is None else self.value

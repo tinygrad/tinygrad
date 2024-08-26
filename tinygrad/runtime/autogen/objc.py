@@ -168,7 +168,7 @@ __autoreleasing = True # macro
 class struct_objc_class(Structure):
     pass
 
-Class = ctypes.POINTER(struct_objc_class)
+Class = ctypes.c_void_p
 class struct_objc_object(Structure):
     pass
 
@@ -177,7 +177,7 @@ struct_objc_object._fields_ = [
     ('isa', ctypes.POINTER(struct_objc_class)),
 ]
 
-id = ctypes.POINTER(struct_objc_object)
+id = ctypes.c_void_p
 class struct_objc_selector(Structure):
     pass
 

@@ -234,6 +234,10 @@ generate_objc() {
   gsed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/objc.py
   gsed -i "s\FIXME_STUB\libobjc\g" $BASE/objc.py
   gsed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('objc'))\g" $BASE/objc.py
+
+  gsed -i "s\Class = ctypes.POINTER(struct_objc_class)\Class = ctypes.c_void_p\g" $BASE/objc.py
+  gsed -i "s\id = ctypes.POINTER(struct_objc_object)\id = ctypes.c_void_p\g" $BASE/objc.py
+
   rm /tmp/runtime.h
 
   fixup $BASE/objc.py
