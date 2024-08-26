@@ -215,7 +215,7 @@ generate_libc() {
 }
 
 generate_objc() {
-  cp runtime.h /tmp/runtime.h
+  cp $(xcrun --show-sdk-path)/usr/include/objc/runtime.h /tmp/runtime.h
   gsed -i "s/\^ \_Nonnull block/\* \_Nonnull block/g" /tmp/runtime.h
   clang2py -k cdefstum \
     $(xcrun --show-sdk-path)/usr/include/objc/objc.h \
@@ -230,6 +230,9 @@ generate_objc() {
   rm /tmp/runtime.h
 
   # fixup $BASE/objc.py
+  gsed -i '1s/^/# mypy: ignore-errors\n/' $BASE/objc.py
+  gsed -i 's/ *$//' $BASE/objc.py
+  grep FIXME_STUB $BASE/objc.py || true
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl

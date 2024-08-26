@@ -58,6 +58,7 @@ class MetalGraph(GraphRunner):
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       prg = cast(CompiledRunner, self.jit_cache[j].prg)
       global_size, local_size = global_dims or prg.p.global_size, local_dims or prg.p.local_size
+      assert global_size is not None and local_size is not None, "launch dimensions cannot be None"
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size),
                                                                                                        Metal.MTLSize(*local_size))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]

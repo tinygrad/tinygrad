@@ -11,7 +11,7 @@ def convert_arg(arg, arg_type):
   return arg
 
 @functools.lru_cache(maxsize=None)
-def sel_registerName(sel: str) -> libobjc.SEL:
+def sel_registerName(sel: str) -> ctypes.c_void_p:
   return libobjc.sel_registerName(sel.encode())
 
 def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=None):
@@ -25,9 +25,9 @@ def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=N
 libc = ctypes.CDLL(None)
 libc.free.argtypes = [ctypes.c_void_p]
 
-def dump_objc_methods(clz: libobjc.Class):
+def dump_objc_methods(clz: ctypes.c_void_p):
   method_count = ctypes.c_uint()
-  methods_ptr = libobjc.class_copyMethodList(clz, ctypes.byref(method_count))
+  methods_ptr = libobjc.class_copyMethodList(ctypes.cast(clz, libobjc.Class), ctypes.byref(method_count))
   assert methods_ptr is not None, f"Failed to get methods for class {clz}"
 
   methods = {}
@@ -69,11 +69,11 @@ SIMPLE_TYPES = {
 
 @functools.lru_cache(maxsize=None)
 def get_methods_rec(c: int):
-  p = ctypes.cast(ctypes.c_void_p(c), libobjc.Class)
+  p = ctypes.c_void_p(c)
   methods = {}
   while p:
     methods.update(dump_objc_methods(p))
-    p = libobjc.class_getSuperclass(p)
+    p = libobjc.class_getSuperclass(ctypes.cast(p, libobjc.Class))
   return methods
 
 def objc_type_to_ctype(t: str):
