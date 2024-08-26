@@ -64,7 +64,7 @@ class UOps(Enum):
   Defines the ShapeTracker for a buffer UOp ([`UOps.LOAD`](/developer/uop#tinygrad.ops.UOps.LOAD),
   [`UOps.STORE`](/developer/uop#tinygrad.ops.UOps.STORE) or [`UOps.CONST`](/developer/uop#tinygrad.ops.UOps.CONST)).
 
-  - **`dtype`**: None
+  - **`dtype`**: `None`
   - **`src`**: `Tuple[]`
   - **`arg`**: `ShapeTracker`
   """
@@ -82,19 +82,19 @@ class UOps(Enum):
   """
   - **`dtype`**: The casted scalar DType
   - **`src`**: `Tuple[UOp]`
-  - **`arg`**: None
+  - **`arg`**: `None`
   """
   BITCAST = auto()
   """
   - **`dtype`**: The bitcasted scalar DType
   - **`src`**: `Tuple[UOp]`
-  - **`arg`**: None
+  - **`arg`**: `None`
   """
   VECTORIZE = auto()
   """
   - **`dtype`**: The upcasted vector DType
   - **`src`**: `Tuple[UOp]`
-  - **`arg`**: None
+  - **`arg`**: `None`
   """
   ALU = auto()
   """
@@ -117,43 +117,43 @@ class UOps(Enum):
   - **`src`**:
     - Normal LOAD: `Tuple[UOp, UOp]`
       - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL).
-      - Indexing Op, can only return `dtypes.int32`.
+      - Indexing UOp, can only return `dtypes.int32`.
     - Gated LOAD: `Tuple[UOp, UOp, UOp, UOp]`
       - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL).
-      - Indexing Op, can only return `dtypes.int32`.
-      - Gate Op, can only return `dtypes.bool`.
+      - Indexing UOp, can only return `dtypes.int32`.
+      - Gate UOp, can only return `dtypes.bool`.
       - [`UOps.CONST`](/developer/uop#tinygrad.ops.UOps.CONST) 0, 0.0 or `False`
     - Barriered LOAD: `Tuple[UOp, UOp, UOp, UOp]`
-      - Buffer UOp `DEFINE_LOCAL`.
-      - Indexing Op, can only return `dtypes.int32`.
-      - Gate Op, can only return `dtypes.bool`.
-      - Barrier Op, [`UOps.BARRIER`](/developer/uop#tinygrad.ops.UOps.BARRIER)
+      - Buffer UOp [`UOps.DEFINE_LOCAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_LOCAL).
+      - Indexing UOp, can only return `dtypes.int32`.
+      - Gate UOp, can only return `dtypes.bool`.
+      - Barrier UOp, [`UOps.BARRIER`](/developer/uop#tinygrad.ops.UOps.BARRIER)
   - **`arg`**: `None`
   """
   STORE = auto()
   """
-  - **`dtype`**: None
+  - **`dtype`**: `None`
   - **`src`**:
     - Normal STORE: `Tuple[UOp, UOp, UOp]`
       - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL)
         or [`UOps.DEFINE_LOCAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_LOCAL).
       - Indexing Op, can only return `dtypes.int32`.
-      - Value to store
+      - Value to store.
     - Gated STORE: `Tuple[UOp, UOp, UOp, UOp]`
       - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL).
-      - Indexing Op, can only return `dtypes.int32`.
-      - Value to store
-      - Gate Op, can only return `dtypes.bool`
+      - Indexing UOp, can only return `dtypes.int32`.
+      - Value to store.
+      - Gate UOp, can only return `dtypes.bool`.
   - **`arg`**: `None`
   """
   PHI = auto()
   # control flow ops
   BARRIER = auto()
   """
-  Define a warp sync for the stores in sources.
+  Inserts a warp sync between local stores and local loads.
 
-  - **`dtype`**: None
-  - **`src`**: `Tuple[UOps.STORE, ...]`
+  - **`dtype`**: `None`
+  - **`src`**: `Tuple[UOps.STORE, ...]`, Only local STOREs are allowed.
   - **`arg`**: `None`
   """
   IF = auto()
