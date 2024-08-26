@@ -118,10 +118,11 @@ class UOps(Enum):
       - Normal LOAD: `Tuple[UOp, UOp]`
           - Buffer UOp `DEFINE_GLOBAL`
           - Indexing Op, can only return dtypes.int32.
-      - Gated LOAD: `Tuple[UOp, UOp, UOp]`
+      - Gated LOAD: `Tuple[UOp, UOp, UOp, UOp]`
           - Buffer UOp `DEFINE_GLOBAL`
           - Indexing Op, can only return dtypes.int32.
           - Gate Op, can only return dtypes.bool.
+          - UOps.CONST 0
       - Barriered LOAD: `Tuple[UOp, UOp, UOp, UOp]`
           - Buffer UOp `DEFINE_LOCAL`
           - Indexing Op, can only return dtypes.int32.
