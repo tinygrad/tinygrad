@@ -1,4 +1,4 @@
-from typing import Dict, Union, Any
+from typing import Dict, Tuple, Union, Any
 import functools, ctypes, ctypes.util
 import tinygrad.runtime.autogen.objc as libobjc
 # note: The Objective-C runtime does not expose enough information to provide completely automatic bindings of all APIs. source: https://pyobjc.readthedocs.io/en/latest/metadata/index.html
@@ -11,8 +11,7 @@ def convert_arg(arg, arg_type):
   return arg
 
 @functools.lru_cache(maxsize=None)
-def sel_registerName(sel: str) -> ctypes.c_void_p:
-  return libobjc.sel_registerName(sel.encode())
+def sel_registerName(sel: str) -> ctypes.c_void_p: return libobjc.sel_registerName(sel.encode())
 
 def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=None):
   if argtypes is None: argtypes = []
@@ -25,7 +24,7 @@ def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=N
 libc = ctypes.CDLL(None)
 libc.free.argtypes = [ctypes.c_void_p]
 
-def dump_objc_methods(clz: ctypes.c_void_p):
+def dump_objc_methods(clz: ctypes.c_void_p) -> Dict[str, Tuple[str, str]]:
   method_count = ctypes.c_uint()
   methods_ptr = libobjc.class_copyMethodList(ctypes.cast(clz, libobjc.Class), ctypes.byref(method_count))
   assert methods_ptr is not None, f"Failed to get methods for class {clz}"
@@ -37,10 +36,9 @@ def dump_objc_methods(clz: ctypes.c_void_p):
     return_type_p = libobjc.method_copyReturnType(method)
     return_type = ctypes.string_at(return_type_p).decode('ascii')
     argtypes_ps = tuple(libobjc.method_copyArgumentType(method, j) for j in range(libobjc.method_getNumberOfArguments(method)))
+    methods[sel_name] = (return_type, tuple(ctypes.string_at(arg).decode('ascii') for arg in argtypes_ps))
 
-    methods[sel_name] = {"restype": return_type, "argtypes": tuple(ctypes.string_at(arg).decode('ascii') for arg in argtypes_ps)}
-
-    [libc.free(p) for p in argtypes_ps]
+    for p in argtypes_ps: libc.free(p)
     libc.free(ctypes.cast(return_type_p, ctypes.c_void_p))
   libc.free(methods_ptr)
   return methods
@@ -77,16 +75,10 @@ def get_methods_rec(c: int):
   return methods
 
 def objc_type_to_ctype(t: str):
-  if len(t) == 1:
-    return SIMPLE_TYPES[t]
-  if t[0] == '^':
-    return ctypes.POINTER(objc_type_to_ctype(t[1:]))
-  if t[0] == 'r':
-    return objc_type_to_ctype(t[1:])
-  if t[0] == "V":
-    return objc_type_to_ctype(t[1:])
-  if t.startswith("{") and "=" in t and t.endswith("}"):
-    return ctypes.Structure  # wooo! safety is out the window now
+  if len(t) == 1: return SIMPLE_TYPES[t]
+  if t[0] == "^": return ctypes.POINTER(objc_type_to_ctype(t[1:]))
+  if t[0] in ["r", "V"]: return objc_type_to_ctype(t[1:])
+  if t.startswith("{") and "=" in t and t.endswith("}"): return ctypes.Structure  # wooo! safety is out the window now
   raise ValueError(f"Unknown type {t}")
 
 def wrapper_return_objc_instance(f):
@@ -122,7 +114,7 @@ class ObjcClass(ctypes.c_void_p):
     super().__init__(p)
     assert self.value, f"Class {name} not found"
     _metaclass_ptr = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(p), libobjc.id))
-    self.methods_info: Dict[str, Dict[str, Any]] = get_methods_rec(ctypes.cast(_metaclass_ptr, ctypes.c_void_p).value)
+    self.methods_info = get_methods_rec(ctypes.cast(_metaclass_ptr, ctypes.c_void_p).value)
 
   def __repr__(self) -> str:
     return f"<{ctypes.string_at(libobjc.object_getClassName(ctypes.cast(ctypes.c_void_p(self.value), libobjc.id))).decode()} at 0x{self.value:x}>"
@@ -132,11 +124,7 @@ class ObjcClass(ctypes.c_void_p):
 
   def __getattr__(self, name:str) -> Any:
     sel_name = name.replace("_", ":")
-    if sel_name in self.methods_info:
-      method_info = self.methods_info[sel_name]
-      restype, argtypes = method_info["restype"], method_info["argtypes"]
-      return build_method(name, sel_name, restype, argtypes)(self)  # use cached method
-
+    if sel_name in self.methods_info: return build_method(name, sel_name, *self.methods_info[sel_name])(self)
     raise AttributeError(f"Method {name} not found on {self.__class__.__name__}")
 
 
