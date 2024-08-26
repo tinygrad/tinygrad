@@ -1,5 +1,4 @@
 import ctypes, subprocess, pathlib, tempfile, mmap
-from typing import Tuple, Any
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import OSX, cpu_time_execution, DEBUG, cpu_objdump, mv_address
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -8,7 +7,7 @@ from tinygrad.runtime.support.elf import elf_loader
 import tinygrad.runtime.autogen.macho as macho
 import tinygrad.runtime.autogen.mac as mac
 
-def macho_loader(blob: bytes) -> Tuple[memoryview, Any, Any]:
+def macho_loader(blob: bytes) -> memoryview:
   header = macho.struct_mach_header_64.from_buffer_copy(blob)
   curr_loc = ctypes.sizeof(macho.struct_mach_header_64)
   sections = []
@@ -20,7 +19,7 @@ def macho_loader(blob: bytes) -> Tuple[memoryview, Any, Any]:
     curr_loc += cmd.cmdsize
   image = bytearray(max([sh.addr + sh.size for sh in sections]))
   for sh in sections: image[sh.addr:sh.addr+sh.size] = blob[sh.offset:sh.offset+sh.size]
-  return memoryview(image), None, None
+  return memoryview(image)
 
 class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
@@ -37,7 +36,7 @@ class ClangProgram:
   def __init__(self, name:str, lib:bytes):
     if DEBUG >= 6: cpu_objdump(lib)
     self.name, self.lib = name, lib
-    image, _, _ = macho_loader(lib) if OSX else elf_loader(lib)
+    image = macho_loader(lib) if OSX else elf_loader(lib)[0]
     addr = libc.mmap(0, len(image), mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_ANON | mmap.MAP_PRIVATE, -1, 0)
     assert addr != 0xffffffffffffffff
     if OSX: mac.pthread_jit_write_protect_np(False)
