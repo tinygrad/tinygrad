@@ -159,6 +159,7 @@ class LazyBuffer:
       if op is BinaryOps.MUL:
         if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0): return y if val == 1 else y.const(0)
         if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0): return x if val == 1 else x.const(0)
+      if op is BinaryOps.IDIV and y.is_unrealized_unmasked_const() and y.base.arg == 1: return x
 
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
