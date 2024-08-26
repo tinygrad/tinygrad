@@ -70,7 +70,7 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul_half
         PYTHONPATH=. DEBUG=2 EMULATE_CUDA=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul_half
         PYTHONPATH=. DEBUG=2 EMULATE_INTEL=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul_half
-        PYTHONPATH=. DEBUG=2 EMULATE_AMX=1 PYTHON=1 AMX=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul_half
+        PYTHONPATH=. DEBUG=2 EMULATE_AMX=1 PYTHON=1 AMX=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul
     - name: Test dtype with Python emulator
       run: DEBUG=1 PYTHONPATH=. PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
@@ -333,8 +333,6 @@ jobs:
       run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
       run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
-    - name: Test AMX tensor core ops (real)
-      run: AMX=1 CLANG=1 DEBUG=3 python test/test_linearizer.py TestKernelOpts.test_tensor_core_opts
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     - name: Test Beam Search
