@@ -4,10 +4,12 @@ from collections import defaultdict
 from typing import DefaultDict, Dict, List, Set, Tuple
 from test.external.process_replay.utils import print_diff
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
-from tinygrad.helpers import CI, DEBUG, Context, colored, diskcache_put, fetch, getenv
+from tinygrad.helpers import CI, DEBUG, Context, ContextVar, colored, diskcache_put, fetch, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 from tinygrad.ops import UOp
+
+CAPTURING_PROCESS_REPLAY = ContextVar("CAPTURING_PROCESS_REPLAY", getenv("RUN_PROCESS_REPLAY"))
 
 def process_replay(outs:List[LazyBuffer], graph:DefaultDict[LBScheduleItem, List[LBScheduleItem]], in_degree:DefaultDict[LBScheduleItem, int]):
   # copy the reference module
@@ -35,7 +37,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
     if (cache_key:=tuple(asts)) in seen_diffs: continue
     seen_diffs.add(cache_key)
     changed += 1
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), list(asts.values())))
+    if CAPTURING_PROCESS_REPLAY: diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), list(asts.values())))
     if not CI: print_si_diff(si[0], si[1])
   if DEBUG >= 1: print(f"*** process replay: {changed} unique kernel{'s' if changed>1 else ''} changed")
   return changed

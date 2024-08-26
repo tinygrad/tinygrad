@@ -1,11 +1,12 @@
 from typing import List
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
-from tinygrad.helpers import Profiling, Timing, getenv
+from tinygrad.helpers import Profiling, Timing, getenv, BEAM, DEBUG, Context
 from tinygrad.ops import UOps
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.lowerer import ast_to_uop
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
+from tinygrad.engine.search import beam_search, bufs_from_lin
 
 if __name__ == "__main__":
   mdl = ResNet50()
@@ -26,10 +27,12 @@ if __name__ == "__main__":
       if not SCHEDULE_ONLY:
         asts = {x.ast.key:x.ast for x in sched if x.ast.op is UOps.SINK}.values()
         kernels: List[Kernel] = []
-        with Timing("***** model opts in      "):
+        with Timing(f"***** model opts({len(asts):2d}) in  "):
           for ast in asts:
             k = Kernel(ast)
-            k.hand_coded_optimizations()
+            if BEAM:
+              with Context(DEBUG=max(2, DEBUG.value)): k = beam_search(k, bufs_from_lin(k), BEAM.value)
+            else: k.hand_coded_optimizations()
             kernels.append(k)
 
         with Timing("***** model lower in     "): uops = [ast_to_uop(k.get_optimized_ast(), k.opts) for k in kernels]

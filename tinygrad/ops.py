@@ -25,7 +25,7 @@ class TernaryOps(Enum):
   WHERE = auto(); MULACC = auto() # noqa: E702
 class ReduceOps(Enum):
   """A -> B (reduce)"""
-  SUM = auto(); PROD = auto(); MAX = auto(); WMMA = auto() # noqa: E702
+  SUM = auto(); PROD = auto(); MAX = auto() # noqa: E702
 class MetaOps(Enum):
   EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
@@ -33,10 +33,15 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
 
+REDUCE_ALU: Dict[ReduceOps, BinaryOps] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.MAX:BinaryOps.MAX}
+
+# https://en.wikipedia.org/wiki/Identity_element
+def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
+
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); EXT = auto(); EXPAND = auto(); CONTRACT = auto(); SHAPETRACKER = auto()  # noqa: E702
+  SINK = auto(); EXT = auto(); EXPAND = auto(); CONTRACT = auto(); SHAPETRACKER = auto(); SWIZZLE = auto()  # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); GEP = auto() # noqa: E702
@@ -221,11 +226,14 @@ class NOp(UOp):
 
 class UPat:
   def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
-               name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False, location=None):
+               name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False, location=None,
+               custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None):
     self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
     self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
     self.arg, self.name = arg, name
+    self.in_src = src
     self.src: Any = None
+    self.custom_early_reject = custom_early_reject
     # try all permutations if it's a list
     if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
     # only one if it's a tuple
@@ -238,8 +246,9 @@ class UPat:
 
   @functools.cached_property
   def early_reject(self) -> Set[Tuple[UOps, Any]]:
-    # TODO: this can be improved to support some allowed_len == 0 patterns
-    return set((pp.op[0], pp.arg) for pp in self.src[0] if pp.op is not None and len(pp.op) == 1) if self.allowed_len else set()
+    if self.custom_early_reject is not None: return self.custom_early_reject
+    upat_match = [self.in_src] if isinstance(self.in_src, UPat) else ([] if self.in_src is None else self.src[0])
+    return set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
   def printable(self:UPat): return lines(self.location[0])[self.location[1]-1].strip()
   def __repr__(self):
@@ -253,11 +262,11 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
      (pat.dtype is not None and uop.dtype not in pat.dtype) or \
      (pat.arg is not None and pat.arg != uop.arg) or \
-     (pat.op is not None and uop.op not in pat.op): return []
+     (pat.op is not None and uop.op not in pat.op) or \
+     (pat.allowed_len != 0 and len(uop.src) != pat.allowed_len): return []
   if pat.src is None: return [store]
   res: List[Dict[str, UOp]] = []
   for vp in pat.src:
-    if pat.allowed_len != 0 and len(uop.src) != pat.allowed_len: return []
     new_stores = [store.copy()]
     for uu, vv in zip(uop.src, vp): new_stores = [rstore for nstore in new_stores for rstore in _match(uu, vv, nstore)]
     res.extend(new_stores)
@@ -290,7 +299,7 @@ class TrackedPattenMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
     super().__init__(patterns)
     for p,_ in self.patterns:
-      if p not in match_stats: match_stats[p] = [0,0,0.0]
+      if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     ret = None
@@ -304,6 +313,7 @@ class TrackedPattenMatcher(PatternMatcher):
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
         match_stats[p][0] += 1
         match_stats[p][2] += (et:=time.perf_counter()-st)
+        match_stats[p][3] += et
         if TRACK_MATCH_STATS >= 2: print(f"{et*1e6:7.2f} us -- ", p.printable())
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
@@ -314,11 +324,12 @@ if TRACK_MATCH_STATS:
   import atexit
   @atexit.register
   def print_match_stats():
-    ret = [0,0,0.0]
+    ret = [0,0,0.0,0.0]
     for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
-      print(f"{v[0]:6d} / {v[1]:7d} -- {v[2]*1000.:9.2f} ms -- {k.location}", k.printable())
+      loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
+      print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
       ret = [x+y for x,y in zip(ret, v)]
-    print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[2]*1000.:9.2f} ms -- TOTAL")
+    print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
 
 # *** simple graph rewrite engine ***
 
@@ -384,7 +395,7 @@ def type_verify(uops):
     if uop is UOps.DEFINE_GLOBAL: assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}"
     if isinstance(dtype, ImageDType): assert uop is UOps.DEFINE_GLOBAL, f"{uop} can't be image"
     if uop is UOps.SHAPETRACKER: assert len(src) == 0, f"SHAPETRACKER must only define a ShapeTracker arg {uop}"
-    if uop is UOps.REDUCE_AXIS: assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in ReduceOps, f"invalid arg for REDUCE_AXIS {arg}"
+    if uop is UOps.REDUCE_AXIS: assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in BinaryOps, f"invalid arg for REDUCE_AXIS {arg}"
     if uop in {UOps.CONST, UOps.DEFINE_ACC}:
       if uop is UOps.CONST:
         assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
@@ -461,5 +472,5 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
       assert u.arg[1] is not None
-      flops += 2 * prod(u.arg[1]) // 32 * mults
+      flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
   return flops, mem

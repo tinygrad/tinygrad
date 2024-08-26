@@ -372,7 +372,8 @@ class FrozenOpenClipEmbedder(Embedder):
 
     if self.return_pooled:
       x = self.model.ln_final(x)
-      pooled = x[:, tokens.argmax(axis=-1).numpy().item()] @ self.model.text_projection
+      index = tokens.argmax(axis=-1).reshape(-1,1,1).expand(x.shape[0],1,x.shape[-1])
+      pooled = x.gather(1, index).squeeze(1) @ self.model.text_projection
       return penultimate, pooled
     else:
       return penultimate
