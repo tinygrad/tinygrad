@@ -2,6 +2,7 @@ from typing import Dict, Tuple, Union, Any
 import functools, ctypes, ctypes.util
 import tinygrad.runtime.autogen.objc as libobjc
 # note: The Objective-C runtime does not expose enough information to provide completely automatic bindings of all APIs. source: https://pyobjc.readthedocs.io/en/latest/metadata/index.html
+# though it's possible to parse bridgesupport files
 
 def convert_arg(arg, arg_type):
   if isinstance(arg, ObjcObject): assert not arg.released, f"use after free ({arg})"
@@ -14,9 +15,8 @@ def convert_arg(arg, arg_type):
 def sel_registerName(sel: str) -> ctypes.c_void_p: return libobjc.sel_registerName(sel.encode())
 
 def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=None):
-  if argtypes is None: argtypes = []
   base_argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-  encoded_args = [convert_arg(a, t) for a, t in zip(args, argtypes)]
+  encoded_args = [convert_arg(a, t) for a, t in zip(args, argtypes)] if argtypes else []
   # print(f"Sending {sel}(restype:{restype} argtypes:{argtypes}) to ptr:{obj} with args:{args}")
   libobjc.objc_msgSend.restype, libobjc.objc_msgSend.argtypes = restype, ((base_argtypes + argtypes) if argtypes else base_argtypes)
   return libobjc.objc_msgSend(obj, sel_registerName(sel), *encoded_args)
@@ -26,7 +26,7 @@ libc.free.argtypes = [ctypes.c_void_p]
 
 def dump_objc_methods(clz: ctypes.c_void_p) -> Dict[str, Tuple[str, str]]:
   method_count = ctypes.c_uint()
-  methods_ptr = libobjc.class_copyMethodList(ctypes.cast(clz, libobjc.Class), ctypes.byref(method_count))
+  methods_ptr = libobjc.class_copyMethodList(clz, ctypes.byref(method_count))
   assert methods_ptr is not None, f"Failed to get methods for class {clz}"
 
   methods = {}
@@ -39,7 +39,7 @@ def dump_objc_methods(clz: ctypes.c_void_p) -> Dict[str, Tuple[str, str]]:
     methods[sel_name] = (return_type, tuple(ctypes.string_at(arg).decode('ascii') for arg in argtypes_ps))
 
     for p in argtypes_ps: libc.free(p)
-    libc.free(ctypes.cast(return_type_p, ctypes.c_void_p))
+    libc.free(return_type_p)
   libc.free(methods_ptr)
   return methods
 
@@ -81,19 +81,15 @@ def objc_type_to_ctype(t: str):
   if t[0] == "{" and "=" in t and t[-1] == "}": return ctypes.Structure  # wooo! safety is out the window now
   raise ValueError(f"Unknown type {t}")
 
-def wrapper_return_objc_instance(f):
-  def _wrapper(*args, **kwargs):
-    res = f(*args, **kwargs)
-    if res: return ObjcObject(res)
-    return None
-  return _wrapper
-
-def wrapper_arg_error(f):
-  def _wrapper(*args, **kwargs):
-    err = ctypes.c_void_p()
-    res = f(*args[:-1], ctypes.byref(err), **kwargs)
-    return (res, None if err.value is None else ObjcObject(err.value))
-  return _wrapper
+class ObjcMethod:
+  def __init__(self, f, out_err=False, ret_ptr=False):
+    self.f, self.out_err, self.ret_ptr = f, out_err, ret_ptr
+  def __call__(self, *args, **kwargs):
+    err = ctypes.c_void_p()  # find a way to not create this?
+    res = self.f(*args[:-1], ctypes.byref(err), **kwargs) if self.out_err else self.f(*args, **kwargs)
+    if res and self.ret_ptr: res = ObjcObject(res)
+    if res and self.out_err: res = (res, None if err.value is None else ObjcObject(err.value))
+    return res
 
 @functools.lru_cache(maxsize=None)
 def build_method(name, sel_name, restype, argtypes):
@@ -102,9 +98,7 @@ def build_method(name, sel_name, restype, argtypes):
   def f(p):
     _f = functools.partial(objc_msgSend, p, sel_name, restype=objc_type_to_ctype(restype),
           argtypes=[objc_type_to_ctype(t) for t in argtypes[2:]])
-    if restype == "@": _f = wrapper_return_objc_instance(_f)
-    if name.endswith("error_"): _f = wrapper_arg_error(_f)
-    return _f
+    return ObjcMethod(_f, out_err=name.endswith("error_"), ret_ptr=restype == "@")
   return f
 
 
