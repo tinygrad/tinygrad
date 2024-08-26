@@ -58,6 +58,9 @@ def diff_kernel(offset:int) -> bool:
         # NOTE: replay with the captured renderer, not the one in master
         good_src = k.opts.render(name, cast(List,k.to_program().uops))
     except Exception as e:
+      k = Kernel(ast, opts=opts)
+      for opt in applied_opts: k.apply_opt(opt)
+      print(k.to_program())
       logging.warning(f"FAILED TO RECREATE KERNEL {e}")
       logging.info(ast)
       logging.info(applied_opts)
@@ -89,7 +92,7 @@ def _run_differ(row_count:int, differ:Callable[[int], bool]) -> None:
     pool.close()
     pool.join()
     pool.terminate()
-    if any(changed) and ASSERT_DIFF: raise Exception("process replay detected changes")
+    if any(changed) and ASSERT_DIFF: raise AssertionError("process replay detected changes")
 
 def process_replay_schedule() -> None:
   conn = db_connection()
@@ -111,7 +114,7 @@ def process_replay_kernel() -> None:
   try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
   except sqlite3.OperationalError:
     logging.warning(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
-    exit(0)
+    return None
   conn.commit()
   cur.close()
   _run_differ(row_count, diff_kernel)
