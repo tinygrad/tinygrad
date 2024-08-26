@@ -15,7 +15,7 @@ def sel_registerName(sel: str) -> libobjc.SEL:
   return libobjc.sel_registerName(sel.encode())
 
 def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=None):
-  if argtypes == None: argtypes = []
+  if argtypes is None: argtypes = []
   base_argtypes = [ctypes.c_void_p, ctypes.c_void_p]
   encoded_args = [convert_arg(a, t) for a, t in zip(args, argtypes)]
   # print(f"Sending {sel}(restype:{restype} argtypes:{argtypes}) to ptr:{obj} with args:{args}")
