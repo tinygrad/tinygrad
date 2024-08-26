@@ -2062,30 +2062,25 @@ class Tensor:
     ```
     """
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
-    assert mode == "linear", "only supports linear interpolate"
-    x, expand = self, list(self.shape)
-    for i in range(-len(size), 0):
-      scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
-      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-      reshape[i] = expand[i] = size[i]
-      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-      x = x.gather(i, low).lerp(x.gather(i, high), perc)
-    return x.cast(self.dtype)
-
-  def nearest_interpolate(self, size: Tuple[int, ...]) -> 'Tensor':
-    """
-    Nearest neighbor interpolation.
-    """
-    x, expand = self, list(self.shape)
-    for i in range(-len(size), 0):
-      scale = self.shape[i] / size[i]
-      index = (Tensor.arange(size[i], dtype=dtypes.float32, device=self.device) * scale).floor().clip(0, self.shape[i] - 1)
-      reshape = [1] * self.ndim
-      reshape[i] = expand[i] = size[i]
-      index = index.reshape(reshape).expand(expand)
-      x = x.gather(i, index)
-    return x.cast(self.dtype)
+    if mode == "linear":
+      x, expand = self, list(self.shape)
+      for i in range(-len(size), 0):
+        scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
+        arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
+        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+        reshape[i] = expand[i] = size[i]
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      return x.cast(self.dtype)
+    if mode == "nearest":
+      if align_corners:
+        raise ValueError("align_corners option can only be set with the interpolating modes: linear | bilinear | bicubic | trilinear")
+      x = self
+      for i in range(-len(size), 0):
+        index = (Tensor.arange(size[i], dtype=dtypes.float32, device=self.device) * (self.shape[i] / size[i])).floor().clip(0, self.shape[i] - 1)
+        x = x.gather(i, index.long().reshape([1] * self.ndim).expand(list(self.shape)[:-len(size)] + [size[i]]))
+      return x.cast(self.dtype)
+    raise AssertionError(f"only supports linear and nearest interpolate, got {mode=}")
 
   # ***** unary ops *****
 
