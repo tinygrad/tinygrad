@@ -2073,6 +2073,20 @@ class Tensor:
       x = x.gather(i, low).lerp(x.gather(i, high), perc)
     return x.cast(self.dtype)
 
+  def nearest_interpolate(self, size: Tuple[int, ...]) -> 'Tensor':
+    """
+    Nearest neighbor interpolation.
+    """
+    x, expand = self, list(self.shape)
+    for i in range(-len(size), 0):
+      scale = self.shape[i] / size[i]
+      index = (Tensor.arange(size[i], dtype=dtypes.float32, device=self.device) * scale).floor().clip(0, self.shape[i] - 1)
+      reshape = [1] * self.ndim
+      reshape[i] = expand[i] = size[i]
+      index = index.reshape(reshape).expand(expand)
+      x = x.gather(i, index)
+    return x.cast(self.dtype)
+
   # ***** unary ops *****
 
   def logical_not(self):
