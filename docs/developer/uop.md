@@ -7,4 +7,5 @@
 ::: tinygrad.ops.UOps
     options:
         show_labels: false
+        members: true
         members_order: source
