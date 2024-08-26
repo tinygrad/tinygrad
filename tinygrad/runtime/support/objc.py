@@ -4,6 +4,7 @@ import tinygrad.runtime.autogen.objc as libobjc
 # note: The Objective-C runtime does not expose enough information to provide completely automatic bindings of all APIs. source: https://pyobjc.readthedocs.io/en/latest/metadata/index.html
 
 def convert_arg(arg, arg_type):
+  if isinstance(arg, ObjcInstance): assert not arg.released, f"use after free ({arg})"
   if isinstance(arg, str) and arg_type is ctypes.c_char_p: return arg.encode()
   if isinstance(arg, str) and arg_type is ctypes.c_void_p: return NSString.stringWithUTF8String_(arg)
   if isinstance(arg, list) or isinstance(arg, tuple) and arg_type is ctypes.c_void_p: return (ctypes.c_void_p * len(arg))(*arg)
@@ -146,10 +147,14 @@ class ObjcInstance(ObjcClass):
     super(ctypes.c_void_p, self).__init__(v)
     c = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(v), libobjc.id))
     self.methods_info = get_methods_rec(ctypes.cast(c, ctypes.c_void_p).value)
+    self.auto_release = True
+    self.released = False
 
   def __del__(self):
-    # print(f"Releasing {self}")
-    self.release()
+    if self.auto_release:
+      # print(f"Releasing {self}")
+      self.released = True
+      self.release()
 
 NSString: Any = ObjcClass("NSString")
 

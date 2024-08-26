@@ -69,6 +69,7 @@ class MetalAllocator(LRUAllocator):
   def _alloc(self, size:int, options) -> MetalBuffer:
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
+    ret.auto_release = False
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): opaque.buf.release()
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
@@ -88,6 +89,7 @@ class MetalAllocator(LRUAllocator):
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
   def from_buffer(self, src:memoryview) -> Optional[Any]:
     ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, src.nbytes, Metal.MTLResourceStorageModeShared, None)
+    ret.auto_release = False
     if ret: self.device.mv_in_metal.append(src)
     return MetalBuffer(ret, src.nbytes)
   def as_buffer(self, src:MetalBuffer) -> memoryview:
