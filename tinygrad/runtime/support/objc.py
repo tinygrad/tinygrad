@@ -4,7 +4,7 @@ import tinygrad.runtime.autogen.objc as libobjc
 # note: The Objective-C runtime does not expose enough information to provide completely automatic bindings of all APIs. source: https://pyobjc.readthedocs.io/en/latest/metadata/index.html
 
 def convert_arg(arg, arg_type):
-  if isinstance(arg, ObjcInstance): assert not arg.released, f"use after free ({arg})"
+  if isinstance(arg, ObjcObject): assert not arg.released, f"use after free ({arg})"
   if isinstance(arg, str) and arg_type is ctypes.c_char_p: return arg.encode()
   if isinstance(arg, str) and arg_type is ctypes.c_void_p: return NSString.stringWithUTF8String_(arg)
   if isinstance(arg, list) or isinstance(arg, tuple) and arg_type is ctypes.c_void_p: return (ctypes.c_void_p * len(arg))(*arg)
@@ -84,7 +84,7 @@ def objc_type_to_ctype(t: str):
 def wrapper_return_objc_instance(f):
   def _wrapper(*args, **kwargs):
     res = f(*args, **kwargs)
-    if res: return ObjcInstance(res)
+    if res: return ObjcObject(res)
     return None
   return _wrapper
 
@@ -92,7 +92,7 @@ def wrapper_arg_error(f):
   def _wrapper(*args, **kwargs):
     err = ctypes.c_void_p()
     res = f(*args[:-1], ctypes.byref(err), **kwargs)
-    return (res, None if err.value is None else ObjcInstance(err))
+    return (res, None if err.value is None else ObjcObject(err.value))
   return _wrapper
 
 @functools.lru_cache(maxsize=None)
@@ -108,13 +108,20 @@ def build_method(name, sel_name, restype, argtypes):
   return f
 
 
-class ObjcClass(ctypes.c_void_p):
-  def __init__(self, name:str):
-    p: Union[int, None] = ctypes.cast(libobjc.objc_getClass(name.encode()), ctypes.c_void_p).value
+class ObjcObject(ctypes.c_void_p):
+  def __init__(self, p:int, manual_release=False):
+    assert p, "Can't create ObjcObject with null ptr"
     super().__init__(p)
-    assert self.value, f"Class {name} not found"
     _metaclass_ptr = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(p), libobjc.id))
     self.methods_info = get_methods_rec(ctypes.cast(_metaclass_ptr, ctypes.c_void_p).value)
+    self.manual_release = manual_release
+    self.released = False
+
+  @classmethod
+  def from_classname(cls, name:str):
+    p = ctypes.cast(libobjc.objc_getClass(name.encode()), ctypes.c_void_p).value
+    assert p, f"Class {name} not found"
+    return cls(p, manual_release=True)
 
   def __repr__(self) -> str:
     return f"<{ctypes.string_at(libobjc.object_getClassName(ctypes.cast(ctypes.c_void_p(self.value), libobjc.id))).decode()} at 0x{self.value:x}>"
@@ -127,24 +134,13 @@ class ObjcClass(ctypes.c_void_p):
     if sel_name in self.methods_info: return build_method(name, sel_name, *self.methods_info[sel_name])(self)
     raise AttributeError(f"Method {name} not found on {self.__class__.__name__}")
 
-
-class ObjcInstance(ObjcClass):
-  def __init__(self, ptr: Union[int, ctypes.c_void_p, None]):
-    v: Union[int, None] = ptr.value if isinstance(ptr, ctypes.c_void_p) else ptr
-    assert v, "Can't create ObjcInstance with null ptr"
-    super(ctypes.c_void_p, self).__init__(v)
-    c = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(v), libobjc.id))
-    self.methods_info = get_methods_rec(ctypes.cast(c, ctypes.c_void_p).value)
-    self.auto_release = True
-    self.released = False
-
   def __del__(self):
-    if self.auto_release:
+    if self.manual_release:
       # print(f"Releasing {self}")
       self.released = True
       self.release()
 
-NSString: Any = ObjcClass("NSString")
+NSString: Any = ObjcObject.from_classname("NSString")
 
 def nsstring_to_str(nsstring) -> str:
   return ctypes.string_at(nsstring.UTF8String(), size=nsstring.length()).decode()

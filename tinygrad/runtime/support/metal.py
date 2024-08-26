@@ -1,5 +1,5 @@
 import ctypes, ctypes.util
-from tinygrad.runtime.support.objc import ObjcClass, ObjcInstance
+from tinygrad.runtime.support.objc import ObjcObject
 
 metal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/Metal")
 core_graphics = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")  # needed: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
@@ -22,15 +22,15 @@ class IndirectCommandBufferExecutionRange(ctypes.Structure):
 
 class Metal:
   @staticmethod
-  def MTLCreateSystemDefaultDevice(): return ObjcInstance(metal.MTLCreateSystemDefaultDevice())
+  def MTLCreateSystemDefaultDevice(): return ObjcObject(metal.MTLCreateSystemDefaultDevice())
   MTLResourceStorageModeShared = 0
   MTLSize = MTLSize
-  MTLCompileOptions = ObjcClass("MTLCompileOptions")
+  MTLCompileOptions = ObjcObject.from_classname("MTLCompileOptions")
   # MTL graph support
-  MTLIndirectCommandBufferDescriptor = ObjcClass("MTLIndirectCommandBufferDescriptor")
+  MTLIndirectCommandBufferDescriptor = ObjcObject.from_classname("MTLIndirectCommandBufferDescriptor")
   MTLIndirectCommandTypeConcurrentDispatch = 32
   MTLResourceUsageRead = 1
   MTLResourceUsageWrite = 2
   MTLResourceUsageSample = 4
   MTLIndirectCommandBufferExecutionRangeMake = IndirectCommandBufferExecutionRange
-  MTLComputePipelineDescriptor = ObjcClass("MTLComputePipelineDescriptor")
+  MTLComputePipelineDescriptor = ObjcObject.from_classname("MTLComputePipelineDescriptor")
