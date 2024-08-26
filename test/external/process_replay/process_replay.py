@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3
 from typing import Callable, List, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, db_connection, getenv, tqdm
