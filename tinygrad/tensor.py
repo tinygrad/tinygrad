@@ -942,7 +942,7 @@ class Tensor:
   #   2. Bool indexing is not supported
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
-  def __getitem__(self, indices, adv_set: bool = False) -> Tensor:
+  def __getitem__(self, indices, set: bool = False) -> Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
@@ -1044,7 +1044,7 @@ class Tensor:
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
 
-    if adv_set: return mask, ret.shape, first_dim, sum_axis
+      if set: return mask, ret.shape, first_dim, sum_axis
     return ret
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
@@ -1055,30 +1055,34 @@ class Tensor:
     if not isinstance(v, (Tensor, list, np.ndarray, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, tuple, list)) for i in indices)):
-      mask, ret_shape, first_dim, sum_axis = self.realize().__getitem__(indices, adv_set=True)
-      # broadcast to resulting shape from getitem
-      v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret_shape, v.shape))
-      # add back reduced dims from sum and broadcast to mask's shape
-      for dim in sum_axis: v = v.unsqueeze(dim)
-      v = v._broadcast_to(_broadcast_shape(mask.shape, v.shape))
-      # axis to be reduced to match self.shape
-      axis = tuple(range(first_dim, first_dim + (mask.ndim - self.ndim)))
-      # apply mask to v and reduce such that if v contains repeated indices the last one remains
-      v = v * mask
-      for dim in axis: v = functools.reduce(lambda x,y: y.where(y, x), v.split(1, dim))
-      # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
-      v = mask.any(axis).where(v.squeeze(), self)
-      # TODO: there must be a better way to do this
-      st = self.lazydata.st
-      self.assign(v.contiguous()).realize()
-      self.lazydata.st = st
 
-    else:
-      assign_to = self.realize().__getitem__(indices)
+    res = self.realize().__getitem__(indices, set=True)
+    # basic setitem
+    if isinstance(res, Tensor):
       # NOTE: contiguous to prevent const folding.
-      v = v.cast(assign_to.dtype)._broadcast_to(_broadcast_shape(assign_to.shape, v.shape)).contiguous()
-      assign_to.assign(v).realize()
+      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
+      st = res.lazydata.st
+      res.assign(v).realize()
+      res.lazydata.st = st
+      return
+    # advanced setitem
+    mask, ret_shape, first_dim, sum_axis = res
+    # broadcast to resulting shape from getitem
+    v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret_shape, v.shape))
+    # add back reduced dims from sum and broadcast to mask's shape
+    for dim in sum_axis: v = v.unsqueeze(dim)
+    v = v._broadcast_to(_broadcast_shape(mask.shape, v.shape))
+    # axis to be reduced to match self.shape
+    axis = tuple(range(first_dim, first_dim + (mask.ndim - self.ndim)))
+    # apply mask to v and reduce such that if v contains repeated indices the last one remains
+    v = v * mask
+    for dim in axis: v = functools.reduce(lambda x,y: y.where(y, x), v.split(1, dim))
+    # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
+    v = mask.any(axis).where(v.squeeze(), self)
+    # NOTE: hack for non contiguous tensors
+    st = self.lazydata.st
+    self.assign(v.contiguous()).realize()
+    self.lazydata.st = st
 
   # NOTE: using _slice is discouraged and things should migrate to pad and shrink
   def _slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
