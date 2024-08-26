@@ -120,8 +120,8 @@ class Union(ctypes.Union, AsDictMixin):
 
 import fcntl, functools
 
-def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, **kwargs):
-  ret = fcntl.ioctl(__fd, (__idir<<30) | (ctypes.sizeof(made := __user_struct(**kwargs))<<16) | (__base<<8) | __nr, made)
+def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, *args, **kwargs):
+  ret = fcntl.ioctl(__fd, (__idir<<30) | (ctypes.sizeof(made := __user_struct(*args, **kwargs))<<16) | (__base<<8) | __nr, made)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
   return made
 
@@ -1298,27 +1298,310 @@ try:
     fastrpc_munmap.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(None), size_t]
 except AttributeError:
     pass
+_APPS_STD_H = True # macro
+def __QAIC_HEADER(ff):  # macro
+   return ff
+__QAIC_HEADER_EXPORT = True # macro
+__QAIC_HEADER_ATTRIBUTE = True # macro
+def __QAIC_IMPL(ff):  # macro
+   return ff
+__QAIC_IMPL_EXPORT = True # macro
+__QAIC_IMPL_ATTRIBUTE = True # macro
+__QAIC_STRING1_OBJECT_DEFINED__ = True # macro
+__STRING1_OBJECT__ = True # macro
+class struct__cstring1_s(Structure):
+    pass
+
+struct__cstring1_s._pack_ = 1 # source:False
+struct__cstring1_s._fields_ = [
+    ('data', ctypes.POINTER(ctypes.c_char)),
+    ('dataLen', ctypes.c_int32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+_cstring1_t = struct__cstring1_s
+apps_std_FILE = ctypes.c_int32
+
+# values for enumeration 'apps_std_SEEK'
+apps_std_SEEK__enumvalues = {
+    0: 'APPS_STD_SEEK_SET',
+    1: 'APPS_STD_SEEK_CUR',
+    2: 'APPS_STD_SEEK_END',
+    2147483647: '_32BIT_PLACEHOLDER_apps_std_SEEK',
+}
+APPS_STD_SEEK_SET = 0
+APPS_STD_SEEK_CUR = 1
+APPS_STD_SEEK_END = 2
+_32BIT_PLACEHOLDER_apps_std_SEEK = 2147483647
+apps_std_SEEK = ctypes.c_uint32 # enum
+class struct_apps_std_DIR(Structure):
+    pass
+
+struct_apps_std_DIR._pack_ = 1 # source:False
+struct_apps_std_DIR._fields_ = [
+    ('handle', ctypes.c_uint64),
+]
+
+apps_std_DIR = struct_apps_std_DIR
+class struct_apps_std_DIRENT(Structure):
+    pass
+
+struct_apps_std_DIRENT._pack_ = 1 # source:False
+struct_apps_std_DIRENT._fields_ = [
+    ('ino', ctypes.c_int32),
+    ('name', ctypes.c_char * 255),
+    ('PADDING_0', ctypes.c_ubyte),
+]
+
+apps_std_DIRENT = struct_apps_std_DIRENT
+class struct_apps_std_STAT(Structure):
+    pass
+
+struct_apps_std_STAT._pack_ = 1 # source:False
+struct_apps_std_STAT._fields_ = [
+    ('tsz', ctypes.c_uint64),
+    ('dev', ctypes.c_uint64),
+    ('ino', ctypes.c_uint64),
+    ('mode', ctypes.c_uint32),
+    ('nlink', ctypes.c_uint32),
+    ('rdev', ctypes.c_uint64),
+    ('size', ctypes.c_uint64),
+    ('atime', ctypes.c_int64),
+    ('atimensec', ctypes.c_int64),
+    ('mtime', ctypes.c_int64),
+    ('mtimensec', ctypes.c_int64),
+    ('ctime', ctypes.c_int64),
+    ('ctimensec', ctypes.c_int64),
+]
+
+apps_std_STAT = struct_apps_std_STAT
+try:
+    apps_std_fopen = _libraries['FIXME_STUB'].apps_std_fopen
+    apps_std_fopen.restype = ctypes.c_int32
+    apps_std_fopen.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_freopen = _libraries['FIXME_STUB'].apps_std_freopen
+    apps_std_freopen.restype = ctypes.c_int32
+    apps_std_freopen.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_fflush = _libraries['FIXME_STUB'].apps_std_fflush
+    apps_std_fflush.restype = ctypes.c_int32
+    apps_std_fflush.argtypes = [apps_std_FILE]
+except AttributeError:
+    pass
+try:
+    apps_std_fclose = _libraries['FIXME_STUB'].apps_std_fclose
+    apps_std_fclose.restype = ctypes.c_int32
+    apps_std_fclose.argtypes = [apps_std_FILE]
+except AttributeError:
+    pass
+try:
+    apps_std_fread = _libraries['FIXME_STUB'].apps_std_fread
+    apps_std_fread.restype = ctypes.c_int32
+    apps_std_fread.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_fwrite = _libraries['FIXME_STUB'].apps_std_fwrite
+    apps_std_fwrite.restype = ctypes.c_int32
+    apps_std_fwrite.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_fgetpos = _libraries['FIXME_STUB'].apps_std_fgetpos
+    apps_std_fgetpos.restype = ctypes.c_int32
+    apps_std_fgetpos.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_fsetpos = _libraries['FIXME_STUB'].apps_std_fsetpos
+    apps_std_fsetpos.restype = ctypes.c_int32
+    apps_std_fsetpos.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    apps_std_ftell = _libraries['FIXME_STUB'].apps_std_ftell
+    apps_std_ftell.restype = ctypes.c_int32
+    apps_std_ftell.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_fseek = _libraries['FIXME_STUB'].apps_std_fseek
+    apps_std_fseek.restype = ctypes.c_int32
+    apps_std_fseek.argtypes = [apps_std_FILE, ctypes.c_int32, apps_std_SEEK]
+except AttributeError:
+    pass
+try:
+    apps_std_flen = _libraries['FIXME_STUB'].apps_std_flen
+    apps_std_flen.restype = ctypes.c_int32
+    apps_std_flen.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
+    apps_std_rewind = _libraries['FIXME_STUB'].apps_std_rewind
+    apps_std_rewind.restype = ctypes.c_int32
+    apps_std_rewind.argtypes = [apps_std_FILE]
+except AttributeError:
+    pass
+try:
+    apps_std_feof = _libraries['FIXME_STUB'].apps_std_feof
+    apps_std_feof.restype = ctypes.c_int32
+    apps_std_feof.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_ferror = _libraries['FIXME_STUB'].apps_std_ferror
+    apps_std_ferror.restype = ctypes.c_int32
+    apps_std_ferror.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_clearerr = _libraries['FIXME_STUB'].apps_std_clearerr
+    apps_std_clearerr.restype = ctypes.c_int32
+    apps_std_clearerr.argtypes = [apps_std_FILE]
+except AttributeError:
+    pass
+try:
+    apps_std_print_string = _libraries['FIXME_STUB'].apps_std_print_string
+    apps_std_print_string.restype = ctypes.c_int32
+    apps_std_print_string.argtypes = [ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    apps_std_getenv = _libraries['FIXME_STUB'].apps_std_getenv
+    apps_std_getenv.restype = ctypes.c_int32
+    apps_std_getenv.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_setenv = _libraries['FIXME_STUB'].apps_std_setenv
+    apps_std_setenv.restype = ctypes.c_int32
+    apps_std_setenv.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    apps_std_unsetenv = _libraries['FIXME_STUB'].apps_std_unsetenv
+    apps_std_unsetenv.restype = ctypes.c_int32
+    apps_std_unsetenv.argtypes = [ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    apps_std_fopen_with_env = _libraries['FIXME_STUB'].apps_std_fopen_with_env
+    apps_std_fopen_with_env.restype = ctypes.c_int32
+    apps_std_fopen_with_env.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_fgets = _libraries['FIXME_STUB'].apps_std_fgets
+    apps_std_fgets.restype = ctypes.c_int32
+    apps_std_fgets.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_get_search_paths_with_env = _libraries['FIXME_STUB'].apps_std_get_search_paths_with_env
+    apps_std_get_search_paths_with_env.restype = ctypes.c_int32
+    apps_std_get_search_paths_with_env.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct__cstring1_s), ctypes.c_int32, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint16)]
+except AttributeError:
+    pass
+try:
+    apps_std_fileExists = _libraries['FIXME_STUB'].apps_std_fileExists
+    apps_std_fileExists.restype = ctypes.c_int32
+    apps_std_fileExists.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_ubyte)]
+except AttributeError:
+    pass
+try:
+    apps_std_fsync = _libraries['FIXME_STUB'].apps_std_fsync
+    apps_std_fsync.restype = ctypes.c_int32
+    apps_std_fsync.argtypes = [apps_std_FILE]
+except AttributeError:
+    pass
+try:
+    apps_std_fremove = _libraries['FIXME_STUB'].apps_std_fremove
+    apps_std_fremove.restype = ctypes.c_int32
+    apps_std_fremove.argtypes = [ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    apps_std_fdopen_decrypt = _libraries['FIXME_STUB'].apps_std_fdopen_decrypt
+    apps_std_fdopen_decrypt.restype = ctypes.c_int32
+    apps_std_fdopen_decrypt.argtypes = [apps_std_FILE, ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_opendir = _libraries['FIXME_STUB'].apps_std_opendir
+    apps_std_opendir.restype = ctypes.c_int32
+    apps_std_opendir.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_apps_std_DIR)]
+except AttributeError:
+    pass
+try:
+    apps_std_closedir = _libraries['FIXME_STUB'].apps_std_closedir
+    apps_std_closedir.restype = ctypes.c_int32
+    apps_std_closedir.argtypes = [ctypes.POINTER(struct_apps_std_DIR)]
+except AttributeError:
+    pass
+try:
+    apps_std_readdir = _libraries['FIXME_STUB'].apps_std_readdir
+    apps_std_readdir.restype = ctypes.c_int32
+    apps_std_readdir.argtypes = [ctypes.POINTER(struct_apps_std_DIR), ctypes.POINTER(struct_apps_std_DIRENT), ctypes.POINTER(ctypes.c_int32)]
+except AttributeError:
+    pass
+try:
+    apps_std_mkdir = _libraries['FIXME_STUB'].apps_std_mkdir
+    apps_std_mkdir.restype = ctypes.c_int32
+    apps_std_mkdir.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    apps_std_rmdir = _libraries['FIXME_STUB'].apps_std_rmdir
+    apps_std_rmdir.restype = ctypes.c_int32
+    apps_std_rmdir.argtypes = [ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    apps_std_stat = _libraries['FIXME_STUB'].apps_std_stat
+    apps_std_stat.restype = ctypes.c_int32
+    apps_std_stat.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_apps_std_STAT)]
+except AttributeError:
+    pass
+try:
+    apps_std_ftrunc = _libraries['FIXME_STUB'].apps_std_ftrunc
+    apps_std_ftrunc.restype = ctypes.c_int32
+    apps_std_ftrunc.argtypes = [apps_std_FILE, ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    apps_std_frename = _libraries['FIXME_STUB'].apps_std_frename
+    apps_std_frename.restype = ctypes.c_int32
+    apps_std_frename.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
 __all__ = \
-    ['ADSPRPC_SHARED_H', 'ADSP_DOMAIN', 'ADSP_DOMAIN_ID', 'ARCH_VER',
-    'ASYNC_FASTRPC_SUPPORT', 'CAMERA_SECURE_CP_USAGE', 'CDSP_DOMAIN',
-    'CDSP_DOMAIN_ID', 'DEFAULT_DOMAIN_ID', 'DEVICE_NAME',
-    'DISPLAY_SECURE_CP_USAGE', 'DOMAIN_ID_MASK', 'DOMAIN_SUPPORT',
-    'DSPRPC_CONTROL_LATENCY', 'DSPRPC_CONTROL_UNSIGNED_MODULE',
-    'DSPRPC_CONTROL_WAKELOCK', 'DSPRPC_GET_DOMAIN',
-    'DSPRPC_GET_DSP_INFO', 'FASTRPC_ASYNC_CALLBACK',
-    'FASTRPC_ASYNC_NO_SYNC', 'FASTRPC_ASYNC_POLL',
-    'FASTRPC_ASYNC_TYPE_MAX', 'FASTRPC_ATTR_COHERENT',
-    'FASTRPC_ATTR_COHERENT', 'FASTRPC_ATTR_FORCE_NOFLUSH',
-    'FASTRPC_ATTR_FORCE_NOINVALIDATE', 'FASTRPC_ATTR_KEEP_MAP',
-    'FASTRPC_ATTR_KEEP_MAP', 'FASTRPC_ATTR_NOMAP',
-    'FASTRPC_ATTR_NOMAP', 'FASTRPC_ATTR_NON_COHERENT',
-    'FASTRPC_ATTR_NON_COHERENT', 'FASTRPC_ATTR_NOVA',
-    'FASTRPC_ATTR_TRY_MAP_STATIC', 'FASTRPC_CONTROL_KALLOC',
-    'FASTRPC_CONTROL_LATENCY', 'FASTRPC_CONTROL_PD_DUMP',
-    'FASTRPC_CONTROL_SMMU', 'FASTRPC_DSP_SSR', 'FASTRPC_GLINK_GUID',
-    'FASTRPC_INIT_ATTACH', 'FASTRPC_INIT_ATTACH_SENSORS',
-    'FASTRPC_INIT_CREATE', 'FASTRPC_INIT_CREATE_STATIC',
-    'FASTRPC_MAP_FD', 'FASTRPC_MAP_FD_DELAYED', 'FASTRPC_MAP_MAX',
+    ['ADSPRPC_SHARED_H', 'ADSP_DOMAIN', 'ADSP_DOMAIN_ID',
+    'APPS_STD_SEEK_CUR', 'APPS_STD_SEEK_END', 'APPS_STD_SEEK_SET',
+    'ARCH_VER', 'ASYNC_FASTRPC_SUPPORT', 'CAMERA_SECURE_CP_USAGE',
+    'CDSP_DOMAIN', 'CDSP_DOMAIN_ID', 'DEFAULT_DOMAIN_ID',
+    'DEVICE_NAME', 'DISPLAY_SECURE_CP_USAGE', 'DOMAIN_ID_MASK',
+    'DOMAIN_SUPPORT', 'DSPRPC_CONTROL_LATENCY',
+    'DSPRPC_CONTROL_UNSIGNED_MODULE', 'DSPRPC_CONTROL_WAKELOCK',
+    'DSPRPC_GET_DOMAIN', 'DSPRPC_GET_DSP_INFO',
+    'FASTRPC_ASYNC_CALLBACK', 'FASTRPC_ASYNC_NO_SYNC',
+    'FASTRPC_ASYNC_POLL', 'FASTRPC_ASYNC_TYPE_MAX',
+    'FASTRPC_ATTR_COHERENT', 'FASTRPC_ATTR_COHERENT',
+    'FASTRPC_ATTR_FORCE_NOFLUSH', 'FASTRPC_ATTR_FORCE_NOINVALIDATE',
+    'FASTRPC_ATTR_KEEP_MAP', 'FASTRPC_ATTR_KEEP_MAP',
+    'FASTRPC_ATTR_NOMAP', 'FASTRPC_ATTR_NOMAP',
+    'FASTRPC_ATTR_NON_COHERENT', 'FASTRPC_ATTR_NON_COHERENT',
+    'FASTRPC_ATTR_NOVA', 'FASTRPC_ATTR_TRY_MAP_STATIC',
+    'FASTRPC_CONTROL_KALLOC', 'FASTRPC_CONTROL_LATENCY',
+    'FASTRPC_CONTROL_PD_DUMP', 'FASTRPC_CONTROL_SMMU',
+    'FASTRPC_DSP_SSR', 'FASTRPC_GLINK_GUID', 'FASTRPC_INIT_ATTACH',
+    'FASTRPC_INIT_ATTACH_SENSORS', 'FASTRPC_INIT_CREATE',
+    'FASTRPC_INIT_CREATE_STATIC', 'FASTRPC_MAP_FD',
+    'FASTRPC_MAP_FD_DELAYED', 'FASTRPC_MAP_MAX',
     'FASTRPC_MAP_RESERVED', 'FASTRPC_MAP_STATIC',
     'FASTRPC_MAX_DSP_ATTRIBUTES', 'FASTRPC_MODE_PARALLEL',
     'FASTRPC_MODE_PROFILE', 'FASTRPC_MODE_SERIAL',
@@ -1371,14 +1654,31 @@ __all__ = \
     'RPC_PM_QOS', 'RPC_POLL_QOS', 'SDSP_DOMAIN', 'SDSP_DOMAIN_ID',
     'STATUS_NOTIFICATION_SUPPORT', 'UNKNOWN', 'UNSIGNED_PD_SUPPORT',
     'VIDEO_BITSTREAM', 'VIDEO_NONPIXEL', 'VIDEO_PIXEL', 'VTCM_COUNT',
-    'VTCM_PAGE', '_IO', '_IOR', '_IOW', '_IOWR', '_UAPI_LINUX_ION_H',
-    '_UAPI_MSM_ION_H', '__QAIC_REMOTE_ATTRIBUTE',
-    '__QAIC_REMOTE_EXPORT', 'cp_mem_usage',
-    'fastrpc_async_callback_t', 'fastrpc_async_descriptor_t',
-    'fastrpc_async_get_status', 'fastrpc_async_jobid',
-    'fastrpc_async_notify_type', 'fastrpc_capability',
-    'fastrpc_map_flags', 'fastrpc_mmap', 'fastrpc_munmap',
-    'fastrpc_notif_fn_t', 'fastrpc_process_type',
+    'VTCM_PAGE', '_32BIT_PLACEHOLDER_apps_std_SEEK', '_APPS_STD_H',
+    '_IO', '_IOR', '_IOW', '_IOWR', '_UAPI_LINUX_ION_H',
+    '_UAPI_MSM_ION_H', '__QAIC_HEADER_ATTRIBUTE',
+    '__QAIC_HEADER_EXPORT', '__QAIC_IMPL_ATTRIBUTE',
+    '__QAIC_IMPL_EXPORT', '__QAIC_REMOTE_ATTRIBUTE',
+    '__QAIC_REMOTE_EXPORT', '__QAIC_STRING1_OBJECT_DEFINED__',
+    '__STRING1_OBJECT__', '_cstring1_t', 'apps_std_DIR',
+    'apps_std_DIRENT', 'apps_std_FILE', 'apps_std_SEEK',
+    'apps_std_STAT', 'apps_std_clearerr', 'apps_std_closedir',
+    'apps_std_fclose', 'apps_std_fdopen_decrypt', 'apps_std_feof',
+    'apps_std_ferror', 'apps_std_fflush', 'apps_std_fgetpos',
+    'apps_std_fgets', 'apps_std_fileExists', 'apps_std_flen',
+    'apps_std_fopen', 'apps_std_fopen_with_env', 'apps_std_fread',
+    'apps_std_fremove', 'apps_std_frename', 'apps_std_freopen',
+    'apps_std_fseek', 'apps_std_fsetpos', 'apps_std_fsync',
+    'apps_std_ftell', 'apps_std_ftrunc', 'apps_std_fwrite',
+    'apps_std_get_search_paths_with_env', 'apps_std_getenv',
+    'apps_std_mkdir', 'apps_std_opendir', 'apps_std_print_string',
+    'apps_std_readdir', 'apps_std_rewind', 'apps_std_rmdir',
+    'apps_std_setenv', 'apps_std_stat', 'apps_std_unsetenv',
+    'cp_mem_usage', 'fastrpc_async_callback_t',
+    'fastrpc_async_descriptor_t', 'fastrpc_async_get_status',
+    'fastrpc_async_jobid', 'fastrpc_async_notify_type',
+    'fastrpc_capability', 'fastrpc_map_flags', 'fastrpc_mmap',
+    'fastrpc_munmap', 'fastrpc_notif_fn_t', 'fastrpc_process_type',
     'fastrpc_release_async_job', 'handle_control_req_id',
     'ion_fixed_position', 'ion_heap_ids', 'ion_heap_type',
     'ion_user_handle_t', 'msm_ion_heap_types', 'remote_arg',
@@ -1401,6 +1701,8 @@ __all__ = \
     'remote_rpc_status_flags_t__enumvalues', 'remote_session_control',
     'remote_set_mode', 'session_control_req_id', 'size_t',
     'smq_invoke_buf_start', 'smq_phy_page_start',
+    'struct__cstring1_s', 'struct_apps_std_DIR',
+    'struct_apps_std_DIRENT', 'struct_apps_std_STAT',
     'struct_c__SA_remote_buf', 'struct_c__SA_remote_dma_handle',
     'struct_fastrpc_async_callback',
     'struct_fastrpc_async_descriptor', 'struct_fastrpc_ctrl_kalloc',

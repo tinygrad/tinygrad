@@ -453,11 +453,12 @@ class DSPRenderer(ClangRenderer):
             'unsigned long long HAP_perf_get_time_us(void);',
             'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {']
     msrc += ['if ((sc>>24) != 2) return 0;']
-    msrc += [f'void *buf_{i} = HAP_mmap(0, ((int*)pra[0].buf.pv)[{i}], 3, 0, pra[{i+2}].dma.fd, 0);' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'int sz_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'void *buf_{i} = HAP_mmap(0, sz_{i}, 3, 0, pra[{i+2}].dma.fd, 0);' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'((int*)pra[0].buf.pv)[{i}]') for i,b in enumerate(bufs)])});"]
     msrc += ["*(unsigned long long *)(pra[1].buf.pv) = HAP_perf_get_time_us() - start;"]
-    msrc += [f'HAP_munmap(buf_{i}, ((int*)pra[0].buf.pv)[{i}]);' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'HAP_munmap(buf_{i}, sz_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["return 0; }"]
     return ret + '\n' + '\n'.join(msrc)
 
