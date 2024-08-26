@@ -183,6 +183,8 @@ class CStyleLanguage(Renderer):
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
           r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + \
             (f"[{args}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) or self.device == 'CLANG' else f".{'xyzwabcd'[args]}")
+        elif uop in {UOps.EXPAND, UOps.CONTRACT}:
+          r[u] = f"/*{'EX' if uop is UOps.EXPAND else 'con'}{args}:{{{','.join([r[s] for s in src])}}}*/"
         else: raise RuntimeError(f"failed to render {u}")
 
     # NOTE: this relies on bufs dict preserving order

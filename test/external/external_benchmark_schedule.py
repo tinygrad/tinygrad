@@ -42,10 +42,10 @@ if __name__ == "__main__":
           with Timing("***** model rewrite in   "):
             rewritten_uops = []
             for i,u in enumerate(uops):
-              with Timing(f"rewrite {i:2d} ", enabled=getenv("REWRITE_TIMING", 0)): rewritten_uops.append(full_graph_rewrite(u, k.opts))
+              with Timing(f"rewrite {i:2d} ", enabled=getenv("VERBOSE", 0)): rewritten_uops.append(full_graph_rewrite(u, k.opts))
             uops = rewritten_uops
         if getenv("LINEARIZE", 1):
-          with Timing("***** model linearize in "): uops = [linearize_uop(u, skip_check=False) for u in uops]
+          with Timing("***** model linearize in "): uops = [linearize_uop(u, skip_check=True) for u in uops]
           print(sum(len(u) for u in uops))
           if getenv("GRAPHUOPS", 0):
             for u in uops:
