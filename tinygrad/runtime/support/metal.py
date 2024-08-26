@@ -7,7 +7,8 @@ core_graphics = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/C
 metal.MTLCreateSystemDefaultDevice.restype, metal.MTLCreateSystemDefaultDevice.argtypes = ctypes.c_void_p, []
 
 libdispatch = ctypes.CDLL(ctypes.util.find_library("dispatch"))
-libdispatch.dispatch_data_create.restype, libdispatch.dispatch_data_create.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p]
+libdispatch.dispatch_data_create.restype = ctypes.c_void_p
+libdispatch.dispatch_data_create.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p]
 
 class MTLSize(ctypes.Structure):
   _fields_ = [("width", ctypes.c_ulong),
