@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Tuple, List
-import ctypes, fcntl, os, mmap, tempfile, hashlib, pathlib, array, functools, threading
-from tinygrad.device import BufferOptions, LRUAllocator, Compiled, Allocator
+from typing import Tuple, Dict, Any
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading
+from tinygrad.device import BufferOptions, Compiled, Allocator
 from tinygrad.helpers import from_mv, getenv, DEBUG, round_up, mv_address, to_mv
 from tinygrad.runtime.ops_clang import ClangCompiler
 from tinygrad.renderer.cstyle import DSPRenderer
@@ -133,7 +133,7 @@ class RPCListner(threading.Thread):
       req_args[1].buf.len = out_buf_size
       qcom_dsp.FASTRPC_IOCTL_INVOKE(self.device.rpc_fd, handle=0x3, sc=0x04020200, pra=req_args)
 
-      context, handle, sc = msg_recv[:3]
+      context, _, sc = msg_recv[:3]
       inbufs, outbufs = (sc >> 16) & 0xff, (sc >> 8) & 0xff
 
       in_ptr, out_ptr, objs = mv_address(in_buf), mv_address(out_buf), []
@@ -154,7 +154,7 @@ class RPCListner(threading.Thread):
       if sc == 0x20200: pass # greating
       elif sc == 0x13050100: # open
         try: out_args[0].cast('I')[0] = os.open(in_args[3].tobytes()[:-1].decode(), os.O_RDONLY)
-        except: status = 1
+        except OSError: status = 1
       elif sc == 0x9010000: # seek
         res = os.lseek(in_args[0].cast('I')[0], in_args[0].cast('I')[1], in_args[0].cast('I')[2])
         status = 0 if res >= 0 else res
