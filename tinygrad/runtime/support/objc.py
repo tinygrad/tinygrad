@@ -44,25 +44,9 @@ def dump_objc_methods(clz: ctypes.c_void_p) -> Dict[str, Tuple[str, str]]:
   return methods
 
 SIMPLE_TYPES = {
-    'c': ctypes.c_char,
-    'i': ctypes.c_int,
-    's': ctypes.c_short,
-    'l': ctypes.c_long,
-    'q': ctypes.c_longlong,
-    'C': ctypes.c_uint8,
-    'I': ctypes.c_uint,
-    'S': ctypes.c_ushort,
-    'L': ctypes.c_ulong,
-    'Q': ctypes.c_ulonglong,
-    'f': ctypes.c_float,
-    'd': ctypes.c_double,
-    'B': ctypes.c_bool,
-    'v': None,
-    '*': ctypes.c_char_p,
-    '@': ctypes.c_void_p,
-    '#': 'Class',
-    ':': 'SEL',
-    '?': '<unknown-type>',
+    'c': ctypes.c_char, 'i': ctypes.c_int, 's': ctypes.c_short, 'l': ctypes.c_long, 'q': ctypes.c_longlong,
+    'C': ctypes.c_uint8, 'I': ctypes.c_uint, 'S': ctypes.c_ushort, 'L': ctypes.c_ulong, 'Q': ctypes.c_ulonglong,
+    'f': ctypes.c_float, 'd': ctypes.c_double, 'B': ctypes.c_bool, 'v': None, '*': ctypes.c_char_p, '@': ctypes.c_void_p,
 }
 
 @functools.lru_cache(maxsize=None)
@@ -100,7 +84,6 @@ def build_method(name, sel_name, restype, argtypes):
           argtypes=[objc_type_to_ctype(t) for t in argtypes[2:]])
     return ObjcMethod(_f, out_err=name.endswith("error_"), ret_ptr=restype == "@")
   return f
-
 
 class ObjcObject(ctypes.c_void_p):
   def __init__(self, p:int, manual_release=False):
