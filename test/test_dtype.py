@@ -99,7 +99,7 @@ class TestDType(unittest.TestCase):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
     list(map(
       lambda dtype:
-        _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype.itemsize == self.DTYPE.itemsize and dtype != dtypes.bool else None,
+        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
 
@@ -117,6 +117,13 @@ class TestDType(unittest.TestCase):
       tor = torch.as_tensor(arr).detach().numpy()
       assert dt == tin.dtype == tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
       np.testing.assert_allclose(tin, tor, atol=1e-6, rtol=1e-3)
+
+  def test_finfo(self):
+    if self.DTYPE not in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]: return
+    info = np.finfo(_to_np_dtype(self.DTYPE))
+    assert info.bits == self.DTYPE.itemsize*8
+    assert info.nexp == dtypes.finfo(self.DTYPE)[0]
+    assert info.nmant == dtypes.finfo(self.DTYPE)[1]
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   target_dtype = target_dtype or least_upper_dtype(a_dtype, b_dtype)
@@ -241,9 +248,20 @@ class TestUint8DType(TestDType):
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
-  def test_shape_change_bitcast(self):
+  @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
+  def test_shape_change_bitcast(self, dt1, dt2):
+    if dt2 == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
+    data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
+    _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, data.view(_to_np_dtype(dt2)).tolist())
+
+  def test_shape_change_bitcast_exceptions(self):
     with self.assertRaises(RuntimeError):
-      _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
+      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16)
+
+    with self.assertRaises(RuntimeError):
+      # should fail because backprop through bitcast is undefined
+      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True).bitcast(dtypes.float16)
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
@@ -479,7 +497,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))
   def test_bool_ops(self, dtype, op):
-    assert op(Tensor.rand(4, 4, dtype=dtype), Tensor.rand(4, 4, dtype=dtype)).dtype == dtypes.bool
+    assert op(Tensor.ones(4, 4, dtype=dtype), Tensor.ones(4, 4, dtype=dtype)).dtype == dtypes.bool
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_functions_return_index(self, dtype, default_int, default_float):
@@ -490,7 +508,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(dtype_ints))
   def test_tensor_indexing_returns_same_dtype(self, data_dtype, indices_dtype):
-    X_data =  Tensor.rand(60000, 1, 28, 28, dtype=data_dtype)
+    X_data =  Tensor.ones(60000, 1, 28, 28, dtype=data_dtype)
     indices =  Tensor.randint(512, high=X_data.shape[0]).cast(indices_dtype)
     assert X_data[indices].dtype == X_data.dtype
 
@@ -573,10 +591,10 @@ class TestAutoCastType(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes))
   def test_broadcast_scalar(self, dt):
-    assert (Tensor.rand(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
-    assert (Tensor.rand(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    assert (Tensor.ones(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
+    assert (Tensor.ones(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
     if Device.DEFAULT != "WEBGPU" and dt != dtypes.bool:
-      assert (Tensor.rand(4, 4, dtype=dt) + True).dtype == dt
+      assert (Tensor.ones(4, 4, dtype=dt) + True).dtype == dt
 
   def test_sum(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).sum().dtype == dtypes.int32
@@ -602,6 +620,13 @@ class TestAutoCastType(unittest.TestCase):
     # specifiying acc_dtype and it's not downcasted
     assert t.sum(acc_dtype=dtypes.float32).dtype == dtypes.float32
     np.testing.assert_allclose(t.sum(acc_dtype=dtypes.float32).numpy(), 80000)
+
+  def test_prod_acc_dtype(self):
+    t = Tensor([100, 200], dtype=dtypes.int32)
+    assert t.prod().dtype == dtypes.int32
+    np.testing.assert_allclose(t.prod().numpy(), 20000)
+    assert t.prod(acc_dtype=dtypes.float32).dtype == dtypes.float32
+    np.testing.assert_allclose(t.prod(acc_dtype=dtypes.float32).numpy(), 20000)
 
   def test_mean(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).mean().dtype == dtypes.float32

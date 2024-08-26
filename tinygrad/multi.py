@@ -3,14 +3,14 @@ from typing import Optional, Union, Any, Tuple, List, Dict
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.dtype import DType, ConstType
-from tinygrad.ops import BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps
+from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
 def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
   assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
-  bop = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[op]
+  bop = REDUCE_ALU[op]
 
   n_lbs, dim = len(lbs), prod(lbs[0].shape)
   # Ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)

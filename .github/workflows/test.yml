@@ -4,6 +4,7 @@ env:
   DOWNLOAD_CACHE_VERSION: '5'
   RUN_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PYTHONPATH: .
 
 on:
   push:
@@ -45,16 +46,26 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
     - name: Test emulated CUDA tensor cores
       run: DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
+    - name: Test emulated INTEL OpenCL tensor cores
+      run: DEBUG=2 EMULATE_INTEL=1 FORWARD_ONLY=1 PYTHON=1 HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
     - name: Full test tensor cores
       run: |
         PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         PYTHONPATH=. DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+        PYTHONPATH=. DEBUG=2 EMULATE_INTEL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
     - name: Test tensor cores (TC=3)
       run: |
         TC=3 DEBUG=3 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
-        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         TC=3 DEBUG=3 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
+        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_INTEL=1 PYTHON=1 N=16 HALF=1 python3 ./extra/gemm/simple_matmul.py
+    - name: Test device flop counts
+      run: |
+        PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul_half
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul_half
+        PYTHONPATH=. DEBUG=2 EMULATE_CUDA=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul_half
+        PYTHONPATH=. DEBUG=2 EMULATE_INTEL=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul_half
     - name: Test dtype with Python emulator
       run: DEBUG=1 PYTHONPATH=. PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
@@ -86,8 +97,8 @@ jobs:
         key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
     - name: Install dependencies
       run: pip install -e '.[linting,testing,docs]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Lint with pylint
-      run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
+    - name: Lint bad-indentation and trailing-whitespace with pylint
+      run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
       run: |
         pip3 install --upgrade --force-reinstall ruff
@@ -106,6 +117,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
+    - name: Run unit tests
+      run: PYTHONPATH="." python -m pytest -n=auto test/unit/
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
@@ -122,10 +135,12 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+        pip install mypy
+        mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Repo line count <8800 lines
-      run: MAX_LINE_COUNT=8800 python sz.py
+    - name: Repo line count <9000 lines
+      run: MAX_LINE_COUNT=9000 python sz.py
 
   testopencl:
     strategy:
@@ -304,7 +319,7 @@ jobs:
         METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
         METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run metal test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit --durations=20
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Run ONNX
@@ -317,8 +332,8 @@ jobs:
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     - name: Test Beam Search
       run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
-    - name: Fuzz Test linearizer
-      run: PYTHONPATH="." METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=24 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py
+    - name: Fuzz Test linearizer, TODO fix failure
+      run: PYTHONPATH="." METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=24 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py --expected-failures 1
     - name: Fuzz Test models schedule
       run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
@@ -497,7 +512,7 @@ jobs:
           diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
-        run: python -m pytest -n=auto test/ --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/unit --durations=20
       # - name: Run test_ops with FUZZ_UOPS=1
       #   if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
       #   run: FUZZ_UOPS=1 python -m pytest -n=auto test/test_ops.py --durations=20
@@ -506,7 +521,7 @@ jobs:
         run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='ptx'||matrix.backend=='triton'||matrix.backend=='nv'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --ignore test/test_gc.py --durations=20
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py --durations=20

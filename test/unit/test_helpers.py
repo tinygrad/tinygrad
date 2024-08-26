@@ -1,4 +1,4 @@
-import unittest
+import gzip, unittest
 from PIL import Image
 from tinygrad.helpers import Context, ContextVar
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction, get_shape
@@ -148,7 +148,7 @@ class TestFetch(unittest.TestCase):
     self.assertRaises(Exception, fetch, 'http://www.google.com/404', allow_caching=False)
 
   def test_fetch_small(self):
-    assert(len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
+    assert (len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
   def test_fetch_img(self):
     img = fetch("https://avatars.githubusercontent.com/u/132956020", allow_caching=False)
@@ -160,6 +160,24 @@ class TestFetch(unittest.TestCase):
     with Image.open(img) as pimg:
       assert pimg.size == (77, 77), pimg.size
     assert img.parent.name == "images"
+
+  def test_fetch_gunzip_valid(self):
+    # compare fetch(gunzip=True) to fetch(gunzip=False) plus decompressing afterwards
+    gzip_url: str = 'https://ftp.gnu.org/gnu/gzip/gzip-1.13.tar.gz'
+    fp_gz = fetch(gzip_url, gunzip=True)
+    fp_no_gz = fetch(gzip_url, gunzip=False)
+    with open(fp_gz, 'rb') as f: content_gz = f.read()
+    with open(fp_no_gz, 'rb') as f: content_no_gz = gzip.decompress(f.read())
+    assert fp_gz.stat().st_size > fp_no_gz.stat().st_size
+    assert isinstance(content_gz, bytes) and isinstance(content_no_gz, bytes)
+    assert len(content_gz) == len(content_no_gz)
+    assert content_gz == content_no_gz
+
+  def test_fetch_gunzip_invalid(self):
+    # given a non-gzipped file, fetch(gunzip=True) fails
+    no_gzip_url: str = 'https://ftp.gnu.org/gnu/gzip/gzip-1.13.zip'
+    with self.assertRaises(gzip.BadGzipFile):
+      fetch(no_gzip_url, gunzip=True)
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):

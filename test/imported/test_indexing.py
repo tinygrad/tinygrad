@@ -908,10 +908,10 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(out, ref)
 
   def test_int_indices(self):
-      v = Tensor.randn(5, 7, 3)
-      numpy_testing_assert_equal_helper(v[[0, 4, 2]].shape, (3, 7, 3))
-      numpy_testing_assert_equal_helper(v[:, [0, 4, 2]].shape, (5, 3, 3))
-      numpy_testing_assert_equal_helper(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
+    v = Tensor.randn(5, 7, 3)
+    numpy_testing_assert_equal_helper(v[[0, 4, 2]].shape, (3, 7, 3))
+    numpy_testing_assert_equal_helper(v[:, [0, 4, 2]].shape, (5, 3, 3))
+    numpy_testing_assert_equal_helper(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
 
   # TODO fancy setitem
   '''
@@ -983,7 +983,7 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(x[[1, 2]].shape, (2, 0))
     numpy_testing_assert_equal_helper(x[[], []].shape, (0,))
     with self.assertRaises(IndexError):
-        x[:, [0, 1]]
+      x[:, [0, 1]]
 
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)
@@ -1036,8 +1036,8 @@ class TestIndexing(unittest.TestCase):
       a[...] = neg_ones_expanded * 4
       numpy_testing_assert_equal_helper(a, neg_ones * 4)
       if a.dim() == 0:
-          with self.assertRaises(IndexError):
-              a[:] = neg_ones_expanded * 5
+        with self.assertRaises(IndexError):
+          a[:] = neg_ones_expanded * 5
 
   @unittest.skip("bool indexing not supported")
   def test_index_scalar_with_bool_mask(self):
