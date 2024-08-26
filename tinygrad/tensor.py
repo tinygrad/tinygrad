@@ -2063,11 +2063,12 @@ class Tensor:
     """
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
     if mode == "linear":
-      x, expand = self, list(self.shape)
+      x = self
       for i in range(-len(size), 0):
         scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
-        arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+        arr = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device)
+        index = ((scale * (arr + 0.5)) - 0.5 if not align_corners else scale * arr).clip(0, self.shape[i] - 1)
+        reshape, expand = [1] * self.ndim, list(self.shape)
         reshape[i] = expand[i] = size[i]
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
@@ -2078,7 +2079,7 @@ class Tensor:
       x = self
       for i in range(-len(size), 0):
         index = (Tensor.arange(size[i], dtype=dtypes.float32, device=self.device) * (self.shape[i] / size[i])).floor().clip(0, self.shape[i] - 1)
-        x = x.gather(i, index.long().reshape([1] * self.ndim).expand(list(self.shape)[:-len(size)] + [size[i]]))
+        x = x.gather(i, index.astype(dtypes.int32).reshape([1] * self.ndim).expand(list(self.shape)[:-len(size)] + [size[i]]))
       return x.cast(self.dtype)
     raise AssertionError(f"only supports linear and nearest interpolate, got {mode=}")
 
