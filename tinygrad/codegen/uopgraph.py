@@ -413,12 +413,16 @@ def no_vectorized_alu(alu):
 def create_gate(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
+    # print(f"checking gate {u.op} {len(u.src)}, {gate.op} {len(gate.src)}")
     if u.op is UOps.BARRIER: return u
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
       # NOTE: gate could already be wrapped in an IF, so only take IF's src[0] in that case. Will join IFs in delete_redundant_gates
       return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate if gate.op is not UOps.IF else gate.src[0], u.src[-1])),), u.arg)
-    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op in { UOps.ALU, UOps.CAST }:
-      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (u.src[-1],)),), u.arg)
+    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op is not UOps.IF:
+      # print(f"gated store {u.src[3].op} with ref to {u.src[2].op}")
+      if u.src[-1].op is UOps.EXPAND and u.src[-1].src[0].op is UOps.IF: return u
+      # return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (u.src[3],)),), u.arg)
+      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (u.src[3], u.src[2])),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
@@ -476,7 +480,7 @@ reducer = PatternMatcher([
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
-  (NOp(UOps.SINK, name="sink"), merge_gates),
+  # (NOp(UOps.SINK, name="sink"), merge_gates),
 ])
 
 no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.pyint, name="x"),
