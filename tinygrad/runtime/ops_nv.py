@@ -84,9 +84,7 @@ class NVSignal(HCQSignal):
 
 class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
   def __del__(self):
-    if self.binded_device is not None:
-      self.binded_device.synchronize() # Synchronize to ensure the buffer is no longer in use.
-      self.binded_device._gpu_free(self.hw_page)
+    if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferOptions(cpu_access=True, nolru=True))
 
   @hcq_command
   def setup(self, compute_class=None, copy_class=None, local_mem_window=None, shared_mem_window=None, local_mem=None, local_mem_tpc_bytes=None):
@@ -109,7 +107,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
 
   def bind(self, device):
     self.binded_device = device
-    self.hw_page = cast(NVDevice, device)._gpu_alloc(len(self.q) * 4, map_to_cpu=True)
+    self.hw_page = device.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
     for i, value in enumerate(self.q): hw_view[i] = value
 
@@ -201,7 +199,7 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
     if src is not None: self._patch(cmd_idx, offset=1, data=data64(src))
 
   def _signal(self, signal, value=0):
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *data64(signal.signal_addr), value, 4]
+    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 3), *data64(signal.signal_addr), value]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
 
   def _update_signal(self, cmd_idx, signal=None, value=None):

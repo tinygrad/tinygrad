@@ -53,8 +53,6 @@ class LLVMRenderer(Renderer):
   has_shared = False
   global_max = None
   code_for_op: Dict[Op, Callable] = {
-    UnaryOps.NEG: lambda builder, x, dtype: builder.neg(x) if dtypes.is_int(dtype) else \
-    (builder.not_(x) if dtype == dtypes.bool else builder.fneg(x, flags=MFLAGS)),
     UnaryOps.RECIP: lambda builder, x, dtype: builder.fdiv(const(1, dtype), x, flags=MFLAGS),
     UnaryOps.SQRT: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.sqrt', [x.type]), [x], fastmath=MFLAGS),
     BinaryOps.ADD: lambda builder, x, y, dtype: builder.or_(x, y) if dtype == dtypes.bool else builder.add(x, y) if dtypes.is_int(dtype) else builder.fadd(x, y, flags=MFLAGS),  # noqa: E501

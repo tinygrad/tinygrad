@@ -129,6 +129,18 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
+def tar_extract(fn:os.PathLike) -> Dict[str, Tensor]:
+  """
+  Extracts files from a tar archive and returns them as dictionary of names (keys) and tensors (values).
+
+  ```python
+  tensors = nn.state.tar_extract("archive.tar")
+  ```
+  """
+  t = Tensor(pathlib.Path(fn))
+  with tarfile.open(fn, "r") as tar:
+    return {member.name:t[member.offset_data:member.offset_data+member.size] for member in tar if member.type == tarfile.REGTYPE}
+
 # torch support!
 
 def torch_load(fn:str) -> Dict[str, Tensor]:

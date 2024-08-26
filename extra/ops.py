@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Union, Tuple, Any, List
+from typing import Dict, Union, Tuple, Any, List, cast
 import functools, hashlib
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -42,7 +42,6 @@ class LazyOp:
   @functools.cached_property
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
-    if self.op is ReduceOps.WMMA: return self.arg[3]   # WMMA can change the type
     if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
     return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPNE} else self.src[-1].dtype
   @functools.cached_property
@@ -84,7 +83,7 @@ def verify_lazyop(ast:LazyOp) -> Dict[LazyOp, ShapeTracker]:
     for x in op.src: assert_valid(x, st)
     # only reduceop is allowed to change shape, limited to turning n to 1
     if op.op in ReduceOps:
-      axis = op.arg[-1] if op.op is ReduceOps.WMMA else op.arg
+      axis = op.arg
       assert isinstance(axis, tuple) and all(isinstance(i, int) for i in axis), f"reduceop must have axis {op.arg}"
       st = ShapeTracker.from_shape(sts[op.src[0]].reduce(axis))
     else:
@@ -125,7 +124,9 @@ def to_uop(*a) -> UOp:
       return UOp(UOps.STORE, None, (buf, st_uop, create_uop(lop.src[0])))
     src = tuple(create_uop(x) for x in lop.src)
     if lop.op is MetaOps.KERNEL: return UOp(UOps.SINK, None, src)
-    if lop.op in ReduceOps: return UOp(UOps.REDUCE_AXIS, src[0].dtype, src, (lop.op, lop.arg))
+    if lop.op in ReduceOps:
+      alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, lop.op)]
+      return UOp(UOps.REDUCE_AXIS, src[0].dtype, src, (alu_op, lop.arg))
     if lop.op is UnaryOps.CAST: return UOp(UOps.CAST, lop.arg.scalar(), src)
     if lop.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, lop.arg.scalar(), src)
     return src[0].alu(lop.op, *src[1:])

@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Union, Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, DTypeLike, ConstType, to_dtype
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP
-from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
+from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, REDUCE_ALU, identity_element
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
@@ -145,24 +145,20 @@ class LazyBuffer:
       raise AssertionError(f"all dtypes must match {dts} on {op}")
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
-    if op is UnaryOps.NEG: assert srcs[0].dtype != dtypes.bool, "UnaryOps.NEG does not accept dtype bool"
 
     out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else srcs[-1].dtype
 
     # const folding
     if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
       return self.cast(out_dtype).const(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
-    if op is UnaryOps.NEG and self.base.op is UnaryOps.NEG and self.base.realized is None: return self.base.srcs[0]
     if op in BinaryOps:
       x, y = self, in_srcs[0]
       if op is BinaryOps.ADD:
         if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
         if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
       if op is BinaryOps.MUL:
-        if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):
-          return y if val == 1 else y.const(0) if val == 0 else y.e(UnaryOps.NEG)
-        if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0, -1):
-          return x if val == 1 else x.const(0) if val == 0 else x.e(UnaryOps.NEG)
+        if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0): return y if val == 1 else y.const(0)
+        if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0): return x if val == 1 else x.const(0)
 
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
@@ -177,12 +173,14 @@ class LazyBuffer:
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = self.st.reduce(axis)
     # TODO: this logic should move to the scheduler
-    if 0 in self.shape and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: dtypes.min(self.dtype)}[op], new_shape)
+    if 0 in self.shape and 0 not in new_shape: return self.const(identity_element(REDUCE_ALU[op], self.dtype), new_shape)
 
     # const folding
     # TODO: fold this for symbolic?
     if self.is_unrealized_unmasked_const() and all_int(self.shape):
-      return self.const(self.base.arg * {ReduceOps.SUM: prod(self.shape[i] for i in axis), ReduceOps.MAX: 1}[op], new_shape)
+      if op is ReduceOps.SUM: return self.const(self.base.arg * prod(self.shape[i] for i in axis), new_shape)
+      if op is ReduceOps.PROD: return self.const(self.base.arg ** prod(self.shape[i] for i in axis), new_shape)
+      if op is ReduceOps.MAX: return self.const(self.base.arg, new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \

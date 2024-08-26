@@ -6,13 +6,15 @@
 import random, time
 import numpy as np
 from typing import Optional
-from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
 from tinygrad.multi import MultiLazyBuffer
+
+cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
+cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
 EVAL_BS = getenv("EVAL_BS", BS)
@@ -252,7 +254,7 @@ def train_cifar():
       if not is_train: break
 
   transform = [
-    lambda x: x / 255.0,
+    lambda x: x.float() / 255.0,
     lambda x: x.reshape((-1,3,32,32)) - Tensor(cifar_mean, device=x.device, dtype=x.dtype).reshape((1,3,1,1)),
     lambda x: x / Tensor(cifar_std, device=x.device, dtype=x.dtype).reshape((1,3,1,1)),
   ]
@@ -277,10 +279,7 @@ def train_cifar():
 
   set_seed(getenv('SEED', hyp['seed']))
 
-  X_train, Y_train, X_test, Y_test = fetch_cifar()
-  # load data and label into GPU and convert to dtype accordingly
-  X_train, X_test = X_train.to(device=Device.DEFAULT).float(), X_test.to(device=Device.DEFAULT).float()
-  Y_train, Y_test = Y_train.to(device=Device.DEFAULT), Y_test.to(device=Device.DEFAULT)
+  X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
   # one-hot encode labels
   Y_train, Y_test = Y_train.one_hot(10), Y_test.one_hot(10)
   # preprocess data
