@@ -1,5 +1,12 @@
 #!/bin/bash -e
 
+SED=sed
+if command -v gsed &> /dev/null
+then
+    echo "Using gsed"
+    SED=gsed
+fi
+
 # setup instructions for clang2py
 if [[ ! $(clang2py -V) ]]; then
   pushd .
@@ -17,8 +24,8 @@ fi
 BASE=tinygrad/runtime/autogen/
 
 fixup() {
-  sed -i '1s/^/# mypy: ignore-errors\n/' $1
-  sed -i 's/ *$//' $1
+  $SED -i '1s/^/# mypy: ignore-errors\n/' $1
+  $SED -i 's/ *$//' $1
   grep FIXME_STUB $1 || true
 }
 
@@ -229,10 +236,7 @@ generate_objc() {
   gsed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('objc'))\g" $BASE/objc.py
   rm /tmp/runtime.h
 
-  # fixup $BASE/objc.py
-  gsed -i '1s/^/# mypy: ignore-errors\n/' $BASE/objc.py
-  gsed -i 's/ *$//' $BASE/objc.py
-  grep FIXME_STUB $BASE/objc.py || true
+  fixup $BASE/objc.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
