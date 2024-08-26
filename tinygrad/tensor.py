@@ -1052,29 +1052,27 @@ class Tensor:
       self.__getitem__(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
-    #assert all(lb.st.contiguous for lb in self.lazydata.lbs), "setitem target needs to be contiguous"
     if not isinstance(v, (Tensor, list, np.ndarray, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, tuple, list)) for i in indices)):
       mask, ret_shape, first_dim, sum_axis = self.realize().__getitem__(indices, adv_set=True)
       # broadcast to resulting shape from getitem
-      v = v._broadcast_to(_broadcast_shape(ret_shape, v.shape)).contiguous()
+      v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret_shape, v.shape))
       # add back reduced dims from sum and broadcast to mask's shape
       for dim in sum_axis: v = v.unsqueeze(dim)
-      v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(mask.shape, v.shape))
+      v = v._broadcast_to(_broadcast_shape(mask.shape, v.shape))
       # axis to be reduced to match self.shape
       axis = tuple(range(first_dim, first_dim + (mask.ndim - self.ndim)))
-      # apply mask to v
-      v_reduced = mask.where(v, 0)
-      # reduce v such that if repeated indices are assigned in v the last one remains
-      for dim in axis: v_reduced = functools.reduce(lambda x,y: y.where(y, x), v_reduced.split(1, dim))
-      # reduce mask and select element from v(get rid of extra dims from reduce) for each True element in mask else select from self
-      assign_to = mask.any(axis).where(v_reduced.squeeze(), self)
+      # apply mask to v and reduce such that if v contains repeated indices the last one remains
+      v = v * mask
+      for dim in axis: v = functools.reduce(lambda x,y: y.where(y, x), v.split(1, dim))
+      # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
+      v = mask.any(axis).where(v.squeeze(), self)
       # TODO: there must be a better way to do this
-      hack = self.lazydata.st
-      self.assign(assign_to.contiguous()).realize()
-      self.lazydata.st = hack
+      st = self.lazydata.st
+      self.assign(v.contiguous()).realize()
+      self.lazydata.st = st
 
     else:
       assign_to = self.realize().__getitem__(indices)
