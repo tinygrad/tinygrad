@@ -1,8 +1,10 @@
 ::: tinygrad.ops.UOp
     options:
         members: false
+        members_order: source
         show_labels: false
 
 ::: tinygrad.ops.UOps
     options:
         show_labels: false
+        members_order: source
