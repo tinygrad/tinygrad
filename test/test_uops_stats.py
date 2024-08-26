@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
 from tinygrad.codegen.uopgraph import linearize_uop
@@ -94,6 +94,16 @@ class TestUOpsStats(unittest.TestCase):
     assert expected_ops <= ops and ops <= expected_ops * 1.2
     # NOTE: it's hard to assert on the memory here, all depends on caching
     assert required_mem <= mem
+
+  @unittest.skipUnless(getenv("PYTHON"), "only run test on emulated tensor cores")
+  def test_simple_matmul_half(self):
+    GlobalCounters.reset()
+    N = 16
+    a, b = Tensor.empty(N, N, dtype=dtypes.half), Tensor.empty(N, N, dtype=dtypes.half)
+    c = a.matmul(b)
+    c.realize()
+    expected_ops = N ** 3 * 2
+    assert expected_ops == GlobalCounters.global_ops
 
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):

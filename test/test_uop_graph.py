@@ -4,7 +4,7 @@ from test.helpers import TestUOps
 from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, ReduceOps, UOps, UOp, NOp, PatternMatcher, KernelInfo
+from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, NOp, PatternMatcher, KernelInfo
 from tinygrad.codegen.lowerer import ast_to_uop
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, constant_folder, float4_folding
 from tinygrad.shape.shapetracker import ShapeTracker, View
@@ -34,7 +34,7 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(2, 4, 64, 8, 16, 1, 1, 3, 3, 4, 1),
                                                                   strides=(1179648, 9216, 1, 147456, 576, 0, 0, 64, 192, 36864, 0),
                                                                   offset=0, mask=None, contiguous=False),)), src=()),
-        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (5, 6, 10)), src=(
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (5, 6, 10)), src=(
           UOp(UOps.CAST, dtypes.float, arg=None, src=(
             UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
               UOp(UOps.LOAD, dtypes.half, arg=None, src=(
@@ -496,7 +496,7 @@ class TestExpander(unittest.TestCase):
   @unittest.skip("no longer supported")
   def test_reduce_known_axis(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
-    sink = UOp(UOps.REDUCE, dtypes.int, (3*e1,e1), ReduceOps.SUM)
+    sink = UOp(UOps.REDUCE, dtypes.int, (3*e1,e1), BinaryOps.ADD)
     sink = expander_rewrite(sink)
     assert sink.op is UOps.CONST
     self.assertEqual(sink.arg, 3*(0+1+2+3))
@@ -504,7 +504,7 @@ class TestExpander(unittest.TestCase):
   @unittest.skip("no longer supported")
   def test_reduce_const(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
-    sink = UOp(UOps.REDUCE, dtypes.int, (UOp.const(dtypes.int, 3), e1), ReduceOps.SUM)
+    sink = UOp(UOps.REDUCE, dtypes.int, (UOp.const(dtypes.int, 3), e1), BinaryOps.ADD)
     sink = expander_rewrite(sink)
     assert sink.op is UOps.CONST
     self.assertEqual(sink.arg, 3*4)
@@ -542,7 +542,7 @@ class TestExpander(unittest.TestCase):
   def test_reduce_different_axis(self):
     e1 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     e2 = UOp(UOps.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
-    sink = UOp(UOps.REDUCE, dtypes.int, (e1,e2), ReduceOps.SUM)
+    sink = UOp(UOps.REDUCE, dtypes.int, (e1,e2), BinaryOps.ADD)
     sink = expander_rewrite(sink)
     print(sink)
 
