@@ -9,7 +9,7 @@ from tinygrad.lazy import LazyBuffer
 class TestDiffSchedule(unittest.TestCase):
   def setUp(self):
     self.old_value = CAPTURING_PROCESS_REPLAY.value
-    CAPTURING_PROCESS_REPLAY.value = 1
+    CAPTURING_PROCESS_REPLAY.value = 0
   def tearDown(self):
     CAPTURING_PROCESS_REPLAY.value = self.old_value
 
