@@ -118,7 +118,7 @@ def build_method(name, sel_name, restype, argtypes):
 
 class ObjcClass(ctypes.c_void_p):
   def __init__(self, name:str):
-    p: int | None = ctypes.cast(libobjc.objc_getClass(name.encode()), ctypes.c_void_p).value
+    p: Union[int, None] = ctypes.cast(libobjc.objc_getClass(name.encode()), ctypes.c_void_p).value
     super().__init__(p)
     assert self.value, f"Class {name} not found"
     _metaclass_ptr = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(p), libobjc.id))
@@ -142,7 +142,7 @@ class ObjcClass(ctypes.c_void_p):
 
 class ObjcInstance(ObjcClass):
   def __init__(self, ptr: Union[int, ctypes.c_void_p, None]):
-    v: int | None = ptr.value if isinstance(ptr, ctypes.c_void_p) else ptr
+    v: Union[int, None] = ptr.value if isinstance(ptr, ctypes.c_void_p) else ptr
     assert v, "Can't create ObjcInstance with null ptr"
     super(ctypes.c_void_p, self).__init__(v)
     c = libobjc.object_getClass(ctypes.cast(ctypes.c_void_p(v), libobjc.id))
