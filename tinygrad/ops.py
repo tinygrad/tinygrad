@@ -116,15 +116,15 @@ class UOps(Enum):
   - **`dtype`**: Output DType
   - **`src`**:
     - Normal LOAD: `Tuple[UOp, UOp]`
-      - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL)
+      - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL).
       - Indexing Op, can only return `dtypes.int32`.
     - Gated LOAD: `Tuple[UOp, UOp, UOp, UOp]`
-      - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL)
+      - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL).
       - Indexing Op, can only return `dtypes.int32`.
       - Gate Op, can only return `dtypes.bool`.
       - [`UOps.CONST`](/developer/uop#tinygrad.ops.UOps.CONST) 0, 0.0 or `False`
     - Barriered LOAD: `Tuple[UOp, UOp, UOp, UOp]`
-      - Buffer UOp `DEFINE_LOCAL`
+      - Buffer UOp `DEFINE_LOCAL`.
       - Indexing Op, can only return `dtypes.int32`.
       - Gate Op, can only return `dtypes.bool`.
       - Barrier Op, [`UOps.BARRIER`](/developer/uop#tinygrad.ops.UOps.BARRIER)
@@ -136,12 +136,11 @@ class UOps(Enum):
   - **`src`**:
     - Normal STORE: `Tuple[UOp, UOp, UOp]`
       - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL)
-        or [`UOps.DEFINE_LOCAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_LOCAL)
+        or [`UOps.DEFINE_LOCAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_LOCAL).
       - Indexing Op, can only return `dtypes.int32`.
       - Value to store
     - Gated STORE: `Tuple[UOp, UOp, UOp, UOp]`
-      - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL)
-        or [`UOps.DEFINE_LOCAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_LOCAL)
+      - Buffer UOp [`UOps.DEFINE_GLOBAL`](/developer/uop#tinygrad.ops.UOps.DEFINE_GLOBAL).
       - Indexing Op, can only return `dtypes.int32`.
       - Value to store
       - Gate Op, can only return `dtypes.bool`
