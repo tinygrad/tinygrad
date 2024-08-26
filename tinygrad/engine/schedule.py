@@ -186,8 +186,18 @@ def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   if (root_st:=get_output_st(root, uop_sts)) is not None and rshape == root_st.shape: return None
   return st_fixup(root, lambda st:st.reshape(rshape), uop_sts, {})
 
+def pad_reduceop_dims(root:UOp) -> Optional[UOp]:
+  reduceops = [x for x in root.parents if x.op is UOps.REDUCE_AXIS]
+  if len(reduceops) <= 1: return None
+  uop_sts: Dict[UOp, ShapeTracker] = {}
+  full_shapes = {r:unwrap(get_output_st(r.src[0], uop_sts)) for r in reduceops}
+  shape_dims: List[List[sint]] = [sorted(dedup(dims)) for dims in zip(*[input_st.shape for input_st in full_shapes.values()])]
+  to_fixup = [x for x in shape_dims if len(x) != 1 and not (len(x) == 2 and x[0] == 1)]
+  if len(to_fixup) == 0: return None
+
 reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(name="rsrc"), UPat(UOps.SWIZZLE, src=(UPat(name="swizzle"),))), name="root"), apply_swizzle),
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), pad_reduceop_dims),
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_reduceop_shape),
 ])
 
