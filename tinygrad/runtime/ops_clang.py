@@ -6,6 +6,7 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.elf import elf_loader
 import tinygrad.runtime.autogen.macho as macho
+import tinygrad.runtime.autogen.mac as mac
 
 def macho_loader(blob: bytes) -> Tuple[memoryview, Any, Any]:
   header = macho.struct_mach_header_64.from_buffer_copy(blob)
@@ -39,7 +40,11 @@ class ClangProgram:
     image, _, _ = macho_loader(lib) if OSX else elf_loader(lib)
     addr = libc.mmap(0, len(image), mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_ANON | mmap.MAP_PRIVATE, -1, 0)
     assert addr != 0xffffffffffffffff
+    if OSX: mac.pthread_jit_write_protect_np(False)
     ctypes.memmove(addr, mv_address(image), len(image))
+    if OSX:
+      mac.pthread_jit_write_protect_np(True)
+      mac.sys_icache_invalidate(addr, len(image))
     assert libc.mprotect(addr, len(image), mmap.PROT_READ | mmap.PROT_EXEC) != 0xffffffffffffffff
     self.fxn = ctypes.CFUNCTYPE(None)(addr)
 

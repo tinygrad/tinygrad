@@ -234,6 +234,28 @@ generate_macho() {
     -o $BASE/macho.py
 
   fixup $BASE/macho.py
+  python3 -c "import tinygrad.runtime.autogen.macho"
+}
+
+generate_mac() {
+  if [ "$(uname)" != "Darwin" ]; then
+    echo "Must be Darwin to generate macos libc stubs. Skipping generation."
+    return
+  fi
+
+  clang2py -k cdefstum \
+    $(xcrun -sdk / -show-sdk-path)/usr/include/libkern/OSCacheControl.h \
+    $(xcrun -sdk / -show-sdk-path)/usr/include/pthread.h \
+    -s 'pthread_jit_write_protect_np' -s 'sys_icache_invalidate' \
+    --clang-args="-I$(xcrun -sdk / -show-sdk-path)/usr/include" \
+    -o $BASE/mac.py
+
+  sed -i '' -e "s/import ctypes/import ctypes, ctypes.util, os/g" $BASE/mac.py
+  sed -i '' -e "s/FIXME_STUB/libc/g" $BASE/mac.py
+  sed -i '' -e "s/FunctionFactoryStub()/ctypes.CDLL(ctypes.util.find_library('c'))/g" $BASE/mac.py
+
+  fixup $BASE/mac.py
+  python3 -c "import tinygrad.runtime.autogen.mac"
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
@@ -248,6 +270,7 @@ elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "macho" ]; then generate_macho
+elif [ "$1" == "mac" ]; then generate_mac
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
 else echo "usage: $0 <type>"
 fi
