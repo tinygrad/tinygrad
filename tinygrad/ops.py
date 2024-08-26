@@ -47,7 +47,9 @@ class UOps(Enum):
 
   - **`dtype`**: `None`
   - **`src`**: `Tuple[UOps.STORE, ...]`
-  - **`arg`**: `KernelInfo`
+  - **`arg`**: `Optional[KernelInfo]`
+
+  NOTE: ScheduleItem ASTs do not have Kernel info, `Kernel` inserts this arg to the SINK later.
   """
   EXT = auto()
   """
