@@ -40,20 +40,125 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
-  # ops that aren't rendered
-  SINK = auto(); EXT = auto(); EXPAND = auto(); CONTRACT = auto(); SHAPETRACKER = auto(); SWIZZLE = auto()  # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
-  CONST = auto(); SPECIAL = auto() # noqa: E702
-  NOOP = auto(); GEP = auto() # noqa: E702
+  # uops that aren't rendered
+  SINK = auto()
+  """
+  Holds [UOps.STORE](/developer/uop#tinygrad.ops.UOps.STORE). SINK defines the AST for a Kernel.
+
+  - **`dtype`**: `None`
+  - **`src`**: `[UOps.STORE, ...]`
+  - **`arg`**: `KernelInfo`
+  """
+  EXT = auto()
+  """
+  Holds a single MetaOp. EXT UOps do not need a Kernel.
+
+  - **`dtype`**: Output dtype
+  - **`src`**: `Tuple[]`
+  - **`arg`**: (`MetaOps.CUSTOM | MetaOps.COPY | MetaOps.EMPTY | MetaOps.VIEW`, LazyBuffer arg)
+  """
+  EXPAND = auto()
+  CONTRACT = auto()
+  SHAPETRACKER = auto()
+  """
+  Defines the ShapeTracker for a buffer UOp ([UOps.LOAD](/developer/uop#tinygrad.ops.UOps.LOAD),
+  [UOps.STORE](/developer/uop#tinygrad.ops.UOps.STORE) or [UOps.CONST](/developer/uop#tinygrad.ops.UOps.CONST)).
+
+  - **`dtype`**: None
+  - **`src`**: `Tuple[]`
+  - **`arg`**: `ShapeTracker`
+  """
+  SWIZZLE = auto()
+  DEFINE_GLOBAL = auto()
+  DEFINE_VAR = auto()
+  DEFINE_LOCAL = auto()
+  DEFINE_ACC = auto()
+  CONST = auto()
+  SPECIAL = auto()
+  NOOP = auto()
+  GEP = auto()
   # math ops
-  CAST = auto(); BITCAST = auto(); VECTORIZE = auto() # noqa: E702
-  ALU = auto(); REDUCE = auto(); REDUCE_AXIS = auto(); WMMA = auto() # noqa: E702
+  CAST = auto()
+  """
+  - **`dtype`**: the casted scalar DType
+  - **`src`**: `Tuple[UOp]`
+  - **`arg`**: None
+  """
+  BITCAST = auto()
+  """
+  - **`dtype`**: the bitcasted scalar DType
+  - **`src`**: `Tuple[UOp]`
+  - **`arg`**: None
+  """
+  VECTORIZE = auto()
+  """
+  - **`dtype`**: the upcasted vector DType
+  - **`src`**: `Tuple[UOp]`
+  - **`arg`**: None
+  """
+  ALU = auto()
+  """
+  - **`dtype`**: Output DType
+  - **`src`**: `Tuple[UOp] | Tuple[UOp, UOp] | Tuple[UOp, UOp, UOp]`
+  - **`arg`**: `Op`
+  """
+  REDUCE = auto()
+  REDUCE_AXIS = auto()
+  """
+  - **`dtype`**: Output DType
+  - **`src`**: Input to reduce `Tuple[UOp]`
+  - **`arg`**: `(BinaryOps.ADD | BinaryOps.MUL | BinaryOps.MAX, Tuple[int, ...])`
+  """
+  WMMA = auto()
   # memory/assignment ops
-  LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
+  LOAD = auto()
+  """
+  - **`dtype`**: Output DType
+  - **`src`**:
+      - Normal LOAD: `Tuple[UOp, UOp]`
+          - Buffer UOp `DEFINE_GLOBAL`
+          - Indexing Op, can only return dtypes.int32.
+      - Gated LOAD: `Tuple[UOp, UOp, UOp]`
+          - Buffer UOp `DEFINE_GLOBAL`
+          - Indexing Op, can only return dtypes.int32.
+          - Gate Op, can only return dtypes.bool.
+      - Barriered LOAD: `Tuple[UOp, UOp, UOp, UOp]`
+          - Buffer UOp `DEFINE_LOCAL`
+          - Indexing Op, can only return dtypes.int32.
+          - Gate Op, can only return dtypes.bool.
+          - Barrier Op, [UOps.BARRIER](/developer/uop#tinygrad.ops.UOps.BARRIER)
+  - **`arg`**: `None`
+  """
+  STORE = auto()
+  """
+  - **`dtype`**: None
+  - **`src`**:
+      - Normal STORE: `Tuple[UOp, UOp, UOp]`
+          - Buffer UOp `DEFINE_GLOBAL | DEFINE_LOCAL`
+          - Indexing Op, can only return dtypes.int32.
+          - Value to store
+      - Gated STORE: `Tuple[UOp, UOp, UOp, UOp]`
+          - Buffer UOp `DEFINE_GLOBAL | DEFINE_LOCAL`
+          - Indexing Op, can only return dtypes.int32.
+          - Value to store
+          - Gate Op, can only return dtypes.bool
+  - **`arg`**: `None`
+  """
+  PHI = auto()
   # control flow ops
-  BARRIER = auto(); IF = auto(); RANGE = auto() # noqa: E702
-  # these two are not graph nodes
-  ENDRANGE = auto(); ENDIF = auto() # noqa: E702
+  BARRIER = auto()
+  """
+  Define a warp sync for the stores in sources.
+
+  - **`dtype`**: None
+  - **`src`**: `Tuple[STORE, ...]`
+  - **`arg`**: `None`
+  """
+  IF = auto()
+  RANGE = auto()
+  # ops that are not graph nodes
+  ENDRANGE = auto()
+  ENDIF = auto()
 
 BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 
