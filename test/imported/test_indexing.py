@@ -33,9 +33,9 @@ def copy_(src:Tensor, other:Tensor) -> Tensor: return copy.copy(src)
 def data_ptr(tensor:Tensor): return tensor.lazydata
 
 # https://pytorch.org/docs/stable/generated/torch.Tensor.index_put_.html
-# TODO this is setitem
 def index_put_(tensor:Tensor, indices, values, accumulate) -> Tensor:
-  tensor[indices] = values
+  if accumulate: tensor[indices] += values
+  else: tensor[indices] = values
 
 # https://pytorch.org/docs/stable/generated/torch.argsort.html
 def argsort(tensor:Tensor) -> Tensor:
@@ -213,7 +213,6 @@ class TestIndexing(unittest.TestCase):
     # Case 1: Purely Integer Array Indexing
     reference = consec((10,))
     validate_indexing(reference)
-
     # setting values    
     validate_setting(reference)
 
@@ -284,7 +283,6 @@ class TestIndexing(unittest.TestCase):
                       np.array([[4, 6], [2, 3]]))
     
     # Verify still works with Transposed (i.e. non-contiguous) Tensors
-
     reference = Tensor([[0, 1, 2, 3],
                         [4, 5, 6, 7],
                         [8, 9, 10, 11]]).T
@@ -405,7 +403,6 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(strided[rows, columns],
                       Tensor([[4, 6], [2, 3]]))
     
-
     # Tests using less than the number of dims, and ellipsis
 
     # reference is 1 2
@@ -562,7 +559,6 @@ class TestIndexing(unittest.TestCase):
       
       assert_set_eq(reference, indexer, 212)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-      
       assert_backward_eq(reference, indexer)
 
     reference = Tensor.arange(0., 1296).reshape(3, 9, 8, 6)
