@@ -17,8 +17,17 @@ fi
 BASE=tinygrad/runtime/autogen/
 
 fixup() {
-  sed -i '1s/^/# mypy: ignore-errors\n/' $1
-  sed -i 's/ *$//' $1
+  # https://stackoverflow.com/questions/4247068/
+  case "$OSTYPE" in
+    darwin*|bsd*)
+      sed -i '' -e '1s/^/# mypy: ignore-errors\n/' $1
+      sed -i '' -e 's/ *$//' $1
+      ;;
+    *)
+      sed -i '1s/^/# mypy: ignore-errors\n/' $1
+      sed -i 's/ *//' $1
+      ;;
+  esac
   grep FIXME_STUB $1 || true
 }
 
@@ -214,6 +223,19 @@ generate_libc() {
   fixup $BASE/libc.py
 }
 
+generate_macho() {
+  if [ "$(uname)" != "Darwin" ]; then
+    echo "Must be Darwin to generate mach-o stubs. Skipping generation."
+    return
+  fi
+
+  clang2py -k cdefstum \
+    $(xcrun -sdk / -show-sdk-path)/usr/include/mach-o/loader.h \
+    -o $BASE/macho.py
+
+  fixup $BASE/macho.py
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -225,6 +247,7 @@ elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
+elif [ "$1" == "macho" ]; then generate_macho
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
 else echo "usage: $0 <type>"
 fi

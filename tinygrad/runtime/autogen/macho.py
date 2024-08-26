@@ -174,7 +174,6 @@ MH_NO_HEAP_EXECUTION = 0x1000000 # macro
 MH_APP_EXTENSION_SAFE = 0x02000000 # macro
 MH_NLIST_OUTOFSYNC_WITH_DYLDINFO = 0x04000000 # macro
 MH_SIM_SUPPORT = 0x08000000 # macro
-MH_IMPLICIT_PAGEZERO = 0x10000000 # macro
 MH_DYLIB_IN_CACHE = 0x80000000 # macro
 LC_REQ_DYLD = 0x80000000 # macro
 LC_SEGMENT = 0x1 # macro
@@ -294,11 +293,6 @@ SECT_ICON_TIFF = "__tiff" # macro
 SEG_LINKEDIT = "__LINKEDIT" # macro
 SEG_UNIXSTACK = "__UNIXSTACK" # macro
 SEG_IMPORT = "__IMPORT" # macro
-DYLIB_USE_WEAK_LINK = 0x01 # macro
-DYLIB_USE_REEXPORT = 0x02 # macro
-DYLIB_USE_UPWARD = 0x04 # macro
-DYLIB_USE_DELAYED_INIT = 0x08 # macro
-DYLIB_USE_MARKER = 0x1a741800 # macro
 INDIRECT_SYMBOL_LOCAL = 0x80000000 # macro
 INDIRECT_SYMBOL_ABS = 0x40000000 # macro
 PLATFORM_UNKNOWN = 0 # macro
@@ -313,8 +307,6 @@ PLATFORM_IOSSIMULATOR = 7 # macro
 PLATFORM_TVOSSIMULATOR = 8 # macro
 PLATFORM_WATCHOSSIMULATOR = 9 # macro
 PLATFORM_DRIVERKIT = 10 # macro
-PLATFORM_VISIONOS = 11 # macro
-PLATFORM_VISIONOSSIMULATOR = 12 # macro
 PLATFORM_FIRMWARE = 13 # macro
 PLATFORM_SEPOS = 14 # macro
 TOOL_CLANG = 1 # macro
@@ -540,20 +532,6 @@ struct_dylib_command._fields_ = [
     ('cmd', ctypes.c_uint32),
     ('cmdsize', ctypes.c_uint32),
     ('dylib', struct_dylib),
-]
-
-class struct_dylib_use_command(Structure):
-    pass
-
-struct_dylib_use_command._pack_ = 1 # source:False
-struct_dylib_use_command._fields_ = [
-    ('cmd', ctypes.c_uint32),
-    ('cmdsize', ctypes.c_uint32),
-    ('nameoff', ctypes.c_uint32),
-    ('marker', ctypes.c_uint32),
-    ('current_version', ctypes.c_uint32),
-    ('compat_version', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
 ]
 
 class struct_sub_framework_command(Structure):
@@ -1026,9 +1004,7 @@ __all__ = \
     'BIND_TYPE_TEXT_ABSOLUTE32', 'BIND_TYPE_TEXT_PCREL32',
     'DICE_KIND_ABS_JUMP_TABLE32', 'DICE_KIND_DATA',
     'DICE_KIND_JUMP_TABLE16', 'DICE_KIND_JUMP_TABLE32',
-    'DICE_KIND_JUMP_TABLE8', 'DYLIB_USE_DELAYED_INIT',
-    'DYLIB_USE_MARKER', 'DYLIB_USE_REEXPORT', 'DYLIB_USE_UPWARD',
-    'DYLIB_USE_WEAK_LINK', 'EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE',
+    'DICE_KIND_JUMP_TABLE8', 'EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE',
     'EXPORT_SYMBOL_FLAGS_KIND_MASK',
     'EXPORT_SYMBOL_FLAGS_KIND_REGULAR',
     'EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL',
@@ -1061,8 +1037,8 @@ __all__ = \
     'MH_DSYM', 'MH_DYLDLINK', 'MH_DYLIB', 'MH_DYLIB_IN_CACHE',
     'MH_DYLIB_STUB', 'MH_DYLINKER', 'MH_EXECUTE', 'MH_FILESET',
     'MH_FORCE_FLAT', 'MH_FVMLIB', 'MH_GPU_DYLIB', 'MH_GPU_EXECUTE',
-    'MH_HAS_TLV_DESCRIPTORS', 'MH_IMPLICIT_PAGEZERO', 'MH_INCRLINK',
-    'MH_KEXT_BUNDLE', 'MH_LAZY_INIT', 'MH_MAGIC', 'MH_MAGIC_64',
+    'MH_HAS_TLV_DESCRIPTORS', 'MH_INCRLINK', 'MH_KEXT_BUNDLE',
+    'MH_LAZY_INIT', 'MH_MAGIC', 'MH_MAGIC_64',
     'MH_NLIST_OUTOFSYNC_WITH_DYLDINFO', 'MH_NOFIXPREBINDING',
     'MH_NOMULTIDEFS', 'MH_NOUNDEFS', 'MH_NO_HEAP_EXECUTION',
     'MH_NO_REEXPORTED_DYLIBS', 'MH_OBJECT', 'MH_PIE',
@@ -1073,7 +1049,6 @@ __all__ = \
     'PLATFORM_FIRMWARE', 'PLATFORM_IOS', 'PLATFORM_IOSSIMULATOR',
     'PLATFORM_MACCATALYST', 'PLATFORM_MACOS', 'PLATFORM_SEPOS',
     'PLATFORM_TVOS', 'PLATFORM_TVOSSIMULATOR', 'PLATFORM_UNKNOWN',
-    'PLATFORM_VISIONOS', 'PLATFORM_VISIONOSSIMULATOR',
     'PLATFORM_WATCHOS', 'PLATFORM_WATCHOSSIMULATOR',
     'REBASE_IMMEDIATE_MASK', 'REBASE_OPCODE_ADD_ADDR_IMM_SCALED',
     'REBASE_OPCODE_ADD_ADDR_ULEB', 'REBASE_OPCODE_DONE',
@@ -1114,9 +1089,8 @@ __all__ = \
     'struct_data_in_code_entry', 'struct_dyld_info_command',
     'struct_dylib', 'struct_dylib_command', 'struct_dylib_module',
     'struct_dylib_module_64', 'struct_dylib_reference',
-    'struct_dylib_table_of_contents', 'struct_dylib_use_command',
-    'struct_dylinker_command', 'struct_dysymtab_command',
-    'struct_encryption_info_command',
+    'struct_dylib_table_of_contents', 'struct_dylinker_command',
+    'struct_dysymtab_command', 'struct_encryption_info_command',
     'struct_encryption_info_command_64', 'struct_entry_point_command',
     'struct_fileset_entry_command', 'struct_fvmfile_command',
     'struct_fvmlib', 'struct_fvmlib_command', 'struct_ident_command',
