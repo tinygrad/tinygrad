@@ -79,6 +79,11 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_div_tensor_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) / Tensor.ones(4))
 
+  def test_idiv_literal_one(self):
+    _check_ast_count(0, Tensor([1, 2, 3, 4]) // 1)
+  def test_idiv_tensor_one(self):
+    _check_ast_count(0, Tensor([1, 2, 3, 4]) // Tensor.ones(4, dtype=dtypes.int32))
+
   def test_pow_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** 0)
   def test_pow_tensor_zero(self):
