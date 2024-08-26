@@ -10,6 +10,7 @@ from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
+from tinygrad.shape.symbolic import Variable
 from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
@@ -100,7 +101,6 @@ class TestUOps(unittest.TestCase):
             self._equal(f([a,b,c], op, dts), fxn(a,b,c))
 
 class TestFloatUOps(TestUOps):
-  def test_neg(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a)
   @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
   def test_exp2(self): self._test_uop_fxn(UnaryOps.EXP2, lambda a: np.exp2(a))
   @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
@@ -125,7 +125,6 @@ class TestFloatUOps(TestUOps):
     self._test_top_fxn(TernaryOps.MULACC, lambda a,b,c: a*b+c, (dtypes.float, dtypes.float, dtypes.float))
 
 class TestNonFloatUOps(TestUOps):
-  def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, (dtypes.int32, ))
   def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
   def test_mul_int32(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: int(a)*int(b), (dtypes.int32, dtypes.int32))
   @unittest.skipUnless(getenv("PTX"), "only ptx uses bitshifts")
@@ -166,7 +165,6 @@ class TestBoolUOps(TestUOps):
           for c in [False, True]:
             self._equal(f([a,b,c], op, (dtypes.bool, )*3), fxn(a,b,c))
 
-  def test_not_bool(self): self._test_uop_bool_fxn(UnaryOps.NEG, lambda a: not a)
   def test_add_bool(self): self._test_bop_bool_fxn(BinaryOps.ADD, lambda a,b: a or b)
   def test_mul_bool(self): self._test_bop_bool_fxn(BinaryOps.MUL, lambda a,b: a and b)
   def test_xor_bool(self): self._test_bop_bool_fxn(BinaryOps.XOR, lambda a,b: a != b)
@@ -198,10 +196,6 @@ class TestExecALU(TestUOps):
     np.testing.assert_allclose(exec_alu(UnaryOps.RECIP, dtypes.float32, ((32+521+3),)), 1/(32+521+3))
     np.testing.assert_allclose(exec_alu(UnaryOps.RECIP, dtypes.float32, ((34**2),)), 1/(34**2))
     np.testing.assert_allclose(exec_alu(UnaryOps.RECIP, dtypes.float32, (10,)), 1/10)
-
-  def test_bool_neg(self):
-    self.assertEqual(exec_alu(UnaryOps.NEG, dtypes.bool, (False,)), True)
-    self.assertEqual(exec_alu(UnaryOps.NEG, dtypes.bool, (True,)), False)
 
   def test_bool_cmplt(self):
     self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (False, False)), False)
@@ -379,6 +373,10 @@ class TestUOpStr(TestEqUOps):
   def test_nop_str(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
     assert str(eval(str(a))) == str(a)
+
+  def test_variable_const(self):
+    uop = UOp(UOps.CONST, dtypes.int, (), arg=Variable("a",1,10))
+    assert str(eval(str(uop))) == str(uop)
 
 class TestIndexingOrdering(unittest.TestCase):
   # NOTE: these tests skip type_verify since they add dtype to STORE

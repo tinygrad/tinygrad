@@ -1,6 +1,7 @@
 ## Reduce
 
 ::: tinygrad.Tensor.sum
+::: tinygrad.Tensor.prod
 ::: tinygrad.Tensor.max
 ::: tinygrad.Tensor.min
 ::: tinygrad.Tensor.any
