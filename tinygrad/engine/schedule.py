@@ -186,18 +186,31 @@ def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   if (root_st:=get_output_st(root, uop_sts)) is not None and rshape == root_st.shape: return None
   return st_fixup(root, lambda st:st.reshape(rshape), uop_sts, {})
 
-def pad_reduceop_dims(root:UOp) -> Optional[UOp]:
+def _swap_uops(root:UOp, uop_map:Dict[UOp, UOp], cache:Dict[UOp, UOp]) -> UOp:
+  if (cached:=cache.get(root)): return cached
+  if (new:=uop_map.get(root)): return new
+  new_srcs = tuple(_swap_uops(x, uop_map, cache) for x in root.src)
+  return cache.setdefault(root, replace(root, src=new_srcs))
+
+def pad_reduceop_shape(root:UOp) -> Optional[UOp]:
   reduceops = [x for x in root.parents if x.op is UOps.REDUCE_AXIS]
   if len(reduceops) <= 1: return None
   uop_sts: Dict[UOp, ShapeTracker] = {}
   full_shapes = {r:unwrap(get_output_st(r.src[0], uop_sts)) for r in reduceops}
-  shape_dims: List[List[sint]] = [sorted(dedup(dims)) for dims in zip(*[input_st.shape for input_st in full_shapes.values()])]
-  to_fixup = [x for x in shape_dims if len(x) != 1 and not (len(x) == 2 and x[0] == 1)]
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[input_st.shape for input_st in full_shapes.values()])]
+  to_fixup = {i:x for i,x in enumerate(shape_dims) if len(x) != 1 and not (len(x) == 2 and x[0] == 1)}
   if len(to_fixup) == 0: return None
+  new_reduceops: Dict[UOp, UOp] = {}
+  for i,dims in to_fixup.items():
+    for r,st in full_shapes.items():
+      if (dim:=st.shape[i]) > 1 and dim != max(dims):
+        new_rsrc = st_fixup(r.src[0], lambda st:st.pad(((0, 0),)*i+((0, max(dims)-dim),)), uop_sts, {})
+        new_reduceops[r] = replace(r, src=(new_rsrc,))
+  return _swap_uops(root, new_reduceops, {})
 
 reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(name="rsrc"), UPat(UOps.SWIZZLE, src=(UPat(name="swizzle"),))), name="root"), apply_swizzle),
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), pad_reduceop_dims),
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), pad_reduceop_shape),
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_reduceop_shape),
 ])
 
