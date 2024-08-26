@@ -14,7 +14,8 @@ def convert_arg(arg, arg_type):
 def sel_registerName(sel: str) -> libobjc.SEL:
   return libobjc.sel_registerName(sel.encode())
 
-def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=[]):
+def objc_msgSend(obj: ctypes.c_void_p, sel: str, *args, restype=None, argtypes=None):
+  if argtypes == None: argtypes = []
   base_argtypes = [ctypes.c_void_p, ctypes.c_void_p]
   encoded_args = [convert_arg(a, t) for a, t in zip(args, argtypes)]
   # print(f"Sending {sel}(restype:{restype} argtypes:{argtypes}) to ptr:{obj} with args:{args}")
@@ -78,16 +79,15 @@ def get_methods_rec(c: int):
 def objc_type_to_ctype(t: str):
   if len(t) == 1:
     return SIMPLE_TYPES[t]
-  elif t[0] == '^':
+  if t[0] == '^':
     return ctypes.POINTER(objc_type_to_ctype(t[1:]))
-  elif t[0] == 'r':
+  if t[0] == 'r':
     return objc_type_to_ctype(t[1:])
-  elif t[0] == "V":
+  if t[0] == "V":
     return objc_type_to_ctype(t[1:])
-  elif t.startswith("{") and "=" in t and t.endswith("}"):
+  if t.startswith("{") and "=" in t and t.endswith("}"):
     return ctypes.Structure  # wooo! safety is out the window now
-  else:
-    raise ValueError(f"Unknown type {t}")
+  raise ValueError(f"Unknown type {t}")
 
 def wrapper_return_objc_instance(f):
   def _wrapper(*args, **kwargs):
@@ -100,7 +100,7 @@ def wrapper_arg_error(f):
   def _wrapper(*args, **kwargs):
     err = ctypes.c_void_p()
     res = f(*args[:-1], ctypes.byref(err), **kwargs)
-    return (res, err if err.value else None)
+    return (res, None if err.value is None else ObjcInstance(err))
   return _wrapper
 
 @functools.lru_cache(maxsize=None)
@@ -128,7 +128,7 @@ class ObjcClass(ctypes.c_void_p):
     return f"<{ctypes.string_at(libobjc.object_getClassName(ctypes.cast(ctypes.c_void_p(self.value), libobjc.id))).decode()} at 0x{self.value:x}>"
 
   def __hash__(self) -> int:
-    return self.value
+    return 0 if self.value is None else self.value
 
   def __getattr__(self, name:str) -> Any:
     sel_name = name.replace("_", ":")
