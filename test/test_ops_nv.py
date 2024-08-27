@@ -9,11 +9,14 @@ from tinygrad.runtime.ops_nv import NVDevice
 
 MOCKGPU = getenv("MOCKGPU")
 
-@unittest.skipUnless(type(Device[Device.DEFAULT]) == NVDevice, "NV device required to run")
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT], NVDevice), "NV device required to run")
 class TestOpsNV(unittest.TestCase):
   @unittest.skipIf(MOCKGPU, "Can't run on MOCKGPU for now due to constbuf[0] hack")
   def test_blockdim_non_zero(self):
-    program = Program("test_blockdim_nonzero","extern \"C\" __global__ void test_blockdim_nonzero(float *dst) {int idx = blockDim.x * blockIdx.x + threadIdx.x;dst[idx] = 1.0f;}","nv")
+    program = Program("test_blockdim_nonzero",
+                      "extern \"C\" __global__ void test_blockdim_nonzero(float *dst) {"
+                      "int idx = blockDim.x * blockIdx.x + threadIdx.x;dst[idx] = 1.0f;}",
+                      "nv")
     runner = CompiledRunner(program)
     N = 1024
     block_size = 256
