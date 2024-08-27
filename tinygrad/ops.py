@@ -142,7 +142,7 @@ class UOps(Enum):
       - Indexing Op, can only return `dtypes.int32`.
       - Value to store.
     - Gated STORE: `Tuple[UOp, UOp, UOp, UOp]`
-      - Buffer UOp `UOps.DEFINE_GLOBAL`.
+      - Buffer UOp `UOps.DEFINE_GLOBAL` or `UOps.DEFINE_LOCAL`.
       - Indexing UOp, can only return `dtypes.int32`.
       - Value to store.
       - Gate UOp, can only return `dtypes.bool`.
