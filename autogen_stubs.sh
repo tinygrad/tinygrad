@@ -245,7 +245,6 @@ generate_mac() {
 
   clang2py -k cdefstum \
     $(xcrun -sdk / -show-sdk-path)/usr/include/libkern/OSCacheControl.h \
-    $(xcrun -sdk / -show-sdk-path)/usr/include/pthread.h \
     -s 'sys_icache_invalidate' \
     --clang-args="-I$(xcrun -sdk / -show-sdk-path)/usr/include" \
     -o $BASE/mac.py

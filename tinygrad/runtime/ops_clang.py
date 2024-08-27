@@ -2,10 +2,8 @@ import ctypes, subprocess, pathlib, tempfile, mmap
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import OSX, cpu_time_execution, DEBUG, cpu_objdump, mv_address
 from tinygrad.renderer.cstyle import ClangRenderer
-from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.elf import elf_loader
-import tinygrad.runtime.autogen.macho as macho
-import tinygrad.runtime.autogen.mac as mac
+from tinygrad.runtime.autogen import libc, mac, macho
 
 def macho_loader(blob: bytes) -> memoryview:
   header, curr_loc, sections = macho.struct_mach_header_64.from_buffer_copy(blob), ctypes.sizeof(macho.struct_mach_header_64), []
