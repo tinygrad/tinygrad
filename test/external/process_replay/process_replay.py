@@ -15,7 +15,7 @@ MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 RUN_ID = os.getenv("GITHUB_RUN_ID", "HEAD")
 TABLE_NAME = f"process_replay_{RUN_ID}_{getenv('GITHUB_RUN_ATTEMPT')}_{VERSION}"
 ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
-COMPARE_SCHEDULE = getenv("COMPARE_SCHEDULE", int((k:="[compare_schedule]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")))
+COMPARE_SCHEDULE = getenv("COMPARE_SCHEDULE", int((k:="[compare_schedule]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 if REF == "master": SKIP_PROCESS_REPLAY = True
 early_stop = multiprocessing.Event()
@@ -113,6 +113,7 @@ def process_replay():
       logging.warning(f"schedule_diff_{VERSION} isn't accessible in master, did DB_VERSION change?")
       exit(0)
     if has_diff:
+      logging.info("***** schedule diff")
       row_count = cur.execute(f"select count(*) from 'schedule_diff_{VERSION}'").fetchone()[0]
       conn.commit()
       cur.close()
@@ -125,6 +126,7 @@ def process_replay():
         if ASSERT_DIFF: raise Exception("kernel process replay detected changes")
 
   # *** kernel diff
+  logging.info("***** kernel diff")
   conn = db_connection()
   cur = conn.cursor()
   try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
