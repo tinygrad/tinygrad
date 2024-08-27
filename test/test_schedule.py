@@ -11,7 +11,7 @@ from tinygrad.device import Device
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, get_output_st, st_fixup
 from tinygrad.engine.realize import run_schedule
@@ -1607,6 +1607,12 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
 class TestScheduleRewrite(unittest.TestCase):
+  def setUp(self):
+    self.old_val = AST_REWRITE.value
+    AST_REWRITE.value = 1
+  def tearDown(self):
+    AST_REWRITE.value = self.old_val
+
   def test_recursive_get_output_st(self):
     start = time.perf_counter()
     a = Tensor([1,2,3,4]).realize()
@@ -1641,6 +1647,23 @@ class TestScheduleRewrite(unittest.TestCase):
     val = ast.src[0].src[2]
     new_val = st_fixup(val, lambda st:st.reshape((4,)), {}, {})
     self.assertIs(new_val, val)
+
+  def test_deep_reduceop_reshape(self):
+    tms: List[float] = []
+    inputs = [10*i for i in range(1,30 if getenv("BIG") else 15)]
+    for inp in inputs:
+      a = Tensor.empty(4, 4)
+      r = a.sum()
+      for _ in range(inp): r += r+2
+      st = time.perf_counter_ns()
+      r.schedule()
+      tms.append((time.perf_counter_ns()-st)*1e-6)
+    if getenv("GRAPH_TIMING"):
+      import plotly.express as px
+      fig = px.line(x=inputs, y=tms, title="graph_rewrite time as ast grows")
+      fig.update_layout(paper_bgcolor="black", plot_bgcolor="black", font={"color":"white"},
+                        yaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"}, xaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"})
+      fig.show()
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
