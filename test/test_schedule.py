@@ -11,7 +11,7 @@ from tinygrad.device import Device
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
-from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, Profiling, flatten, getenv, SPLIT_REDUCEOP
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, get_output_st, st_fixup
 from tinygrad.engine.realize import run_schedule
