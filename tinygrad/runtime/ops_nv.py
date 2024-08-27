@@ -458,7 +458,7 @@ class NVDevice(HCQCompiled):
 
     for dev in self.devices:
       try: uvm.enable_peer_access(self.fd_uvm, gpuUuidA=self.gpu_uuid, gpuUuidB=dev.gpu_uuid)
-      except RuntimeError as e: raise RuntimeError(str(e) + f". Make sure GPUs #{self.gpu_minor} <-> #{dev.gpu_minor} have P2P enabled between")
+      except RuntimeError as e: raise RuntimeError(str(e) + f". Make sure GPUs #{self.gpu_minor} & #{dev.gpu_minor} have P2P enabled between.") from e
 
     if NVDevice.signals_page is None:
       NVDevice.signals_page = self._gpu_system_alloc(16 * 65536, map_to_cpu=True)
