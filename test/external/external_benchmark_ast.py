@@ -6,7 +6,7 @@ from tinygrad import Tensor
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import Context, getenv, to_function_name
 from tinygrad.engine.schedule import _get_output_groups, _lower_lazybuffer
-from tinygrad.ops import UOps
+from tinygrad.ops import UOp, UOps
 
 if __name__ == "__main__":
   mdl = ResNet50()
@@ -14,7 +14,7 @@ if __name__ == "__main__":
   out = mdl(img)
   output_groups, realizes, _ = _get_output_groups(out.lazydata.lbs, set())
 
-  kernels: List[str] = []
+  asts: List[UOp] = []
   no_rewrite: List[float] = []
   for k,v in output_groups.items():
     st = time.perf_counter_ns()
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     et = time.perf_counter_ns() - st
     if lsi.ast.op is UOps.EXT: continue
     no_rewrite.append(et*1e-6)
-    kernels.append(Kernel(lsi.ast).name)
+    asts.append(lsi.ast)
 
   rewrite: List[float] = []
   with Context(AST_REWRITE=1):
@@ -33,20 +33,23 @@ if __name__ == "__main__":
       if lsi.ast.op is UOps.EXT: continue
       rewrite.append(et*1e-6)
 
-  assert len(rewrite) == len(no_rewrite) == len(kernels)
+  assert len(rewrite) == len(no_rewrite) == len(asts)
 
-  data: Dict[str, Tuple[float, float]] = {k:(rewrite[i], no_rewrite[i]) for i,k in enumerate(kernels)}
-  slowest_kernels = list(sorted(data.items(), reverse=False, key=lambda x:((x[1][1]-x[1][0])/x[1][1])*100))
+  kernel_tms: Dict[bytes, Tuple[UOp, float, float]] = {k.key:(k, no_rewrite[i], rewrite[i]) for i,k in enumerate(asts)}
+  pct_change: Dict[bytes, float] = {k:((x-y)/x)*100 for k,(_,x,y) in kernel_tms.items()}
+  slowest_kernels = list(sorted(pct_change.items(), key=lambda x:x[1]))
+  names = {ast.key:Kernel(ast).name for ast,_,_ in kernel_tms.values()}
   print("slowest ast rewrites:")
-  for k,tms in slowest_kernels[:10]:
-    print(f"{k:10s}   {tms[1]:4.2f} ms -> {tms[0]:4.2f} ms")
+  for k,pct in slowest_kernels[:10]:
+    _, no_rw, rw = kernel_tms[k]
+    print(f"{names[k]:10s}   {no_rw:4.2f} ms -> {rw:4.2f} ms {pct:4.2f}%")
 
   if getenv("GRAPH_TIMING"):
     sample = slowest_kernels[:20]
-    x = [to_function_name(x) for x,_ in sample]
-    y1, y2 = [x[1][0] for x in sample], [x[1][1] for x in sample]
-    fig = go.Figure(data=[go.Bar(name="no graph_rewrite", x=x, y=y2, marker=dict(color="#524eed", line=dict(color='rgba(0,0,0,0)'))),
-                          go.Bar(name="graph_rewrite", x=x, y=y1, marker=dict(color="#6fcf97", line=dict(color='rgba(0,0,0,0)')))])
+    x: List[str] = [to_function_name(names[k]) for k,_ in sample]
+    y1, y2 = [kernel_tms[k][1] for k,_ in sample], [kernel_tms[k][2] for k,_ in sample]
+    fig = go.Figure(data=[go.Bar(name="no graph_rewrite", x=x, y=y1, marker=dict(color="#524eed", line=dict(color='rgba(0,0,0,0)'))),
+                          go.Bar(name="graph_rewrite", x=x, y=y2, marker=dict(color="#6fcf97", line=dict(color='rgba(0,0,0,0)')))])
     fig.update_layout(barmode="group", paper_bgcolor="black", plot_bgcolor="black",
                       font={"color":"white"}, yaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"})
     fig.show()
