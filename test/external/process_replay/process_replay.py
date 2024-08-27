@@ -60,9 +60,6 @@ def diff_kernel(offset:int) -> bool:
         # NOTE: replay with the captured renderer, not the one in master
         good_src = k.opts.render(name, cast(List,k.to_program().uops))
     except Exception as e:
-      k = Kernel(ast, opts=opts)
-      for opt in applied_opts: k.apply_opt(opt)
-      print(k.to_program())
       logging.warning(f"FAILED TO RECREATE KERNEL {e}")
       logging.info(ast)
       logging.info(applied_opts)
