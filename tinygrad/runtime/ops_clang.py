@@ -8,9 +8,7 @@ import tinygrad.runtime.autogen.macho as macho
 import tinygrad.runtime.autogen.mac as mac
 
 def macho_loader(blob: bytes) -> memoryview:
-  header = macho.struct_mach_header_64.from_buffer_copy(blob)
-  curr_loc = ctypes.sizeof(macho.struct_mach_header_64)
-  sections = []
+  header, curr_loc, sections = macho.struct_mach_header_64.from_buffer_copy(blob), ctypes.sizeof(macho.struct_mach_header_64), []
   for _ in range(header.ncmds):
     cmd = macho.struct_load_command.from_buffer_copy(blob, curr_loc)
     if cmd.cmd == macho.LC_SEGMENT_64:
