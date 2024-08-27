@@ -5,7 +5,7 @@ from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
-                             GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
+                             GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -135,8 +135,11 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
 def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> Optional[ShapeTracker]:
   if (st:=uop_sts.get(uop)): return st
   if uop.op in BUFFER_UOPS: return uop.st_arg
-  src_sts = [xst for x in uop.src if (xst:=get_output_st(x, uop_sts)) is not None]
-  if len(src_sts) != len(uop.src) or not all_same([x.shape for x in src_sts]): return None
+  src_sts: List[ShapeTracker] = []
+  for x in uop.src:
+    xst = get_output_st(x, uop_sts)
+    if xst is None or (src_sts and xst.shape != src_sts[0].shape): return None
+    src_sts.append(xst)
   uop_sts[uop] = st = ShapeTracker.from_shape(src_sts[0].reduce(uop.arg[1])) if uop.op is UOps.REDUCE_AXIS else src_sts[0]
   return st
 
