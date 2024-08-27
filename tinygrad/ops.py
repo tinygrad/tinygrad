@@ -75,6 +75,19 @@ class UOps(Enum):
   DEFINE_LOCAL = auto()
   DEFINE_ACC = auto()
   CONST = auto()
+  """
+  Defines a single scalar constant value.
+
+  - **`dtype`**: The scalar DType of the value.
+
+  - **`src`**:
+    The scheduler creates a CONST with a single SHAPETRACKER UOp src: `Tuple[UOp]`.
+
+    The Lowerer replaces the SHAPETRACKER with an empty src.
+    It uses the ShapeTracker valid to create a `WHERE` UOp mask with sources: `(The actual CONST UOp, CONST 0, 0.0 or False)`
+
+  - **`arg`**: The value.
+  """
   SPECIAL = auto()
   NOOP = auto()
   GEP = auto()
