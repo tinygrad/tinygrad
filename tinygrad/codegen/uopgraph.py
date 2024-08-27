@@ -417,7 +417,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
       # NOTE: gate's bool could be nested within an IF or EXPAND, and we only want to get the bool
       def get_gate_bool(gate: UOp):
-        return gate if gate.dtype == dtypes.bool else get_gate_bool(gate.src[0])
+        return gate if gate.op not in {UOps.IF, UOps.EXPAND} else get_gate_bool(gate.src[0])
       return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (get_gate_bool(gate), u.src[-1])),), u.arg)
     if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op in {UOps.ALU, UOps.CAST}:
       return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate, u.src[2])),), u.arg)
