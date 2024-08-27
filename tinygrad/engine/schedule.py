@@ -311,11 +311,11 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
-def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
-  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
-        DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
-  """create a graph for realizing the outputs"""
+def _get_output_groups(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
+  Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # these are the output groups
+        Dict[LazyBuffer, None],                     # these are all the realizes in the graph
+        Dict[LazyBuffer, LazyBuffer]]:              # these are the buffers we ASSIGN to in this schedule
+  """find all the realizes in the graph, group the output LazyBuffers into kernels."""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
   allbufs: Dict[LazyBuffer, None] = {}
@@ -403,7 +403,14 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
         assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
         buf.buffer.dtype = dtypes.float32
         buf.buffer.options = None
+  return output_groups, realizes, assign_targets
 
+SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
+def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
+  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
+        DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
+  """create a graph for realizing the outputs"""
+  output_groups, realizes, assign_targets = _get_output_groups(outs, seen)
   # preschedule all buffers in realizes
   prescheduled = [_lower_lazybuffer(group, realizes) for group in output_groups.values()]
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
