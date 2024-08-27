@@ -413,9 +413,12 @@ def no_vectorized_alu(alu):
 def create_gate(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
-    if u.op in {UOps.BARRIER, UOps.EXPAND}: return u
-    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER and gate.op is not UOps.IF:
-      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
+    if u.op is UOps.BARRIER: return u
+    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
+      # NOTE: gate's bool could be nested within an IF or EXPAND, and we only want to get the bool
+      def get_gate_bool(gate: UOp):
+        return gate if gate.dtype == dtypes.bool else get_gate_bool(gate.src[0])
+      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (get_gate_bool(gate), u.src[-1])),), u.arg)
     if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op in {UOps.ALU, UOps.CAST}:
       return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate, u.src[2])),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
@@ -446,8 +449,9 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   def find_gate(x:UOp) -> Optional[UOp]:
     if x.op is UOps.IF: return x
     return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-  if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
-  return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
+  if len(root.src) == 4 and (sub_gate:=find_gate(root.src[2])) and sub_gate.src[0] is root.src[-1].src[0]:
+    return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
+  return None
 
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
