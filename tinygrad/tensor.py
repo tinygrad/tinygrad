@@ -942,7 +942,7 @@ class Tensor:
   #   2. Bool indexing is not supported
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
-  def __getitem__(self, indices, set: bool = False) -> Union[Tensor, Tuple[Tensor, Tuple, int, Tuple]]:
+  def __getitem__(self, indices, set: bool = False) -> Union[Tensor, Tuple]:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
@@ -1044,7 +1044,7 @@ class Tensor:
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
 
-      if set: return mask, ret.shape, first_dim, sum_axis
+      if set: return (mask, ret.shape, first_dim, sum_axis)
     return ret
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
@@ -1067,12 +1067,11 @@ class Tensor:
     mask, ret_shape, first_dim, sum_axis = res
     # broadcast to resulting shape from getitem
     v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret_shape, v.shape))
-    # add back reduced dims from sum and broadcast to mask's shape
+    # add back reduced dims from sum
     for dim in sum_axis: v = v.unsqueeze(dim)
-    v = v._broadcast_to(_broadcast_shape(mask.shape, v.shape))
     # axis to be reduced to match self.shape
     axis = tuple(range(first_dim, first_dim + (mask.ndim - self.ndim)))
-    # apply mask to v and reduce such that if v contains repeated indices the last one remains
+    # apply mask to v(broadcasted) and reduce such that if v contains repeated indices the last one remains
     v = v * mask
     for dim in axis: v = functools.reduce(lambda x,y: y.where(y, x), v.split(1, dim))
     # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
