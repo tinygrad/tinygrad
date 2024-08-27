@@ -1,4 +1,4 @@
-import sys, pickle, atexit, importlib, contextlib
+import sys, pickle, atexit, importlib, contextlib, functools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
@@ -192,6 +192,9 @@ def _swap_uops(root:UOp, uop_map:Dict[UOp, UOp], cache:Dict[UOp, UOp]) -> UOp:
   new_srcs = tuple(_swap_uops(x, uop_map, cache) for x in root.src)
   return cache.setdefault(root, replace(root, src=new_srcs))
 
+def fix_st_dim(st:ShapeTracker, i:int, dim:sint, dims:List) -> ShapeTracker:
+  return st.pad(((0, 0),)*i+((0, max(dims) - dim),))
+
 def pad_reduceop_shape(root:UOp) -> Optional[UOp]:
   reduceops = [x for x in root.parents if x.op is UOps.REDUCE_AXIS]
   if len(reduceops) <= 1: return None
@@ -203,8 +206,8 @@ def pad_reduceop_shape(root:UOp) -> Optional[UOp]:
   new_reduceops: Dict[UOp, UOp] = {}
   for i,dims in to_fixup.items():
     for r,st in full_shapes.items():
-      if (dim:=st.shape[i]) > 1 and dim != max(dims):
-        new_rsrc = st_fixup(r.src[0], lambda st:st.pad(((0, 0),)*i+((0, max(dims)-dim),)), uop_sts, {})
+      if (dim := st.shape[i]) > 1 and dim != max(dims):
+        new_rsrc = st_fixup(r.src[0], functools.partial(fix_st_dim, i=i, dim=dim, dims=dims), uop_sts, {})
         new_reduceops[r] = replace(r, src=(new_rsrc,))
   return _swap_uops(root, new_reduceops, {})
 
@@ -244,7 +247,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
   ast: List[UOp] = []
   inputs: Dict[LazyBuffer, int] = {}
   for i, out in enumerate(outs):
-    output_shape = ShapeTracker.reduce(*deque(reduce_info.values(), 1).pop()) if reduce_info and not getenv("AST_REWRITE") else out.shape
+    output_shape = ShapeTracker.reduce(*deque(reduce_info.values(), 1).pop()) if reduce_info and not AST_REWRITE else out.shape
     output_st = ShapeTracker.from_shape(output_shape)
     src = _recursive_uop(out, output_st, tuple(outs), var_vals, inputs, realizes, assign_targets, reduce_info, cache=cache)
     if out.op is MetaOps.ASSIGN and out.arg:
