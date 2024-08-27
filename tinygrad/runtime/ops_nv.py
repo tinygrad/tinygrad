@@ -141,10 +141,10 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
   def _memory_barrier(self): self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
 
   def _exec(self, prg, args_state, global_size, local_size):
-    cmd_idx = len(self) - 1
-
     ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
-    self.cmd_idx_to_qmd[cmd_idx] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
+    assert qmd_addr < (1 << 40), f"large qmd addr {qmd_addr:x}"
+
+    self.cmd_idx_to_qmd[(cmd_idx := len(self) - 1)] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
     self.cmd_idx_to_local_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
 
@@ -312,10 +312,11 @@ class NVDevice(HCQCompiled):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1
-  gpus_info:Union[List, ctypes.Array] = []
-  signals_page:Any = None
+  gpus_info: Union[List, ctypes.Array] = []
+  signals_page: Any = None
   signals_pool: List[Any] = []
-  uvm_vaddr: int = 0x1000000000
+  low_uvm_vaddr: int = 0x1000000000 # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
+  uvm_vaddr: int = 0x2000000000 # 0x2000000000+
   host_object_enumerator: int = 0x1000
 
   def _new_gpu_fd(self):
@@ -344,7 +345,7 @@ class NVDevice(HCQCompiled):
              nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED))
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_USER, self.root, self.device, alloc_params).hObjectNew
 
-    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, alignment=align)
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, alignment=align, force_low=map_to_cpu)
     if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
     return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=map_to_cpu)
 
@@ -356,7 +357,7 @@ class NVDevice(HCQCompiled):
              nv_gpu.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED), format=6, size=size, alignment=(4<<10), offset=0, limit=size-1)
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_SYSTEM, self.root, self.device, alloc_params).hObjectNew
 
-    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, force_low=True)
     if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags, system=True)
 
     return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=map_to_cpu)
@@ -399,8 +400,11 @@ class NVDevice(HCQCompiled):
     mem.mapped_gpu_ids.append(self.gpu_uuid)
     self._gpu_uvm_map(mem.va_addr, mem.size, mem.hMemory, create_range=False)
 
-  def _alloc_gpu_vaddr(self, size, alignment=(4 << 10)):
-    NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
+  def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
+    if force_low:
+      NVDevice.low_uvm_vaddr = (res_va:=round_up(NVDevice.low_uvm_vaddr, alignment)) + size
+      assert NVDevice.low_uvm_vaddr < 0x2000000000, "Exceed low vm addresses"
+    else: NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
     return res_va
 
   def _setup_nvclasses(self):
@@ -501,7 +505,7 @@ class NVDevice(HCQCompiled):
     ws_token_params = rmctrl.gpfifo_get_work_submit_token(self.fd_ctl, self.root, gpfifo, workSubmitToken=-1)
     assert ws_token_params.workSubmitToken != -1
 
-    channel_base = self._alloc_gpu_vaddr(0x4000000)
+    channel_base = self._alloc_gpu_vaddr(0x4000000, force_low=True)
     uvm.register_channel(self.fd_uvm, gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), rmCtrlFd=self.fd_ctl, hClient=self.root,
                          hChannel=gpfifo, base=channel_base, length=0x4000000)
 
