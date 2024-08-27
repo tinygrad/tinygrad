@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, \
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
                              GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
@@ -19,7 +19,6 @@ sys.setrecursionlimit(10000)
 # optionally log the ops to disk
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 # use graph rewrite for reduceop fusion
-AST_REWRITE = getenv("AST_REWRITE", 0)
 
 # *** ScheduleItem return type ***
 
@@ -221,7 +220,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
   ast: List[UOp] = []
   inputs: Dict[LazyBuffer, int] = {}
   for i, out in enumerate(outs):
-    output_shape = ShapeTracker.reduce(*deque(reduce_info.values(), 1).pop()) if reduce_info and not getenv("AST_REWRITE") else out.shape
+    output_shape = ShapeTracker.reduce(*deque(reduce_info.values(), 1).pop()) if reduce_info and not AST_REWRITE else out.shape
     output_st = ShapeTracker.from_shape(output_shape)
     src = _recursive_uop(out, output_st, tuple(outs), var_vals, inputs, realizes, assign_targets, reduce_info, cache=cache)
     if out.op is MetaOps.ASSIGN and out.arg:
