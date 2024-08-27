@@ -306,6 +306,7 @@ class TestLinearizer(unittest.TestCase):
       [Opt(OptOps.GROUPTOP, 0, 15)],
       [Opt(OptOps.GROUPTOP, 1, 15)],
       [Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 15)], # group the reduces differently
+      [Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 15), Opt(OptOps.UPCAST, 0, 3)],
       [Opt(OptOps.UNROLL, 0, 3)],
       [Opt(OptOps.UNROLL, 1, 3)],
     ]
