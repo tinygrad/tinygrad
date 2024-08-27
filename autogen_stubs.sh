@@ -25,7 +25,7 @@ fixup() {
       ;;
     *)
       sed -i '1s/^/# mypy: ignore-errors\n/' $1
-      sed -i 's/ *//' $1
+      sed -i 's/ *$//' $1
       ;;
   esac
   grep FIXME_STUB $1 || true
