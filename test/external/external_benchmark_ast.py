@@ -1,4 +1,4 @@
-import time
+import time, pickle
 import plotly.graph_objects as go
 from typing import Dict, List, Tuple
 from extra.models.resnet import ResNet50
@@ -6,6 +6,7 @@ from tinygrad import Tensor
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import Context, getenv, to_function_name
 from tinygrad.engine.schedule import _get_output_groups, _lower_lazybuffer
+from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import UOp, UOps
 
 if __name__ == "__main__":
@@ -25,24 +26,26 @@ if __name__ == "__main__":
     asts.append(lsi.ast)
 
   rewrite: List[float] = []
+  bufs: List[List[LazyBuffer]] = []
   with Context(AST_REWRITE=1):
     for k,v in output_groups.items():
       st = time.perf_counter_ns()
       lsi = _lower_lazybuffer(v, realizes)
+      bufs.append(v)
       et = time.perf_counter_ns() - st
       if lsi.ast.op is UOps.EXT: continue
       rewrite.append(et*1e-6)
 
   assert len(rewrite) == len(no_rewrite) == len(asts)
 
-  kernel_tms: Dict[bytes, Tuple[UOp, float, float]] = {k.key:(k, no_rewrite[i], rewrite[i]) for i,k in enumerate(asts)}
-  pct_change: Dict[bytes, float] = {k:((x-y)/x)*100 for k,(_,x,y) in kernel_tms.items()}
+  kernel_tms: Dict[bytes, Tuple[UOp, float, float, List[LazyBuffer]]] = {k.key:(k, no_rewrite[i], rewrite[i], bufs[i]) for i,k in enumerate(asts)}
+  pct_change: Dict[bytes, float] = {k:((x-y)/x)*100 for k,(_,x,y,_) in kernel_tms.items()}
   slowest_kernels = list(sorted(pct_change.items(), key=lambda x:x[1]))
-  names = {ast.key:Kernel(ast).name for ast,_,_ in kernel_tms.values()}
+  names = {ast.key:Kernel(ast).name for ast,_,_,_ in kernel_tms.values()}
   print("slowest ast rewrites:")
   for k,pct in slowest_kernels[:10]:
-    _, no_rw, rw = kernel_tms[k]
-    print(f"{names[k]:10s}   {no_rw:4.2f} ms -> {rw:4.2f} ms {pct:4.2f}%")
+    _, no_rw, rw, outs = kernel_tms[k]
+    print(f"{names[k]:10s}   {no_rw:4.2f} ms -> {rw:4.2f} ms {pct:4.2f}% {outs}")
 
   if getenv("GRAPH_TIMING"):
     sample = slowest_kernels[:20]
