@@ -188,9 +188,6 @@ class CStyleLanguage(Renderer):
     # NOTE: this relies on bufs dict preserving order
     return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
-def _make_clang_dtype(self, dtype):
-  return f"typedef {self.render_dtype(dtype.scalar())} {self.render_dtype(dtype)} __attribute__((aligned({(sz:=dtype.itemsize)}),vector_size({sz})));"
-
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
   float4 = "(float4)"
@@ -206,8 +203,11 @@ class ClangRenderer(CStyleLanguage):
                  UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
+  def render_vector_prefix(self, dt:DType) -> str:
+    return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
+
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix = [_make_clang_dtype(self, dtype) for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
+    prefix = [self.render_vector_prefix(dtype) for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count>1)]
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
@@ -292,10 +292,6 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
 _nms = "xyzwabcdefghijkl"
-def _make_cuda_dtype(renderer:CStyleLanguage, dtype:DType) -> str:
-  vec, scal = renderer.render_dtype(dtype), renderer.render_dtype(dtype.scalar()),
-  elems, header = ', '.join(_nms[:dtype.count]), ', '.join([f"{scal} {x}" for x in _nms[:dtype.count]])
-  return f"struct __align__({dtype.itemsize}) {vec} {{ {scal} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
@@ -316,12 +312,17 @@ class CUDARenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
+  def render_vector_prefix(self, dt:DType) -> str:
+    vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
+    elems, header = ', '.join(_nms[:dt.count]), ', '.join([f"{scal} {x}" for x in _nms[:dt.count]])
+    return f"struct __align__({dt.itemsize}) {vec} {{ {scal} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
+
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype in (dtypes.half, dtypes.bfloat16)):
-      prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [_make_cuda_dtype(self, dtype.vec(sz)) for sz in [4, 8]]
+      prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [self.render_vector_prefix(dtype.vec(sz)) for sz in [4, 8]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
@@ -356,11 +357,6 @@ def _make_hip_code_for_op():
     return cast_bf16
   return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_hip}.items() }
 
-def _make_hip_dtype(base_type, name, cnt):
-  elems, header = ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
-  return f"typedef {base_type} {name}{cnt} __attribute__((ext_vector_type({cnt})));\n" + \
-         f"static inline __attribute__((device)) {name}{cnt} make_{name}{cnt}({header}) {{ return {{{elems}}}; }}"
-
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
@@ -369,7 +365,7 @@ class AMDRenderer(CStyleLanguage):
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
   ocml = [(f"__ocml_{name}_f{n}", f"{dt}, {dt}" if "fmax" == name else dt, dt, atr)
-            for dt, n in [("float", 32), ("double", 64), ("_Float16", 16)]
+            for dt, n in [(dtype.name, dtype.itemsize * 8) for dtype in [dtypes.float, dtypes.double, dtypes.half]]
             for name, atr in [("fmax", "const"), ("exp2", "pure"), ("log2", "pure"), ("sqrt", "const"), ("sin", "")]]
 
   kernel_prefix = "\n".join(f'extern "C" __attribute__((device{f", {atr}" if atr else ""})) {dto} {meth}({dti});' for meth,dti,dto,atr in ockl+ocml)
@@ -384,9 +380,13 @@ class AMDRenderer(CStyleLanguage):
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
 
+  def render_vector_prefix(self, dtype:DType) -> str:
+    vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
+    return f"typedef {scal} {vec} __attribute__((ext_vector_type({dtype.count})));\nstatic inline __attribute__((device)) "+ \
+           f"{vec} make_{vec}({', '.join([f'{scal} {x}' for x in _nms[:dtype.count]])}) {{ return {{ {', '.join(_nms[:dtype.count])} }}; }}"
+
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix = ["#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(\"\"))", "typedef long unsigned int size_t;"]
-    vec_dts = [("float", "float", 2), ("float", "float", 4), ("float", "float", 8), ("signed int", "int", 4), ("signed int", "int", 2)]
+    prefix = ["#define INFINITY (__builtin_inff())","#define NAN (__builtin_nanf(\"\"))","typedef long unsigned int size_t;","#define half _Float16"]
 
     # TODO: add BF16 vec dts
     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""
@@ -406,11 +406,7 @@ static inline __attribute__((device)) bool operator<(hip_bfloat16 a, hip_bfloat1
 static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) == ((float)b); }
 """)
 
-    if any(uop.dtype == dtypes.half for uop in uops):
-      prefix.append("#define half _Float16")
-      vec_dts += [("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16)]
-
-    prefix += [_make_hip_dtype(*x) for x in vec_dts]
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
 
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
       if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")

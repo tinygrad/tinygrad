@@ -372,7 +372,8 @@ class FrozenOpenClipEmbedder(Embedder):
 
     if self.return_pooled:
       x = self.model.ln_final(x)
-      pooled = x[:, tokens.argmax(axis=-1).numpy().item()] @ self.model.text_projection
+      index = tokens.argmax(axis=-1).reshape(-1,1,1).expand(x.shape[0],1,x.shape[-1])
+      pooled = x.gather(1, index).squeeze(1) @ self.model.text_projection
       return penultimate, pooled
     else:
       return penultimate
@@ -450,9 +451,9 @@ class OpenClipEncoder:
 
   def get_clip_score(self, tokens:Tensor, image:Tensor) -> Tensor:
     image_features: Tensor = self.visual(image)
-    image_features /= image_features.square().sum([-1,-2], keepdim=True).sqrt() # Frobenius Norm
+    image_features /= image_features.square().sum(-1, keepdim=True).sqrt() # Frobenius Norm
 
-    text_features = self.encode_tokens(tokens).squeeze(0)
-    text_features /= text_features.square().sum([-1,-2], keepdim=True).sqrt() # Frobenius Norm
+    text_features = self.encode_tokens(tokens)
+    text_features /= text_features.square().sum(-1, keepdim=True).sqrt() # Frobenius Norm
 
-    return image_features @ text_features.T
+    return (image_features * text_features).sum(axis=-1)

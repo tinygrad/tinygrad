@@ -6,9 +6,8 @@ from dataclasses import replace
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.ops import UOp, UOps
+from tinygrad.ops import UOp, UOps, BinaryOps, TernaryOps, UnaryOps
 from tinygrad.device import Device, Buffer
-from extra.ops import BinaryOps, BufferOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 # from tinygrad.shape.symbolic import Variable
@@ -110,10 +109,10 @@ class TestLinearizer(unittest.TestCase):
     st_x = x.lazydata.st
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((1, 32)).expand((32, 32)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (1,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (1,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((32, 1)).to_uop()))
     diff = second_x + first_reduce*ast_const(dtypes.float, -1, (32, 1))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (0,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (0,)))
     store = UOp(UOps.STORE, None, (g0, ShapeTracker.from_shape((1, 1)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
@@ -146,10 +145,10 @@ class TestLinearizer(unittest.TestCase):
     st_x = x.lazydata.st
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 32, 1, 5)).to_uop()))
     diff = second_x + first_reduce*ast_const(dtypes.float, -1, (27, 32, 1, 5))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
@@ -208,13 +207,13 @@ class TestLinearizer(unittest.TestCase):
     x2 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
     g0, g1, g2, g3 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(4)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x0.lazydata.st.reshape((27, 1, 1, 32, 5)).expand((27, 32, 32, 32, 5)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (3,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (3,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g2, x1.lazydata.st.reshape((27, 1, 32, 1, 5)).expand((27, 32, 32, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 32, 32, 1, 5)))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (2,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (2,)))
     third_x = UOp(UOps.LOAD, dtypes.float, (g3, x2.lazydata.st.reshape((27, 32, 1, 1, 5)).to_uop()))
     mul = (third_x*second_reduce)
-    third_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (mul,), (ReduceOps.SUM, (1,)))
+    third_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (mul,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 1, 5)).to_uop(), third_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     wanna_output = (x2.numpy()*(x1.numpy()-x0.numpy().sum(axis=1, keepdims=True)).sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,1,5)
@@ -234,11 +233,11 @@ class TestLinearizer(unittest.TestCase):
     st = x.lazydata.st
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 1, 32, 8, 1, 16)).expand((8, 32, 32, 8, 16, 16)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2, 5)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2, 5)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 32, 1, 8, 16, 1)).to_uop()))
     neg_first_reduce = first_reduce * ast_const(dtypes.float, -1, (8, 32, 1, 8, 16, 1))
     squares = (second_x+neg_first_reduce)
-    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (1, 4)))
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (1, 4)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((8, 1, 1, 8, 1, 1)).to_uop(), squares_sum,))
     sink = UOp(UOps.SINK, src=(store,))
     wanna_output = (x.numpy()-x.numpy().sum(axis=(1,3), keepdims=True)).sum(axis=(1,3)).reshape((8,1,1,8,1,1))
@@ -285,10 +284,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 15, 5, dtype=dtypes.float).softmax(1).realize()
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
@@ -317,11 +316,11 @@ class TestLinearizer(unittest.TestCase):
     g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
     first_x_p = UOp(UOps.LOAD, dtypes.float, (g2, x_p.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
-    first_reduce_p = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x_p.alu(UnaryOps.EXP2),), (ReduceOps.SUM, (2,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    first_reduce_p = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x_p.alu(UnaryOps.EXP2),), (BinaryOps.ADD, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1)).to_uop()))
     diff = (second_x+(first_reduce + first_reduce_p)*ast_const(dtypes.float, -1, (4, 32, 1)))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((4, 1, 1)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
@@ -352,10 +351,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 15, 5, dtype=dtypes.float).realize()
     g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store0 = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     second_out = second_reduce * ast_const(dtypes.float, 1/15, (27, 1, 1, 5))
     store1 = UOp(UOps.STORE, src=(g1, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_out))
@@ -374,11 +373,11 @@ class TestLinearizer(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 15, 5, dtype=dtypes.float).realize()
     g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
-    first_x = UOp(BufferOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store0 = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     store1 = UOp(UOps.STORE, src=(g1, ShapeTracker(views=(View(shape=(27,15,1,5), strides=(5,0,1,1), offset=0, mask=None, contiguous=False),)).to_uop(), first_reduce)) # noqa: E501
     wanna_output0 = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
@@ -399,10 +398,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 3, 5, dtype=dtypes.float).realize()
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 3, 5)).expand((27, 3, 3, 5)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 3, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 3, 1, 5)))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [[Opt(OptOps.UNROLL, 0, 3), Opt(OptOps.UNROLL, 0, 3)]]
@@ -415,10 +414,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 3, 5, dtype=dtypes.float).realize()
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 3, 5)).expand((27, 3, 3, 5)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 3, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 3, 1, 5)))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [[Opt(OptOps.UPCAST, 0, 3)]]
@@ -434,10 +433,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 12, 5, dtype=dtypes.float).realize()
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 12, 5)).expand((27, 12, 12, 5)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 12, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 12, 1, 5)))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (1,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [[Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 3)]]
@@ -450,11 +449,11 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (3,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (3,)))
     neg_mean = first_reduce * ast_const(dtypes.float, -1/35, (15, 25, 35, 1))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 25, 35, 1)).to_uop()))
     squares = (second_x+neg_mean)*(second_x+neg_mean)
-    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (2,)))
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (2,)))
     variance = squares_sum * ast_const(dtypes.float, 1/35, (15, 25, 1, 1))
     std = variance.alu(UnaryOps.SQRT)
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), std))
@@ -468,11 +467,11 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 1, 25, 35)).expand((15, 25, 25, 35)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (2,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
     neg_mean = first_reduce * ast_const(dtypes.float, -0.04, (15, 25, 1, 35))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 25, 1, 35)).to_uop()))
     squares = (second_x+neg_mean)*(second_x+neg_mean)
-    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (1,)))
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (1,)))
     variance = squares_sum * ast_const(dtypes.float, 0.04, (15, 1, 1, 35))
     std = variance.alu(UnaryOps.SQRT)
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((15, 1, 1, 35)).to_uop(), std))
@@ -488,11 +487,11 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
     g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (3,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (3,)))
     neg_mean = first_reduce * ast_const(dtypes.float, -1/35, (15, 25, 35, 1))
     second_x = UOp(UOps.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((15, 25, 35, 1)).to_uop()))
     squares = (second_x+neg_mean)*(second_x+neg_mean)
-    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (2,)))
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (2,)))
     variance = squares_sum * ast_const(dtypes.float, 1/35, (15, 25, 1, 1))
     std = variance.alu(UnaryOps.SQRT)
     store_mean = UOp(UOps.STORE, src=(g1, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), neg_mean))
@@ -511,13 +510,13 @@ class TestLinearizer(unittest.TestCase):
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     # push reduce (3, 27, 32) -> (3, 27, 1) -> (3, 27, 32) expand to LOAD
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((3, 27, 1, 32)).expand((3, 27, 32, 32)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.SUM, (3,)))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (3,)))
     neg_mean = first_reduce * ast_const(dtypes.float, -0.03125, (3, 27, 32, 1))
     # store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((3, 27, 32, 1)).to_uop(), mean))
     # verify_lazyop(store)
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((3, 27, 32, 1)).to_uop()))
     squares = (second_x+neg_mean)*(second_x+neg_mean)
-    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (ReduceOps.SUM, (2,)))
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (2,)))
     variance = squares_sum * ast_const(dtypes.float, 0.03125, (3, 27, 1, 1))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((3, 27, 1, 1)).to_uop(), variance))
     sink = UOp(UOps.SINK, src=(store,))
@@ -532,11 +531,11 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.rand(4, 32).realize()
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 1, 32,)).expand((4, 32, 32)).to_uop()))
-    max_x = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (ReduceOps.MAX, (2,)))
+    max_x = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.MAX, (2,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1,)).to_uop()))
     centered_x = second_x+max_x*ast_const(dtypes.float, -1, (4, 32, 1))
     exp_x = centered_x.alu(UnaryOps.EXP2)
-    sum_exp_x = UOp(UOps.REDUCE_AXIS, dtypes.float, (exp_x,), (ReduceOps.SUM, (1,)))
+    sum_exp_x = UOp(UOps.REDUCE_AXIS, dtypes.float, (exp_x,), (BinaryOps.ADD, (1,)))
     # y = exp_x * sum_exp_x.alu(UnaryOps.RECIP) # kernels cannot do a return to full shape
     recip_sum_exp_x = sum_exp_x.alu(UnaryOps.RECIP)
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((4,1,1)).to_uop(), recip_sum_exp_x))
@@ -556,7 +555,7 @@ class TestLinearizer(unittest.TestCase):
         View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
     arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
     arange_axis = (3,)
-    arange = UOp(UOps.REDUCE_AXIS, dtypes.int, (UOp(UOps.CONST, dtypes.int, (arange_input_st.to_uop(),), 1),), (ReduceOps.SUM, arange_axis))
+    arange = UOp(UOps.REDUCE_AXIS, dtypes.int, (UOp(UOps.CONST, dtypes.int, (arange_input_st.to_uop(),), 1),), (BinaryOps.ADD, arange_axis))
     output_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
     out = arange+ast_const(dtypes.int, -1, output_shape)
     store = UOp(UOps.STORE, src=(UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0), ShapeTracker.from_shape(output_shape).to_uop(), out))
@@ -573,7 +572,7 @@ class TestLinearizer(unittest.TestCase):
     # TODO: do this arange broadcast in the scheduler
     arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
     arange_axis = (3,)
-    arange = UOp(UOps.REDUCE_AXIS, dtypes.int, (UOp(UOps.CONST, dtypes.int, (arange_input_st.to_uop(),), 1),), (ReduceOps.SUM, arange_axis))
+    arange = UOp(UOps.REDUCE_AXIS, dtypes.int, (UOp(UOps.CONST, dtypes.int, (arange_input_st.to_uop(),), 1),), (BinaryOps.ADD, arange_axis))
     arange_out_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
     arange = arange+ast_const(dtypes.int, -1, arange_out_shape)
     # p2: the indexing
@@ -584,7 +583,7 @@ class TestLinearizer(unittest.TestCase):
     arange_eq = arange.alu(BinaryOps.CMPNE, UOp(UOps.LOAD, dtypes.int, data2)).alu(BinaryOps.CMPNE, ast_const(dtypes.bool, True, arange_out_shape))
     reduce_input = UOp(UOps.LOAD, dataset.dtype, data1)*UOp(UOps.CAST, dataset.dtype.scalar(), src=(arange_eq,))
     out_axis = (1,)
-    out = UOp(UOps.REDUCE_AXIS, reduce_input.dtype, (reduce_input,), (ReduceOps.SUM, out_axis))
+    out = UOp(UOps.REDUCE_AXIS, reduce_input.dtype, (reduce_input,), (BinaryOps.ADD, out_axis))
     output_shape = tuple(1 if i in out_axis else s for i,s in enumerate(arange_out_shape))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape(output_shape).to_uop(), out))
     sink = UOp(UOps.SINK, src=(store,))
@@ -592,7 +591,6 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast(sink, [dataset, idxs], wanna_output=[real_index])
 
   # AssertionError: repeated stores in uops
-  @unittest.skip("TODO: rewrite without using NEG")
   def test_argmax_multireduce_axis0(self):
     t = Tensor.randn(10, 20).realize()
     t_max = t.max((0,)).realize()
@@ -605,8 +603,9 @@ class TestLinearizer(unittest.TestCase):
           UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
             UOp(UOps.CONST, dtypes.int, arg=10, src=(
               UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)), # noqa E501
-            UOp(UOps.ALU, dtypes.int, arg=UnaryOps.NEG, src=(
-              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.MAX, (0,)), src=(
+            UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
+              ast_const(dtypes.int, -1, (1, 20, 1)),
+              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.MAX, (0,)), src=(
                 UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
                   UOp(UOps.CAST, dtypes.int, arg=None, src=(
                     UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
@@ -620,7 +619,7 @@ class TestLinearizer(unittest.TestCase):
                       UOp(UOps.CONST, dtypes.bool, arg=True, src=(
                         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)), # noqa E501
                   UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
-                    UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.SUM, (2,)), src=(
+                    UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (2,)), src=(
                       UOp(UOps.CONST, dtypes.int, arg=-1, src=(
                         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(11, 19), strides=(0, 0), offset=0, mask=((0, 11), (9, 19)), contiguous=False), View(shape=(10, 20, 10), strides=(1, 0, 20), offset=0, mask=None, contiguous=False))), src=()),)),)), # noqa E501
                     UOp(UOps.CONST, dtypes.int, arg=10, src=(
@@ -629,7 +628,6 @@ class TestLinearizer(unittest.TestCase):
             UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)) # noqa E501
     helper_linearizer_ast(ast, [t, t_max], wanna_output=[real_argmax])
 
-  @unittest.skip("TODO: rewrite without using NEG")
   def test_argmax_multireduce_flat(self):
     t = Tensor.randn(10, 20).realize()
     t_max = t.max().realize()
@@ -642,8 +640,9 @@ class TestLinearizer(unittest.TestCase):
           UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
             UOp(UOps.CONST, dtypes.int, arg=200, src=(
               UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),)), # noqa: E501
-            UOp(UOps.ALU, dtypes.int, arg=UnaryOps.NEG, src=(
-              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.MAX, (0,)), src=(
+            UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
+              ast_const(dtypes.int, -1, (1, 1)),
+              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.MAX, (0,)), src=(
                 UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
                   UOp(UOps.CAST, dtypes.int, arg=None, src=(
                     UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
@@ -657,7 +656,7 @@ class TestLinearizer(unittest.TestCase):
                       UOp(UOps.CONST, dtypes.bool, arg=True, src=(
                         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)), # noqa: E501
                   UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
-                    UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.SUM, (1,)), src=(
+                    UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (1,)), src=(
                       UOp(UOps.CONST, dtypes.int, arg=-1, src=(
                         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(201, 399), strides=(0, 0), offset=0, mask=((0, 201), (199, 399)), contiguous=False), View(shape=(200, 200), strides=(1, 400), offset=0, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
                     UOp(UOps.CONST, dtypes.int, arg=200, src=(
@@ -682,16 +681,16 @@ class TestLinearizer(unittest.TestCase):
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     x_ld0 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((1, N, N)).expand((N,N,N)).to_uop()))
     x_ld1 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).to_uop()))
-    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (ReduceOps.SUM, (1,)))
-    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, 1, N)),),(ReduceOps.SUM, (0,)))
+    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (BinaryOps.ADD, (1,)))
+    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, 1, N)),),(BinaryOps.ADD, (0,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((1,1,N)).to_uop(), r1))
     sink = UOp(UOps.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=0, keepdims=True)).sum(axis=0).reshape(1,1,N)], opts=opts)
 
     x_ld0 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).expand((N,N,N)).to_uop()))
     x_ld1 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, N, 1)).to_uop()))
-    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (ReduceOps.SUM, (2,)))
-    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, N, 1)),), (ReduceOps.SUM, (1,)))
+    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (BinaryOps.ADD, (2,)))
+    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, N, 1)),), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((N,1,1)).to_uop(), r1))
     sink = UOp(UOps.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(N,1,1)], opts=opts)
@@ -709,16 +708,16 @@ class TestLinearizer(unittest.TestCase):
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
     x_ld0 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((1, N, N)).expand((N,N,N)).to_uop()))
     x_ld1 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).to_uop()))
-    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (ReduceOps.MAX, (1,)))
-    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, 1, N)),), (ReduceOps.MAX, (0,)))
+    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (BinaryOps.MAX, (1,)))
+    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, 1, N)),), (BinaryOps.MAX, (0,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((1,1,N)).to_uop(), r1))
     sink = UOp(UOps.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().max(axis=0, keepdims=True)).max(axis=0).reshape(1,1,N)], opts=opts)
 
     x_ld0 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).expand((N,N,N)).to_uop()))
     x_ld1 = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, N, 1)).to_uop()))
-    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (ReduceOps.MAX, (2,)))
-    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, N, 1)),), (ReduceOps.MAX, (1,)))
+    r0 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld0,), (BinaryOps.MAX, (2,)))
+    r1 = UOp(UOps.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, N, 1)),), (BinaryOps.MAX, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((N,1,1)).to_uop(), r1))
     sink = UOp(UOps.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().max(axis=1, keepdims=True)).max(axis=1).reshape(N,1,1)], opts=opts)
@@ -746,7 +745,7 @@ class TestLinearizer(unittest.TestCase):
           UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPLT, src=(
             UOp(UOps.CONST, dtypes.float, arg=0.5*N, src=(
               UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(N, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))),)),
-            UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (1,)), src=(
+            UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (1,)), src=(
               UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
                 UOp(UOps.LOAD, dtypes.float, src=(
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1),
@@ -755,7 +754,7 @@ class TestLinearizer(unittest.TestCase):
                   UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPLT, src=(
                     UOp(UOps.CONST, dtypes.float, arg=0.75*N, src=(
                       UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(N, N, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))),)), # noqa: E501
-                    UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (2,)), src=(
+                    UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (2,)), src=(
                       UOp(UOps.LOAD, dtypes.float, src=(
                         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1),
                         ld0.to_uop(),)),)),)),
@@ -782,7 +781,7 @@ class TestLinearizer(unittest.TestCase):
           UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPLT, src=(
             UOp(UOps.CONST, dtypes.float, arg=0.5*N, src=(
               UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 1, N), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)), # noqa: E501
-            UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (0,)), src=(
+            UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (0,)), src=(
               UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
                 UOp(UOps.LOAD, dtypes.float, src=(
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
@@ -791,7 +790,7 @@ class TestLinearizer(unittest.TestCase):
                   UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPLT, src=(
                     UOp(UOps.CONST, dtypes.float, arg=0.75*N, src=(
                       UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(N, 1, N), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)), # noqa: E501
-                    UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (1,)), src=(
+                    UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (1,)), src=(
                       UOp(UOps.LOAD, dtypes.float, src=(
                         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
                         ld0.to_uop(),)),)),)),
@@ -821,7 +820,7 @@ class TestLinearizer(unittest.TestCase):
           UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPLT, src=(
             UOp(UOps.CONST, dtypes.float, arg=0.5*N, src=(
               UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 1, 1, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=True),))),)), # noqa: E501
-            UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (0, 1)), src=(
+            UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (0, 1)), src=(
               UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
                 UOp(UOps.LOAD, dtypes.float, src=(
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1),
@@ -830,7 +829,7 @@ class TestLinearizer(unittest.TestCase):
                   UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPLT, src=(
                     UOp(UOps.CONST, dtypes.float, arg=0.75*N, src=(
                       UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(N, N, 1, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),))),)), # noqa: E501
-                    UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (2, 3)), src=(
+                    UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (2, 3)), src=(
                       UOp(UOps.LOAD, dtypes.float, src=(
                         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1),
                         UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(N, N, N, N), strides=(0, 0, N, 1), offset=0, mask=None, contiguous=False),))),)),)),)), # noqa: E501
@@ -852,7 +851,7 @@ class TestLinearizer(unittest.TestCase):
   def test_end_local(self):
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=i) for i in range(2)]
     load = UOp(UOps.LOAD, dtypes.int, (g1, ShapeTracker.from_shape((32,)).to_uop()))
-    reduce = UOp(UOps.REDUCE_AXIS, dtypes.int, (load,), (ReduceOps.SUM, (0,)))
+    reduce = UOp(UOps.REDUCE_AXIS, dtypes.int, (load,), (BinaryOps.ADD, (0,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((1,)).to_uop(), reduce))
     sink = UOp(UOps.SINK, src=(store,))
     load_t = Tensor.full(load.st_arg.shape, 1).contiguous().realize()
@@ -1570,7 +1569,7 @@ class TestFloat4(unittest.TestCase):
       UOp(UOps.STORE, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0),
         UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1), strides=(0, 32000, 1, 0), offset=0, mask=None, contiguous=True),))),  # noqa: E501
-        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (3,)), src=(
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (3,)), src=(
           UOp(UOps.CAST, dtypes.float, src=(
             UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
               UOp(UOps.LOAD, dtypes.half, src=(
@@ -1599,7 +1598,7 @@ class TestFloat4(unittest.TestCase):
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0),
         UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 1, 128, 512, 512, 1, 1, 1), strides=(0, 0, 262144, 512, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))),  # noqa: E501
         UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (5, 6, 7)), src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (5, 6, 7)), src=(
             UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
               UOp(UOps.LOAD, dtypes.float, src=(
                 UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1),
@@ -1629,7 +1628,7 @@ class TestFloat4(unittest.TestCase):
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=0),
         UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 256, 1, 64, 1, 114, 1, 114), strides=(0, 831744, 0, 12996, 0, 114, 0, 1), offset=0, mask=None, contiguous=True),))), # noqa: E501
         UOp(UOps.CAST, dtypes.half, src=(
-          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (4, 6)), src=(
+          UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (4, 6)), src=(
             UOp(UOps.CAST, dtypes.float, src=(
               UOp(UOps.LOAD, dtypes.half, src=(
                 UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1),
@@ -1907,7 +1906,7 @@ class TestKernelOpts(unittest.TestCase):
       UOp(UOps.STORE, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
         UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))),
-        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(ReduceOps.SUM, (0,)), src=(
+        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (0,)), src=(
           UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
             UOp(UOps.CAST, dtypes.float, src=(
               UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
@@ -2096,7 +2095,7 @@ class TestKernelOpts(unittest.TestCase):
     g0, g1, g2 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(3)]
     ld0 = UOp(UOps.LOAD, dtypes.float, (g1, ShapeTracker(views=(View(shape=(2, 1, 4, 1, 3, 4, 2, 6, 1, 3), strides=(0, 0, 0, 0, 0, 18, 0, 3, 0, 1), offset=0, mask=None, contiguous=False),)).to_uop())) # noqa: E501
     ld1 = UOp(UOps.LOAD, dtypes.float, (g2, ShapeTracker(views=(View(shape=(2, 1, 4, 1, 3, 4, 2, 6, 1, 3), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)).to_uop())) # noqa: E501
-    store = UOp(UOps.STORE, src=(g0, ShapeTracker(views=(View(shape=(1, 1, 1, 1, 1, 4, 1, 6, 1, 3), strides=(0, 0, 0, 0, 0, 18, 0, 3, 0, 1), offset=0, mask=None, contiguous=True),)).to_uop(), UOp(UOps.REDUCE_AXIS, dtypes.float, (ld0*ld1,), (ReduceOps.SUM, (0, 2, 4, 6)),))) # noqa: E501
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker(views=(View(shape=(1, 1, 1, 1, 1, 4, 1, 6, 1, 3), strides=(0, 0, 0, 0, 0, 18, 0, 3, 0, 1), offset=0, mask=None, contiguous=True),)).to_uop(), UOp(UOps.REDUCE_AXIS, dtypes.float, (ld0*ld1,), (BinaryOps.ADD, (0, 2, 4, 6)),))) # noqa: E501
     sink = UOp(UOps.SINK, src=(store,))
     data1 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()
     data2 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()
