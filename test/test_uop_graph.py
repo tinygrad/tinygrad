@@ -629,7 +629,7 @@ class TestIFUOps(unittest.TestCase):
     self.assertEqual(len(if_uops), 1)
     self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
-      self.assertEqual(len(st.src), 3)
+      self.assertEqual(len(st.src), 4)
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
@@ -644,10 +644,10 @@ class TestIFUOps(unittest.TestCase):
     sink = UOp(UOps.SINK, None, tuple(stores))
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
-    self.assertEqual(len(if_uops), 1)
+    self.assertEqual(len(if_uops), 4)
     self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
-      self.assertEqual(len(st.src), 3)
+      self.assertEqual(len(st.src), 4)
 
   # this will be fixed with the merge gated stores bounty
   def test_expand_ifs_dumb(self):
