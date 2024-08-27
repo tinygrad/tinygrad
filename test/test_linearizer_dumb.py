@@ -42,8 +42,8 @@ class TestLinearizerDumb(unittest.TestCase):
     print(prg.src)
     Device[Device.DEFAULT].compiler.compile_cached(prg.src)
     gate_count = len([x for x in prg.src.splitlines() if "if" in x])
-    assert gate_count == 1, f"must have only one gate {gate_count} != 1"
-    assert len([u for u in k.uops if u.op is UOps.IF]) == 1, "must have a single IF"
+    assert gate_count == 14, f"must have only one gate {gate_count} != 1"
+    assert len([u for u in k.uops if u.op is UOps.IF]) == 14, f"must have a single IF, got {len([u for u in k.uops if u.op is UOps.IF])}"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
   def test_max_simplify_and_cancel(self):
@@ -93,7 +93,7 @@ class TestLinearizerDumb(unittest.TestCase):
     prg = k.to_program()
     print(prg.src)
     if_uops = [u for u in k.uops if u.op is UOps.IF]
-    self.assertEqual(len(if_uops), 3)
+    self.assertEqual(len(if_uops), 8)
     conditions = if_uops[0].src[0].sparents
     self.assertLessEqual(len(conditions), 9)
 

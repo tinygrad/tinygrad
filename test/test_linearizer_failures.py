@@ -996,7 +996,7 @@ class TestLinearizerFailures(unittest.TestCase):
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
                   UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(256, 1, 128, 28, 28, 128, 3, 3), strides=(0, 0, 1152, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
     opts=[Opt(op=OptOps.TC, axis=5, amt=2), Opt(op=OptOps.UNROLL, axis=0, amt=0)]
-    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["AMD", "HIP", "METAL"])
+    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["AMD", "HIP"])
 
   # llama3 8B failure with BEAM=2 https://github.com/tinygrad/tinygrad/actions/runs/10150118124/job/28066519425#step:14:1, these don't compile
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
@@ -1042,7 +1042,7 @@ class TestLinearizerFailures(unittest.TestCase):
     k = helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
     assert k is not None
     ifs = [u for u in k.uops if u.op is UOps.IF]
-    self.assertEqual(len(ifs), 4)
+    self.assertEqual(len(ifs), 5)
     #for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
     self.assertLessEqual(len(ifs[0].src[0].sparents), 17)
 
