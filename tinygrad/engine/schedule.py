@@ -13,6 +13,8 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.shape.view import View, strides_for_shape
 
+from line_profiler import profile
+
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
 
@@ -140,14 +142,22 @@ def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> Optional[ShapeTra
   uop_sts[uop] = st = ShapeTracker.from_shape(src_sts[0].reduce(uop.arg[1])) if uop.op is UOps.REDUCE_AXIS else src_sts[0]
   return st
 
+
+@profile
 def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], uop_sts:Dict[UOp, ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
   if (n:=cache.get(u)): return n
-  if (st:=uop_sts.get(u)) and st == apply_to_st(st): return u
+  if (st:=uop_sts.get(u)):
+    new_st = apply_to_st(st) # this reshape is taking 25.2% of the time?
+    if st == new_st: return u
   if u.op is UOps.SHAPETRACKER:
     new_st = apply_to_st(u.arg)
-    return u if u.arg == new_st else replace(u, arg=new_st)
+    if u.arg == new_st: return u
+    #return replace(u, arg=new_st)
+    return UOp(UOps.SHAPETRACKER, arg=new_st) # without dataclass.replace went from 32.0 to 10.0...
   new_srcs = tuple(st_fixup(x, apply_to_st, uop_sts, cache) for x in u.src)
-  cache[u] = ret = u if new_srcs == u.src else replace(u, src=new_srcs)
+  # 43.0 -> 12.0
+  cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
+  #cache[u] = ret = u if new_srcs == u.src else replace(u, src=new_srcs)
   return ret
 
 def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
@@ -177,6 +187,7 @@ def apply_swizzle(root:UOp, rsrc:UOp, swizzle:UOp) -> UOp:
   new_input_st, new_axis = swizzle_reduceop(unwrap(get_output_st(rsrc, uop_sts)), swizzle.arg, root.arg[1])
   return replace(root, src=(st_fixup(rsrc, lambda _:new_input_st, uop_sts, {}),), arg=(root.arg[0], new_axis))
 
+#@profile
 def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   reduceops = [x for x in root.parents if x.op is UOps.REDUCE_AXIS]
   if len(reduceops) == 0: return None
