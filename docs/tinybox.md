@@ -12,7 +12,7 @@ We don't have a stupid cloud service, you don't have to create a tiny account to
 
 ## Plugging it in
 
-tinybox has two 1600W PSUs, which together exceed the capacity of most 120V household circuits. Fortunately, it comes with two plugs. You'll want to plug each plug into a different circuit. You can verify that they are different circuits by flipping the breaker and seeing what turns off. If you have at least a 120V 30A or 220V 15A circuit, you are welcome to use only that one.
+tinybox has two 1600W PSUs, which together exceed the capacity of most 120V household circuits. Fortunately, it comes with two plugs. You'll want to plug each plug into a different circuit. You can verify that they are different circuits by flipping the breaker and seeing what turns off. If you have at least a 120V 30A or 220V 20A circuit, you are welcome to use only that one.
 
 You'll also want to connect the Ethernet port without a rubber stopper to your home network.
 
