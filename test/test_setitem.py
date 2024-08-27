@@ -37,10 +37,10 @@ class TestSetitem(unittest.TestCase):
         t[1] = v
         assert t.dtype == dt
 
-  #def test_setitem_into_noncontiguous(self):
-  #  t = Tensor.ones(4)
-  #  assert not t.lazydata.st.contiguous
-  #  with self.assertRaises(AssertionError): t[1] = 5
+  def test_setitem_into_noncontiguous(self):
+    t = Tensor.ones(4)
+    assert not t.lazydata.st.contiguous
+    with self.assertRaises(RuntimeError): t[1] = 5
 
   def test_setitem_inplace_operator(self):
     t = Tensor.arange(4).reshape(2, 2).contiguous()

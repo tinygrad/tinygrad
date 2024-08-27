@@ -1052,6 +1052,7 @@ class Tensor:
       self.__getitem__(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
+    if not all(lb.st.contiguous for lb in self.lazydata.lbs): raise RuntimeError("setitem target needs to be contiguous")
     if not isinstance(v, (Tensor, list, np.ndarray, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
@@ -1076,10 +1077,8 @@ class Tensor:
     for dim in axis: v = functools.reduce(lambda x,y: y.where(y, x), v.split(1, dim))
     # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
     v = mask.any(axis).where(v.squeeze(), self)
-    # NOTE: hack for non contiguous tensors
-    st = self.lazydata.st
+
     self.assign(v.contiguous()).realize()
-    self.lazydata.st = st
 
   # NOTE: using _slice is discouraged and things should migrate to pad and shrink
   def _slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
