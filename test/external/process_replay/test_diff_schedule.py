@@ -1,12 +1,18 @@
 from typing import cast
 import unittest
-from test.external.process_replay.diff_schedule import diff_schedule
+from test.external.process_replay.diff_schedule import CAPTURING_PROCESS_REPLAY, diff_schedule
 from tinygrad import Tensor, nn
 from tinygrad.helpers import Context
 from tinygrad.engine.schedule import _graph_schedule
 from tinygrad.lazy import LazyBuffer
 
 class TestDiffSchedule(unittest.TestCase):
+  def setUp(self):
+    self.old_value = CAPTURING_PROCESS_REPLAY.value
+    CAPTURING_PROCESS_REPLAY.value = 0
+  def tearDown(self):
+    CAPTURING_PROCESS_REPLAY.value = self.old_value
+
   def test_diff_arange(self):
     # diff a single arange kernel
     X = Tensor.randn(10, 10).realize()

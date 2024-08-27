@@ -621,6 +621,13 @@ class TestAutoCastType(unittest.TestCase):
     assert t.sum(acc_dtype=dtypes.float32).dtype == dtypes.float32
     np.testing.assert_allclose(t.sum(acc_dtype=dtypes.float32).numpy(), 80000)
 
+  def test_prod_acc_dtype(self):
+    t = Tensor([100, 200], dtype=dtypes.int32)
+    assert t.prod().dtype == dtypes.int32
+    np.testing.assert_allclose(t.prod().numpy(), 20000)
+    assert t.prod(acc_dtype=dtypes.float32).dtype == dtypes.float32
+    np.testing.assert_allclose(t.prod(acc_dtype=dtypes.float32).numpy(), 20000)
+
   def test_mean(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).mean().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.int8)).mean().dtype == dtypes.float32
