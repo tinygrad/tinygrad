@@ -45,7 +45,8 @@ if __name__ == "__main__":
   print("slowest ast rewrites:")
   for k,pct in slowest_kernels[:10]:
     _, no_rw, rw, outs = kernel_tms[k]
-    print(f"{names[k]:10s}   {no_rw:4.2f} ms -> {rw:4.2f} ms {pct:4.2f}% {outs}")
+    print(f"{names[k]:10s}   {no_rw:4.2f} ms -> {rw:4.2f} ms {pct:4.2f}%")
+  with open("/tmp/kernel_tms", "wb") as f: pickle.dump(kernel_tms, f)
 
   if getenv("GRAPH_TIMING"):
     sample = slowest_kernels[:20]
