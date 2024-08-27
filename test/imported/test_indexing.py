@@ -213,7 +213,7 @@ class TestIndexing(unittest.TestCase):
     # Case 1: Purely Integer Array Indexing
     reference = consec((10,))
     validate_indexing(reference)
-    # setting values    
+    # setting values
     validate_setting(reference)
 
     # Tensor with stride != 1
@@ -281,7 +281,7 @@ class TestIndexing(unittest.TestCase):
     reference[rows, columns] = np.array([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(reference[rows, columns],
                       np.array([[4, 6], [2, 3]]))
-    
+
     # Verify still works with Transposed (i.e. non-contiguous) Tensors
     reference = Tensor([[0, 1, 2, 3],
                         [4, 5, 6, 7],
@@ -567,7 +567,7 @@ class TestIndexing(unittest.TestCase):
 
     for indexer in indices_to_test:
       assert_get_eq(reference, indexer)
-      
+
       assert_set_eq(reference, indexer, 212)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
       assert_backward_eq(reference, indexer)
@@ -639,10 +639,10 @@ class TestIndexing(unittest.TestCase):
 
     for indexer in indices_to_test:
       assert_get_eq(reference, indexer)
-      
+
       assert_set_eq(reference, indexer, 1333)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-      
+
     indices_to_test += [
       [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
       [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
@@ -799,7 +799,7 @@ class TestIndexing(unittest.TestCase):
       # input = torch.randn(indices.abs().max() + 1)
       input = Tensor.randn(indices.abs().max().item() + 1)
       # values = torch.randn(indices.size(0))
-      values = Tensor.randn(indices.size(0))
+      values = Tensor.randn(indices.shape(0))
       output = index_put_(input, (indices,), values, accumulate=True)
 
       input_list = input.numpy().tolist()
@@ -847,7 +847,7 @@ class TestIndexing(unittest.TestCase):
   def test_index_put_accumulate_empty(self):
     # Regression test for https://github.com/pytorch/pytorch/issues/94667
     input = Tensor.rand([], dtype=dtypes.float32)
-    with self.assertRaises(IndexError):
+    with self.assertRaises(RuntimeError):
       index_put_(input, [], np.array([1.0]), True)
   '''
 
