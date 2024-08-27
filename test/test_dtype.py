@@ -65,7 +65,7 @@ class TestDType(unittest.TestCase):
     if not cls.DTYPE or not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
     cls.DATA = rand_for_dtype(cls.DTYPE, 10)
   def setUp(self):
-    if self.DTYPE is None: raise unittest.SkipTest("base class")
+    if self.DTYPE is None or dtypes.void: raise unittest.SkipTest("base class")
 
   def test_to_np(self):
     _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))

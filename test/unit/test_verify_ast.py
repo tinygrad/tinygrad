@@ -11,7 +11,7 @@ from tinygrad.shape.view import View
 
 class InvalidASTException(Exception): pass
 def helper_test_verify_ast(*stores:UOp) -> Kernel:
-  sink = UOp(UOps.SINK, None, stores)
+  sink = UOp(UOps.SINK, dtypes.void, stores)
   if DEBUG >= 3:
     for op in stores: print(op)
   try: verify_ast(sink)
@@ -30,7 +30,7 @@ class TestVerifyAST(unittest.TestCase):
     buf_2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 2)
     a = UOp(UOps.LOAD, dtype, (buf_1, ShapeTracker.from_shape((32, 1)).to_uop()))
     b = UOp(UOps.LOAD, dtype, (buf_2, ShapeTracker.from_shape((32, 1)).to_uop()))
-    store = UOp(UOps.STORE, None, (buf_0, ShapeTracker.from_shape((32, 1)).to_uop(), a+b))
+    store = UOp(UOps.STORE, dtypes.void, (buf_0, ShapeTracker.from_shape((32, 1)).to_uop(), a+b))
     helper_test_verify_ast(store)
 
   def test_exactly_one_full_shape(self):
@@ -48,7 +48,7 @@ class TestVerifyAST(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), i) for i in range(2)]
     a = UOp(UOps.LOAD, dtypes.float, (bufs[1], ShapeTracker.from_shape((4, 32)).to_uop()))
     b = a + UOp(UOps.REDUCE_AXIS, dtypes.float, (a,), (ReduceOps.MAX, (1,)))
-    st = UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape((4, 32)).to_uop(), b))
+    st = UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((4, 32)).to_uop(), b))
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
   def test_shrink_ok(self):
