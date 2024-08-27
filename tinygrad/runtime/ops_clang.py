@@ -37,11 +37,8 @@ class ClangProgram:
     image = macho_loader(lib) if OSX else elf_loader(lib)[0]
     addr = libc.mmap(0, len(image), mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_ANON | mmap.MAP_PRIVATE, -1, 0)
     assert addr != 0xffffffffffffffff
-    if OSX: mac.pthread_jit_write_protect_np(False)
     ctypes.memmove(addr, mv_address(image), len(image))
-    if OSX:
-      mac.pthread_jit_write_protect_np(True)
-      mac.sys_icache_invalidate(addr, len(image))
+    if OSX: mac.sys_icache_invalidate(addr, len(image))
     assert libc.mprotect(addr, len(image), mmap.PROT_READ | mmap.PROT_EXEC) != 0xffffffffffffffff
     self.fxn = ctypes.CFUNCTYPE(None)(addr)
 

@@ -37,12 +37,5 @@ try:
     sys_icache_invalidate.argtypes = [ctypes.POINTER(None), size_t]
 except AttributeError:
     pass
-try:
-    pthread_jit_write_protect_np = _libraries['libc'].pthread_jit_write_protect_np
-    pthread_jit_write_protect_np.restype = None
-    pthread_jit_write_protect_np.argtypes = [ctypes.c_int32]
-except AttributeError:
-    pass
 __all__ = \
-    ['pthread_jit_write_protect_np', 'size_t',
-    'sys_icache_invalidate']
+    ['size_t', 'sys_icache_invalidate']
