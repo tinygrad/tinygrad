@@ -118,6 +118,20 @@ class UOps(Enum):
   """
   - **`dtype`**: Output DType
   - **`src`**:
+
+    The scheduler and Kernel create LOADs with a SHAPETRACKER uop in src.
+
+    - Normal LOAD: `Tuple[UOp, UOp]`
+      - Buffer UOp `UOps.DEFINE_GLOBAL`.
+      - SHAPETRACKER UOp.
+
+    - Local LOAD: `Tuple[UOp, UOp, UOp]`
+      - Buffer UOp `UOps.DEFINE_LOCAL`.
+      - SHAPETRACKER UOp.
+      - Local UOps.STORE to the same Buffer. We will barrier this later.
+
+    The Lowerer replaces the SHAPETRACKER with an indexing uop and gates the LOAD if needed.
+
     - Normal LOAD: `Tuple[UOp, UOp]`
       - Buffer UOp `UOps.DEFINE_GLOBAL`.
       - Indexing UOp, can only return `dtypes.int32`.
@@ -137,6 +151,15 @@ class UOps(Enum):
   """
   - **`dtype`**: `None`
   - **`src`**:
+
+    Similar to LOAD, the scheduler and Kernel create STOREs with a SHAPETRACKER uop in src:
+
+    - Buffer UOp `UOps.DEFINE_GLOBAL` or `UOps.DEFINE_LOCAL`.
+    - SHAPETRACKER UOp.
+    - Value to store.
+
+    The Lowerer replaces the SHAPETRACKER with an indexing uop and gates the STORE if needed.
+
     - Normal STORE: `Tuple[UOp, UOp, UOp]`
       - Buffer UOp `UOps.DEFINE_GLOBAL` or `UOps.DEFINE_LOCAL`.
       - Indexing Op, can only return `dtypes.int32`.
