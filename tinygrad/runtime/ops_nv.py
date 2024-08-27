@@ -147,6 +147,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     self.cmd_idx_to_qmd[(cmd_idx := len(self) - 1)] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
     self.cmd_idx_to_local_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
+    to_mv(args_state.ptr, 6 * 4).cast('I')[:] = array.array('I', [*local_size, *global_size])
 
     qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
     qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
