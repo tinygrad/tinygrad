@@ -41,7 +41,45 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); EXT = auto(); EXPAND = auto(); CONTRACT = auto(); SHAPETRACKER = auto(); SWIZZLE = auto()  # noqa: E702
+  SINK = auto(); EXT = auto(); EXPAND = auto(); CONTRACT = auto(); SHAPETRACKER = auto() # noqa: E702
+  SWIZZLE = auto()
+  """
+  Swizzle inserts a movement op between a UOp and its children. Movement ops (reshape, expand, shrink, permute, pad) are not allowed in an AST.
+  The scheduler rewrites SWIZZLE by pushing its ShapeTracker through reduceops or elementwise ops to the edges of the graph.
+
+  Example:
+  ```python
+  a = Tensor.empty(32, 32)
+  first_reduce = a.sum()
+  output = (a + first_reduce).sum()
+  ```
+  `first_reduce` must broadcast to `(32, 32)` before ADD. We UOp this as:
+
+  ```
+  UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+    UOp(UOps.SWIZZLE, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=(
+      UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
+        UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+          x3:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+          UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),
+    UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+       x3,
+      UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),))
+  ```
+
+  The scheduler rewrites this by pushing the expand in SWIZZLE to the LOAD.
+
+  ```
+  UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+    UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (2, 3)), src=(
+      UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+        x2:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32, 32, 32), strides=(0, 0, 32, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+    UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+       x2,
+      UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),)),))
+  ```
+  """
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); GEP = auto() # noqa: E702
