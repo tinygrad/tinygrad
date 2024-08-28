@@ -942,7 +942,7 @@ class Tensor:
   #   2. Bool indexing is not supported
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
-  def __getitem__(self, indices, setitem: bool = False) -> Union[Tensor, Tuple[Tensor, Tuple[sint, ...], int, Tuple[int, ...]]]:
+  def __getitem__(self, indices, v: Union[Tensor, None] = None) -> Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
@@ -966,7 +966,6 @@ class Tensor:
 
     # record None for dimension injection later and filter None and record rest of indices
     type_dim[None] = [dim for dim, i in enumerate(indices) if i is None]
-    tensor_dims = [dim for dim, i in enumerate(indices) if isinstance(i, Tensor)]
     indices_filtered = [i for i in indices if i is not None]
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
@@ -986,11 +985,9 @@ class Tensor:
       if (index := indices_filtered[dim]).step == 0: raise ValueError(f"{index=} on {dim=} cannot have 0 as step")
       s, e, st = index.indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st * (e - s)) < 0 else (s, e) if st > 0 else (e+1, s+1), st)
-    # record tensors and skip all Tensor dims for basic indexing
-    tensor_index: List[Tensor] = []
+    # skip all Tensor dims for basic indexing
     for dim in type_dim[Tensor]:
-      tensor_index.append(index := indices_filtered[dim])
-      if not dtypes.is_int(index.dtype): raise IndexError(f"{index.dtype=} on {dim=} is not supported, only int tensor indexing is supported")
+      if not dtypes.is_int(dtype:=indices_filtered[dim].dtype): raise IndexError(f"{dtype=} on {dim=} is not supported, only int tensor indexing is supported")
       indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
     new_slice, strides = ((), ()) if not indices_filtered else zip(*indices_filtered)
@@ -1013,6 +1010,7 @@ class Tensor:
 
     # 3. advanced indexing (copy)
     if type_dim[Tensor]:
+      dim_tensors = [(dim, i) for dim, i in enumerate(indices) if isinstance(i, Tensor)]
       # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
       def calc_dim(tensor_dim:int) -> int:
         return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d)
@@ -1020,7 +1018,7 @@ class Tensor:
       assert all_int(ret.shape), f"does not support symbolic shape {ret.shape}"
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
-      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(tensor_dims, tensor_index)}
+      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in dim_tensors}
 
       masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
       pre_reduce_shape = ret.shape[:first_dim] + (big_shape := _broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
@@ -1044,7 +1042,19 @@ class Tensor:
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
 
-      if setitem: return (mask, ret.shape, first_dim, sum_axis)
+      # for advanced setitem, returns whole tensor with indices replaced
+      if v is not None:
+        ret = v._broadcast_to(_broadcast_shape(ret.shape, v.shape))
+        # add back reduced dims from sum
+        for dim in sum_axis: ret = ret.unsqueeze(dim)
+        # axis to be reduced to match self.shape
+        axis = tuple(range(first_dim, first_dim + len(big_shape)))
+        # apply mask to ret(broadcasted) and reduce such that if ret contains repeated indices the last one remains
+        ret = ret * mask
+        for dim in axis: ret = functools.reduce(lambda x,y: y.where(y, x), ret.split(1, dim))
+        # reduce mask and select from ret(get rid of extra dims from reduce) for each True element in mask else select from self
+        ret = mask.any(axis).where(ret.squeeze(), self)
+
     return ret
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
@@ -1057,28 +1067,13 @@ class Tensor:
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    res = self.realize().__getitem__(indices, setitem=True)
-    # basic setitem
-    if isinstance(res, Tensor):
-      # NOTE: contiguous to prevent const folding.
+    res = self.realize().__getitem__(indices, v)
+    # if shapes match it's a copy and we assign to self
+    if res.shape == self.shape:
+      self.assign(res.cast(self.dtype).contiguous()).realize()
+    else: # no copy, basic setitem
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
       res.assign(v).realize()
-      return
-    # advanced setitem
-    mask, ret_shape, first_dim, sum_axis = res
-    # broadcast to resulting shape from getitem
-    v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret_shape, v.shape))
-    # add back reduced dims from sum
-    for dim in sum_axis: v = v.unsqueeze(dim)
-    # axis to be reduced to match self.shape
-    axis = tuple(range(first_dim, first_dim + (mask.ndim - self.ndim)))
-    # apply mask to v(broadcasted) and reduce such that if v contains repeated indices the last one remains
-    v = v * mask
-    for dim in axis: v = functools.reduce(lambda x,y: y.where(y, x), v.split(1, dim))
-    # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
-    v = mask.any(axis).where(v.squeeze(), self)
-
-    self.assign(v.contiguous()).realize()
 
   # NOTE: using _slice is discouraged and things should migrate to pad and shrink
   def _slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
