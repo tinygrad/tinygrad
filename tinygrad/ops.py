@@ -44,8 +44,8 @@ class UOps(Enum):
   SINK = auto(); EXT = auto(); EXPAND = auto(); CONTRACT = auto(); SHAPETRACKER = auto() # noqa: E702
   SWIZZLE = auto()
   """
-  Swizzle inserts a movement op between a UOp and its children. Movement ops (reshape, expand, shrink, permute, pad) are not allowed in an AST.
-  The scheduler rewrites SWIZZLE by pushing its ShapeTracker through reduceops or elementwise ops to the edges of the graph.
+  Swizzle inserts a movement op between a UOp and its children. Because movement ops (reshape, expand, shrink, permute, pad) are not allowed in an AST,
+  the scheduler rewrites SWIZZLE by pushing its ShapeTracker through reduceops or elementwise ops to the edges of the graph.
 
   Example:
   ```python
@@ -79,7 +79,11 @@ class UOps(Enum):
        x2,
       UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),)),))
   ```
-  """
+
+  - **`dtype`**: Output DType
+  - **`src`**: `Tuple[UOp]`, a single UOp to swizzle.
+  - **`arg`**: ShapeTracker
+  """ # noqa E501
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); GEP = auto() # noqa: E702
