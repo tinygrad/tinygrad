@@ -2050,7 +2050,7 @@ class Tensor:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
 
-    The interpolation algorithm is selected with `mode` which currently only supports `linear`.
+    The interpolation algorithm is selected with `mode` which currently only supports `linear` and `nearest`.
     To run `bilinear` or `trilinear`, pass in a 2D or 3D size.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -2062,15 +2062,20 @@ class Tensor:
     ```
     """
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
-    assert mode == "linear", "only supports linear interpolate"
+    assert mode in ("linear", "nearest"), "only supports linear or nearest interpolate"
+    assert not (align_corners and mode != "linear"), "align_corners option can only be set with the interpolating mode linear"
     x, expand = self, list(self.shape)
     for i in range(-len(size), 0):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
       reshape[i] = expand[i] = size[i]
-      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-      x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      if mode == "linear":
+        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      else:
+        index = (scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
+        x = x.gather(i, index)
     return x.cast(self.dtype)
 
   # ***** unary ops *****
