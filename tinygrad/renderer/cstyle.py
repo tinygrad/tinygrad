@@ -144,7 +144,7 @@ class CStyleLanguage(Renderer):
           if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('alu',u)} = {val};")
         elif uop is UOps.SPECIAL:
-          kk(f"int {args[0]} = {self.code_for_workitem[args[0][0]](args[0][-1])}; /* {args[1]} */")
+          kk(f"{self.render_dtype(dtype)} {args[0]} = {self.code_for_workitem[args[0][0]](args[0][-1])}; /* {args[1]} */")
           r[u] = args[0]
         elif uop is UOps.DEFINE_VAR:
           assert args.expr not in seen_vars, f"duplicate variable {args.expr}"
