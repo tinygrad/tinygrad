@@ -55,7 +55,7 @@ class UOps(Enum):
   """
   Holds a single MetaOp. EXT UOps do not need a Kernel.
 
-  - **`dtype`**: Output dtype
+  - **`dtype`**: Output DType
   - **`src`**: `Tuple[]`
   - **`arg`**: (`MetaOps.CUSTOM | MetaOps.COPY | MetaOps.EMPTY | MetaOps.VIEW`, LazyBuffer arg)
   """
