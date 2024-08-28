@@ -1,11 +1,19 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
+<<<<<<< HEAD
 from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
                              GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
+=======
+from typing import Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
+from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
+from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, \
+                             GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata
+>>>>>>> b2b22cbf (reset to working state)
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -19,6 +27,10 @@ sys.setrecursionlimit(10000)
 # optionally log the ops to disk
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 # use graph rewrite for reduceop fusion
+<<<<<<< HEAD
+=======
+AST_REWRITE = getenv("AST_REWRITE", 0)
+>>>>>>> b2b22cbf (reset to working state)
 
 # *** ScheduleItem return type ***
 
@@ -82,7 +94,10 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
 
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
+<<<<<<< HEAD
     swizzle = (UOp(UOps.SWIZZLE, src=(st.to_uop(),)),) if not st.contiguous and AST_REWRITE else ()
+=======
+>>>>>>> b2b22cbf (reset to working state)
     rinfo: Optional[Tuple[ShapeTracker, Tuple[int, ...]]] = (ShapeTracker.from_shape(buf.srcs[0].shape), buf.arg) \
         if AST_REWRITE else reduce_info.get((buf, st))
     rsrc = _recursive_uop(buf.srcs[0], st:=(rinfo[0] if rinfo else st), outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
@@ -91,7 +106,11 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
     if rinfo is None:
       assert rsrc.op is UOps.REDUCE_AXIS and rsrc.arg[0] is alu_op, f"can't merge reduceop {buf.op} with {rsrc}\n{st}"
       return rsrc
+<<<<<<< HEAD
     return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, dtype, (rsrc,)+swizzle, (alu_op, rinfo[1])))
+=======
+    return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (alu_op, rinfo[1])))
+>>>>>>> b2b22cbf (reset to working state)
 
   # elementwise ops pass shapetracker
   in_uops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache) for x in buf.srcs)
@@ -132,6 +151,7 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
 
 # ***** helpers for doing movementops on uops *****
 
+<<<<<<< HEAD
 def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> Optional[ShapeTracker]:
   if (st:=uop_sts.get(uop)): return st
   if uop.op in BUFFER_UOPS: return uop.st_arg
@@ -177,10 +197,31 @@ def apply_swizzle(root:UOp, rsrc:UOp, swizzle:UOp) -> UOp:
   new_input_st, new_axis = swizzle_reduceop(unwrap(get_output_st(rsrc, uop_sts)), swizzle.arg, root.arg[1])
   return replace(root, src=(st_fixup(rsrc, lambda _:new_input_st, uop_sts, {}),), arg=(root.arg[0], new_axis))
 
+=======
+def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> ShapeTracker:
+  if (st:=uop_sts.get(uop)): return st
+  if uop.op in BUFFER_UOPS: return uop.st_arg
+  src_sts = [get_output_st(x, uop_sts) for x in uop.src]
+  assert all_same([x.shape for x in src_sts]), f"inhomogeneous shape from\n{uop}\n{[x.shape for x in src_sts]}"
+  uop_sts[uop] = st = ShapeTracker.from_shape(src_sts[0].reduce(uop.arg[1])) if uop.op is UOps.REDUCE_AXIS else src_sts[0]
+  return st
+
+def reshape_uop(u:UOp, new_shape:Tuple[sint, ...], uop_sts:Dict[UOp, ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
+  if (reshaped:=cache.get(u)): return reshaped
+  if (st:=uop_sts.get(u)) and st.shape == new_shape: return u
+  if u.op is UOps.SHAPETRACKER: return u if u.arg.shape == new_shape else replace(u, arg=u.arg.reshape(new_shape))
+  new_srcs = tuple(reshape_uop(x, new_shape, uop_sts, cache) for x in u.src)
+  cache[u] = reshaped = u if new_srcs == u.src else replace(u, src=new_srcs)
+  return reshaped
+
+# ***** reduceop fusor *****
+
+>>>>>>> b2b22cbf (reset to working state)
 def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   reduceops = [x for x in root.parents if x.op is UOps.REDUCE_AXIS]
   if len(reduceops) == 0: return None
   uop_sts: Dict[UOp, ShapeTracker] = {}
+<<<<<<< HEAD
   rshape = unwrap(get_output_st(reduceops[0], uop_sts)).shape
   if (root_st:=get_output_st(root, uop_sts)) is not None and rshape == root_st.shape: return None
   return st_fixup(root, lambda st:st.reshape(rshape), uop_sts, {})
@@ -188,6 +229,14 @@ def push_reduceop_shape(root:UOp) -> Optional[UOp]:
 reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(name="rsrc"), UPat(UOps.SWIZZLE, src=(UPat(name="swizzle"),))), name="root"), apply_swizzle),
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_reduceop_shape),
+=======
+  rshape = get_output_st(reduceops[0], uop_sts).shape
+  if rshape == root.st_arg.shape: return None
+  return reshape_uop(root, rshape, uop_sts, {})
+
+reduceop_fusor = PatternMatcher([
+  (UPat(UOps.STORE, name="root"), push_reduceop_shape),
+>>>>>>> b2b22cbf (reset to working state)
 ])
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> LBScheduleItem:
@@ -220,7 +269,11 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
   ast: List[UOp] = []
   inputs: Dict[LazyBuffer, int] = {}
   for i, out in enumerate(outs):
+<<<<<<< HEAD
     output_shape = ShapeTracker.reduce(*deque(reduce_info.values(), 1).pop()) if reduce_info and not AST_REWRITE else out.shape
+=======
+    output_shape = ShapeTracker.reduce(*deque(reduce_info.values(), 1).pop()) if reduce_info and not getenv("AST_REWRITE") else out.shape
+>>>>>>> b2b22cbf (reset to working state)
     output_st = ShapeTracker.from_shape(output_shape)
     src = _recursive_uop(out, output_st, tuple(outs), var_vals, inputs, realizes, assign_targets, reduce_info, cache=cache)
     if out.op is MetaOps.ASSIGN and out.arg:

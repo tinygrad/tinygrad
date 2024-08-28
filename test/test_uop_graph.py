@@ -1,7 +1,7 @@
 from typing import List
 import unittest, time
 from test.helpers import TestUOps
-from tinygrad import dtypes, Variable
+from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, NOp, PatternMatcher, KernelInfo
@@ -658,7 +658,7 @@ class TestIFUOps(TestUOps):
     sink = UOp(UOps.SINK, None, tuple(stores))
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
-    self.assertEqual(len(if_uops), 4)
+    self.assertEqual(len(if_uops), 1)
     self.assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 4)

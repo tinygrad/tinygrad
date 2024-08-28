@@ -400,7 +400,13 @@ def do_reduce(root:UOp):
   ret = root.src[0]
   if len(reduce_parented):
     assert root.dtype is not None
+<<<<<<< HEAD
     acc = UOp(UOps.DEFINE_ACC, root.dtype, (root.const(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (acc_number,))
+=======
+    # TODO: helper to reuse this in 0 size folding
+    const = UOp.const(root.dtype, {BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(root.dtype.scalar())}[root.arg])
+    acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(reduce_parented), (acc_number,))
+>>>>>>> b2b22cbf (reset to working state)
     acc_number += 1
     ret = UOp(UOps.PHI, root.dtype, (acc, acc.alu(root.arg, ret)))
   # for MAX, we can just ignore the unparented
@@ -440,7 +446,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
       return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate, u.src[2])),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
-  
+ 
 # def create_gate(root:UOp) -> Optional[UOp]:
 #   @functools.lru_cache(None)
 #   def _gate_srcs(u:UOp, gate:UOp) -> UOp:

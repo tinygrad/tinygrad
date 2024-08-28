@@ -174,7 +174,12 @@ class LazyBuffer:
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = self.st.reduce(axis)
     # TODO: this logic should move to the scheduler
+<<<<<<< HEAD
     if 0 in self.shape and 0 not in new_shape: return self.const(identity_element(REDUCE_ALU[op], self.dtype), new_shape)
+=======
+    if 0 in self.shape and 0 not in new_shape:
+      return self.const({ReduceOps.SUM: 0.0, ReduceOps.PROD: 1.0, ReduceOps.MAX: dtypes.min(self.dtype)}[op], new_shape)
+>>>>>>> b2b22cbf (reset to working state)
 
     # const folding
     # TODO: fold this for symbolic?
