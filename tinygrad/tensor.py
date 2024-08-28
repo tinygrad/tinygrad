@@ -1069,8 +1069,8 @@ class Tensor:
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
     res = self.realize().__getitem__(indices, v)
-    # if shapes match it's a copy and we assign to self
-    if res.shape == self.shape:
+    # if shapes match and data is not shared it's a copy and we assign to self
+    if res.shape == self.shape and res.lazydata is not self.lazydata:
       self.assign(res.cast(self.dtype).contiguous()).realize()
     else: # no copy, basic setitem
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
