@@ -8,12 +8,13 @@ import numpy as np
 from typing import Dict, List, Optional, Union, cast
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
+from tinygrad.dtype import PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
+from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
 from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import create_schedule, get_output_st, st_fixup
+from tinygrad.engine.schedule import create_schedule, get_output_st, st_fixup, reduceop_fusor
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported, Context
 from tinygrad.lazy import LazyBuffer, view_supported_devices
@@ -1650,17 +1651,19 @@ class TestScheduleRewrite(unittest.TestCase):
 
   def test_deep_reduceop_reshape(self):
     tms: List[float] = []
-    inputs = [10*i for i in range(1,30 if getenv("BIG") else 15)]
-    for inp in inputs:
-      a = Tensor.empty(4, 4)
-      r = a.sum()
-      for _ in range(inp): r += r+2
+    sizes = [10*i for i in range(1,30 if getenv("BIG") else 15)]
+    for sz in sizes:
+      bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), i) for i in range(2)]
+      ld = UOp(UOps.LOAD, dtypes.float, (bufs[1], ShapeTracker.from_shape((4, 4)).to_uop()))
+      a = UOp(UOps.REDUCE_AXIS, dtypes.float, (ld,), (BinaryOps.ADD, (0, 1)))
+      for _ in range(sz): a += UOp(UOps.CONST, dtypes.float, (ShapeTracker.from_shape(()).to_uop(),))
+      sink = UOp(UOps.SINK, None, (UOp.store(bufs[0], ShapeTracker.from_shape(()).to_uop()), a))
       st = time.perf_counter_ns()
-      r.schedule()
+      sink = graph_rewrite(sink, reduceop_fusor)
       tms.append((time.perf_counter_ns()-st)*1e-6)
     if getenv("GRAPH_TIMING"):
       import plotly.express as px
-      fig = px.line(x=inputs, y=tms, title="graph_rewrite time as ast grows")
+      fig = px.line(x=sizes, y=tms, title="graph_rewrite time as ast grows")
       fig.update_layout(paper_bgcolor="black", plot_bgcolor="black", font={"color":"white"},
                         yaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"}, xaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"})
       fig.show()
