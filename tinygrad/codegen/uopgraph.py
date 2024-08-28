@@ -354,6 +354,10 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (NOp(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
+  # remove EXPANDs from SINK
+  (NOp(UOps.SINK, name="root"),
+   lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND} else (x,) for x in root.src)), root.arg)
+    if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(UOps.CONST, name='c1'), UPat(name='x'))), lambda c1,x: x+c1 if x.op is not UOps.CONST else None),
   (UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name='x'), UPat(UOps.CONST, name='c1'))), UPat(name='y')]),
@@ -473,10 +477,6 @@ expander = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (NOp(UOps.CONTRACT, name="con"), do_contract),
-  # remove EXPANDs from SINK
-  (NOp(UOps.SINK, name="root"),
-   lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src)), root.arg)
-    if any(x.op is UOps.EXPAND for x in root.src) else None),
   # BARRIERs aren't actually expanded
   (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
   # empty EXPAND is NOOP
@@ -494,10 +494,18 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
+def no_vectorized_load_store(ls:UOp):
+  idx = ls.src[1]
+  if idx.dtype.count == 1: return None
+  tv = [UOp(ls.op, ls.dtype.scalar() if ls.dtype else None, (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
+  return UOp(UOps.VECTORIZE if ls.dtype is not None else UOps.SINK, ls.dtype, tuple(tv))
+
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
+  # expand loads
+  (NOp({UOps.LOAD, UOps.STORE}, name="ls"), no_vectorized_load_store),
   # no ALU on vectorized dtypes
-  #(UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
@@ -539,7 +547,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   sink = graph_rewrite(sink, folder+reducer)
 
   # rewrite pyint to int32
-  #sink = graph_rewrite(sink, no_pyint)
+  sink = graph_rewrite(sink, no_pyint)
 
   # for PTX only
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
