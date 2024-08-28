@@ -2064,7 +2064,7 @@ class Tensor:
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
     assert mode in ("linear", "nearest", "nearest-exact"), "only supports linear, nearest or nearest-exact interpolate"
     assert not (align_corners and mode != "linear"), "align_corners option can only be set with the interpolating mode linear"
-    x, expand = self.cast(dtypes.float32) if self.dtype==dtypes.uint8 else self, list(self.shape)
+    x, expand = self, list(self.shape)
     for i in range(-1,-len(size)-1,-1):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
@@ -2072,11 +2072,7 @@ class Tensor:
       if mode == "linear":
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-        if self.dtype == dtypes.uint8:
-          perc = (perc*(1<<15)+0.5).floor()/(1<<15)
-          x = (x.gather(i, low).lerp(x.gather(i, high), perc) + 0.5).floor()
-        else:
-          x = x.gather(i, low).lerp(x.gather(i, high), perc)
+        x = x.gather(i, low).lerp(x.gather(i, high), perc)
       else:
         index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
         x = x.gather(i, index)
@@ -2271,6 +2267,9 @@ class Tensor:
     print(Tensor([1., 2., 3.]).lerp(Tensor([4., 5., 6.]), 0.5).numpy())
     ```
     """
+    if self.dtype == dtypes.uint8 and isinstance(weight, Tensor):
+      w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
+      return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
 
   def square(self):
