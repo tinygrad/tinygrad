@@ -1064,7 +1064,7 @@ class Tensor:
       return
     # NOTE: check that setitem target is valid first
     if not all(lb.st.contiguous for lb in self.lazydata.lbs): raise RuntimeError("setitem target needs to be contiguous")
-    if not isinstance(v, (Tensor, list, np.ndarray, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
+    if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
