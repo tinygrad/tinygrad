@@ -88,6 +88,10 @@ class UOps(Enum):
 
   ```
 
+  NOTE: Pushing a SWIZZLE through a reduce changes the axis.
+
+  NOTE: Pushing a SWIZZLE changes the output shape of that UOp. We have to reshape every other adjacent node. eg. reshape of the second LOAD to `(32, 32, 1, 1)` above.
+
   - **`dtype`**: Output DType
   - **`src`**: `Tuple[UOp]`, a single UOp to swizzle.
   - **`arg`**: ShapeTracker
