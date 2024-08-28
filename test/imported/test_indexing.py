@@ -207,7 +207,7 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(x[[2, 3, 4]], np.array([4, 4, 4]))
       x[ri([2, 3, 4]), ] = 3
       numpy_testing_assert_equal_helper(x[ri([2, 3, 4]), ], np.array([3, 3, 3]))
-      x[ri([0, 2, 4]), ] = np.array([5, 4, 3])
+      x[ri([0, 2, 4]), ] = Tensor([5, 4, 3])
       numpy_testing_assert_equal_helper(x[ri([0, 2, 4]), ], np.array([5, 4, 3]))
 
     # Case 1: Purely Integer Array Indexing
@@ -275,10 +275,10 @@ class TestIndexing(unittest.TestCase):
     # setting values
     reference[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(reference[ri([0]), ri([1])], np.array([-1]))
-    reference[ri([0, 1, 2]), ri([0])] = np.array([-1, 2, -4])
+    reference[ri([0, 1, 2]), ri([0])] = Tensor([-1, 2, -4])
     numpy_testing_assert_equal_helper(reference[ri([0, 1, 2]), ri([0])],
                       np.array([-1, 2, -4]))
-    reference[rows, columns] = np.array([[4, 6], [2, 3]])
+    reference[rows, columns] = Tensor([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(reference[rows, columns],
                       np.array([[4, 6], [2, 3]]))
 
@@ -315,7 +315,7 @@ class TestIndexing(unittest.TestCase):
                   [1, 2]])
     numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[0, 4], [5, 11]]))
 
-    # TODO: advanced setitem
+    # TODO: non contiguous setitem
     '''
     # setting values
     reference[ri([0]), ri([1])] = -1
