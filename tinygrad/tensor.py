@@ -3183,8 +3183,8 @@ class Tensor:
     print(t.dtype, t.numpy())
     ```
     """
-    if dtypes.is_unsigned(dt:=to_dtype(dtype)) and dtypes.is_float(self.dtype): return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int64), dtype=dt)
-    return self if self.dtype == (dt:=to_dtype(dtype)) else F.Cast.apply(self, dtype=dt)
+    if (dt := to_dtype(dtype)) == dtypes.uint8 and self.dtype == dtypes.float: return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int64), dtype=dt)
+    return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
