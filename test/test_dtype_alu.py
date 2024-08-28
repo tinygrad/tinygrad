@@ -160,8 +160,8 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
 
-  @given(strat.one_of(strat.floats(-1000.0, -0.0001), strat.floats(255.0001, 1000.0)))
-  def test_uint8_overflow_underflow(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint8)
+  @given(strat.one_of(strat.floats(-1000.0, -9.999999747378752e-05, width=32), strat.floats(255.00010681152344, 1000.0, width=32)))
+  def test_float_cast_to_uint8_overflow_underflow(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint8)
 
 class TestFromFuzzer(unittest.TestCase):
   @given(strat.sampled_from(dtypes_float))
