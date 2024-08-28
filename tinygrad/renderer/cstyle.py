@@ -438,7 +438,6 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
 class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = False
-  has_local = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer().type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
