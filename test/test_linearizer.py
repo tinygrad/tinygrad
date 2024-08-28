@@ -603,7 +603,8 @@ class TestLinearizer(unittest.TestCase):
           UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
             UOp(UOps.CONST, dtypes.int, arg=10, src=(
               UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)), # noqa E501
-            UOp(UOps.ALU, dtypes.int, arg=UnaryOps.NEG, src=(
+            UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
+              ast_const(dtypes.int, -1, (1, 20, 1)),
               UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.MAX, (0,)), src=(
                 UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
                   UOp(UOps.CAST, dtypes.int, arg=None, src=(
@@ -638,9 +639,10 @@ class TestLinearizer(unittest.TestCase):
         UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
           UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
             UOp(UOps.CONST, dtypes.int, arg=200, src=(
-              UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),)), # noqa: E501
-            UOp(UOps.ALU, dtypes.int, arg=UnaryOps.NEG, src=(
-              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.MUL, (0,)), src=(
+               UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),)), # noqa: E501
+            UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
+              ast_const(dtypes.int, -1, (1, 1)),
+              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.MAX, (0,)), src=(
                 UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
                   UOp(UOps.CAST, dtypes.int, arg=None, src=(
                     UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
