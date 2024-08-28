@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Union, DefaultDict, cast, Literal, Callable
+from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp
@@ -163,7 +163,7 @@ class CStyleLanguage(Renderer):
           assert len(src) == 1 or (uop is UOps.VECTORIZE and len(src) > 1), "Invalid source length for operation"
           if uop is UOps.BITCAST:
             precast = ssa('precast')
-            kk(f"{self.render_dtype(cast(DType, src[0].dtype))} {precast} = {r[src[0]]};")
+            kk(f"{self.render_dtype(src[0].dtype)} {precast} = {r[src[0]]};")
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
           else: val = self.render_vectorize([r[x] for x in src], dtype)

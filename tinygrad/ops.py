@@ -215,7 +215,7 @@ class NOp(UOp):
   def var(name:Optional[str]=None, dtype:DType=dtypes.void): return NOp(UOps.NOOP, dtype=dtype, name=name)
   @staticmethod
   @functools.lru_cache(None)
-  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
+  def cvar(name:Optional[str]=None, dtype:DType=dtypes.void): return NOp(UOps.CONST, dtype=dtype, name=name)
   def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
   @functools.cached_property
@@ -229,7 +229,7 @@ class UPat:
                name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False, location=None,
                custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None):
     self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
-    self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None or dtype is dtypes.void else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
+    self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None or dtype is dtypes.void else (tuple(dtype) if isinstance(dtype, set) else (dtype,)) # noqa: E501
     self.arg, self.name = arg, name
     self.in_src = src
     self.src: Any = None

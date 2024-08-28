@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Dict, List, Set, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, graph_rewrite, type_verify, print_uops
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -75,8 +75,8 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   # TODO: copied logic from above
   new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((load.src[1] // 4) % buf.dtype.shape[1], (load.src[1] // (4 * buf.dtype.shape[1]))))
   if len(new_src) >= 4:
-    new_src[2] = UOp(UOps.VECTORIZE, cast(DType, new_src[2].dtype).vec(4), tuple(new_src[2] for _ in range(4)))
-  vec_load = UOp(UOps.LOAD, cast(DType, load.dtype).vec(4), tuple(new_src))
+    new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(4), tuple(new_src[2] for _ in range(4)))
+  vec_load = UOp(UOps.LOAD, load.dtype.vec(4), tuple(new_src))
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const(float('nan')))
 
 float4_folding = PatternMatcher([
@@ -225,13 +225,13 @@ constant_folder = PatternMatcher([
   # extra arange loop folding because we don't fold adds. TODO: fold adds
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2") + NOp.var("idx3"))
-   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(dtypes.void, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(dtypes.void, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse), # noqa: E501
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng") +
                           NOp.var("idx2"))
-   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(dtypes.void, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(dtypes.void, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse), # noqa: E501
   # arange loop folding (reduce)
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
-   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(dtypes.void, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(dtypes.void, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse), # noqa: E501
   (NOp(UOps.REDUCE, src=((NOp.var("idx") - NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(dtypes.void, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
    lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
@@ -431,7 +431,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
     if u.op is UOps.BARRIER: return u
-    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, dtypes.void, (gate, u.src[-1])),), u.arg)
+    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, dtypes.void, (gate, u.src[-1])),), u.arg) # noqa: E501
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
@@ -447,7 +447,7 @@ expander = PatternMatcher([
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg)
     if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
   # BARRIERs aren't actually expanded
-  (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)), lambda ex: UOp(UOps.EXPAND, dtypes.void, (UOp(UOps.BARRIER, dtypes.void, ex.src),)*len(ex.src), ex.arg)),
+  (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)), lambda ex: UOp(UOps.EXPAND, dtypes.void, (UOp(UOps.BARRIER, dtypes.void, ex.src),)*len(ex.src), ex.arg)), # noqa: E501
   # empty EXPAND is NOOP
   (NOp(UOps.EXPAND, src=(NOp.var('x'),), arg=()), lambda x: x),
   # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU

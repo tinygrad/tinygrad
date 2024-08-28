@@ -112,7 +112,7 @@ class TestLinearizer(unittest.TestCase):
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (1,)))
     second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((32, 1)).to_uop()))
     diff = second_x + first_reduce*ast_const(dtypes.float, -1, (32, 1))
-    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (ReduceOps.SUM, (0,)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (0,)))
     store = UOp(UOps.STORE, dtypes.void, (g0, ShapeTracker.from_shape((1, 1)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
@@ -604,7 +604,7 @@ class TestLinearizer(unittest.TestCase):
             UOp(UOps.CONST, dtypes.int, arg=10, src=(
               UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)), # noqa E501
             UOp(UOps.ALU, dtypes.int, arg=UnaryOps.NEG, src=(
-              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.MAX, (0,)), src=(
+              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.MAX, (0,)), src=(
                 UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
                   UOp(UOps.CAST, dtypes.int, arg=None, src=(
                     UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
@@ -640,7 +640,7 @@ class TestLinearizer(unittest.TestCase):
             UOp(UOps.CONST, dtypes.int, arg=200, src=(
               UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),)), # noqa: E501
             UOp(UOps.ALU, dtypes.int, arg=UnaryOps.NEG, src=(
-              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(ReduceOps.MAX, (0,)), src=(
+              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.MUL, (0,)), src=(
                 UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
                   UOp(UOps.CAST, dtypes.int, arg=None, src=(
                     UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(

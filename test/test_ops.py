@@ -2099,5 +2099,6 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: Tensor.interpolate((10*x).relu().cast('uint8'), size=out_sz, mode="linear"), forward_only=True)
 
 if __name__ == '__main__':
+  print(dir(dtypes))
   np.random.seed(1337)
   unittest.main(verbosity=2)

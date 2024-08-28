@@ -3,7 +3,7 @@ import functools
 from typing import List, Tuple, cast, Optional, Dict
 from tinygrad.shape.shapetracker import ShapeTracker, variable_to_uop
 from tinygrad.shape.symbolic import sint
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes
 from tinygrad.ops import KernelInfo, BinaryOps, BUFFER_UOPS, UOp, UOps
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, get_contraction, prod, partition, flatten
