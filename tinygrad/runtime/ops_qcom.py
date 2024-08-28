@@ -7,6 +7,7 @@ import tinygrad.runtime.autogen.adreno as adreno
 import tinygrad.runtime.autogen.libc as libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
@@ -23,30 +24,19 @@ def parse_cl_lib(lib: bytes, name:str):
   Extract information from OpenCL binary used to run a shader: image offset, image size, prg_offset, offsets to argument buffers,
   constants offsets and values, HALFREGFOOTPRINT and FULLREGFOOTPRINT
   """
-  image_offset, image_size = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0]
+  image_offset, image_size, buffs_info, consts_info = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0], [], []
 
-  # parse argument buffers layout
-  buffs_info = []
   ptr = struct.unpack("I", lib[0x110:0x114])[0] # read img desc offset
   prg_offset = struct.unpack("I", lib[ptr+196:ptr+200])[0]
-
-  ptr = round_up(ptr + 344 + len(name), 4) # skip to bufs descr, align name to 4 bytes
-  # skips random zeroes
-  while (ptr + 4 <= len(lib)):
-    length = struct.unpack("I", lib[ptr:ptr+4])[0]
-    if length != 0: break
-    ptr += 4
+  ptr = round_up(ptr + 344 + len(name), 4) + 8 * struct.unpack("I", lib[ptr+220:ptr+224])[0] # skip to bufs descr, align name, skip samplers
 
   while (ptr + 16 <= len(lib)):
     length, _, _, offset_words = struct.unpack("I" * 4, lib[ptr:ptr+16])
     if length == 0: break
+    buffs_info.append((offset_words * 4, struct.unpack("I", lib[ptr+0x3c:ptr+0x40])[0] == 0x0))
     ptr += length
-    buffs_info.append(offset_words * 4)
 
-  # parse constants layout
-  consts_info = []
   ptr = struct.unpack("I", lib[0xb0:0xb4])[0]
-  # check for consts
   if ptr != 0:
     ptr = struct.unpack("I", lib[0xac:0xb0])[0] # read consts desc offset
     # constant vals are placed just before a shader
@@ -83,7 +73,6 @@ class QcomDevice(HCQCompiled):
   signals_pool: List[Any] = []
   gpu_id: int = 0
   gpu_stack: Any = None
-  border_color: Any = None
 
   def __init__(self, device:str=""):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
@@ -94,19 +83,11 @@ class QcomDevice(HCQCompiled):
     assert(QcomDevice.gpu_id < 700)
     QcomDevice.gpu_stack = self._gpu_alloc(0x1000000, kgsl.KGSL_MEMTYPE_CL_KERNEL_STACK << kgsl.KGSL_MEMTYPE_SHIFT)
 
-    # TOOD: lazy allocation, correct size of the buffer.
-    QcomDevice.border_color = self._gpu_alloc(0x1000000, map_to_cpu=True)
-    ctypes.memset(QcomDevice.border_color.va_addr, 0, QcomDevice.border_color.size)
-
     super().__init__(device, QcomAllocator(self), QCOMRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
                      QcomSignal, QcomComputeQueue, None, timeline_signals=(QcomSignal(), QcomSignal()))
 
     QcomComputeQueue().setup().signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
-
-  def __del__(self):
-    if hasattr(self, 'ctx'): self._ctx_destroy(self.ctx)
-    if hasattr(self, 'cmd_buf'): self._gpu_free(self.cmd_buf)
 
   def _ctx_create(self):
     cr = kgsl.struct_kgsl_drawctxt_create(flags=(kgsl.KGSL_CONTEXT_TYPE_CL << kgsl.KGSL_CONTEXT_TYPE_SHIFT) | kgsl.KGSL_CONTEXT_PREAMBLE
@@ -132,7 +113,7 @@ class QcomDevice(HCQCompiled):
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
     return ret
 
-  def _gpu_alloc(self, size:int, flags:int=0, map_to_cpu=False, uncached=False):
+  def _gpu_alloc(self, size:int, flags:int=0, map_to_cpu=False, uncached=False, fill_zeroes=False):
     size = round_up(size, 1 << (alignment_hint:=12))
     flags |= ((alignment_hint << kgsl.KGSL_MEMALIGN_SHIFT) & kgsl.KGSL_MEMALIGN_MASK)
     if uncached: flags |= ((kgsl.KGSL_CACHEMODE_UNCACHED << kgsl.KGSL_CACHEMODE_SHIFT) & kgsl.KGSL_CACHEMODE_MASK)
@@ -148,6 +129,7 @@ class QcomDevice(HCQCompiled):
     if map_to_cpu or (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP):
       va_addr = libc.mmap(va_addr, va_len := (va_len or alloc.mmapsize), mmap.PROT_READ|mmap.PROT_WRITE,
                           mmap.MAP_SHARED | (MAP_FIXED if va_addr is not None else 0), self.fd, alloc.id * 0x1000)
+      if fill_zeroes: ctypes.memset(va_addr, 0, va_len)
 
     return SimpleNamespace(va_addr=va_addr, size=va_len, mapped=map_to_cpu or (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP), info=alloc)
 
@@ -160,38 +142,36 @@ class QcomDevice(HCQCompiled):
     self.cmd_buf_ptr = (cur_ptr:=self.cmd_buf_ptr if self.cmd_buf_ptr + sz < self.cmd_buf.size else 0) + sz
     return self.cmd_buf.va_addr + cur_ptr
 
+  def _border_color_base(self):
+    if not hasattr(self, '_border_color_gpu'): self._border_color_gpu = self._gpu_alloc(0x1000000, map_to_cpu=True, fill_zeroes=True)
+    return self._border_color_gpu.va_addr
+
 class QcomAllocator(HCQAllocator):
   def __init__(self, device:QcomDevice): super().__init__(device)
 
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.image is not None:
-      texture = self.device._gpu_alloc(size, kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
+      pitchalign = 6
+      pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.base.itemsize), 1 << pitchalign)
+      texture = self.device._gpu_alloc(pitch * round_up(options.image.shape[0], 16), kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
 
       # save it here to load in one command (the same approach as OpenCL and mesa)
-      texture.samplers, texture.descriptor, texture.ibo = [0] * 8, [0] * 16, [0] * 16
-      
-      # samplers are all the same in tinygrad
-      texture.samplers[0] = 0x1b60
-      texture.samplers[1] = 0x30
+      texture.samplers, texture.descriptor, texture.ibo = [0] * 4, [0] * 16, [0] * 16
 
-      # other texture props are set here. but lets make it at least to pass with exactly the same bytes 
-      texture.descriptor[0] = 0x20806888
-      texture.descriptor[1] = 0x4801b
-      # shapes are set the following way here, but copy bytes for now
-      # texture.descriptor[1] = (options.image.shape[1] << adreno.A6XX_TEX_CONST_1_WIDTH__SHIFT) | (options.image.shape[0] << adreno.A6XX_TEX_CONST_1_WIDTH__SHIFT)
-      texture.descriptor[2] = 0x20010000
+      texture.samplers[0:2] = [0x1b60, 0x30] # compiled sampler. always the same in tinygrad.
+
+      fmt = 0x82 if options.image.base == dtypes.float32 else 0x62
+      texture.descriptor[0] = (0 << adreno.A6XX_TEX_CONST_0_SWIZ_X__SHIFT) | (1 << adreno.A6XX_TEX_CONST_0_SWIZ_Y__SHIFT) | \
+        (2 << adreno.A6XX_TEX_CONST_0_SWIZ_Z__SHIFT) | (3 << adreno.A6XX_TEX_CONST_0_SWIZ_W__SHIFT) | (fmt << adreno.A6XX_TEX_CONST_0_FMT__SHIFT)
+      texture.descriptor[1] = (options.image.shape[1] << adreno.A6XX_TEX_CONST_1_WIDTH__SHIFT) | \
+        (options.image.shape[0] << adreno.A6XX_TEX_CONST_1_HEIGHT__SHIFT)
+      texture.descriptor[2] = (adreno.A6XX_TEX_2D << adreno.A6XX_TEX_CONST_2_TYPE__SHIFT) | (pitch << adreno.A6XX_TEX_CONST_2_PITCH__SHIFT) | \
+        ((pitchalign - 6) << adreno.A6XX_TEX_CONST_2_PITCHALIGN__SHIFT)
       texture.descriptor[4:6] = data64_le(texture.va_addr)
       texture.descriptor[6] = 0x40000000
       texture.descriptor[7] = 0xe
 
-      # seems to be almost the same as descriptor, only first 4 bytes differs
-      texture.ibo[0] = 0x20800000
-      texture.ibo[1] = 0x4801b
-      texture.ibo[2] = 0x20010000
-      # texture.ibo[1] = (options.image.shape[1] << adreno.A6XX_TEX_CONST_1_WIDTH__SHIFT) | (options.image.shape[0] << adreno.A6XX_TEX_CONST_1_WIDTH__SHIFT)
-      texture.ibo[4:6] = data64_le(texture.va_addr)
-      texture.ibo[6] = 0x40000000
-      texture.ibo[7] = 0xe
+      texture.ibo = [texture.descriptor[0] & (~0xffff), *texture.descriptor[1:len(texture.descriptor)]]
 
       return texture
 
@@ -203,7 +183,9 @@ class QcomAllocator(HCQAllocator):
     self.device.synchronize()
     ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
-  def _free(self, opaque, options:BufferOptions): return self.device._gpu_free(opaque)
+  def _free(self, opaque, options:BufferOptions):
+    self.device.synchronize()
+    self.device._gpu_free(opaque)
 
 class QcomComputeQueue(HWComputeQueue):
   def __init__(self):
@@ -274,7 +256,6 @@ class QcomComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, adreno.A6XX_SP_PERFCTR_ENABLE_CS)
     self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, adreno.ISAMMODE_CL | (1 << 3)) # ISAMMODE|UNK3
     self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
-    self.reg(adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_ENABLED)
     self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, 0)
 
   def _exec(self, prg, args_state, global_size, local_size):
@@ -293,7 +274,7 @@ class QcomComputeQueue(HWComputeQueue):
              | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT) | (4 << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
              adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6 | (1 << adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE__SHIFT), 0,
              prg.prg_offset, *data64_le(prg.lib_gpu.va_addr), (1 << adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT),
-             *data64_le(QcomDevice.gpu_stack.va_addr), (0x101 << adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT))
+             *data64_le(QcomDevice.gpu_stack.va_addr), (0x300 << adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
              (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
              | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
@@ -311,6 +292,7 @@ class QcomComputeQueue(HWComputeQueue):
                | (adreno.SB6_CS_TEX << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
                | (args_state.samplers_cnt << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(args_state.samplers_ptr.va_addr))
       self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.samplers_ptr.va_addr))
+      self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.device._border_color_base()))
 
     if hasattr(args_state, 'descriptors_ptr'):
       self.cmd(adreno.CP_LOAD_STATE6_FRAG,
@@ -326,7 +308,9 @@ class QcomComputeQueue(HWComputeQueue):
                | (args_state.ibos_cnt << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(args_state.ibos_ptr.va_addr))
       self.reg(adreno.REG_A6XX_SP_CS_IBO, *data64_le(args_state.ibos_ptr.va_addr))
 
-    self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(QcomDevice.border_color.va_addr))
+    self.reg(adreno.REG_A6XX_SP_CS_CONFIG,
+             adreno.A6XX_SP_CS_CONFIG_ENABLED | (args_state.samplers_cnt << adreno.A6XX_SP_CS_CONFIG_NSAMP__SHIFT)
+             | (args_state.descriptors_cnt << adreno.A6XX_SP_CS_CONFIG_NTEX__SHIFT) | (args_state.ibos_cnt << adreno.A6XX_SP_CS_CONFIG_NIBO__SHIFT))
     self.cmd(adreno.CP_RUN_OPENCL, 0)
 
   def _update_exec(self, cmd_idx, global_size, local_size):
@@ -378,9 +362,10 @@ class QcomArgsState(HCQArgsState):
     for i, b in enumerate(bufs):
       if not hasattr(b, 'samplers') and not hasattr(b, 'descriptor') and not hasattr(b, 'ibo'): self.update_buffer(i, b)
       else:
-        samplers += [*b.samplers]
-        descriptors += [*b.descriptor]
-        ibos += [*b.ibo]
+        if self.boffs[i][1]: ibos += [*b.ibo]
+        else:
+          samplers += [*b.samplers]
+          descriptors += [*b.descriptor]
 
     if len(samplers):
       samplers = array.array('I', samplers)
@@ -400,9 +385,15 @@ class QcomArgsState(HCQArgsState):
     for cnst_val, cnst_off, cnst_sz in self.prg.consts_info:
       ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
 
+  def __del__(self):
+    self.prg.device.synchronize()
+    if hasattr(self, 'samplers_ptr'): self.prg.device._gpu_free(self.samplers_ptr)
+    if hasattr(self, 'descriptors_ptr'): self.prg.device._gpu_free(self.descriptors_ptr)
+    if hasattr(self, 'ibos_ptr'): self.prg.device._gpu_free(self.ibos_ptr)
+
   # don't forget to updte samplers, descriptors and ibos
-  def update_buffer(self, index:int, buf:HCQBuffer): ctypes.cast(self.ptr + self.boffs[index], ctypes.POINTER(ctypes.c_int64))[0] = buf.va_addr
-  def update_var(self, index:int, val:int): ctypes.cast(self.ptr + self.aoffs[index], ctypes.POINTER(ctypes.c_int32))[0] = val
+  def update_buffer(self, index:int, buf:HCQBuffer): ctypes.cast(self.ptr + self.boffs[index][0], ctypes.POINTER(ctypes.c_int64))[0] = buf.va_addr
+  def update_var(self, index:int, val:int): ctypes.cast(self.ptr + self.aoffs[index][0], ctypes.POINTER(ctypes.c_int32))[0] = val
 
 if __name__ == '__main__':
   from tinygrad import Tensor, dtypes
