@@ -69,6 +69,10 @@ def vectorize_alu(vec:UOp):
   return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
                                              tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
 
+def vectorize_const(vec:UOp) -> UOp:
+  if all_same([x.arg for x in vec.src]): return UOp(UOps.CONST, vec.dtype, (), vec.src[0].arg)
+  return UOp(UOps.CONST, vec.dtype, (), tuple(x.arg for x in vec.src))
+
 def fix_unfoldable_image_load(load:UOp, buf:UOp):
   if not isinstance(buf.dtype, ImageDType) or cast(DType, load.src[1].dtype).count == 2: return None
   id4 = load.src[1] % 4
@@ -81,10 +85,11 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const(float('nan')))
 
 float4_folding = PatternMatcher([
-  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  #(UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  #(UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   (UPat(UOps.VECTORIZE, src=UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}), name="vec"), vectorize_alu),
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), vectorize_const),
 ])
 
 # ***** mod *****
@@ -254,7 +259,7 @@ constant_folder = PatternMatcher([
   # max folding
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # const rules
-  (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const(c.arg)),
+  (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const(c.arg[root.arg] if isinstance(c.arg, tuple) else c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
   # a REDUCE without ranges is a NOOP
   (NOp(UOps.REDUCE, src=(NOp.var('x'),)), lambda x: x),
@@ -377,6 +382,32 @@ def do_expand(root:UOp):
   # NOTE: we 0 out the reduce axis for WMMA. in theory they should all be the same, but is this always correct?
   exclude_args = tuple(dedup(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2])))) if root.op is UOps.WMMA else ()
   expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x[0] not in exclude_args)
+  expand_sz = prod([x[1] for x in expand_args])
+  #assert root.dtype.count == 1, "root unexpanded"
+
+  new_srcs = []
+  #print("******")
+  #print(root)
+  for i,src in enumerate(root.src):
+    if src.op is UOps.EXPAND:
+      lst = _swizzle_args(expand_args, src.arg, exclude_args)
+      if list(range(len(lst))) == lst:
+        new_srcs.append(src.src[0])
+      else:
+        raise Exception("unhandled")
+    else:
+      assert src.dtype.count == 1, f"this should be an expand {src.dtype}"
+      if root.op in {UOps.LOAD, UOps.STORE} and i == 0:
+        new_srcs.append(src)
+      else:
+        new_srcs.append(UOp(UOps.VECTORIZE, src.dtype.vec(expand_sz), (src,)*expand_sz))
+
+  nsrc = UOp(root.op, root.dtype.vec(expand_sz) if root.dtype else None, tuple(new_srcs), root.arg)
+  ret = UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
+  #print("***")
+  #print(ret)
+  return ret
+
   esrcs = [[src.src[x] for x in _swizzle_args(expand_args, src.arg, exclude_args)] \
            if src.op is UOps.EXPAND else itertools.repeat(src) for src in root.src]
   new_srcs = [UOp(root.op, root.dtype, new_src, root.arg) for new_src in zip(*esrcs)]
@@ -444,8 +475,8 @@ expander = PatternMatcher([
   (NOp(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
   (NOp(UOps.SINK, name="root"),
-   lambda root: UOp(UOps.SINK, root.dtype, a, root.arg)
-    if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
+   lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src)), root.arg)
+    if any(x.op is UOps.EXPAND for x in root.src) else None),
   # BARRIERs aren't actually expanded
   (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
   # empty EXPAND is NOOP
@@ -466,7 +497,7 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
   # no ALU on vectorized dtypes
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
+  #(UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
@@ -499,9 +530,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   acc_number = 0
   sink = graph_rewrite(sink, folder)
 
-  # rewrite pyint to int32
-  sink = graph_rewrite(sink, no_pyint)
-
   # expand
   linearize_cnt += 1
   if linearize_cnt != getenv("DEBUG_EXPAND", 0):
@@ -509,6 +537,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   # reduce and fold
   sink = graph_rewrite(sink, folder+reducer)
+
+  # rewrite pyint to int32
+  #sink = graph_rewrite(sink, no_pyint)
 
   # for PTX only
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
