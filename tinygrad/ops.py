@@ -401,8 +401,8 @@ def type_verify(uops):
         assert dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
         # TODO: intermediate CONST of Variable is DEFINE_VAR
         assert (isinstance(arg, Variable) and u.src) or (type(arg) is type(dtypes.as_const(arg, dtype))), f"type of {arg=} does not match {dtype}"
-      if uop is UOps.DEFINE_ACC: assert src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
-    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None # type is the output type, not an arg
+      if uop is UOps.DEFINE_ACC: assert dtype is not dtypes.void and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
+    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not dtypes.void # type is the output type, not an arg
     if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
     if uop is UOps.VECTORIZE:
       assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
