@@ -3183,7 +3183,9 @@ class Tensor:
     print(t.dtype, t.numpy())
     ```
     """
-    return self if self.dtype == (dt:=to_dtype(dtype)) else F.Cast.apply(self, dtype=dt)
+    return self if self.dtype == (dt:=to_dtype(dtype)) else self._cast(dtypes.int64)._cast(dt) if dtypes.is_unsigned(dt) else self._cast(dt)
+
+  def _cast(self, dtype:DTypeLike) -> Tensor: return F.Cast.apply(self, dtype=dtype)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
