@@ -5,6 +5,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
+from tinygrad.device import Device
 
 safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
@@ -51,6 +52,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
     offset += v.nbytes()
   j = json.dumps(headers, separators=(',', ':'))
   j += "\x20"*((8-len(j)%8)%8)
+  assert Device[f"disk:{fn}"].allocator.device.count == 0, f"Different tensors have disk device 'disk:{fn}' open"
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:8].bitcast(dtypes.int64).assign([len(j)])
