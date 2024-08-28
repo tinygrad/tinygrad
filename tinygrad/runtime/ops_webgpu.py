@@ -1,5 +1,5 @@
 from typing import List, Tuple
-import functools
+import functools, time
 from wgpu.utils.device import get_default_device
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import UOp, UOps
@@ -15,6 +15,9 @@ class WGSLRenderer(CStyleLanguage):
   supports_float4 = False
   type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
 
+  def render_cast(self, x:str, var_dtype:DType, bitcast=False) -> str:
+    if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x})" if bitcast else f"{self.type_map[var_dtype]}({x})"
+    raise NotImplementedError(f"no cast for {var_dtype}")
   def render_dtype(self, dtype): return "var"
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     local_size = [u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == 'l']
@@ -49,7 +52,9 @@ class WebGPUProgram:
     compute_pass.set_bind_group(0, bind_group, [], 0, 999999) # last 2 not used
     compute_pass.dispatch_workgroups(*global_size)  # x y z
     compute_pass.end()
+    st = time.perf_counter()
     self.device.queue.submit([command_encoder.finish()])
+    return time.perf_counter() - st
 
 class WebGpuAllocator(Allocator):
   def __init__(self, device): self.device = device
