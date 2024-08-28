@@ -67,7 +67,7 @@ class UOps(Enum):
       UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),))
   ```
 
-  The scheduler rewrites this by pushing the expand in SWIZZLE to the LOAD.
+  The scheduler rewrites this by pushing the expand in SWIZZLE through the reduce, to the LOAD:
 
   ```diff
   UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
