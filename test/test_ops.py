@@ -2,7 +2,7 @@ import time, math, unittest
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 import functools
@@ -446,7 +446,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(), ()], lambda x,y: x/y)
   def test_div_int(self):
     helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
-    helper_test_op(None, lambda x: x/2, lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
+    helper_test_op(None, lambda x,y: x//y, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
+    helper_test_op(None, lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
+    helper_test_op(None, lambda x: x//2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
     torch_idiv, tiny_idiv = functools.partial(torch.div, rounding_mode="trunc"), functools.partial(Tensor.div, upcast=False)
     helper_test_op(None, torch_idiv, tiny_idiv, forward_only=True, vals=np.array([[5, -6, 7],[1, 2, 3]], dtype=np.int32))
     x = Tensor(2**64 - 1, dtype=dtypes.uint64).div(1, upcast=False)
@@ -750,10 +752,28 @@ class TestOps(unittest.TestCase):
                                                 lambda a,b: Tensor.einsum('zqrs,tuqvr->zstuv', a,b), atol=1e-5)
     # bilinear transformation
     helper_test_op([(2,3),(5,3,7),(2,7)], lambda a,b,c: torch.einsum('ik,jkl,il->ij', [a,b,c]), lambda a,b,c: Tensor.einsum('ik,jkl,il->ij', [a,b,c]))
-    # test ellipsis # TODO: FIXME
-    with self.assertRaises(Exception):
-      helper_test_op([(16,29,256),(16,29,256)], lambda a,b: torch.einsum('...id, ...jd -> ...ij', [a,b]),
-                                                lambda a,b: Tensor.einsum('...id, ...jd -> ...ij', [a,b]))
+
+  @unittest.expectedFailure
+  def test_einsum_ellipsis(self):
+    """The expected behavior for einsum is described in the PyTorch docs: https://pytorch.org/docs/stable/generated/torch.einsum.html"""
+    # TODO: implement ellipsis support in einsum to pass these tests
+    # test ellipsis
+    helper_test_op([(3, 8, 9), (3, 8, 9)], lambda a, b: torch.einsum('...id, ...jd -> ...ij', [a, b]),
+               lambda a, b: Tensor.einsum('...id, ...jd -> ...ij', [a, b]))
+    # ellipsis will come first in the output before the subscript labels, if rhs is not specified
+    helper_test_op([(3, 8, 9), (3, 8, 9)], lambda a, b: torch.einsum('...id, ...jd', [a, b]),
+               lambda a, b: Tensor.einsum('...id, ...jd', [a, b]))
+    # multiple ellipsis in different operands with different shapes are allowed
+    helper_test_op([(2, 3, 4, 5), (5, 2, 4)], lambda a, b: torch.einsum('i...j,ji...->...', [a, b]),
+               lambda a, b: Tensor.einsum('i...j,ji...->...', [a, b]))
+    # multiple ellipsis in one operand are not allowed. This test shall raise an exception.
+    with self.assertRaises(RuntimeError):
+      helper_test_op([(2, 3, 4), (2, 3, 4)], lambda a, b: torch.einsum('...ik..., ...jk ->', [a, b]),
+                       lambda a, b: Tensor.einsum('...ik..., ...jk ->', [a, b]))
+    # multiple ellipsis must broadcast together. This test shall raise an exception.
+    with self.assertRaises(RuntimeError):
+      helper_test_op([(2, 3, 4, 5), (5, 2, 7)], lambda a, b: torch.einsum('i...j,ji...->...', [a, b]),
+                       lambda a, b: Tensor.einsum('i...j,ji...->...', [a, b]))
 
   def test_einsum_shape_check(self):
     a = Tensor.zeros(3,8,10,5)
@@ -878,6 +898,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(0,2)))
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)))
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=1))
+    helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=1, keepdim=True))
     helper_test_op([()], lambda x: x.sum())
     helper_test_op([()], lambda x: x.sum(0))
     helper_test_op([()], lambda x: x.sum(-1))
@@ -890,6 +911,16 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(0,)))
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(1,)))
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(0,1)))
+
+  def test_prod(self):
+    helper_test_op(None, lambda x: x.prod(), vals=[[1.0, 2.0, 3.0]])
+    with Context(NOOPT=1): helper_test_op(None, lambda x: x.prod(), vals=[[1.0, 2.0, 3.0]])
+    helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=3), lambda x: x.prod(axis=3))
+    helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=1), lambda x: x.prod(axis=1))
+    helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=1, keepdim=True), lambda x: x.prod(axis=1, keepdim=True))
+    helper_test_op([()], lambda x: x.prod())
+    helper_test_op([()], lambda x: x.prod(0))
+    helper_test_op([()], lambda x: x.prod(-1))
 
   def test_min(self):
     helper_test_op([(3,3)], lambda x: x.min())

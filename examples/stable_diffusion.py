@@ -289,6 +289,6 @@ if __name__ == "__main__":
   # validation!
   if args.prompt == default_prompt and args.steps == 5 and args.seed == 0 and args.guidance == 7.5:
     ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "stable_diffusion_seed0.png")))
-    distance = (((x - ref_image).cast(dtypes.float) / ref_image.max())**2).mean().item()
+    distance = (((x.cast(dtypes.float) - ref_image.cast(dtypes.float)) / ref_image.max())**2).mean().item()
     assert distance < 3e-4, colored(f"validation failed with {distance=}", "red")
     print(colored(f"output validated with {distance=}", "green"))

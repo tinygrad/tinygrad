@@ -141,10 +141,10 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
   def _memory_barrier(self): self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
 
   def _exec(self, prg, args_state, global_size, local_size):
-    cmd_idx = len(self) - 1
-
     ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
-    self.cmd_idx_to_qmd[cmd_idx] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
+    assert qmd_addr < (1 << 40), f"large qmd addr {qmd_addr:x}"
+
+    self.cmd_idx_to_qmd[(cmd_idx := len(self) - 1)] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
     self.cmd_idx_to_local_dims[cmd_idx] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
 
@@ -312,10 +312,11 @@ class NVDevice(HCQCompiled):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1
-  gpus_info:Union[List, ctypes.Array] = []
-  signals_page:Any = None
+  gpus_info: Union[List, ctypes.Array] = []
+  signals_page: Any = None
   signals_pool: List[Any] = []
-  uvm_vaddr: int = 0x1000000000
+  low_uvm_vaddr: int = 0x1000000000 # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
+  uvm_vaddr: int = 0x2000000000 # 0x2000000000+
   host_object_enumerator: int = 0x1000
 
   def _new_gpu_fd(self):
@@ -344,7 +345,7 @@ class NVDevice(HCQCompiled):
              nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED))
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_USER, self.root, self.device, alloc_params).hObjectNew
 
-    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, alignment=align)
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, alignment=align, force_low=map_to_cpu)
     if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
     return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=map_to_cpu)
 
@@ -356,7 +357,7 @@ class NVDevice(HCQCompiled):
              nv_gpu.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED), format=6, size=size, alignment=(4<<10), offset=0, limit=size-1)
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_SYSTEM, self.root, self.device, alloc_params).hObjectNew
 
-    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, force_low=True)
     if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags, system=True)
 
     return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=map_to_cpu)
@@ -387,20 +388,22 @@ class NVDevice(HCQCompiled):
 
   def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False) -> nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS:
     if create_range: uvm.create_external_range(self.fd_uvm, base=va_base, length=size)
-    gpu_attrs = (nv_gpu.struct_c__SA_UvmGpuMappingAttributes*256)(
-      nv_gpu.struct_c__SA_UvmGpuMappingAttributes(gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuMappingType = 1))
+    attrs = (nv_gpu.struct_c__SA_UvmGpuMappingAttributes*256)(nv_gpu.struct_c__SA_UvmGpuMappingAttributes(gpuUuid=self.gpu_uuid, gpuMappingType=1))
 
     # NOTE: va_addr is set to make rawbufs compatable with HCQBuffer protocol.
     return uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
-      gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size, mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping)
+      gpuAttributesCount=1, perGpuAttributes=attrs, va_addr=va_base, size=size, mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping)
 
   def _gpu_map(self, mem):
     if self.gpu_uuid in mem.mapped_gpu_ids: return
     mem.mapped_gpu_ids.append(self.gpu_uuid)
     self._gpu_uvm_map(mem.va_addr, mem.size, mem.hMemory, create_range=False)
 
-  def _alloc_gpu_vaddr(self, size, alignment=(4 << 10)):
-    NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
+  def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
+    if force_low:
+      NVDevice.low_uvm_vaddr = (res_va:=round_up(NVDevice.low_uvm_vaddr, alignment)) + size
+      assert NVDevice.low_uvm_vaddr < 0x2000000000, "Exceed low vm addresses"
+    else: NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
     return res_va
 
   def _setup_nvclasses(self):
@@ -428,6 +431,7 @@ class NVDevice(HCQCompiled):
       raise RuntimeError(f"No device found for {device}. Requesting more devices than the system has?")
 
     self.gpu_info = rmctrl.gpu_get_id_info_v2(self.fd_ctl, self.root, self.root, gpuId=NVDevice.gpus_info[self.device_id].gpu_id)
+    self.gpu_minor = NVDevice.gpus_info[self.device_id].minor_number
     self.fd_dev = self._new_gpu_fd()
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.gpu_info.deviceInstance, hClientShare=self.root,
@@ -447,15 +451,14 @@ class NVDevice(HCQCompiled):
     vaspace = rm_alloc(self.fd_ctl, nv_gpu.FERMI_VASPACE_A, self.root, self.device, vaspace_params).hObjectNew
 
     raw_uuid = rmctrl.gpu_get_gid_info(self.fd_ctl, self.root, self.subdevice, flags=nv_gpu.NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_BINARY, length=16)
-    self.gpu_uuid = (ctypes.c_ubyte*16)(*[raw_uuid.data[i] for i in range(16)])
+    self.gpu_uuid = nv_gpu.struct_nv_uuid(uuid=(ctypes.c_ubyte*16)(*[raw_uuid.data[i] for i in range(16)]))
 
-    uvm.register_gpu(self.fd_uvm, rmCtrlFd=-1, gpu_uuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid))
-    uvm.register_gpu_vaspace(self.fd_uvm, gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), rmCtrlFd=self.fd_ctl,
-                             hClient=self.root, hVaSpace=vaspace)
+    uvm.register_gpu(self.fd_uvm, rmCtrlFd=-1, gpu_uuid=self.gpu_uuid)
+    uvm.register_gpu_vaspace(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl, hClient=self.root, hVaSpace=vaspace)
 
-    for dev in self.devices:
-      uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid),
-                                          gpuUuidB=nv_gpu.struct_nv_uuid(uuid=cast(NVDevice, dev).gpu_uuid))
+    for dev in cast(List[NVDevice], self.devices):
+      try: uvm.enable_peer_access(self.fd_uvm, gpuUuidA=self.gpu_uuid, gpuUuidB=dev.gpu_uuid)
+      except RuntimeError as e: raise RuntimeError(str(e) + f". Make sure GPUs #{self.gpu_minor} & #{dev.gpu_minor} have P2P enabled between.") from e
 
     if NVDevice.signals_page is None:
       NVDevice.signals_page = self._gpu_system_alloc(16 * 65536, map_to_cpu=True)
@@ -501,8 +504,8 @@ class NVDevice(HCQCompiled):
     ws_token_params = rmctrl.gpfifo_get_work_submit_token(self.fd_ctl, self.root, gpfifo, workSubmitToken=-1)
     assert ws_token_params.workSubmitToken != -1
 
-    channel_base = self._alloc_gpu_vaddr(0x4000000)
-    uvm.register_channel(self.fd_uvm, gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), rmCtrlFd=self.fd_ctl, hClient=self.root,
+    channel_base = self._alloc_gpu_vaddr(0x4000000, force_low=True)
+    uvm.register_channel(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl, hClient=self.root,
                          hChannel=gpfifo, base=channel_base, length=0x4000000)
 
     return GPFifo(ring=to_mv(gpfifo_area.va_addr + offset, entries * 8).cast("Q"), entries_count=entries, token=ws_token_params.workSubmitToken,

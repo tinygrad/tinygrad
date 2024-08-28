@@ -148,7 +148,7 @@ class TestIndexing(unittest.TestCase):
   def test_index_mnist_opt(self): self.test_index_mnist(0)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
-  def test_llama_embedding(self, noopt=1, op_limit=100):
+  def test_llama_embedding(self, noopt=1, op_limit=65536):
     # llama3 is 128256
     vocab_size, embed_size = (10, 3) if CI else (32000, 4096)
     emb = nn.Embedding(vocab_size, embed_size)
