@@ -141,7 +141,7 @@ class UOps(Enum):
     - Local LOAD: `Tuple[UOp, UOp, UOp]`
       - Buffer UOp `UOps.DEFINE_LOCAL`.
       - SHAPETRACKER UOp.
-      - Local UOps.STORE to the same Buffer. We will barrier this later.
+      - Local UOps.STORE to the same local buffer. We will barrier this later.
 
     The Lowerer replaces the SHAPETRACKER with an indexing uop and gates the LOAD if needed.
 
