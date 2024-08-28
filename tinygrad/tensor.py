@@ -1045,16 +1045,16 @@ class Tensor:
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
-        ret = v._broadcast_to(_broadcast_shape(ret.shape, v.shape))
+        v = v._broadcast_to(_broadcast_shape(ret.shape, v.shape))
         # add back reduced dims from sum
-        for dim in sum_axis: ret = ret.unsqueeze(dim)
+        for dim in sum_axis: v = v.unsqueeze(dim)
         # axis to be reduced to match self.shape
         axis = tuple(range(first_dim, first_dim + len(big_shape)))
-        # apply mask to ret(broadcasted) and reduce such that if ret contains repeated indices the last one remains
-        ret = ret * mask
-        for dim in axis: ret = functools.reduce(lambda x,y: y.where(y, x), ret.split(1, dim))
-        # reduce mask and select from ret(get rid of extra dims from reduce) for each True element in mask else select from self
-        ret = mask.any(axis).where(ret.squeeze(), self)
+        # apply mask to ret(broadcasted) and reduce such that if v contains repeated indices the last one remains
+        v = v * mask
+        for dim in axis: v = functools.reduce(lambda x,y: y.where(y, x), v.split(1, dim))
+        # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
+        ret = mask.any(axis).where(v.squeeze(), self)
 
     return ret
 
