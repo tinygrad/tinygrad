@@ -442,7 +442,7 @@ class UPat:
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
-  @property
+  @functools.cached_property
   def early_reject(self) -> Set[Tuple[UOps, Any]]:
     if self.custom_early_reject is not None: return self.custom_early_reject
     upat_match = [self.in_src] if isinstance(self.in_src, UPat) else ([] if self.in_src is None else self.src[0])
