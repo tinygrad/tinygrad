@@ -80,7 +80,7 @@ class QcomDevice(HCQCompiled):
     QcomDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
     info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0
     QcomDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
-    assert(QcomDevice.gpu_id < 700)
+    assert QcomDevice.gpu_id < 700
     QcomDevice.gpu_stack = self._gpu_alloc(0x1000000, kgsl.KGSL_MEMTYPE_CL_KERNEL_STACK << kgsl.KGSL_MEMTYPE_SHIFT)
 
     super().__init__(device, QcomAllocator(self), QCOMRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
@@ -196,16 +196,16 @@ class QcomComputeQueue(HWComputeQueue):
 
   def reg(self, reg: int, *vals: int): self.q += [pkt4_hdr(reg, len(vals)), *vals]
 
-  def _signal(self, signal, value=0):
+  def _signal(self, signal, value=0, ts=False):
     if QcomDevice.gpu_id < 700:
-      self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_FLUSH_TS | (0 if value else adreno.CP_EVENT_WRITE_0_TIMESTAMP),
-               *data64_le(mv_address(signal._signal) + (0 if value else 8)), value & 0xFFFFFFFF)
+      self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_FLUSH_TS | (0 if not ts else adreno.CP_EVENT_WRITE_0_TIMESTAMP),
+               *data64_le(mv_address(signal._signal) + (0 if not ts else 8)), value & 0xFFFFFFFF)
       self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_INVALIDATE)
     else:
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
       raise RuntimeError('CP_EVENT_WRITE7 is not supported')
 
-  def _timestamp(self, signal): return self._signal(signal, 0)
+  def _timestamp(self, signal): return self._signal(signal, 0, ts=True)
 
   def _wait(self, signal, value=0):
     self.cmd(adreno.CP_WAIT_REG_MEM, adreno.WRITE_GE | (adreno.POLL_MEMORY << adreno.CP_WAIT_REG_MEM_0_POLL__SHIFT),
