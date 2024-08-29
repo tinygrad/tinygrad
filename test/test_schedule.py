@@ -1676,7 +1676,7 @@ class TestScheduleRewrite(unittest.TestCase):
     expected_out = (a.numpy() + a.numpy().sum()).sum()
     np.testing.assert_equal(b.numpy(), expected_out)
 
-  def test_deep_reduceop_reshape(self):
+  def test_big(self):
     tms: List[float] = []
     sizes = [10*i for i in range(1,30 if getenv("BIG") else 15)]
     for sz in sizes:
