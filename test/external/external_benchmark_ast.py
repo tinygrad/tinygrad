@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.helpers import Context, getenv, to_function_name
+from tinygrad.helpers import DEBUG, Context, getenv, to_function_name
 from tinygrad.engine.schedule import _get_output_groups, _lower_lazybuffer
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import UOp, UOps
@@ -41,16 +41,17 @@ if __name__ == "__main__":
   kernel_tms: Dict[bytes, Tuple[UOp, float, float, List[LazyBuffer]]] = {k.key:(k, no_rewrite[i], rewrite[i], bufs[i]) for i,k in enumerate(asts)}
   pct_change: Dict[bytes, float] = {k:((x-y)/x)*100 for k,(_,x,y,_) in kernel_tms.items()}
   slowest_kernels = list(sorted(pct_change.items(), key=lambda x:x[1]))
-  names = {ast.key:Kernel(ast).name for ast,_,_,_ in kernel_tms.values()}
+  kernels = {ast.key:Kernel(ast).to_program() for ast,_,_,_ in kernel_tms.values()}
   print("slowest ast rewrites:")
   for k,pct in slowest_kernels[:10]:
     _, no_rw, rw, outs = kernel_tms[k]
-    print(f"{names[k]:10s}   {no_rw:4.2f} ms -> {rw:4.2f} ms {pct:4.2f}%")
+    print(f"{kernels[k].name:10s}   {no_rw:4.2f} ms -> {rw:4.2f} ms {pct:4.2f}%")
+    if DEBUG >= 4: print(kernels[k].src)
   with open("/tmp/kernel_tms", "wb") as f: pickle.dump(kernel_tms, f)
 
   if getenv("GRAPH_TIMING"):
     sample = slowest_kernels[:20]
-    x: List[str] = [to_function_name(names[k]) for k,_ in sample]
+    x: List[str] = [to_function_name(kernels[k].name) for k,_ in sample]
     y1, y2 = [kernel_tms[k][1] for k,_ in sample], [kernel_tms[k][2] for k,_ in sample]
     fig = go.Figure(data=[go.Bar(name="no graph_rewrite", x=x, y=y1, marker=dict(color="#524eed", line=dict(color='rgba(0,0,0,0)'))),
                           go.Bar(name="graph_rewrite", x=x, y=y2, marker=dict(color="#6fcf97", line=dict(color='rgba(0,0,0,0)')))])
