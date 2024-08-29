@@ -70,8 +70,8 @@ def vectorize_alu(vec:UOp):
                                              tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
 
 def vectorize_const(vec:UOp) -> UOp:
-  if all_same([x.arg for x in vec.src]): return UOp(UOps.CONST, vec.dtype, (), vec.src[0].arg)
-  return UOp(UOps.CONST, vec.dtype, (), tuple(x.arg for x in vec.src))
+  if all_same(ct:=tuple(x.arg for x in vec.src)): return UOp(UOps.CONST, vec.dtype, (), vec.src[0].arg)
+  return UOp(UOps.CONST, vec.dtype, (), ct)
 
 def fix_unfoldable_image_load(load:UOp, buf:UOp):
   if not isinstance(buf.dtype, ImageDType) or cast(DType, load.src[1].dtype).count == 2: return None
@@ -264,10 +264,7 @@ constant_folder = PatternMatcher([
   # a REDUCE without ranges is a NOOP
   (NOp(UOps.REDUCE, src=(NOp.var('x'),)), lambda x: x),
   # GEP on a const is the const
-  (NOp(UOps.GEP, src=(NOp.cvar("x"),), name="root"), lambda root,x: root.const(x.arg)),
-  # a conditional with the same results either way is a noop, also fold const conditionals
-  (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
-  (NOp.cvar('gate').where(NOp.var('c0'), NOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (NOp(UOps.GEP, src=(NOp.cvar("x"),), name="root"), lambda root,x: root.const(x.arg[root.arg]) if isinstance(x.arg, tuple) else root.const(x.arg)),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
@@ -277,8 +274,12 @@ constant_folder = PatternMatcher([
   (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
   (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
-  (NOp.var('x', dtype=dtypes.bool) & NOp.cvar('c'), lambda x,c: x if c.arg else c),
-  (NOp.var('x', dtype=dtypes.bool) | NOp.cvar('c'), lambda x,c: c if c.arg else x),
+  # a conditional with the same results either way is a noop
+  (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
+  # const selection
+  #(NOp.cvar('gate').where(NOp.var('c0'), NOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
+  #(NOp.var('x', dtype=dtypes.bool) & NOp.cvar('c'), lambda x,c: x if c.arg else c),
+  #(NOp.var('x', dtype=dtypes.bool) | NOp.cvar('c'), lambda x,c: c if c.arg else x),
   # ** zero folding **
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
@@ -398,7 +399,7 @@ def do_expand(root:UOp):
       if list(range(len(lst))) == lst:
         new_srcs.append(src.src[0])
       else:
-        raise Exception(f"unhandled {lst}")
+        new_srcs.append(UOp(UOps.VECTORIZE, root.dtype.vec(expand_sz), tuple(src.src[0].gep(l) for l in lst)))
     else:
       assert src.dtype.count == 1, f"this should be an expand {src.dtype}"
       if root.op in {UOps.LOAD, UOps.STORE} and i == 0:
