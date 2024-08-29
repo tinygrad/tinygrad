@@ -40,20 +40,218 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
-  # ops that aren't rendered
-  SINK = auto(); EXT = auto(); EXPAND = auto(); CONTRACT = auto(); SHAPETRACKER = auto(); SWIZZLE = auto()  # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
-  CONST = auto(); SPECIAL = auto() # noqa: E702
-  NOOP = auto(); GEP = auto() # noqa: E702
+  # uops that aren't rendered
+  SINK = auto()
+  """
+  Holds `UOps.STORE`. SINK defines the AST for a Kernel.
+
+  - **`dtype`**: `None`
+  - **`src`**: `Tuple[UOp, ...]`, Only global STOREs are allowed.
+  - **`arg`**: `Optional[KernelInfo]`
+
+  NOTE: `ScheduleItem` ASTs do not have the `KernelInfo` arg, `Kernel` inserts this to the SINK later.
+  """
+  EXT = auto()
+  """
+  Holds a single MetaOp. EXT UOps do not need a Kernel.
+
+  - **`dtype`**: Output DType
+  - **`src`**: `Tuple[]`
+  - **`arg`**: (`MetaOps.CUSTOM | MetaOps.COPY | MetaOps.EMPTY | MetaOps.VIEW`, LazyBuffer arg)
+  """
+  EXPAND = auto()
+  CONTRACT = auto()
+  SHAPETRACKER = auto()
+  """
+  Defines the ShapeTracker for a buffer UOp `UOps.LOAD`, `UOps.STORE` or `UOps.CONST`.
+
+  - **`dtype`**: `None`
+  - **`src`**: `Tuple[]`
+  - **`arg`**: `ShapeTracker`
+  """
+  SWIZZLE = auto()
+  """
+  Swizzle inserts a movement op between a UOp and its children. Because movement ops (reshape, expand, shrink, permute, pad) are not allowed in an AST,
+  the scheduler rewrites SWIZZLE by pushing its ShapeTracker through reduceops or elementwise ops to the edges of the graph.
+
+  Example:
+  ```python
+  a = Tensor.empty(32, 32)
+  first_reduce = a.sum()
+  output = (a + first_reduce).sum()
+  ```
+  `first_reduce` must broadcast to `(32, 32)` before ADD. We UOp this as:
+
+  ```
+  UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+    UOp(UOps.SWIZZLE, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=(
+      UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
+        UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+          x3:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+          UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),
+    UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+       x3,
+      UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),))
+  ```
+
+  The scheduler rewrites this by pushing the expand in SWIZZLE through the reduce, to the LOAD:
+
+  ```diff
+  UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+  -   UOp(UOps.SWIZZLE, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=(
+  -     UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
+  -       UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+  -         x3:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+  -         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),
+  +   UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (2, 3)), src=(
+  +     UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+  +       x2:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+  +       UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32, 32, 32), strides=(0, 0, 32, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+    UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+  -      x3,
+  -     UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),))
+  +      x2,
+  +     UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),)),))
+
+  ```
+
+  NOTE: Pushing a SWIZZLE through a reduce changes the axis.
+
+  NOTE: Pushing a SWIZZLE changes the output shape of that UOp. We have to reshape every other adjacent node. eg. reshape of the second LOAD to `(32, 32, 1, 1)` above.
+
+  - **`dtype`**: Output DType
+  - **`src`**: `Tuple[UOp]`, a single UOp to swizzle.
+  - **`arg`**: ShapeTracker
+  """ # noqa E501
+  DEFINE_GLOBAL = auto()
+  DEFINE_VAR = auto()
+  DEFINE_LOCAL = auto()
+  DEFINE_ACC = auto()
+  CONST = auto()
+  """
+  Defines a single scalar constant value.
+
+  - **`dtype`**: The scalar DType of the value.
+
+  - **`src`**:
+    The scheduler creates a CONST with a single SHAPETRACKER UOp src: `Tuple[UOp]`.
+
+    The Lowerer replaces the SHAPETRACKER with an empty src.
+    It uses the ShapeTracker valid to create a `WHERE` UOp mask with sources: `(The actual CONST UOp, CONST 0, 0.0 or False)`
+
+  - **`arg`**: The value.
+  """
+  SPECIAL = auto()
+  NOOP = auto()
+  GEP = auto()
   # math ops
-  CAST = auto(); BITCAST = auto(); VECTORIZE = auto() # noqa: E702
-  ALU = auto(); REDUCE = auto(); REDUCE_AXIS = auto(); WMMA = auto() # noqa: E702
+  CAST = auto()
+  """
+  - **`dtype`**: The casted scalar DType
+  - **`src`**: `Tuple[UOp]`
+  - **`arg`**: `None`
+  """
+  BITCAST = auto()
+  """
+  - **`dtype`**: The bitcasted scalar DType
+  - **`src`**: `Tuple[UOp]`
+  - **`arg`**: `None`
+  """
+  VECTORIZE = auto()
+  """
+  - **`dtype`**: The upcasted vector DType
+  - **`src`**: `Tuple[UOp, ...]`
+  - **`arg`**: `None`
+
+  NOTE: Length of sources must match `dtype.count`
+  """
+  ALU = auto()
+  """
+  - **`dtype`**: Output DType
+  - **`src`**: `Tuple[UOp] | Tuple[UOp, UOp] | Tuple[UOp, UOp, UOp]`
+  - **`arg`**: `UnaryOps | BinaryOps | TernaryOps`
+  """
+  REDUCE = auto()
+  REDUCE_AXIS = auto()
+  """
+  - **`dtype`**: Output DType
+  - **`src`**: Input to reduce `Tuple[UOp]`
+  - **`arg`**: `(BinaryOps.ADD | BinaryOps.MUL | BinaryOps.MAX, Tuple[int, ...])`
+  """
+  WMMA = auto()
   # memory/assignment ops
-  LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
+  LOAD = auto()
+  """
+  - **`dtype`**: Output DType
+  - **`src`**:
+
+    The scheduler and Kernel create LOADs with a SHAPETRACKER uop in src.
+
+    - Normal LOAD: `Tuple[UOp, UOp]`
+      - Buffer UOp `UOps.DEFINE_GLOBAL`.
+      - SHAPETRACKER UOp.
+
+    - Local LOAD: `Tuple[UOp, UOp, UOp]`
+      - Buffer UOp `UOps.DEFINE_LOCAL`.
+      - SHAPETRACKER UOp.
+      - Local UOps.STORE to the same local buffer. We will barrier this later.
+
+    The Lowerer replaces the SHAPETRACKER with an indexing uop and gates the LOAD if needed.
+
+    - Normal LOAD: `Tuple[UOp, UOp]`
+      - Buffer UOp `UOps.DEFINE_GLOBAL`.
+      - Indexing UOp, can only return `dtypes.int32`.
+    - Gated LOAD: `Tuple[UOp, UOp, UOp, UOp]`
+      - Buffer UOp `UOps.DEFINE_GLOBAL`.
+      - Indexing UOp, can only return `dtypes.int32`.
+      - Gate UOp, can only return `dtypes.bool`.
+      - Value if gate is `False`, can only be a `UOps.CONST` with arg 0, 0.0 or `False`.
+    - Barriered LOAD: `Tuple[UOp, UOp, UOp, UOp]`
+      - Buffer UOp `UOps.DEFINE_LOCAL`.
+      - Indexing UOp, can only return `dtypes.int32`.
+      - Gate UOp, can only return `dtypes.bool`.
+      - Barrier UOp `UOps.BARRIER`.
+  - **`arg`**: `None`
+  """
+  STORE = auto()
+  """
+  - **`dtype`**: `None`
+  - **`src`**:
+
+    Similar to LOAD, the scheduler and Kernel create STOREs with a SHAPETRACKER uop in src:
+
+    - Buffer UOp `UOps.DEFINE_GLOBAL` or `UOps.DEFINE_LOCAL`.
+    - SHAPETRACKER UOp.
+    - Value to store.
+
+    The Lowerer replaces the SHAPETRACKER with an indexing uop and gates the STORE if needed.
+
+    - Normal STORE: `Tuple[UOp, UOp, UOp]`
+      - Buffer UOp `UOps.DEFINE_GLOBAL` or `UOps.DEFINE_LOCAL`.
+      - Indexing Op, can only return `dtypes.int32`.
+      - Value to store.
+    - Gated STORE: `Tuple[UOp, UOp, UOp, UOp]`
+      - Buffer UOp `UOps.DEFINE_GLOBAL` or `UOps.DEFINE_LOCAL`.
+      - Indexing UOp, can only return `dtypes.int32`.
+      - Value to store.
+      - Gate UOp, can only return `dtypes.bool`.
+  - **`arg`**: `None`
+  """
+  PHI = auto()
   # control flow ops
-  BARRIER = auto(); IF = auto(); RANGE = auto() # noqa: E702
-  # these two are not graph nodes
-  ENDRANGE = auto(); ENDIF = auto() # noqa: E702
+  BARRIER = auto()
+  """
+  Inserts a warp sync between local stores and local loads.
+
+  - **`dtype`**: `None`
+  - **`src`**: `Tuple[UOp, ...]`, Only local STOREs are allowed.
+  - **`arg`**: `None`
+  """
+  IF = auto()
+  RANGE = auto()
+  # ops that are not graph nodes
+  ENDRANGE = auto()
+  ENDIF = auto()
 
 BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 

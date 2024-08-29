@@ -23,6 +23,7 @@ nav:
   - Developer:
     - Intro: developer/developer.md
     - Function (autodiff): developer/function.md
+    - UOp: developer/uop.md
     - Runtime:
       - developer/runtime.md
       - HCQ: developer/hcq.md
