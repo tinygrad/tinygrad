@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, \
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
                              GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
@@ -19,7 +19,6 @@ sys.setrecursionlimit(10000)
 # optionally log the ops to disk
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 # use graph rewrite for reduceop fusion
-AST_REWRITE = getenv("AST_REWRITE", 0)
 
 # *** ScheduleItem return type ***
 
@@ -221,7 +220,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
   ast: List[UOp] = []
   inputs: Dict[LazyBuffer, int] = {}
   for i, out in enumerate(outs):
-    output_shape = ShapeTracker.reduce(*deque(reduce_info.values(), 1).pop()) if reduce_info and not getenv("AST_REWRITE") else out.shape
+    output_shape = ShapeTracker.reduce(*deque(reduce_info.values(), 1).pop()) if reduce_info and not AST_REWRITE else out.shape
     output_st = ShapeTracker.from_shape(output_shape)
     src = _recursive_uop(out, output_st, tuple(outs), var_vals, inputs, realizes, assign_targets, reduce_info, cache=cache)
     if out.op is MetaOps.ASSIGN and out.arg:
@@ -312,11 +311,11 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
-def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
-  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
-        DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
-  """create a graph for realizing the outputs"""
+def _get_output_groups(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
+  Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # these are the output groups
+        Dict[LazyBuffer, None],                     # these are all the realizes in the graph
+        Dict[LazyBuffer, LazyBuffer]]:              # these are the buffers we ASSIGN to in this schedule
+  """find all the realizes in the graph, group the output LazyBuffers into kernels."""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
   allbufs: Dict[LazyBuffer, None] = {}
@@ -404,7 +403,14 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
         assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
         buf.buffer.dtype = dtypes.float32
         buf.buffer.options = None
+  return output_groups, realizes, assign_targets
 
+SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
+def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
+  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
+        DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
+  """create a graph for realizing the outputs"""
+  output_groups, realizes, assign_targets = _get_output_groups(outs, seen)
   # preschedule all buffers in realizes
   prescheduled = [_lower_lazybuffer(group, realizes) for group in output_groups.values()]
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
