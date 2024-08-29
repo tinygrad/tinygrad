@@ -67,7 +67,9 @@ class MetalGraph(GraphRunner):
     encoder.useResources_count_usage_(all_resources, len(all_resources), Metal.MTLResourceUsageRead | Metal.MTLResourceUsageWrite)
 
     # NOTE: the pipelines likely need to be added to the used resources to fix the crash on M1/M2, but I haven't figured out how
-    # this is a O(n) hack to get them used
+    # this is a O(n) hack to get them used. what should work is:
+    #encoder.useResources_count_usage_(self.all_pipelines, len(self.all_pipelines), Metal.MTLResourceUsageRead)
+    # but it fails with "Invalid Resource (00000009:kIOGPUCommandBufferCallbackErrorInvalidResource)"
     if getenv("FIX_METAL_ICB", 1):
       for ps in self.all_pipelines:
         encoder.setComputePipelineState_(ps)
