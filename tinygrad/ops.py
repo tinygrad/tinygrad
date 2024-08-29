@@ -46,7 +46,7 @@ class UOps(Enum):
   Holds `UOps.STORE`. SINK defines the AST for a Kernel.
 
   - **`dtype`**: `None`
-  - **`src`**: `Tuple[UOp, ...]`, Only local STOREs are allowed.
+  - **`src`**: `Tuple[UOp, ...]`, Only global STOREs are allowed.
   - **`arg`**: `Optional[KernelInfo]`
 
   NOTE: `ScheduleItem` ASTs do not have the `KernelInfo` arg, `Kernel` inserts this to the SINK later.
