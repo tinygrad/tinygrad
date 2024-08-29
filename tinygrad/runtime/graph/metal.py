@@ -70,6 +70,7 @@ class MetalGraph(GraphRunner):
     # this is a O(n) hack to get them used. what should work is:
     #encoder.useResources_count_usage_(self.all_pipelines, len(self.all_pipelines), Metal.MTLResourceUsageRead)
     # but it fails with "Invalid Resource (00000009:kIOGPUCommandBufferCallbackErrorInvalidResource)"
+    # to repro the crash (which can also crash other running GPU apps), run with FIX_METAL_ICB=0
     if getenv("FIX_METAL_ICB", 1):
       for ps in self.all_pipelines:
         encoder.setComputePipelineState_(ps)
