@@ -46,7 +46,7 @@ class UOps(Enum):
   Holds `UOps.STORE`. SINK defines the AST for a Kernel.
 
   - **`dtype`**: `None`
-  - **`src`**: `Tuple[UOp, ...]`, Only local STOREs are allowed.
+  - **`src`**: `Tuple[UOp, ...]`, Only global STOREs are allowed.
   - **`arg`**: `Optional[KernelInfo]`
 
   NOTE: `ScheduleItem` ASTs do not have the `KernelInfo` arg, `Kernel` inserts this to the SINK later.
@@ -70,6 +70,59 @@ class UOps(Enum):
   - **`arg`**: `ShapeTracker`
   """
   SWIZZLE = auto()
+  """
+  Swizzle inserts a movement op between a UOp and its children. Because movement ops (reshape, expand, shrink, permute, pad) are not allowed in an AST,
+  the scheduler rewrites SWIZZLE by pushing its ShapeTracker through reduceops or elementwise ops to the edges of the graph.
+
+  Example:
+  ```python
+  a = Tensor.empty(32, 32)
+  first_reduce = a.sum()
+  output = (a + first_reduce).sum()
+  ```
+  `first_reduce` must broadcast to `(32, 32)` before ADD. We UOp this as:
+
+  ```
+  UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+    UOp(UOps.SWIZZLE, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=(
+      UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
+        UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+          x3:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+          UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),
+    UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+       x3,
+      UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),))
+  ```
+
+  The scheduler rewrites this by pushing the expand in SWIZZLE through the reduce, to the LOAD:
+
+  ```diff
+  UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+  -   UOp(UOps.SWIZZLE, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=(
+  -     UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
+  -       UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+  -         x3:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+  -         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),
+  +   UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (2, 3)), src=(
+  +     UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+  +       x2:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+  +       UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32, 32, 32), strides=(0, 0, 32, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+    UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+  -      x3,
+  -     UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),))
+  +      x2,
+  +     UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),)),))
+
+  ```
+
+  NOTE: Pushing a SWIZZLE through a reduce changes the axis.
+
+  NOTE: Pushing a SWIZZLE changes the output shape of that UOp. We have to reshape every other adjacent node. eg. reshape of the second LOAD to `(32, 32, 1, 1)` above.
+
+  - **`dtype`**: Output DType
+  - **`src`**: `Tuple[UOp]`, a single UOp to swizzle.
+  - **`arg`**: ShapeTracker
+  """ # noqa E501
   DEFINE_GLOBAL = auto()
   DEFINE_VAR = auto()
   DEFINE_LOCAL = auto()
