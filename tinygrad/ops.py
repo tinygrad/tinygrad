@@ -587,6 +587,7 @@ def uop_alu_resolve(u:UOp) -> sint:
 # ***** uop type spec *****
 
 def type_verify(uops):
+  if not __debug__: return  # python -O sets __debug__ to False
   for u in uops:
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
     if uop is UOps.DEFINE_LOCAL: assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}"
