@@ -1678,7 +1678,8 @@ class TestScheduleRewrite(unittest.TestCase):
 
   def test_big(self):
     tms: List[float] = []
-    sizes = [10*i for i in range(1,30 if getenv("BIG") else 15)]
+    SZ = 31 if getenv("BIG") else 11
+    sizes = [10*i for i in range(1,SZ)]
     for sz in sizes:
       bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), i) for i in range(2)]
       ld = UOp(UOps.LOAD, dtypes.float, (bufs[1], ShapeTracker.from_shape((4, 4)).to_uop()))
@@ -1694,6 +1695,8 @@ class TestScheduleRewrite(unittest.TestCase):
       fig.update_layout(paper_bgcolor="black", plot_bgcolor="black", font={"color":"white"},
                         yaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"}, xaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"})
       fig.show()
+    change = tms[-1] / tms[0]
+    assert change <= SZ-1, f"bad complexity, time increased by {change:4.2f}x while input only grew {SZ-1}x"
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
