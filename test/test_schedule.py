@@ -3,9 +3,8 @@
 # NOTE: this has overlap with external_test_opt.py
 
 import unittest
-import time
 import numpy as np
-from typing import Dict, List, Optional, Union, cast
+from typing import List, Optional, Union, cast
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.dtype import PtrDType
@@ -13,11 +12,11 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import create_schedule, get_output_st, st_fixup, reduceop_fusor
+from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
-from test.helpers import is_dtype_supported, Context
+from test.helpers import is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
 
@@ -1609,40 +1608,80 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
 class TestScheduleRewrite(unittest.TestCase):
-  def test_recursive_get_output_st(self):
-    start = time.perf_counter()
-    a = Tensor([1,2,3,4]).realize()
-    for _ in range(24): a = a + a
-    ast = a.schedule()[0].ast
-    st = get_output_st(ast.src[0].src[2], {})
-    self.assertEqual(st, ShapeTracker.from_shape((4,)))
-    self.assertLess(time.perf_counter()-start, 1.0)
+  def setUp(self):
+    self.old_val = AST_REWRITE.value
+    AST_REWRITE.value = 1
+  def tearDown(self): AST_REWRITE.value = self.old_val
 
-  def test_recursive_reshape(self):
-    start = time.perf_counter()
+  def test_recursive_st_fixup(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     ast = a.schedule()[0].ast
-    new_uop = st_fixup(ast.src[0].src[2], lambda st:st.reshape((4, 1)), {}, {})
+    new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {}, {})
     self.assertEqual(get_output_st(new_uop, {}), ShapeTracker.from_shape((4,)).reshape((4, 1)))
-    self.assertLess(time.perf_counter()-start, 1.0)
+    self.assertLess(et, 1e3)
 
-  def test_uop_sts_reshape(self):
-    uop_sts: Dict[UOp, ShapeTracker] = {}
-    a = Tensor([1,2,3,4]).realize()+2
-    ast = a.schedule()[0].ast
-    val = ast.src[0].src[2]
-    ret = get_output_st(val, uop_sts)
-    assert uop_sts[val] == ret == ShapeTracker.from_shape((4,))
-    new_val = st_fixup(val, lambda st:st.reshape((4, 1)), uop_sts, {})
-    self.assertNotIn(new_val, uop_sts)
+  def test_no_rewrite_elementwise(self):
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(3)]
+    ld1 = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+    ld2 = UOp(UOps.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((32, 32)).to_uop()))
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape((32, 32)).to_uop(), ld1+ld2)),))
+    rsink = graph_rewrite(sink, reduceop_fusor)
+    self.assertEqual(rsink.key, sink.key)
 
-  def test_reshape_noop(self):
-    a = Tensor([1,2,3,4]).realize()+2
-    ast = a.schedule()[0].ast
-    val = ast.src[0].src[2]
-    new_val = st_fixup(val, lambda st:st.reshape((4,)), {}, {})
-    self.assertIs(new_val, val)
+  def test_simple_store_reshape(self):
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+    ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+    r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
+    rsink = graph_rewrite(sink, reduceop_fusor)
+    with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    verify_ast(rsink)
+
+  def test_no_reshape_reduceop(self):
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+    ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+    r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape((1, 1)).to_uop(), r)),))
+    rsink = graph_rewrite(sink, reduceop_fusor)
+    verify_ast(sink)
+    self.assertEqual(sink.key, rsink.key)
+
+  def test_reshape_many(self):
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+    ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+    r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    for _ in range(24): r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
+    rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
+    with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    verify_ast(rsink)
+    self.assertLessEqual(et, 1e3)
+
+  @unittest.expectedFailure
+  def test_complexity(self):
+    SZ = 30 if getenv("BIG") else 10
+    sizes = [10*(i+1) for i in range(SZ)]
+    tms: List[float] = []
+    for sz in sizes:
+      bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+      ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+      r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+      for _ in range(sz): r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+      sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
+      rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
+      with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+      verify_ast(rsink)
+      tms.append(et)
+    if getenv("GRAPH_TIMING"):
+      import plotly.express as px
+      fig = px.line(x=sizes, y=tms, title="graph_rewrite time as ast grows")
+      fig.update_layout(paper_bgcolor="black", plot_bgcolor="black", font={"color":"white"},
+                        yaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"}, xaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"})
+      fig.show()
+    change = tms[-1] / tms[0]
+    assert change <= SZ, f"bad complexity, time increased by {change:4.2f}x while input only grew {SZ}x"
 
   def test_swizzle_rewrite(self):
     # graph rewrite
