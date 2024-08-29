@@ -8,8 +8,7 @@ from tinygrad.renderer.cstyle import MetalRenderer
 
 def wait_check(cbuf: Any):
   cbuf.waitUntilCompleted()
-  if (error := cbuf.error()) is not None:
-    raise RuntimeError(error)
+  if (error := cbuf.error()) is not None: raise RuntimeError(error)
 
 class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]):
@@ -37,10 +36,88 @@ class MetalProgram:
         if ret:
           print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
     assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
+    import time
+    #st = time.perf_counter()
+
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
-    self.fxn = self.library.newFunctionWithName_(name)
-    self.pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
+    #print(dir(self.library))
+    #print(self.library)
+
+    #print(self.library.libraryData())
+
+
+    fxndescriptor = Metal.MTLFunctionDescriptor.new()
+    fxndescriptor.setName_(name)
+    fxndescriptor.setOptions_(Metal.MTLFunctionOptionCompileToBinary)
+    self.fxn = unwrap2(self.library.newFunctionWithDescriptor_error_(fxndescriptor, None))
+
+    #print(self.fxn.functionType())
+    #mt = time.perf_counter()
+    #print(dir(self.fxn))
+    #print(self.fxn)
+    #Metal.MTLBinaryArchive()
+
+    descriptor = Metal.MTLComputePipelineDescriptor.new()
+    descriptor.setComputeFunction_(self.fxn)
+    descriptor.setSupportIndirectCommandBuffers_(True)
+
+    #for k in dir(descriptor): print(k)
+
+    """
+    badescriptor = Metal.MTLBinaryArchiveDescriptor()
+    self.ba = unwrap2(self.device.device.newBinaryArchiveWithDescriptor_error_(badescriptor, None))
+    self.ba.addFunctionWithDescriptor_library_error_(fxndescriptor, self.library, None)
+    print(self.ba)
+
+    #print(dir(self.device.device))
+    #print(dir(self.ba))
+    self.ba.addComputePipelineFunctionsWithDescriptor_error_(descriptor, None)
+    print(dir(self.ba))
+    self.ba.materializeAll()
+    descriptor.setBinaryArchives_([self.ba])
+    self.pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithDescriptor_options_reflection_error_(
+      descriptor, Metal.MTLPipelineOption(Metal.MTLPipelineOptionFailOnBinaryArchiveMiss), None, None))
+    """
+
+    #for k in dir(self.device.device):
+    #  print(k)
+    #for k in dir(descriptor): print(k)
+
+    self.pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithDescriptor_options_reflection_error_(
+      descriptor, Metal.MTLPipelineOption(0), None, None))
+
+    #print(hex(id(self.pipeline_state)))
+    #print(self.pipeline_state)
+    #print(self.pipeline_state.gpuAddress())
+    print(self.pipeline_state.gpuAddress(), self.pipeline_state.allocatedSize(), self.pipeline_state.resourceIndex())
+    #for k in dir(self.pipeline_state): print(k)
+
+    #print(self.pipeline_state.gpuHandle())
+    #print(self.pipeline_state.gpuResourceID())
+    #print(self.pipeline_state.resourceIndex())
+    #for k in dir(self.pipeline_state):
+    #  print(k)
+    #for k in dir(self.library): print(k)
+    #print(self.pipeline_state.pipelineBinaries()['compute'][0])
+
+    
+    #print(dir(self.pipeline_state))
+    #self.pipeline_state_fxn = self.pipeline_state.functionHandleWithFunction_(self.fxn)
+    #print(self.pipeline_state_fxn)
+
+
+    #et = time.perf_counter()
+    #print((et-mt)*1000, (mt-st)*1000)
+    #print(self.pipeline_state.gpuResourceID())
+    #print(self.pipeline_state.gpuAddress())
+    #print(self.pipeline_state.gpuHandle())
+    #print(dir(self.pipeline_state))
+    #print(self.pipeline_state)
+    #print(self.pipeline_state.pipelineBinaries())
+    #rsrc = self.pipeline_state.pipelineBinaries()['compute'][0]
+    #print(dir(rsrc))
+    #print(rsrc)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if prod(local_size) > self.pipeline_state.maxTotalThreadsPerThreadgroup(): raise RuntimeError(f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}")  # noqa: E501
@@ -57,18 +134,24 @@ class MetalProgram:
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     self.device.mtl_buffers_in_flight.append(command_buffer)
 
+all_time = []
 class MetalBuffer:
-  def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
+  def __init__(self, buf:Any, size:int, offset=0):
+    all_time.append(self)
+    self.buf, self.size, self.offset = buf, size, offset
 
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
     self.device:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
+    print(f"alloc {size}")
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
-  def _free(self, opaque:MetalBuffer, options): opaque.buf.release()
+  def _free(self, opaque:MetalBuffer, options):
+    #opaque.buf.release()
+    pass
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer()
@@ -95,8 +178,11 @@ class MetalAllocator(LRUAllocator):
   def copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)
   def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
+import mlx.core as mx
 class MetalDevice(Compiled):
   def __init__(self, device:str):
+    #mx.metal.start_capture("mlx_trace_new_mb2.gputrace")
+
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
@@ -110,6 +196,8 @@ class MetalDevice(Compiled):
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
                      functools.partial(MetalProgram, self), MetalGraph)
+
+  #def __del__(self): mx.metal.stop_capture()
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()

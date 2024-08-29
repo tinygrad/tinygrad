@@ -26,12 +26,12 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   def flush_batch():
     nonlocal current_batch, current_device, max_batch_size
     try:
-      if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
+      #if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
       graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
       graphed_jit_cache.append(ExecItem(graph_runner, cast(List[Optional[Buffer]], input_rawbuffers)))
-      max_batch_size *= 2
+      #max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
       graphed_jit_cache.extend(current_batch)
@@ -159,8 +159,8 @@ class CapturedJit(Generic[ReturnType]):
 
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self._jit_cache, input_buffers, var_vals)
-      self._input_replace = get_input_replace(self._jit_cache, input_buffers)
+      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals)
+      self._input_replace = get_input_replace(self.jit_cache, input_buffers)
       self._graphed = True
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
