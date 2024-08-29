@@ -52,7 +52,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
     offset += v.nbytes()
   j = json.dumps(headers, separators=(',', ':'))
   j += "\x20"*((8-len(j)%8)%8)
-  assert Device[f"disk:{fn}"].allocator.device.count == 0, f"Different tensors have disk device 'disk:{fn}' open"
+  assert Device[f"disk:{fn}"].count == 0, f"Different tensors have disk device 'disk:{fn}' open"
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:8].bitcast(dtypes.int64).assign([len(j)])
