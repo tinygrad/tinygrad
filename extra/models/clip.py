@@ -108,7 +108,7 @@ class Tokenizer:
       self.cache[token] = word
       return word
 
-    def encode(self, text:str, pad_with_zeros:bool=False):
+    def encode(self, text:str, pad_with_zeros:bool=False) -> List[int]:
       bpe_tokens: List[int] = []
       text = Tokenizer.whitespace_clean(text.strip()).lower()
       for token in re.findall(self.pat, text):
@@ -123,7 +123,7 @@ class Tokenizer:
 class Embedder(ABC):
   input_key: str
   @abstractmethod
-  def __call__(self, text:str) -> Union[Tensor,Tuple[Tensor,...]]:
+  def __call__(self, x:Union[str,List[str],Tensor]) -> Union[Tensor,Tuple[Tensor,...]]:
     pass
 
 
@@ -222,9 +222,11 @@ class FrozenClosedClipEmbedder(Embedder):
     self.transformer = Closed.ClipTextModel(ret_layer_idx)
     self.input_key   = "txt"
 
-  def __call__(self, text:str) -> Union[Tensor,Tuple[Tensor,...]]:
-    tokens = Tensor(self.tokenizer.encode(text))
-    return self.transformer.text_model(tokens.reshape(1,-1))
+  def __call__(self, texts:Union[str,List[str],Tensor]) -> Union[Tensor,Tuple[Tensor,...]]:
+    if isinstance(texts, str): texts = [texts]
+    assert isinstance(texts, (list,tuple)), f"expected list of strings, got {type(texts).__name__}"
+    tokens = Tensor.cat(*[Tensor(self.tokenizer.encode(text)) for text in texts], dim=0)
+    return self.transformer.text_model(tokens.reshape(len(texts),-1))
 
 
 class Open:
@@ -378,8 +380,10 @@ class FrozenOpenClipEmbedder(Embedder):
     else:
       return penultimate
 
-  def __call__(self, text:str) -> Union[Tensor,Tuple[Tensor,...]]:
-    tokens = self.tokenize(text)
+  def __call__(self, texts:Union[str,List[str],Tensor]) -> Union[Tensor,Tuple[Tensor,...]]:
+    if isinstance(texts, str): texts = [texts]
+    assert isinstance(texts, (list,tuple)), f"expected list of strings, got {type(texts).__name__}"
+    tokens = Tensor.cat(*[self.tokenize(text) for text in texts], dim=0)
     return self.embed_tokens(tokens)
 
 
