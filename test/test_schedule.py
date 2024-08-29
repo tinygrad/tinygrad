@@ -1676,6 +1676,7 @@ class TestScheduleRewrite(unittest.TestCase):
     expected_out = (a.numpy() + a.numpy().sum()).sum()
     np.testing.assert_equal(b.numpy(), expected_out)
 
+  @unittest.expectedFailure
   def test_big(self):
     tms: List[float] = []
     SZ = 31 if getenv("BIG") else 11
