@@ -33,6 +33,117 @@ class TestTinygrad(unittest.TestCase):
     val2 = a.numpy()
     np.testing.assert_allclose(val1, val2)
 
+  def test_setitem(self):
+    t = Tensor.zeros((5, 5)).contiguous()
+    t[1:3, 1:3] = 1
+    expected = np.array([[0, 0, 0, 0, 0],
+                         [0, 1, 1, 0, 0],
+                         [0, 1, 1, 0, 0],
+                         [0, 0, 0, 0, 0],
+                         [0, 0, 0, 0, 0]])
+    np.testing.assert_array_equal(t.numpy(), expected)
+
+  def test_setitem_3d(self):
+    t = Tensor.zeros((5, 5, 5)).contiguous()
+    t[:, 1:3, 1:3] = 1
+    expected = np.repeat([[[0, 0, 0, 0, 0],
+                         [0, 1, 1, 0, 0],
+                         [0, 1, 1, 0, 0],
+                         [0, 0, 0, 0, 0],
+                         [0, 0, 0, 0, 0]]],axis=0, repeats=5)
+    np.testing.assert_array_equal(t.numpy(), expected)
+
+  @unittest.expectedFailure
+  def test_setitem_float(self):
+    t = Tensor.zeros((5, 5)).contiguous()
+    t[:, :3.5] = 1
+
+  def test_setitem_integer_tensor(self):
+    t = Tensor.zeros((5, 5)).contiguous()
+    indices = Tensor([0, 2, 4]).int()
+    t[indices] = 1
+    expected = np.array([[1, 1, 1, 1, 1],
+                         [0, 0, 0, 0, 0],
+                         [1, 1, 1, 1, 1],
+                         [0, 0, 0, 0, 0],
+                         [1, 1, 1, 1, 1]])
+    np.testing.assert_array_equal(t.numpy(), expected)
+
+  @unittest.expectedFailure
+  def test_setitem_float_tensor(self):
+    t = Tensor.zeros((5, 5)).contiguous()
+    indices = Tensor([0, 2, 4.5], dtype=dtypes.float)
+    t[indices] = 1
+
+  def test_mixed_setitem(self):
+    t = Tensor.zeros((5, 5)).contiguous()
+    indices = Tensor([0, 2, 4]).int()
+    t[1:4, indices] = 1
+    expected = np.array([[0, 0, 0, 0, 0],
+                         [1, 0, 1, 0, 1],
+                         [1, 0, 1, 0, 1],
+                         [1, 0, 1, 0, 1],
+                         [0, 0, 0, 0, 0]])
+    np.testing.assert_array_equal(t.numpy(),expected)
+
+  def test_setitem_mixed_setitem_with_step(self):
+    t = Tensor.zeros((5, 5)).contiguous()
+    indices = Tensor([0, 2, 4]).int()
+    t[:4:2, indices] = 1
+    expected = np.array([[1, 0, 1, 0, 1],
+                         [0, 0, 0, 0, 0],
+                         [1, 0, 1, 0, 1],
+                         [0, 0, 0, 0, 0],
+                         [0, 0, 0, 0, 0]])
+    np.testing.assert_array_equal(t.numpy(),expected)
+
+  def test_setitem_list_of_list(self):
+    t = Tensor.zeros((5, 5)).contiguous()
+    indices = [[1]]
+    t[indices] = 1
+    expected = np.array([[0, 0, 0, 0, 0],
+                         [1, 1, 1, 1, 1],
+                         [0, 0, 0, 0, 0],
+                         [0, 0, 0, 0, 0],
+                         [0, 0, 0, 0, 0]])
+    np.testing.assert_array_equal(t.numpy(),expected)
+
+  def test_setitem_broadcasting(self):
+    t = Tensor.zeros((5, 5)).contiguous()
+    values = Tensor([1, 2, 3, 4, 5])
+    t[:, 1] = values
+    expected = np.array([[0, 1, 0, 0, 0],
+                         [0, 2, 0, 0, 0],
+                         [0, 3, 0, 0, 0],
+                         [0, 4, 0, 0, 0],
+                         [0, 5, 0, 0, 0]])
+    np.testing.assert_array_equal(t.numpy(), expected)
+
+  def test_setitem_broadcasting_row(self):
+    t = Tensor.zeros((5, 5)).contiguous()
+    t[2, :] = Tensor([1, 2, 3, 4, 5])
+    expected = np.array([[0, 0, 0, 0, 0],
+                         [0, 0, 0, 0, 0],
+                         [1, 2, 3, 4, 5],
+                         [0, 0, 0, 0, 0],
+                         [0, 0, 0, 0, 0]])
+    np.testing.assert_array_equal(t.numpy(), expected)
+
+  def test_setitem_broadcasting_scalar(self):
+    t = Tensor.zeros(5, 5).contiguous()
+    t[:, 0] = 7
+    expected = np.array([[7, 0, 0, 0, 0],
+                         [7, 0, 0, 0, 0],
+                         [7, 0, 0, 0, 0],
+                         [7, 0, 0, 0, 0],
+                         [7, 0, 0, 0, 0]])
+    np.testing.assert_array_equal(t.numpy(), expected)
+
+  @unittest.expectedFailure
+  def test_setitem_non_contiguous(self):
+    t = Tensor.randn(5, 5).permute(1, 0)
+    t[2:4, 2:4] = 1
+
   def test_backward_pass(self):
     def test_tinygrad():
       x = Tensor(x_init, requires_grad=True)

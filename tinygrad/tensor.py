@@ -1045,7 +1045,7 @@ class Tensor:
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
     return ret
 
-  def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
+  def __setitem__(self, indices: Union[Tuple[Union[slice,Tensor,int,list], ...], Tensor, int], v:Union[Tensor, ConstType]) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.__getitem__(indices).assign(v)
       return
@@ -1055,8 +1055,30 @@ class Tensor:
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, list)) for i in indices)):
-      raise NotImplementedError("Advanced indexing setitem is not currently supported")
-
+      if isinstance(indices, Tensor): indices = (indices,)
+      if len(indices) == 1 and isinstance(idx:=indices[0], (Tensor, list)):
+        if not isinstance(idx, Tensor): idx = Tensor(idx)
+        if not dtypes.is_int(idx.dtype): raise ValueError(f"can't index with float index {idx.numpy()}")
+        if len(self.shape) > 1:
+          idx = idx.reshape(-1, 1) * self.shape[1] + Tensor.arange(self.shape[1], device=self.device)
+          idx = idx.reshape(-1)
+        mask = idx.one_hot(cast(int, self.numel())).sum(axis=0).reshape(self.shape)
+      else:
+        mask = Tensor.ones(self.shape, device=self.device, dtype=self.dtype)
+        for dim, index in enumerate(indices):
+          if isinstance(index, slice):
+            start, stop, step = index.indices(cast(int, self.shape[dim]))
+            trange = Tensor.arange(self.shape[dim], device=self.device)
+            temp_mask = (trange >= start) * (trange < stop)
+            if step != 1:
+              temp_mask *= ((d:=(trange - start)) // step) * step == d
+          elif isinstance(index, Tensor):
+            temp_mask = Tensor.zeros(self.shape[dim], device=self.device).contiguous()
+            temp_mask[index] = 1
+          mask *= temp_mask.reshape([s if i == dim else 1 for i, s in enumerate(self.shape)])
+      if v.shape != mask.shape: v = v.expand(mask.shape)
+      self.assign(mask.where(v, self))
+      return
     assign_to = self.realize().__getitem__(indices)
     # NOTE: contiguous to prevent const folding.
     v = v.cast(assign_to.dtype)._broadcast_to(_broadcast_shape(assign_to.shape, v.shape)).contiguous()
