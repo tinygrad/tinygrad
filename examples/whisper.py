@@ -21,6 +21,7 @@ class CrossAttention:
     self.max_self_attn_cache_len = max_self_attn_cache_len
 
   def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[Variable,int]=None):
+    bs = x.shape[0]
 
     if not hasattr(self, 'qkv'):
       self.qkv = nn.Linear(1,1)
@@ -130,6 +131,16 @@ class TextDecoder:
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
+  
+  def debatch(self, target:int):
+    assert target in [0,1]
+    for block in self.blocks:
+      for attn in [block.attn, block.cross_attn]:
+        attn.cache_k.assign(block.attn.cache_k.shrink(((target, target+1), None, None)).realize())
+        attn.cache_v.assign(block.attn.cache_v.shrink(((target, target+1), None, None)).realize())
+        
+        print(attn.cache_k.shape)
+
 
 class Whisper:
   def __init__(self, dims, batch_size=1):
@@ -294,8 +305,11 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
     encoded_audio = model.encoder.encode(audio)
 
     if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
-    else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
-    yield [arr[np.where(arr == start_tokens[-1])[0][0]+1:np.where(arr == eot)[0][0]] for arr in ctx[:len(waveforms)]]
+    else:
+      ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
+      model.decoder.debatch(0)
+      raise StopIteration
+    yield [arr[np.where(arr == start_tokens[-1])[0][0]+1:eoti[0] if len (eoti:=np.where(arr == eot)[0]) else None] for arr in ctx[:len(waveforms)]]
     ctx = [[special('startofprev')]+gettexttoks(cs)+start_tokens for cs in ctx]
 
 
@@ -315,8 +329,11 @@ def listener(q):
 
 if __name__ == "__main__":
   model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=getenv("BATCH", 1))
-  def timestring(s): return f'{int(s//60//60)}:{int(s//60%60)}:{int(s%60)}'
+  def timestring(s): return f'{int(s//60//60):02d}:{int(s//60%60):02d}:{int(s%60):02d}'
   if len(sys.argv) > 1:
+
+    outfile = sys.argv[2] if len(sys.argv) > 2 else None
+    fout = open(outfile, 'w') if outfile else sys.stdout
 
     filename = fetch(sys.argv[1]) if sys.argv[1].startswith("http") else sys.argv[1]
     waves = [load_file_waveform(filename, i*360) for i in range(model.batch_size)]
@@ -326,20 +343,31 @@ if __name__ == "__main__":
     avg_speed = None
     beamval = BEAM.value
     BEAM.value = 0
-    for frame, lines in enumerate(transcribe_waveform(model, enc, waves, use_timestamps=use_timestamps)):
-      if frame==3: BEAM.value=beamval
-      for i,line in enumerate(lines):
-        if use_timestamps:
-          for text, start, end in parse_timestamps(line, enc, frame*30.): print(f'[{timestring(start)} - {timestring(end)}] {text}')
-        else: print(enc.decode(line))
-        print('//')
+    try:
+      for frame, lines in enumerate(transcribe_waveform(model, enc, waves, use_timestamps=use_timestamps)):
+        print(f'frame{frame}')
+        if frame==3: BEAM.value=beamval
+        for i,line in enumerate(lines):
+          if use_timestamps:
+            # for text, start, end in parse_timestamps(line, enc, frame*30.): print(f'[{timestring(start)} - {timestring(end)}] {text}')
+            for text, start, end in parse_timestamps(line, enc, frame*30.): fout.write(f'[{timestring(start)} - {timestring(end)}] {text}\n')
+          # else: print(enc.decode(line))
+          else: fout.write(enc.decode(line)+'\n')
+          fout.write('//\n')
 
-      dur = time.perf_counter()-st
-      st = time.perf_counter()
-      speed = 30/dur*len(waves)
-      avg_speed = (avg_speed or speed)*0.9 + speed*0.1
-      print(colored(f"inference duration: {dur:.2f}s, {speed:.2f}x realtime, {avg_speed:.2f}x roll. avg", 'green' if speed>10 else 'red'))
-      if frame == 20: break
+        dur = time.perf_counter()-st
+        st = time.perf_counter()
+        speed = 30/dur*len(waves)
+        avg_speed = (avg_speed or speed)*0.9 + speed*0.1
+        fout.write(f"inference duration: {dur:.2f}s, {speed:.2f}x realtime, {avg_speed:.2f}x roll. avg\n")
+        fout.flush()
+        # if frame == 20: break
+    except Exception as e:
+      fout.write(str(e)+'\n')
+      fout.write(colored(f"inference duration: {dur:.2f}s, {speed:.2f}x realtime, {avg_speed:.2f}x roll. avg", 'green' if speed>10 else 'red')+'\n')
+      if fout != sys.stdout: fout.close()
+      raise e
+    if fout != sys.stdout: fout.close()
 
   else:
     # online
