@@ -1677,7 +1677,7 @@ class TestScheduleRewrite(unittest.TestCase):
     np.testing.assert_equal(b.numpy(), expected_out)
 
   @unittest.expectedFailure
-  def test_big(self):
+  def test_rewrite_complexity(self):
     tms: List[float] = []
     SZ = 31 if getenv("BIG") else 11
     sizes = [10*i for i in range(1,SZ)]
