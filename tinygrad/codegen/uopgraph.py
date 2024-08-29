@@ -308,7 +308,7 @@ constant_folder = PatternMatcher([
    newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
   # ** mod **
   # mod folding
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  #(NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
   # (x%c)+(x//c)*c = x
@@ -398,7 +398,7 @@ def do_expand(root:UOp):
       if list(range(len(lst))) == lst:
         new_srcs.append(src.src[0])
       else:
-        raise Exception("unhandled")
+        raise Exception(f"unhandled {lst}")
     else:
       assert src.dtype.count == 1, f"this should be an expand {src.dtype}"
       if root.op in {UOps.LOAD, UOps.STORE} and i == 0:
@@ -452,7 +452,7 @@ def do_contract(con:UOp):
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   srcs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
-    lsrcs = [ex.src[_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})] for lrpk in _choices_from_args(con.arg)]
+    lsrcs = [ex.src[0].gep(_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})) for lrpk in _choices_from_args(con.arg)]
     srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(lsrcs)))
   return srcs[0] if len(srcs) == 1 else UOp(UOps.EXPAND, con.dtype, tuple(srcs), new_ex_args)
 
