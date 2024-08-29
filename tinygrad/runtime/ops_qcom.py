@@ -29,6 +29,7 @@ def parse_cl_lib(lib: bytes, name:str):
   ptr = struct.unpack("I", lib[0x110:0x114])[0] # read img desc offset
   prg_offset = struct.unpack("I", lib[ptr+196:ptr+200])[0]
   branch_stack = struct.unpack("I", lib[ptr+264:ptr+268])[0]
+  shmem = struct.unpack("I", lib[ptr+0xd8:ptr+0xdc])[0]
   ptr = round_up(ptr + 344 + len(name), 4) + 8 * struct.unpack("I", lib[ptr+220:ptr+224])[0] # skip to bufs descr, align name, skip samplers
 
   while (ptr + 16 <= len(lib)):
@@ -49,7 +50,7 @@ def parse_cl_lib(lib: bytes, name:str):
   ptr = struct.unpack("I", lib[0x34:0x38])[0] # read main offset
   fullreg, hlfreg = struct.unpack("II", lib[ptr+20:ptr+28])
 
-  return image_offset, image_size, prg_offset, buffs_info, consts_info, hlfreg, fullreg, branch_stack
+  return image_offset, image_size, prg_offset, buffs_info, consts_info, hlfreg, fullreg, branch_stack, shmem
 
 class QcomCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
@@ -273,7 +274,8 @@ class QcomComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
              (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT) | (prg.hlfreg << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT)
              | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT) | (prg.branch_stack << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
-             adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6 | (1 << adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE__SHIFT), 0,
+             adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6
+             | (max(1, (prg.shmem - 1) // 1024) << adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE__SHIFT), 0,
              prg.prg_offset, *data64_le(prg.lib_gpu.va_addr), (1 << adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT),
              *data64_le(QcomDevice.gpu_stack.va_addr), (0x300 << adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
@@ -338,7 +340,7 @@ class QcomProgram(HCQProgram):
     self.device, self.name, self.lib = device, name, lib
 
     image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.hlfreg, self.fullreg, \
-      self.branch_stack = parse_cl_lib(self.lib, self.name)
+      self.branch_stack, self.shmem = parse_cl_lib(self.lib, self.name)
     image = bytearray(lib[image_offset:image_offset+self.image_size])
 
     # reserve some space after for gpu to use
