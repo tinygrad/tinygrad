@@ -74,6 +74,13 @@ class TestGraphRewriteConst(unittest.TestCase):
     self.assertEqual(ret.dtype, dtypes.int)
     self.assertEqual(ret.arg, 1)
 
+  def test_gep_const_single(self):
+    v1 = UOp.const(dtypes.int.vec(3), 4)
+    v2 = v1.gep(1)
+    ret = graph_rewrite(v2, constant_folder)
+    self.assertEqual(ret.dtype, dtypes.int)
+    self.assertEqual(ret.arg, 4)
+
   def test_add_const(self):
     v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
     v2 = UOp.const(dtypes.int.vec(3), (5,6,7))

@@ -65,6 +65,12 @@ class UOp:
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  def __post_init__(self):
+    if type(self) == UOp:
+      if self.op is UOps.VECTORIZE:
+        assert len(self.src) > 0
+      if self.op is UOps.GEP:
+        assert self.dtype.count == 1
   def commutative(self) -> bool:
     return (self.op is UOps.ALU and \
       self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
@@ -318,6 +324,7 @@ class TrackedPattenMatcher(PatternMatcher):
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
         if TRACK_MATCH_STATS >= 2: print(f"{et*1e6:7.2f} us -- ", p.printable())
+        assert ret.dtype is None or uop.dtype.count == ret.dtype.count, f"dtype count {uop.dtype} != {ret.dtype}, mismatch {p.printable()}"
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None

@@ -270,10 +270,18 @@ constant_folder = PatternMatcher([
   # ** self folding **
   (NOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (NOp.var('x') * 1, lambda x: x),    # x*1 -> x
-  (NOp.var('x') // NOp.var('x'), lambda x: x.const(1)), # x//x -> 1
   (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
+  (NOp.var('x') // NOp.var('x'), lambda x: x.const(1)), # x//x -> 1
   (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
+  # ** complex self folding **
+  (NOp.var('x')%NOp.cvar('c')+(NOp.var('x')//NOp.cvar('c'))*NOp.cvar('c'), lambda x,c: x), # (x%c)+(x//c)*c = x
+  ((NOp.var("x") * NOp.var("x2")) / NOp.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
+  # ** other folding **
+  (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)), # -(x+y) -> -x + -y
+  (NOp.var("x") + NOp.var("x") * NOp.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
+  (NOp.var("x") + NOp.var("x"), lambda x: x*2), # (x+x)-> x*2
+  ((NOp.var("x") / NOp.var("x2")) / NOp.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x1)/x2 -> x/(x1*x2)
   # a conditional with the same results either way is a noop
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
   # const selection
@@ -286,7 +294,7 @@ constant_folder = PatternMatcher([
   # NOTE: this can be wrong for loaded NaN
   (NOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # min==max -> CONST (slow!)
-  (UPat({UOps.ALU, UOps.DEFINE_VAR}, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
+  #(UPat({UOps.ALU, UOps.DEFINE_VAR}, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
   # ** load/store folding **
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.load(NOp.var("buf"), NOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
@@ -295,45 +303,33 @@ constant_folder = PatternMatcher([
   # *** rules from symbolic ***
   # ** lt **
   # c0*x<c1 for positive int c0,c1
-  ((NOp.cvar('c0')*NOp.var('x')).lt(NOp.cvar('c1')),
-   lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if dtypes.is_int(x.dtype) and c0.arg > 0 and c1.arg > 0 else None),
+  #((NOp.cvar('c0')*NOp.var('x')).lt(NOp.cvar('c1')),
+  # lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if dtypes.is_int(x.dtype) and c0.arg > 0 and c1.arg > 0 else None),
   # mul add lt
-  (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
-   lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
+  #(((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
+  # lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
   # generic lt folding (use div)
-  (NOp.var('x').lt(NOp.cvar('c')), lambda x,c: newx.src[0].lt(newx.src[1]) if 0 < c.arg and dtypes.is_int(x.dtype) and \
-   not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV else None),
+  #(NOp.var('x').lt(NOp.cvar('c')), lambda x,c: newx.src[0].lt(newx.src[1]) if 0 < c.arg and dtypes.is_int(x.dtype) and \
+  # not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV else None),
   # ** div **
   # # div folding
-  (NOp.var('x') // NOp.cvar('c'), lambda x,c:
-   newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
+  #(NOp.var('x') // NOp.cvar('c'), lambda x,c:
+  # newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
   # ** mod **
   # mod folding
   #(NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # mul mod
-  ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
-  # (x%c)+(x//c)*c = x
-  (NOp.var('x')%NOp.cvar('c')+(NOp.var('x')//NOp.cvar('c'))*NOp.cvar('c'), lambda x,c: x),
+  #((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
   # ** combine terms **
-  # -(x+y) -> -x + -y
-  (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
-  # (x+c0)*c1 -> x*c1+c0*c1. only for signed int, float have inf*0=nan issue
-  ((NOp.var("x") + NOp.cvar("c0")) * NOp.cvar("c1"), lambda x,c0,c1:
-   x*c1+c0.arg*c1.arg if dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
-  # (x*c0)+(x*c1) -> x*(c0+c1)
-  (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  # (x+x*c)-> x*(c+1)
-  (NOp.var("x") + NOp.var("x") * NOp.cvar("c"), lambda x,c: x*(c.arg+1)),
-  # (x+x)-> x*2
-  (NOp.var("x") + NOp.var("x"), lambda x: x*2),
   # (x*c0)+(y*c0) -> (x+y)*c0
   #((NOp.var("x") * NOp.cvar("c0")) + (NOp.var("y") * NOp.cvar("c0")), lambda x,y,c0: c0*(x+y)),
-  # (x*x2)/x2 -> x
-  ((NOp.var("x") * NOp.var("x2")) / NOp.var("x2"), lambda x,x2: x),
+  # (x+c0)*c1 -> x*c1+c0*c1. only for signed int, float have inf*0=nan issue
+  ((NOp.var("x") + NOp.cvar("c0")) * NOp.cvar("c1"), lambda x,c0,c1:
+   x*c1+c0*c1 if dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
+  # (x*c0)+(x*c1) -> x*(c0+c1)
+  (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
   # (x//c0)//c1 -> x//(c0*c1)
   ((NOp.var("x") // NOp.cvar("c0")) // NOp.cvar("c1"), lambda x,c0,c1: x//x.const(exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
-  # (x/x1)/x2 -> x/(x1*x2)
-  ((NOp.var("x") / NOp.var("x2")) / NOp.var("x3"), lambda x,x2,x3: x/(x2*x3)),
   # c0 + x < c1 -> x < c1 - c0
   ((NOp.cvar("c0") + NOp.var("x")).lt(NOp.cvar("c1")), lambda x,c0,c1: UOp.lt(x, x.const(exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, -c0.arg])))),
   # x!=0 -> (bool)x
@@ -399,7 +395,8 @@ def do_expand(root:UOp):
       if list(range(len(lst))) == lst:
         new_srcs.append(src.src[0])
       else:
-        new_srcs.append(UOp(UOps.VECTORIZE, root.dtype.vec(expand_sz), tuple(src.src[0].gep(l) for l in lst)))
+        vec = tuple(src.src[0].gep(l) for l in lst)
+        new_srcs.append(UOp(UOps.VECTORIZE, vec[0].dtype.vec(expand_sz), vec))
     else:
       assert src.dtype.count == 1, f"this should be an expand {src.dtype}"
       if root.op in {UOps.LOAD, UOps.STORE} and i == 0:
