@@ -21,15 +21,15 @@ if __name__ == "__main__":
       if lsi.ast.op is UOps.EXT: continue
       raw_sinks.append(lsi.ast)
 
-  rewrite_tms: Dict[bytes, Tuple[UOp, float]] = {}
-  for sink in raw_sinks:
+  rewrite_tms: Dict[bytes, Tuple[UOp, int, float]] = {}
+  for i,sink in enumerate(raw_sinks):
     st = time.perf_counter_ns()
     sink = graph_rewrite(sink, reduceop_fusor)
     et = time.perf_counter_ns()-st
-    rewrite_tms[sink.key] = (sink, (et*1e-6))
+    rewrite_tms[sink.key] = (sink, i, (et*1e-6))
   rewrite_tms = dict(sorted(rewrite_tms.items(), reverse=True, key=lambda x:x[1][1]))
 
-  for sink,tm in list(rewrite_tms.values())[:5]:
+  for sink,i,tm in list(rewrite_tms.values())[:1]:
     p = Kernel(sink).to_program()
-    print(f"{p.name} {tm:4.2f} ms")
+    print(f"{i} {p.name} {tm:4.2f} ms")
     print(p.src)
