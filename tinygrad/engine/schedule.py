@@ -138,10 +138,8 @@ def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> Optional[ShapeTra
   if (st:=uop_sts.get(uop)): return st
   if uop.op in BUFFER_UOPS: return uop.st_arg
   src_sts: List[ShapeTracker] = []
-  for x in uop.src:
-    xst = get_output_st(x, uop_sts)
-    if xst is None or (src_sts and xst.shape != src_sts[0].shape): return None
-    src_sts.append(xst)
+  src_sts = [xst for x in uop.src if (xst:=get_output_st(x, uop_sts)) is not None]
+  if len(src_sts) != len(uop.src) or not all_same([x.shape for x in src_sts]): return None
   uop_sts[uop] = st = ShapeTracker.from_shape(src_sts[0].reduce(uop.arg[1])) if uop.op is UOps.REDUCE_AXIS else src_sts[0]
   return st
 
