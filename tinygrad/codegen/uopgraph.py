@@ -233,9 +233,6 @@ constant_folder = PatternMatcher([
   # arange loop folding (reduce)
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") - NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
-   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
-   lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # arange loop folding (unrolled)
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)) + NOp.var("extra"),),
@@ -262,6 +259,8 @@ constant_folder = PatternMatcher([
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
+  # cast NOOP (NOTE: it's str to deal with PtrDType)
+  (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (NOp(UOps.REDUCE, src=(NOp.var('x'),)), lambda x: x),  # a REDUCE without ranges is a NOOP
   (NOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (NOp.var('x') * 1, lambda x: x),    # x*1 -> x
@@ -323,9 +322,6 @@ constant_folder = PatternMatcher([
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("gate").where(NOp.var("alt"), NOp.load(NOp.var("buf"), NOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
-  # cast NOOP (NOTE: it's str to deal with PtrDType)
-  (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
-  (NOp(UOps.VECTORIZE, src=(NOp.var("root_src"),), name="root"), lambda root, root_src: root_src if str(root.dtype) == str(root_src.dtype) else None),
   # fold gated LOAD/STORE
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True)), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True), NOp.var("barrier")),
