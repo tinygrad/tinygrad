@@ -1,6 +1,6 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
@@ -147,9 +147,9 @@ def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], uop_sts:
   if (st:=uop_sts.get(u)) and st == apply_to_st(st): return u
   if u.op is UOps.SHAPETRACKER:
     new_st = apply_to_st(u.arg)
-    return u if u.arg == new_st else replace(u, arg=new_st)
+    return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, None, (), new_st)
   new_srcs = tuple(st_fixup(x, apply_to_st, uop_sts, cache) for x in u.src)
-  cache[u] = ret = u if new_srcs == u.src else replace(u, src=new_srcs)
+  cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
   return ret
 
 def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
