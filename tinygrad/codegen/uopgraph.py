@@ -496,7 +496,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
   return sink
 
-def linearize_uop(sink:UOp, skip_check:bool=False) -> List[UOp]:
+def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
   # filter nodes that don't link to a sink
   # BFS toposort

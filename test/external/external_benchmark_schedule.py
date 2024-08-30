@@ -39,7 +39,7 @@ if __name__ == "__main__":
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):
           with Timing("***** model rewrite in   "): uops = [full_graph_rewrite(u, k.opts) for u in uops]
         if getenv("LINEARIZE", 1):
-          with Timing("***** model linearize in "): uops = [linearize_uop(u, skip_check=False) for u in uops]
+          with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
           print(sum(len(u) for u in uops))
           if getenv("GRAPHUOPS", 0):
             for u in uops:
