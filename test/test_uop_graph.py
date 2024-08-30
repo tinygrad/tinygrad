@@ -185,6 +185,7 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
+  @unittest.skip("this test isn't valid uops")
   def test_noop_vectorize_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0)
     idx = UOp.const(dtypes.int, 0)

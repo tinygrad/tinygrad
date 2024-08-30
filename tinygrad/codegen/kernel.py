@@ -754,7 +754,7 @@ class Kernel:
 
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{getenv('GITHUB_RUN_ATTEMPT')}"
-      diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+      diskcache_put(table_name, str(id(self)), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
