@@ -7,7 +7,7 @@ import math
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
   half = dim // 2
-  freqs = (-math.log(max_period) * Tensor.arange(half) / half).exp()
+  freqs = (-math.log(max_period) * Tensor.arange(half, device=timesteps.device) / half).exp()
   args = timesteps.unsqueeze(1) * freqs.unsqueeze(0)
   return Tensor.cat(args.cos(), args.sin(), dim=-1).cast(dtypes.float16)
 
