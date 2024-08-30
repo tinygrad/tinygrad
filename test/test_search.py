@@ -282,3 +282,6 @@ class TestTimeProgram(unittest.TestCase):
     self.assertGreaterEqual(factor, 1)
     self.assertLessEqual(
         reduce(lambda a, b: a*b, result_size), max_global_size)
+
+if __name__ == '__main__':
+  unittest.main()
