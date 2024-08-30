@@ -19,7 +19,6 @@ from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass, field
 from functools import reduce
 
-
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
     si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is UOps.SINK][0]
@@ -166,7 +165,6 @@ class MockProgram:
   dname: str
   uops: list = None
   globals: list = field(default_factory=list)
-
 
 class MockDevice:
   def __init__(self, has_invalidate=True):
