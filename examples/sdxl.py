@@ -338,7 +338,7 @@ class DPMPP2MSampler:
     return x, denoised
 
   def __call__(self, denoiser, x:Tensor, c:Dict, uc:Dict, num_steps:int, timing=False) -> Tensor:
-    sigmas = self.discretization(num_steps)
+    sigmas = self.discretization(num_steps).to(x.device)
     x *= Tensor.sqrt(1.0 + sigmas[0] ** 2.0)
     num_sigmas = len(sigmas)
 
