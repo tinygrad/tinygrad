@@ -3,7 +3,7 @@ from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import OSX, cpu_time_execution, DEBUG, cpu_objdump, mv_address
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.autogen import libc, mac
+from tinygrad.runtime.autogen import libc
 
 class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
@@ -29,7 +29,7 @@ class ClangProgram:
     addr = libc.mmap(0, len(image), mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_ANON | mmap.MAP_PRIVATE, -1, 0)
     assert addr != 0xffffffffffffffff
     ctypes.memmove(addr, mv_address(image), len(image))
-    if OSX: mac.sys_icache_invalidate(addr, len(image))
+    if OSX: libc.sys_icache_invalidate(addr, len(image))
     assert libc.mprotect(addr, len(image), mmap.PROT_READ | mmap.PROT_EXEC) != 0xffffffffffffffff
     self.fxn = ctypes.CFUNCTYPE(None)(addr)
 

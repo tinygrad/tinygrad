@@ -4401,6 +4401,27 @@ try:
     getentropy.argtypes = [ctypes.POINTER(None), size_t]
 except AttributeError:
     pass
+_OS_CACHE_CONTROL_H_ = True # macro
+kCacheFunctionPrepareForExecution = 1 # macro
+kCacheFunctionFlushDcache = 2 # macro
+try:
+    sys_cache_control = _libraries['libc'].sys_cache_control
+    sys_cache_control.restype = ctypes.c_int32
+    sys_cache_control.argtypes = [ctypes.c_int32, ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    sys_icache_invalidate = _libraries['libc'].sys_icache_invalidate
+    sys_icache_invalidate.restype = None
+    sys_icache_invalidate.argtypes = [ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    sys_dcache_flush = _libraries['libc'].sys_dcache_flush
+    sys_dcache_flush.restype = None
+    sys_dcache_flush.argtypes = [ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
 __all__ = \
     ['AT_BASE', 'AT_BASE_PLATFORM', 'AT_CLKTCK', 'AT_DCACHEBSIZE',
     'AT_EGID', 'AT_ENTRY', 'AT_EUID', 'AT_EXECFD', 'AT_EXECFN',
@@ -5402,17 +5423,17 @@ __all__ = \
     'Val_GNU_MIPS_ABI_FP_DOUBLE', 'Val_GNU_MIPS_ABI_FP_MAX',
     'Val_GNU_MIPS_ABI_FP_OLD_64', 'Val_GNU_MIPS_ABI_FP_SINGLE',
     'Val_GNU_MIPS_ABI_FP_SOFT', 'Val_GNU_MIPS_ABI_FP_XX', 'W_OK',
-    'X_OK', '_ELF_H', '_POSIX2_C_BIND', '_POSIX2_C_DEV',
-    '_POSIX2_C_VERSION', '_POSIX2_LOCALEDEF', '_POSIX2_SW_DEV',
-    '_POSIX2_VERSION', '_POSIX_VERSION', '_SYSCALL_H', '_SYS_MMAN_H',
-    '_UNISTD_H', '_XOPEN_ENH_I18N', '_XOPEN_LEGACY', '_XOPEN_UNIX',
-    '_XOPEN_VERSION', '_XOPEN_XCU_VERSION', '_XOPEN_XPG2',
-    '_XOPEN_XPG3', '_XOPEN_XPG4', '__POSIX2_THIS_VERSION',
-    '__environ', '__getpgid', '__gid_t', '__gid_t_defined',
-    '__intptr_t_defined', '__mode_t_defined', '__need_NULL',
-    '__need_size_t', '__off_t', '__off_t_defined', '__pid_t',
-    '__pid_t_defined', '__socklen_t_defined', '__ssize_t_defined',
-    '__uid_t', '__uid_t_defined', '__useconds_t',
+    'X_OK', '_ELF_H', '_OS_CACHE_CONTROL_H_', '_POSIX2_C_BIND',
+    '_POSIX2_C_DEV', '_POSIX2_C_VERSION', '_POSIX2_LOCALEDEF',
+    '_POSIX2_SW_DEV', '_POSIX2_VERSION', '_POSIX_VERSION',
+    '_SYSCALL_H', '_SYS_MMAN_H', '_UNISTD_H', '_XOPEN_ENH_I18N',
+    '_XOPEN_LEGACY', '_XOPEN_UNIX', '_XOPEN_VERSION',
+    '_XOPEN_XCU_VERSION', '_XOPEN_XPG2', '_XOPEN_XPG3', '_XOPEN_XPG4',
+    '__POSIX2_THIS_VERSION', '__environ', '__getpgid', '__gid_t',
+    '__gid_t_defined', '__intptr_t_defined', '__mode_t_defined',
+    '__need_NULL', '__need_size_t', '__off_t', '__off_t_defined',
+    '__pid_t', '__pid_t_defined', '__socklen_t_defined',
+    '__ssize_t_defined', '__uid_t', '__uid_t_defined', '__useconds_t',
     '__useconds_t_defined', '_exit', 'access', 'acct', 'alarm', 'brk',
     'c__Ea_Val_GNU_MIPS_ABI_FP_ANY', 'chdir', 'chown', 'chroot',
     'close', 'closefrom', 'confstr', 'crypt', 'daemon', 'dup', 'dup2',
@@ -5423,17 +5444,18 @@ __all__ = \
     'getentropy', 'geteuid', 'getgid', 'getgroups', 'gethostid',
     'gethostname', 'getlogin', 'getlogin_r', 'getpagesize', 'getpass',
     'getpgid', 'getpgrp', 'getpid', 'getppid', 'getsid', 'getuid',
-    'getusershell', 'getwd', 'gid_t', 'intptr_t', 'isatty', 'lchown',
-    'link', 'linkat', 'lockf', 'lseek', 'madvise', 'mincore', 'mlock',
-    'mlockall', 'mmap', 'mode_t', 'mprotect', 'msync', 'munlock',
-    'munlockall', 'munmap', 'nice', 'off_t', 'pathconf', 'pause',
-    'pid_t', 'pipe', 'posix_madvise', 'pread', 'profil', 'pwrite',
-    'read', 'readlink', 'readlinkat', 'revoke', 'rmdir', 'sbrk',
-    'setdomainname', 'setegid', 'seteuid', 'setgid', 'sethostid',
-    'sethostname', 'setlogin', 'setpgid', 'setpgrp', 'setregid',
-    'setreuid', 'setsid', 'setuid', 'setusershell', 'shm_open',
-    'shm_unlink', 'size_t', 'sleep', 'socklen_t', 'ssize_t',
-    'struct_c__SA_Elf32_Chdr', 'struct_c__SA_Elf32_Dyn',
+    'getusershell', 'getwd', 'gid_t', 'intptr_t', 'isatty',
+    'kCacheFunctionFlushDcache', 'kCacheFunctionPrepareForExecution',
+    'lchown', 'link', 'linkat', 'lockf', 'lseek', 'madvise',
+    'mincore', 'mlock', 'mlockall', 'mmap', 'mode_t', 'mprotect',
+    'msync', 'munlock', 'munlockall', 'munmap', 'nice', 'off_t',
+    'pathconf', 'pause', 'pid_t', 'pipe', 'posix_madvise', 'pread',
+    'profil', 'pwrite', 'read', 'readlink', 'readlinkat', 'revoke',
+    'rmdir', 'sbrk', 'setdomainname', 'setegid', 'seteuid', 'setgid',
+    'sethostid', 'sethostname', 'setlogin', 'setpgid', 'setpgrp',
+    'setregid', 'setreuid', 'setsid', 'setuid', 'setusershell',
+    'shm_open', 'shm_unlink', 'size_t', 'sleep', 'socklen_t',
+    'ssize_t', 'struct_c__SA_Elf32_Chdr', 'struct_c__SA_Elf32_Dyn',
     'struct_c__SA_Elf32_Ehdr', 'struct_c__SA_Elf32_Lib',
     'struct_c__SA_Elf32_Move', 'struct_c__SA_Elf32_Nhdr',
     'struct_c__SA_Elf32_Phdr', 'struct_c__SA_Elf32_RegInfo',
@@ -5454,9 +5476,11 @@ __all__ = \
     'struct_c__SA_Elf_Options', 'struct_c__SA_Elf_Options_Hw',
     'struct_c__UA_Elf32_gptab_gt_entry',
     'struct_c__UA_Elf32_gptab_gt_header', 'symlink', 'symlinkat',
-    'sync', 'syscall', 'sysconf', 'tcgetpgrp', 'tcsetpgrp',
-    'truncate', 'ttyname', 'ttyname_r', 'ttyslot', 'ualarm', 'uid_t',
-    'union_c__SA_Elf32_Dyn_d_un', 'union_c__SA_Elf32_auxv_t_a_un',
-    'union_c__SA_Elf64_Dyn_d_un', 'union_c__SA_Elf64_auxv_t_a_un',
-    'union_c__UA_Elf32_gptab', 'unlink', 'unlinkat', 'useconds_t',
-    'usleep', 'vfork', 'vhangup', 'write']
+    'sync', 'sys_cache_control', 'sys_dcache_flush',
+    'sys_icache_invalidate', 'syscall', 'sysconf', 'tcgetpgrp',
+    'tcsetpgrp', 'truncate', 'ttyname', 'ttyname_r', 'ttyslot',
+    'ualarm', 'uid_t', 'union_c__SA_Elf32_Dyn_d_un',
+    'union_c__SA_Elf32_auxv_t_a_un', 'union_c__SA_Elf64_Dyn_d_un',
+    'union_c__SA_Elf64_auxv_t_a_un', 'union_c__UA_Elf32_gptab',
+    'unlink', 'unlinkat', 'useconds_t', 'usleep', 'vfork', 'vhangup',
+    'write']
