@@ -359,35 +359,24 @@ class QcomArgsState(HCQArgsState):
 
     if len(bufs) + len(vals) != len(prg.buffs_info): raise RuntimeError(f'incorrect args size given={len(bufs)} != want={len(prg.buffs_info)}')
     self.boffs, self.aoffs = self.prg.buffs_info[:len(bufs)], self.prg.buffs_info[len(bufs):]
-
     for i, v in enumerate(vals): self.update_var(i, v)
+    for cnst_val, cnst_off, cnst_sz in self.prg.consts_info:
+      ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
 
-    samplers, descriptors, ibos = [], [], []
+    samplers, descriptors, ibos, self.i2descr, self.i2ibo = [], [], [], {}, {}
     for i, b in enumerate(bufs):
       if not hasattr(b, 'samplers') and not hasattr(b, 'descriptor') and not hasattr(b, 'ibo'): self.update_buffer(i, b)
       else:
-        if self.boffs[i][1]: ibos += [*b.ibo]
-        else:
-          samplers += [*b.samplers]
-          descriptors += [*b.descriptor]
+        if self.boffs[i][1]: ibos, self.i2ibo = [*ibos, *b.ibo], {**self.i2ibo, i: len(ibos)}
+        else: samplers, descriptors, self.i2descr = [*samplers, *b.samplers], [*descriptors, *b.descriptor], {**self.i2descr, i: len(descriptors)}
 
-    if len(samplers):
-      samplers = array.array('I', samplers)
-      self.samplers_ptr, self.samplers_cnt = prg.device._gpu_alloc(len(samplers) * 4, map_to_cpu=True), len(samplers) // 4
-      ctypes.memmove(self.samplers_ptr.va_addr, mv_address(memoryview(samplers)), len(samplers) * 4)
+    def alloc_tex_gpu(data, chunk_size):
+      to_mv((ptr:=prg.device._gpu_alloc(len(data) * 4, map_to_cpu=True)).va_addr, len(data) * 4).cast('I')[:] = array.array('I', data)
+      return ptr, len(data) // chunk_size
 
-    if len(descriptors):
-      descriptors = array.array('I', descriptors)
-      self.descriptors_ptr, self.descriptors_cnt = prg.device._gpu_alloc(len(descriptors) * 4, map_to_cpu=True), len(descriptors) // 16
-      ctypes.memmove(self.descriptors_ptr.va_addr, mv_address(memoryview(descriptors)), len(descriptors) * 4)
-
-    if len(ibos):
-      ibos = array.array('I', ibos)
-      self.ibos_ptr, self.ibos_cnt = prg.device._gpu_alloc(len(ibos) * 4, map_to_cpu=True), len(ibos) // 16
-      ctypes.memmove(self.ibos_ptr.va_addr, mv_address(memoryview(ibos)), len(ibos) * 4)
-
-    for cnst_val, cnst_off, cnst_sz in self.prg.consts_info:
-      ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
+    if len(samplers): self.samplers_ptr, self.samplers_cnt = alloc_tex_gpu(samplers, 4)
+    if len(descriptors): self.descriptors_ptr, self.descriptors_cnt = alloc_tex_gpu(descriptors, 16)
+    if len(ibos): self.ibos_ptr, self.ibos_cnt = alloc_tex_gpu(ibos, 16)
 
   def __del__(self):
     self.prg.device.synchronize()
@@ -395,28 +384,9 @@ class QcomArgsState(HCQArgsState):
     if hasattr(self, 'descriptors_ptr'): self.prg.device._gpu_free(self.descriptors_ptr)
     if hasattr(self, 'ibos_ptr'): self.prg.device._gpu_free(self.ibos_ptr)
 
-  # don't forget to updte samplers, descriptors and ibos
-  def update_buffer(self, index:int, buf:HCQBuffer): ctypes.cast(self.ptr + self.boffs[index][0], ctypes.POINTER(ctypes.c_int64))[0] = buf.va_addr
+  def update_buffer(self, index:int, buf:HCQBuffer):
+    if (descr:=self.i2descr.get(index, None)) != None: to_mv(self.descriptors_ptr + 16 * descr + 4 * 4, 8).cast('I')[:] = data64_le(buf.va_addr)
+    elif (ibo:=self.i2ibo.get(index, None)) != None: to_mv(self.ibos_ptr + 16 * ibo + 4 * 4, 8).cast('I')[:] = data64_le(buf.va_addr)
+    else: ctypes.cast(self.ptr + self.boffs[index][0], ctypes.POINTER(ctypes.c_int64))[0] = buf.va_addr
+
   def update_var(self, index:int, val:int): ctypes.cast(self.ptr + self.aoffs[index][0], ctypes.POINTER(ctypes.c_int32))[0] = val
-
-if __name__ == '__main__':
-  from tinygrad import Tensor, dtypes
-
-  # this works
-  def test1():
-    data = Tensor.ones(9 * 27 * 4).realize()
-    numpy_data = data.numpy()
-    print("Original Tensor:", numpy_data)
-    image_data = data.cast(dtypes.imagef((9, 27, 4))).realize()
-    print("New Tensor:", image_data.numpy())
-
-  # this does not
-  def test2():
-    data = Tensor.randn(9 * 27 * 4).realize()
-    numpy_data = data.numpy()
-    print("Original Tensor:", numpy_data)
-    image_data = data.cast(dtypes.imagef((9, 27, 4))).realize()
-    print("New Tensor:", image_data.numpy())
-
-  test1()
-  test2()
