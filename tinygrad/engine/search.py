@@ -34,24 +34,44 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, factor
 
-def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:List[Buffer], early_stop:Optional[float]=None,
-                  max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> List[float]:
+def _time_program(p: Program, lib: bytes, var_vals: Dict[Variable, int], rawbufs: List[Buffer],
+                  early_stop: Optional[float] = None, max_global_size: Optional[int] = 65536,
+                  clear_l2: bool = False, cnt: int = 3, name: str = "test") -> List[float]:
+  # Adjust global size if necessary
   factor = 1
   if p.global_size is not None and max_global_size is not None:
-    global_size, factor = _get_test_global_size(p.global_size, max_global_size, var_vals)
-    p = replace(p, global_size=global_size)
+    p, factor = _adjust_global_size(p, max_global_size, var_vals)
+
+  # Compile program
   try: car = CompiledRunner(p, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
-  tms = []
+
+  # Prepare input buffers
   input_bufs = [rawbufs[i] for i in car.p.globals]
+  tms = []
   for _ in range(cnt):
-    if clear_l2:
-      if hasattr(dev:=Device[p.dname], 'invalidate_caches'): dev.invalidate_caches()
-      else:
-        with Context(DEBUG=0, BEAM=0, CAPTURING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
-    tms.append(cast(float, car(input_bufs, var_vals, wait=True))*factor)
-    if early_stop is not None and early_stop < min(tms): break
+    _clear_caches_if_needed(p, clear_l2)
+    execution_time = _run_and_time(car, input_bufs, var_vals) * factor
+    tms.append(execution_time)
+    if early_stop is not None and min(tms) > early_stop:
+      break
+
   return tms
+
+def _adjust_global_size(p: Program, max_global_size: int, var_vals: Dict[Variable, int]) -> Tuple[Program, int]:
+  global_size, factor = _get_test_global_size(p.global_size, max_global_size, var_vals)
+  return replace(p, global_size=global_size), factor
+
+def _clear_caches_if_needed(p: Program, clear_l2: bool):
+  if clear_l2:
+    dev = Device[p.dname]
+    if hasattr(dev:=Device[p.dname], 'invalidate_caches'): dev.invalidate_caches()
+    else:
+      with Context(DEBUG=0, BEAM=0, CAPTURING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
+
+def _run_and_time(car: CompiledRunner, input_bufs: List[Buffer], var_vals: Dict[Variable, int]) -> float:
+  return cast(float, car(input_bufs, var_vals, wait=True))
+
 
 class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
@@ -175,6 +195,7 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True,
 
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
   if BEAM_DEBUG: print(f"BEAM_SEARCH: final tm={beam[0][1]*1e6:0.2f} us, applied_opts={beam[0][0].applied_opts}")
+  # from pdb import set_trace; set_trace()
   return beam[0][0]
 
 def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buffer]) -> List[int]:
