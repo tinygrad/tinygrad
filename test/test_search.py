@@ -174,7 +174,6 @@ class MockDevice:
   def _invalidate_caches(self):
     pass
 
-
 class TestTimeProgram(unittest.TestCase):
   def setUp(self):
     self.mock_compiled_runner = Mock(spec=CompiledRunner)
@@ -227,7 +226,6 @@ class TestTimeProgram(unittest.TestCase):
   def test_time_program_clear_cache_with_invalidate(self):
     self._test_time_program_clear_cache(True, True)
 
-  # probablamatic test
   def test_time_program_clear_cache_without_invalidate(self):
     self._test_time_program_clear_cache(True, False)
 

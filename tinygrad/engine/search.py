@@ -72,7 +72,6 @@ def _clear_caches_if_needed(p: Program, clear_l2: bool):
 def _run_and_time(car: CompiledRunner, input_bufs: List[Buffer], var_vals: Dict[Variable, int]) -> float:
   return cast(float, car(input_bufs, var_vals, wait=True))
 
-
 class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
 
