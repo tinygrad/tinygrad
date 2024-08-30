@@ -9,7 +9,7 @@ class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     triple = f"{platform.machine()}-none-unknown-elf"
     asm = subprocess.check_output(['clang', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-S', '-ffreestanding', '-nostdlib', '-target',
-                                   triple, '-fno-jump-tables', '-fno-math-errno', '-', '-o', '-'], input=src.encode('utf-8'))
+                                   triple, '-fno-jump-tables', '-fno-math-errno', '-fPIC', '-', '-o', '-'], input=src.encode('utf-8'))
     lines, data, func = asm.decode('utf-8').split('\n'), [], []
     for l in lines:
       if '.globl' in l: func.append(l)
