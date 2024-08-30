@@ -27,7 +27,7 @@ class ClangGraph(GraphRunner):
         else:
           args.append(f"({render_dtype(buf.dtype)}*)0x{ctypes.addressof(buf._buf):X}")
       args += [x.expr for x in cast(CompiledRunner, ji.prg).p.vars]
-      code.append(f"  {cast(CompiledRunner, ji.prg).p.function_name}({','.join(args)});")
+      code.append(f"  [[clang::always_inline]] {cast(CompiledRunner, ji.prg).p.function_name}({','.join(args)});")
     code.append("}")
     if DEBUG >= 4: print("\n".join(code))
     compiler = Device["CLANG"].compiler
