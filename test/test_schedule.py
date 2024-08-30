@@ -1330,6 +1330,28 @@ class TestConvBW(unittest.TestCase):
     np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
 
+  def test_fold_conv_relu_backward_ast_rewrite(self):
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
+
+    # run
+    c1(img).relu().mean().backward()
+    assert img.grad is not None and c1.weight.grad is not None
+    with Context(AST_REWRITE=1):
+      self.check_schedule([img.grad, c1.weight.grad], 4)
+
+    # compare
+    import torch
+    c1_torch = torch.nn.Conv2d(3,16,3, bias=False)
+    c1_torch.weight.requires_grad = True
+    c1_torch.weight = torch.nn.Parameter(torch.tensor(c1.weight.numpy(), dtype=torch.float32))
+    img_torch = torch.tensor(img.numpy(), requires_grad=True)
+    c1_torch(img_torch).relu().mean().backward()
+    assert img_torch.grad is not None and c1_torch.weight.grad is not None
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
+
   @unittest.expectedFailure
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_fold_conv_relu_backward_half(self):
