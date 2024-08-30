@@ -223,20 +223,6 @@ generate_libc() {
   fixup $BASE/libc.py
 }
 
-generate_macho() {
-  if [ "$(uname)" != "Darwin" ]; then
-    echo "Must be Darwin to generate mach-o stubs. Skipping generation."
-    return
-  fi
-
-  clang2py -k cdefstum \
-    $(xcrun -sdk / -show-sdk-path)/usr/include/mach-o/loader.h \
-    -o $BASE/macho.py
-
-  fixup $BASE/macho.py
-  python3 -c "import tinygrad.runtime.autogen.macho"
-}
-
 generate_mac() {
   if [ "$(uname)" != "Darwin" ]; then
     echo "Must be Darwin to generate macos libc stubs. Skipping generation."
@@ -268,7 +254,6 @@ elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
-elif [ "$1" == "macho" ]; then generate_macho
 elif [ "$1" == "mac" ]; then generate_mac
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
 else echo "usage: $0 <type>"
