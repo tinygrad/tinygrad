@@ -12,6 +12,13 @@ from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from unittest.mock import Mock, patch
+from tinygrad.engine.search import _time_program, _get_test_global_size
+from tinygrad.engine.realize import CompiledRunner
+from tinygrad.shape.symbolic import Variable
+from dataclasses import dataclass, field
+from functools import reduce
+
 
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
@@ -153,5 +160,129 @@ class TestBEAM(unittest.TestCase):
     beam_search(lin, bufs, 3, disable_cache=True)
     self.assertEqual(kcount, len(Kernel.kernel_cnt))
 
-if __name__ == '__main__':
-  unittest.main()
+@dataclass
+class MockProgram:
+  global_size: list
+  dname: str
+  uops: list = None
+  globals: list = field(default_factory=list)
+
+
+class MockDevice:
+  def __init__(self, has_invalidate=True):
+    if has_invalidate:
+      self.invalidate_caches = self._invalidate_caches
+
+  def _invalidate_caches(self):
+    pass
+
+
+class TestTimeProgram(unittest.TestCase):
+  def setUp(self):
+    self.mock_compiled_runner = Mock(spec=CompiledRunner)
+    self.mock_compiled_runner.p = MockProgram(
+        global_size=None, dname="MockDevice", globals=[0])
+    self.mock_device = MockDevice()
+    self.mock_tensor = Mock(spec=Tensor)
+
+  def test_time_program_basic(self):
+    p = MockProgram(global_size=None, dname="MockDevice", globals=[0])
+    lib = b"mock_lib"
+    var_vals = {}
+    rawbufs = [Mock()]
+
+    with patch('tinygrad.engine.search.CompiledRunner', return_value=self.mock_compiled_runner):
+      self.mock_compiled_runner.return_value = 0.1
+      result = _time_program(p, lib, var_vals, rawbufs, cnt=3)
+
+    self.assertEqual(len(result), 3)
+    self.assertTrue(all(t == 0.1 for t in result))
+
+  def test_time_program_early_stop(self):
+    p = MockProgram(global_size=None, dname="MockDevice", globals=[0])
+    lib = b"mock_lib"
+    var_vals = {}
+    rawbufs = [Mock()]
+
+    with patch('tinygrad.engine.search.CompiledRunner', return_value=self.mock_compiled_runner):
+      self.mock_compiled_runner.return_value = 0.2
+      result = _time_program(p, lib, var_vals, rawbufs, early_stop=0.1, cnt=3)
+
+    self.assertEqual(len(result), 1)
+    self.assertEqual(result[0], 0.2)
+
+  def test_time_program_adjust_global_size(self):
+    p = MockProgram(global_size=[1000, 1000], dname="MockDevice", globals=[0])
+    lib = b"mock_lib"
+    var_vals = {Variable("x", 1, 1000): 500}
+    rawbufs = [Mock()]
+
+    with patch('tinygrad.engine.search.CompiledRunner', return_value=self.mock_compiled_runner), \
+            patch('tinygrad.engine.search._get_test_global_size', return_value=([500, 500], 2)):
+      self.mock_compiled_runner.return_value = 0.1
+      result = _time_program(p, lib, var_vals, rawbufs,
+                             max_global_size=65536, cnt=1)
+
+    self.assertEqual(len(result), 1)
+    self.assertEqual(result[0], 0.2)  # 0.1 * 2 (factor)
+
+  def test_time_program_clear_cache_with_invalidate(self):
+    self._test_time_program_clear_cache(True, True)
+
+  # probablamatic test
+  def test_time_program_clear_cache_without_invalidate(self):
+    self._test_time_program_clear_cache(True, False)
+
+  def test_time_program_no_clear_cache(self):
+    self._test_time_program_clear_cache(False, True)
+
+  def _test_time_program_clear_cache(self, clear_l2, has_invalidate):
+    p = MockProgram(global_size=None, dname="MockDevice", globals=[0])
+    lib = b"mock_lib"
+    var_vals = {}
+    rawbufs = [Mock()]
+
+    mock_device = MockDevice(has_invalidate=has_invalidate)
+
+    with patch('tinygrad.engine.search.CompiledRunner', return_value=self.mock_compiled_runner), \
+            patch('tinygrad.engine.search.Device', {p.dname: mock_device}), \
+            patch('tinygrad.engine.search.Context') as mock_context:
+
+      self.mock_compiled_runner.return_value = 0.1
+      _time_program(p, lib, var_vals, rawbufs, clear_l2=clear_l2, cnt=1)
+
+      if clear_l2:
+        if has_invalidate:
+          self.assertTrue(hasattr(mock_device, 'invalidate_caches'))
+        else:
+          mock_context.assert_called_once_with(DEBUG=0, BEAM=0, CAPTURING=0)
+      else:
+        if has_invalidate:
+          self.assertTrue(hasattr(mock_device, 'invalidate_caches'))
+        mock_context.assert_not_called()
+
+  def test_time_program_compilation_error(self):
+    p = MockProgram(global_size=None, dname="MockDevice", globals=[0])
+    lib = b"mock_lib"
+    var_vals = {}
+    rawbufs = [Mock()]
+
+    with patch('tinygrad.engine.search.CompiledRunner', side_effect=AssertionError):
+      result = _time_program(p, lib, var_vals, rawbufs, cnt=3)
+
+    self.assertEqual(len(result), 3)
+    self.assertTrue(all(t == float('inf') for t in result))
+
+  def test_get_test_global_size(self):
+    global_size = [1000, 1000, 1000]
+    max_global_size = 1000000
+    var_vals = {Variable("x", 1, 1000): 500}
+
+    result_size, factor = _get_test_global_size(
+        global_size, max_global_size, var_vals)
+
+    self.assertEqual(len(result_size), 3)
+    self.assertTrue(all(size <= 1000 for size in result_size))
+    self.assertGreaterEqual(factor, 1)
+    self.assertLessEqual(
+        reduce(lambda a, b: a*b, result_size), max_global_size)
