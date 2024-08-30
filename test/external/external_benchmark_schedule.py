@@ -1,6 +1,6 @@
 from typing import List
 from extra.models.resnet import ResNet50
-from tinygrad import Tensor
+from tinygrad import Tensor, Device
 from tinygrad.helpers import Profiling, Timing, getenv, BEAM, DEBUG, Context
 from tinygrad.ops import UOps
 from tinygrad.codegen.kernel import Kernel
@@ -25,7 +25,8 @@ if __name__ == "__main__":
         sched = out.schedule()
 
       if not SCHEDULE_ONLY:
-        asts = {x.ast.key:x.ast for x in sched if x.ast.op is UOps.SINK}.values()
+        asts = list({x.ast.key:x.ast for x in sched if x.ast.op is UOps.SINK}.values())
+        if (restrict_kernel := getenv("RESTRICT_KERNEL", -1)) != -1: asts = asts[restrict_kernel:restrict_kernel+1]
         kernels: List[Kernel] = []
         with Timing(f"***** model opts({len(asts):2d}) in  "):
           for ast in asts:
@@ -37,11 +38,19 @@ if __name__ == "__main__":
 
         with Timing("***** model lower in     "): uops = [ast_to_uop(k.get_optimized_ast(), k.opts) for k in kernels]
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):
-          with Timing("***** model rewrite in   "): uops = [full_graph_rewrite(u, k.opts) for u in uops]
+          with Timing("***** model rewrite in   "):
+            rewritten_uops = []
+            for i,u in enumerate(uops):
+              with Timing(f"rewrite {i:2d} ", enabled=getenv("VERBOSE", 0)):
+                rewritten_uops.append(full_graph_rewrite(u, k.opts))
+            uops = rewritten_uops
         if getenv("LINEARIZE", 1):
-          with Timing("***** model linearize in "): uops = [linearize_uop(u, skip_check=False) for u in uops]
+          with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
           print(sum(len(u) for u in uops))
           if getenv("GRAPHUOPS", 0):
             for u in uops:
               from tinygrad.engine.graph import graph_uops
               graph_uops(u)
+          if getenv("SRC", 0):
+            renderer = Device[Device.DEFAULT].renderer
+            for k,u in zip(kernels, uops): print(renderer.render(k.name, u))
