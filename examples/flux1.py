@@ -4,7 +4,6 @@ from tinygrad.nn.state import safe_load, load_state_dict
 from tinygrad import Tensor, dtypes
 from typing import Optional
 import tinygrad.nn as nn
-# from transformers import T5EncoderModel, T5Tokenizer, CLIPTokenizer, CLIPTextModel
 
 def rope(pos:Tensor, dim:int, theta:int) -> Tensor:
   assert dim % 2 == 0
@@ -170,8 +169,8 @@ class LastLayer:
 
 class Flux:
   def __init__(
-      self, in_channels:int, vec_in_dim:int, context_in_dim:int, hidden_size:int, mlp_ratio:float, num_heads:int, 
-      depth:int, depth_single_blocks:int, axes_dim: list[int], theta:int, qkv_bias:bool, guidance_embed:bool
+    self, in_channels:int, vec_in_dim:int, context_in_dim:int, hidden_size:int, mlp_ratio:float, num_heads:int, 
+    depth:int, depth_single_blocks:int, axes_dim: list[int], theta:int, qkv_bias:bool, guidance_embed:bool
   ):
     self.pe_embedder = EmbedND(hidden_size // num_heads, theta, axes_dim)
     self.img_in = nn.Linear(in_channels, hidden_size)
