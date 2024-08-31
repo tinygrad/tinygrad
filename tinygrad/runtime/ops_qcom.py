@@ -77,7 +77,6 @@ class QcomDevice(HCQCompiled):
   signals_page: Any = None
   signals_pool: List[Any] = []
   gpu_id: int = 0
-  gpu_stack: Any = None
 
   def __init__(self, device:str=""):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
@@ -86,7 +85,6 @@ class QcomDevice(HCQCompiled):
     info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0
     QcomDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     assert QcomDevice.gpu_id < 700
-    QcomDevice.gpu_stack = self._gpu_alloc(0x1000000, kgsl.KGSL_MEMTYPE_CL_KERNEL_STACK << kgsl.KGSL_MEMTYPE_SHIFT)
 
     super().__init__(device, QcomAllocator(self), QCOMRenderer(), QcomCompiler(device), functools.partial(QcomProgram, self),
                      QcomSignal, QcomComputeQueue, None, timeline_signals=(QcomSignal(), QcomSignal()))
@@ -150,6 +148,13 @@ class QcomDevice(HCQCompiled):
   def _border_color_base(self):
     if not hasattr(self, '_border_color_gpu'): self._border_color_gpu = self._gpu_alloc(0x1000000, map_to_cpu=True, fill_zeroes=True)
     return self._border_color_gpu.va_addr
+
+  def _ensure_stack_size(self, sz):
+    if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)
+    elif self._stack.size < sz:
+      self.synchronize()
+      self._gpu_free(self._stack)
+      self._stack = self._gpu_alloc(sz)
 
 class QcomAllocator(HCQAllocator):
   def __init__(self, device:QcomDevice): super().__init__(device)
@@ -279,7 +284,7 @@ class QcomComputeQueue(HWComputeQueue):
              adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6
              | (max(1, (prg.shmem - 1) // 1024) << adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE__SHIFT), 0,
              prg.prg_offset, *data64_le(prg.lib_gpu.va_addr), (prg.pvtmem_size_per_item << adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT),
-             *data64_le(QcomDevice.gpu_stack.va_addr), (prg.pvtmem_size_total << adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT))
+             *data64_le(prg.device._stack.va_addr), (prg.pvtmem_size_total << adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
              (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
              | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
@@ -355,6 +360,7 @@ class QcomProgram(HCQProgram):
     self.pvtmem_size_per_item = round_up(self.pvtmem, 512) >> 9
     self.pvtmem_size_total = self.pvtmem_size_per_item * 128 * 2
     self.hw_stack_offset = round_up(next_power2(round_up(self.pvtmem, 512)) * 128 * 16, 0x1000)
+    device._ensure_stack_size(self.hw_stack_offset * 4)
 
     super().__init__(QcomArgsState, self.device, self.name, kernargs_alloc_size=1024)
 
