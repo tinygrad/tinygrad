@@ -1,7 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 import sys, base64, multiprocessing, itertools, collections, time
-from typing import Optional, Union, Literal, List, Iterator, Tuple
-
+from typing import Optional, Union, Literal, List, Iterator, Tuple, Dict
 from tinygrad import Tensor, TinyJit, Variable, nn
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, DEBUG, fetch, colored, BEAM
@@ -19,6 +18,7 @@ class CrossAttention:
 
     self.kv_caching = kv_caching
     self.max_self_attn_cache_len = max_self_attn_cache_len
+    self.caches: Dict[int, Tuple[Tensor, Tensor]] = {}
 
   def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[Variable,int]=None):
     bs = x.shape[0]
@@ -30,17 +30,14 @@ class CrossAttention:
       del self.key, self.value
     if xa is not None:
       [k, v] = self.qkv(xa).chunk(2, 2)
-      if not hasattr(self, 'cache_k'):
-        self.cache_k, self.cache_v = k.contiguous().realize(), v.contiguous().realize()
+      if not bs in self.caches: self.caches[bs] = (k.contiguous().realize(), v.contiguous().realize())
       else:
-        self.cache_k.assign(k).realize()
-        self.cache_v.assign(v).realize()
-    else:
-      k, v = self.cache_k, self.cache_v
+        self.caches[bs][0].assign(k).realize()
+        self.caches[bs][1].assign(v).realize()
     q = self.query(x)
-    return self.attn(q, k, v, mask)
+    return self.attend(q, *self.caches[bs], mask)
 
-  def attn(self, q, k, v, mask=None):
+  def attend(self, q, k, v, mask=None):
     n_ctx = q.shape[1]
     assert(q.shape[-1] == k.shape[-1] == v.shape[-1])
     head_dim = q.shape[-1] // self.n_head
@@ -59,17 +56,17 @@ class SelfAttention(CrossAttention):
       self.qkv.bias = Tensor.cat(self.query.bias, Tensor.zeros_like(self.query.bias), self.value.bias)
       del self.query, self.key, self.value
     [q, k, v] = self.qkv(x).chunk(3, 2)
-
+    bs = x.shape[0]
+    assert x.shape[2] == self.qkv.weight.shape[1]
     if self.kv_caching:
-      if not hasattr(self, 'cache_k'):
-        self.cache_k = Tensor.zeros(x.shape[0], self.max_self_attn_cache_len, x.shape[2])
-        self.cache_v = Tensor.zeros(x.shape[0], self.max_self_attn_cache_len, x.shape[2])
-      k = self.cache_k.shrink((None, (0, len), None)).cat(k, dim=1)
-      v = self.cache_v.shrink((None, (0, len), None)).cat(v, dim=1)
+      if not bs in self.caches: self.caches[bs] = [Tensor.zeros(bs, self.max_self_attn_cache_len, x.shape[2]) for i in [1,2]]
+      cachek, cachev = self.caches[bs]
+      k = cachek.shrink((None, (0, len), None)).cat(k, dim=1)
+      v = cachev.shrink((None, (0, len), None)).cat(v, dim=1)
       padding = self.max_self_attn_cache_len-len-x.shape[1]
-      self.cache_k.assign(k.pad((None, (0, padding), None)).contiguous()).realize()
-      self.cache_v.assign(v.pad((None, (0, padding), None)).contiguous()).realize()
-    return self.attn(q, k, v, mask)
+      cachek.assign(k.pad((None, (0, padding), None)).contiguous()).realize()
+      cachev.assign(v.pad((None, (0, padding), None)).contiguous()).realize()
+    return self.attend(q, k, v, mask)
 
 class ResidualAttentionBlock:
   def __init__(self, n_state, n_head, is_decoder_block=False, max_self_attn_cache_len=None):
@@ -133,14 +130,17 @@ class TextDecoder:
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
   
   def debatch(self, target:int):
+    print(f'debatching to {target}')
+    # assuming max batch size of 2
     assert target in [0,1]
+    assert 2 in self.blocks[0].attn.caches
     for block in self.blocks:
       for attn in [block.attn, block.cross_attn]:
-        attn.cache_k.assign(block.attn.cache_k.shrink(((target, target+1), None, None)).realize())
-        attn.cache_v.assign(block.attn.cache_v.shrink(((target, target+1), None, None)).realize())
-        
-        print(attn.cache_k.shape)
-
+        bigcache = attn.caches[2]
+        if 1 not in attn.caches: attn.caches[1] = [Tensor.zeros(1, *bigcache[0].shape[1:]) for _ in [1,2]]
+        for i in [0,1]:
+          bigcache[i].shrink(((target, target+1), None, None))
+          attn.caches[1][i].assign(bigcache[i].shrink(((target, target+1), None, None)).contiguous()).realize()
 
 class Whisper:
   def __init__(self, dims, batch_size=1):
@@ -236,6 +236,7 @@ MODEL_URLS = {
   "large": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
 }
 def init_whisper(model_name="tiny.en", batch_size=1):
+  assert batch_size <= 2
   assert MODEL_URLS[model_name] is not None
 
   filename = fetch(MODEL_URLS[model_name])
@@ -280,16 +281,29 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
   start_tokens = ["<|startoftranscript|>", *(["<|en|>", "<|transcribe|>"] if model.is_multilingual else []), *(["<|notimestamps|>"] if not use_timestamps else [])]
   start_tokens = [enc._special_tokens[x] for x in start_tokens]
 
-  def inferloop(ctx, encoded_audio):
-
+  def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
     pos, prompt = 0, ctx
+    # lastactive = None
     for i in range((nsample-len(start_tokens))*2):
       next_tokens = model.decoder(Tensor(prompt), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32)
+      if lastactive is not None:
+        next_tokens = next_tokens.repeat(2)
+        next_tokens[1-lastactive] = eot
       next_tokens[ctx[:, -1] == eot] = eot
       prompt = next_tokens.reshape(-1, 1)
       ctx = np.concatenate((ctx, prompt), axis=1)
       pos = ctx.shape[-1] - 1
       if (next_tokens == eot).all(): break
+
+      if lastactive is None:
+        if (ended := (next_tokens == eot).nonzero()[0]).size:
+          lastactive = int(1-ended[0])
+          model.decoder.debatch(lastactive)
+          prompt = prompt[lastactive:lastactive+1]
+          encoded_audio = encoded_audio[lastactive:lastactive+1].contiguous()
+      else: prompt = prompt[lastactive:lastactive+1]
+
+      # reset context window
       if i == nsample-len(start_tokens): ctx = np.array([start_tokens+gettexttoks(cs) for cs in ctx])
     return ctx
 
@@ -307,8 +321,8 @@ def transcribe_waveform(model:Whisper, enc, waveforms:List[Iterator], use_timest
     if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
     else:
       ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
-      model.decoder.debatch(0)
-      raise StopIteration
+      # model.decoder.debatch(0)
+      # return StopIteration
     yield [arr[np.where(arr == start_tokens[-1])[0][0]+1:eoti[0] if len (eoti:=np.where(arr == eot)[0]) else None] for arr in ctx[:len(waveforms)]]
     ctx = [[special('startofprev')]+gettexttoks(cs)+start_tokens for cs in ctx]
 
@@ -328,6 +342,7 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
+
   model, enc = init_whisper(getenv("MODEL", "tiny.en"), batch_size=getenv("BATCH", 1))
   def timestring(s): return f'{int(s//60//60):02d}:{int(s//60%60):02d}:{int(s%60):02d}'
   if len(sys.argv) > 1:
@@ -345,6 +360,7 @@ if __name__ == "__main__":
     BEAM.value = 0
     try:
       for frame, lines in enumerate(transcribe_waveform(model, enc, waves, use_timestamps=use_timestamps)):
+        if frame == 20: break
         print(f'frame{frame}')
         if frame==3: BEAM.value=beamval
         for i,line in enumerate(lines):

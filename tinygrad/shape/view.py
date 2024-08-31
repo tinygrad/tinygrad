@@ -93,7 +93,7 @@ class View:
   def size(self) -> int:
     # NOTE: Variable and the Node derived from it in symbolic shapes can only have int as max.
     ret = prod([x.max if isinstance(x, Node) else x for x in self.shape])
-    assert isinstance(ret, int), f"{ret=} is not int"
+    assert isinstance(ret, int), f"{ret=} is not int {type(ret)}"
     return ret
 
   @staticmethod
