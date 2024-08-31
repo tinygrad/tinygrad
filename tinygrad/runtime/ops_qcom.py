@@ -21,40 +21,6 @@ def pkt7_hdr(opcode: int, cnt: int): return adreno.CP_TYPE7_PKT | cnt & 0x3FFF |
 
 def pkt4_hdr(reg: int, cnt: int): return adreno.CP_TYPE4_PKT | cnt & 0x7F | prt(cnt) << 7 | (reg & 0x3FFFF) << 8 | prt(reg) << 27
 
-def parse_cl_lib(lib: bytes, name:str):
-  """
-  Extract information from OpenCL binary used to run a shader: image offset, image size, prg_offset, offsets to argument buffers,
-  constants offsets and values, HALFREGFOOTPRINT and FULLREGFOOTPRINT
-  """
-  image_offset, image_size, buffs_info, consts_info = struct.unpack("I", lib[0xC0:0xC4])[0], struct.unpack("I", lib[0x100:0x104])[0], [], []
-
-  ptr = struct.unpack("I", lib[0x110:0x114])[0] # read img desc offset
-  prg_offset = struct.unpack("I", lib[ptr+196:ptr+200])[0]
-  branch_stack = struct.unpack("I", lib[ptr+264:ptr+268])[0]
-  pvtmem = struct.unpack("I", lib[ptr+0xc8:ptr+0xcc])[0]
-  shmem = struct.unpack("I", lib[ptr+0xd8:ptr+0xdc])[0]
-  ptr = round_up(ptr + 344 + len(name), 4) + 8 * struct.unpack("I", lib[ptr+220:ptr+224])[0] # skip to bufs descr, align name, skip samplers
-
-  while (ptr + 16 <= len(lib)):
-    length, _, _, offset_words = struct.unpack("I" * 4, lib[ptr:ptr+16])
-    if length == 0: break
-    buffs_info.append((offset_words * 4, struct.unpack("I", lib[ptr+0x3c:ptr+0x40])[0] == 0x0))
-    ptr += length
-
-  ptr = struct.unpack("I", lib[0xb0:0xb4])[0]
-  if ptr != 0:
-    ptr = struct.unpack("I", lib[0xac:0xb0])[0] # read consts desc offset
-    # constant vals are placed just before a shader
-    while (ptr + 40 <= image_offset):
-      cnst, offset_words, _, is32 = struct.unpack("I", lib[ptr:ptr+4])[0], *struct.unpack("III", lib[ptr+16:ptr+28])
-      ptr += 40
-      consts_info.append((cnst, offset_words * (sz_bytes:=(2 << is32)), sz_bytes))
-
-  ptr = struct.unpack("I", lib[0x34:0x38])[0] # read main offset
-  fullreg, hlfreg = struct.unpack("II", lib[ptr+20:ptr+28])
-
-  return image_offset, image_size, prg_offset, buffs_info, consts_info, hlfreg, fullreg, branch_stack, shmem, pvtmem
-
 class QcomCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
 
@@ -276,8 +242,8 @@ class QcomComputeQueue(HWComputeQueue):
              global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf,
              0xfc | adreno.A6XX_HLSQ_CS_CNTL_1_THREADSIZE(adreno.THREAD128), global_size[0], global_size[1], global_size[2])
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
-             adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE(adreno.THREAD128) | adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT(prg.hlfreg)
-             | adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT(prg.fullreg) | adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK(prg.branch_stack),
+             adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE(adreno.THREAD128) | adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT(prg.hregs_count)
+             | adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT(prg.fregs_count) | adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK(prg.branch_stack),
              adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6
              | adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE(max(1, (prg.shmem - 1) // 1024)), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM(prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
@@ -345,15 +311,11 @@ class QcomComputeQueue(HWComputeQueue):
 class QcomProgram(HCQProgram):
   def __init__(self, device: QcomDevice, name: str, lib: bytes):
     self.device, self.name, self.lib = device, name, lib
-
-    image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.hlfreg, self.fullreg, \
-      self.branch_stack, self.shmem, self.pvtmem = parse_cl_lib(self.lib, self.name)
-
-    image = bytearray(lib[image_offset:image_offset+self.image_size])
+    self._parse_lib()
 
     # reserve some space after for gpu to use
-    self.lib_gpu = self.device.allocator.alloc(len(image) + 0x20000, options=BufferOptions(cpu_access=True, nolru=True))
-    ctypes.memmove(self.lib_gpu.va_addr, mv_address(memoryview(image)), self.image_size)
+    self.lib_gpu = self.device.allocator.alloc(len(self.image) + 0x20000, options=BufferOptions(cpu_access=True, nolru=True))
+    ctypes.memmove(self.lib_gpu.va_addr, mv_address(memoryview(self.image)), self.image_size)
 
     self.pvtmem_size_per_item = round_up(self.pvtmem, 512) >> 9
     self.pvtmem_size_total = self.pvtmem_size_per_item * 128 * 2
@@ -361,6 +323,40 @@ class QcomProgram(HCQProgram):
     device._ensure_stack_size(self.hw_stack_offset * 4)
 
     super().__init__(QcomArgsState, self.device, self.name, kernargs_alloc_size=1024)
+
+  def _parse_lib(self):
+    def _read_lib(off): return struct.unpack("I", self.lib[off:off+4])[0]
+
+    # Extract image binary
+    self.image_size = _read_lib(0x100)
+    self.image = bytearray(self.lib[(image_offset:=_read_lib(0xc0)):image_offset+self.image_size])
+
+    # Parse image descriptors
+    image_desc_off = _read_lib(0x110)
+    self.prg_offset, self.branch_stack = _read_lib(image_desc_off+0xc4), _read_lib(image_desc_off+0x108)
+    self.pvtmem, self.shmem = _read_lib(image_desc_off+0xc8), _read_lib(image_desc_off+0xd8)
+
+    # Fill up constants and buffers info
+    self.buffs_info, self.consts_info = [], []
+
+    samplers_count = _read_lib(image_desc_off + 0xdc)
+    bdoff = round_up(image_desc_off + 0x158 + len(self.name), 4) + 8 * samplers_count
+    while (bdoff + 16 <= len(self.lib)):
+      length, _, _, offset_words = struct.unpack("I" * 4, self.lib[bdoff:bdoff+16])
+      if length == 0: break
+      self.buffs_info.append((offset_words * 4, struct.unpack("I", self.lib[bdoff+0x3c:bdoff+0x40])[0] == 0x0))
+      bdoff += length
+
+    if _read_lib(0xb0) != 0: # check if we have constants.
+      cdoff = _read_lib(0xac)
+      while (cdoff + 40 <= image_offset):
+        cnst, offset_words, _, is32 = struct.unpack("I", self.lib[cdoff:cdoff+4])[0], *struct.unpack("III", self.lib[cdoff+16:cdoff+28])
+        self.consts_info.append((cnst, offset_words * (sz_bytes:=(2 << is32)), sz_bytes))
+        cdoff += 40
+
+    # Registers info
+    reg_desc_off = _read_lib(0x34)
+    self.fregs_count, self.hregs_count = _read_lib(reg_desc_off + 0x14), _read_lib(reg_desc_off + 0x18)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
