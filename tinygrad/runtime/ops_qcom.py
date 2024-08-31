@@ -11,6 +11,8 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
+def next_power2(x): return 1 if x == 0 else 1 << (x - 1).bit_length()
+
 def prt(val: int):
   for i in range(4,1,-1): val ^= val >> (1 << i)
   return (~0x6996 >> (val & 0xf)) & 1
@@ -29,6 +31,7 @@ def parse_cl_lib(lib: bytes, name:str):
   ptr = struct.unpack("I", lib[0x110:0x114])[0] # read img desc offset
   prg_offset = struct.unpack("I", lib[ptr+196:ptr+200])[0]
   branch_stack = struct.unpack("I", lib[ptr+264:ptr+268])[0]
+  pvtmem = struct.unpack("I", lib[ptr+0xc8:ptr+0xcc])[0]
   shmem = struct.unpack("I", lib[ptr+0xd8:ptr+0xdc])[0]
   ptr = round_up(ptr + 344 + len(name), 4) + 8 * struct.unpack("I", lib[ptr+220:ptr+224])[0] # skip to bufs descr, align name, skip samplers
 
@@ -50,7 +53,7 @@ def parse_cl_lib(lib: bytes, name:str):
   ptr = struct.unpack("I", lib[0x34:0x38])[0] # read main offset
   fullreg, hlfreg = struct.unpack("II", lib[ptr+20:ptr+28])
 
-  return image_offset, image_size, prg_offset, buffs_info, consts_info, hlfreg, fullreg, branch_stack, shmem
+  return image_offset, image_size, prg_offset, buffs_info, consts_info, hlfreg, fullreg, branch_stack, shmem, pvtmem
 
 class QcomCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
@@ -63,7 +66,7 @@ class QcomSignal(HCQSignal):
   def _get_value(self) -> int: return self._signal[0]
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1])
   def _set_value(self, new_value:int): self._signal[0] = new_value
-  def wait(self, value:int, timeout:int=10000):
+  def wait(self, value:int, timeout:int=60000):
     start_time = time.time() * 1000
     while time.time() * 1000 - start_time < timeout:
       if self._signal[0] >= value: return
@@ -258,7 +261,6 @@ class QcomComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, adreno.A6XX_SP_PERFCTR_ENABLE_CS)
     self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, adreno.ISAMMODE_CL | (1 << 3)) # ISAMMODE|UNK3
     self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
-    self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, 0)
 
   def _exec(self, prg, args_state, global_size, local_size):
     global_size_mp = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size))) if local_size else global_size
@@ -276,8 +278,8 @@ class QcomComputeQueue(HWComputeQueue):
              | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT) | (prg.branch_stack << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
              adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6
              | (max(1, (prg.shmem - 1) // 1024) << adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE__SHIFT), 0,
-             prg.prg_offset, *data64_le(prg.lib_gpu.va_addr), (1 << adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT),
-             *data64_le(QcomDevice.gpu_stack.va_addr), (0x300 << adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT))
+             prg.prg_offset, *data64_le(prg.lib_gpu.va_addr), (prg.pvtmem_size_per_item << adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT),
+             *data64_le(QcomDevice.gpu_stack.va_addr), (prg.pvtmem_size_total << adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
              (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
              | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
@@ -288,7 +290,9 @@ class QcomComputeQueue(HWComputeQueue):
              | (math.ceil(prg.image_size / 128) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(prg.lib_gpu.va_addr))
     self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc,
              ((prg.kernargs_alloc_size // 4) >> 2) << adreno.A6XX_HLSQ_CS_CNTL_CONSTLEN__SHIFT | adreno.A6XX_HLSQ_CS_CNTL_ENABLED)
+    self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, prg.hw_stack_offset)
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.image_size // 4)
+
     if hasattr(args_state, 'samplers_ptr'):
       self.cmd(adreno.CP_LOAD_STATE6_FRAG,
                (adreno.ST_SHADER << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
@@ -340,12 +344,17 @@ class QcomProgram(HCQProgram):
     self.device, self.name, self.lib = device, name, lib
 
     image_offset, self.image_size, self.prg_offset, self.buffs_info, self.consts_info, self.hlfreg, self.fullreg, \
-      self.branch_stack, self.shmem = parse_cl_lib(self.lib, self.name)
+      self.branch_stack, self.shmem, self.pvtmem = parse_cl_lib(self.lib, self.name)
+
     image = bytearray(lib[image_offset:image_offset+self.image_size])
 
     # reserve some space after for gpu to use
     self.lib_gpu = self.device.allocator.alloc(len(image) + 0x20000, options=BufferOptions(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(memoryview(image)), self.image_size)
+
+    self.pvtmem_size_per_item = round_up(self.pvtmem, 512) >> 9
+    self.pvtmem_size_total = self.pvtmem_size_per_item * 128 * 2
+    self.hw_stack_offset = round_up(next_power2(round_up(self.pvtmem, 512)) * 128 * 16, 0x1000)
 
     super().__init__(QcomArgsState, self.device, self.name, kernargs_alloc_size=1024)
 
@@ -356,6 +365,7 @@ class QcomArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:QcomProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
     super().__init__(ptr, prg, bufs, vals=vals)
     self.ibos_cnt, self.descriptors_cnt, self.samplers_cnt = 0, 0, 0
+    ctypes.memset(ptr, 0, 1024)
 
     if len(bufs) + len(vals) != len(prg.buffs_info): raise RuntimeError(f'incorrect args size given={len(bufs)} != want={len(prg.buffs_info)}')
     self.boffs, self.aoffs = self.prg.buffs_info[:len(bufs)], self.prg.buffs_info[len(bufs):]
@@ -385,8 +395,8 @@ class QcomArgsState(HCQArgsState):
     if hasattr(self, 'ibos_ptr'): self.prg.device._gpu_free(self.ibos_ptr)
 
   def update_buffer(self, index:int, buf:HCQBuffer):
-    if (descr:=self.i2descr.get(index, None)) != None: to_mv(self.descriptors_ptr + 16 * descr + 4 * 4, 8).cast('I')[:] = data64_le(buf.va_addr)
-    elif (ibo:=self.i2ibo.get(index, None)) != None: to_mv(self.ibos_ptr + 16 * ibo + 4 * 4, 8).cast('I')[:] = data64_le(buf.va_addr)
+    if (descr:=self.i2descr.get(index, None)) is not None: to_mv(self.descriptors_ptr + 16 * descr + 4 * 4, 8).cast('I')[:] = data64_le(buf.va_addr)
+    elif (ibo:=self.i2ibo.get(index, None)) is not None: to_mv(self.ibos_ptr + 16 * ibo + 4 * 4, 8).cast('I')[:] = data64_le(buf.va_addr)
     else: ctypes.cast(self.ptr + self.boffs[index][0], ctypes.POINTER(ctypes.c_int64))[0] = buf.va_addr
 
   def update_var(self, index:int, val:int): ctypes.cast(self.ptr + self.aoffs[index][0], ctypes.POINTER(ctypes.c_int32))[0] = val
