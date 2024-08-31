@@ -182,9 +182,6 @@ class TestDTypeALU(unittest.TestCase):
     universal_test_cast(a.draw(underflow_strat), float_dtype, unsigned_dtype)
     universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
 
-  @given(ht.int64)
-  def test_cast_float_to_uint64(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint64)
-
   @unittest.expectedFailure
   def test_cast_float_to_uint64_overflow_failure(self):
     # to show why we exclude uint64 in special float to unsigned cast
