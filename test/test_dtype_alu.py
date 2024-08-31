@@ -182,13 +182,6 @@ class TestDTypeALU(unittest.TestCase):
     universal_test_cast(a.draw(underflow_strat), float_dtype, unsigned_dtype)
     universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
 
-  @unittest.expectedFailure
-  def test_cast_float_to_uint64_overflow_failure(self):
-    # to show why we exclude uint64 in special float to unsigned cast
-    tensor_value = Tensor([9223372036854775807+1], dtype=dtypes.float).cast(dtypes.int64).cast(dtypes.uint64)
-    numpy_value = np.array([9223372036854775807+1], dtype=_to_np_dtype(dtypes.float)).astype(_to_np_dtype(dtypes.uint64))
-    np.testing.assert_equal(tensor_value.numpy(), numpy_value)
-
 class TestFromFuzzer(unittest.TestCase):
   @given(strat.sampled_from(dtypes_float))
   def test_sin(self, dtype):
