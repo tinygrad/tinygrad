@@ -286,11 +286,13 @@ generate_kgsl() {
   fixup $BASE/kgsl.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/kgsl.py
   sed -i -E 's/^#? ?([^= ]+) = _[^,]+, 0x([0-9A-Fa-f]+) .+$/\1 = 0x\2/' $BASE/kgsl.py
+  sed -nE 's/#define ([A-Za-z0-9_]+)_SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1_SHIFT) \& \1_MASK/p' extra/qcom_gpu_driver/msm_kgsl.h >> $BASE/kgsl.py
   python3 -c "import tinygrad.runtime.autogen.kgsl"
 }
 
 generate_adreno() {
   clang2py extra/qcom_gpu_driver/a6xx.xml.h -o $BASE/adreno.py -k cestum
+  sed -nE 's/#define ([A-Za-z0-9_]+)__SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1__SHIFT) \& \1__MASK/p' extra/qcom_gpu_driver/a6xx.xml.h >> $BASE/adreno.py
   fixup $BASE/adreno.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/adreno.py
   python3 -c "import tinygrad.runtime.autogen.adreno"

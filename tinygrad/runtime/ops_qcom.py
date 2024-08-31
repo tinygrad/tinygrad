@@ -93,10 +93,10 @@ class QcomDevice(HCQCompiled):
     self.timeline_value += 1
 
   def _ctx_create(self):
-    cr = kgsl.struct_kgsl_drawctxt_create(flags=(kgsl.KGSL_CONTEXT_TYPE_CL << kgsl.KGSL_CONTEXT_TYPE_SHIFT) | kgsl.KGSL_CONTEXT_PREAMBLE
-                                                | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE
-                                                | (kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN << kgsl.KGSL_CONTEXT_PREEMPT_STYLE_SHIFT)
-                                                | (8 << kgsl.KGSL_CONTEXT_PRIORITY_SHIFT))
+    cr = kgsl.struct_kgsl_drawctxt_create(flags=(kgsl.KGSL_CONTEXT_TYPE(kgsl.KGSL_CONTEXT_TYPE_CL) | kgsl.KGSL_CONTEXT_PREAMBLE
+                                                 | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE
+                                                 | kgsl.KGSL_CONTEXT_PREEMPT_STYLE(kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)
+                                                 | kgsl.KGSL_CONTEXT_PRIORITY(8)))
     self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
     self.context_id = cr.drawctxt_id
     return self.context_id
@@ -118,8 +118,8 @@ class QcomDevice(HCQCompiled):
 
   def _gpu_alloc(self, size:int, flags:int=0, map_to_cpu=False, uncached=False, fill_zeroes=False):
     size = round_up(size, 1 << (alignment_hint:=12))
-    flags |= ((alignment_hint << kgsl.KGSL_MEMALIGN_SHIFT) & kgsl.KGSL_MEMALIGN_MASK)
-    if uncached: flags |= ((kgsl.KGSL_CACHEMODE_UNCACHED << kgsl.KGSL_CACHEMODE_SHIFT) & kgsl.KGSL_CACHEMODE_MASK)
+    flags |= (kgsl.KGSL_MEMALIGN(alignment_hint))
+    if uncached: flags |= (kgsl.KGSL_CACHEMODE(kgsl.KGSL_CACHEMODE_UNCACHED))
 
     alloc = kgsl.struct_kgsl_gpuobj_alloc(size=size, flags=flags)
     self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_ALLOC, alloc)
@@ -167,16 +167,14 @@ class QcomAllocator(HCQAllocator):
 
       # save it here to load in one command (the same approach as OpenCL and mesa)
       texture.samplers, texture.descriptor, texture.ibo = [0] * 4, [0] * 16, [0] * 16
-
       texture.samplers[0:2] = [0x1b60, 0x30] # compiled sampler. always the same in tinygrad.
 
-      fmt = 0x82 if options.image.base == dtypes.float32 else 0x62
-      texture.descriptor[0] = (0 << adreno.A6XX_TEX_CONST_0_SWIZ_X__SHIFT) | (1 << adreno.A6XX_TEX_CONST_0_SWIZ_Y__SHIFT) | \
-        (2 << adreno.A6XX_TEX_CONST_0_SWIZ_Z__SHIFT) | (3 << adreno.A6XX_TEX_CONST_0_SWIZ_W__SHIFT) | (fmt << adreno.A6XX_TEX_CONST_0_FMT__SHIFT)
-      texture.descriptor[1] = (options.image.shape[1] << adreno.A6XX_TEX_CONST_1_WIDTH__SHIFT) | \
-        (options.image.shape[0] << adreno.A6XX_TEX_CONST_1_HEIGHT__SHIFT)
-      texture.descriptor[2] = (adreno.A6XX_TEX_2D << adreno.A6XX_TEX_CONST_2_TYPE__SHIFT) | (pitch << adreno.A6XX_TEX_CONST_2_PITCH__SHIFT) | \
-        ((pitchalign - 6) << adreno.A6XX_TEX_CONST_2_PITCHALIGN__SHIFT)
+      texture.descriptor[0] = adreno.A6XX_TEX_CONST_0_SWIZ_X(0) | adreno.A6XX_TEX_CONST_0_SWIZ_Y(1) | adreno.A6XX_TEX_CONST_0_SWIZ_Z(2) \
+        | adreno.A6XX_TEX_CONST_0_SWIZ_W(3) | adreno.A6XX_TEX_CONST_0_FMT(0x82 if options.image.base == dtypes.float32 else 0x62)
+      texture.descriptor[1] = adreno.A6XX_TEX_CONST_1_WIDTH(options.image.shape[1]) | adreno.A6XX_TEX_CONST_1_HEIGHT(options.image.shape[0])
+      texture.descriptor[2] = adreno.A6XX_TEX_CONST_2_TYPE(adreno.A6XX_TEX_2D) | adreno.A6XX_TEX_CONST_2_PITCH(pitch) \
+        | adreno.A6XX_TEX_CONST_2_PITCHALIGN(pitchalign - 6)
+
       texture.descriptor[4:6] = data64_le(texture.va_addr)
       texture.descriptor[6] = 0x40000000
       texture.descriptor[7] = 0xe
@@ -218,7 +216,7 @@ class QcomComputeQueue(HWComputeQueue):
   def _timestamp(self, signal): return self._signal(signal, 0, ts=True)
 
   def _wait(self, signal, value=0):
-    self.cmd(adreno.CP_WAIT_REG_MEM, adreno.WRITE_GE | (adreno.POLL_MEMORY << adreno.CP_WAIT_REG_MEM_0_POLL__SHIFT),
+    self.cmd(adreno.CP_WAIT_REG_MEM, adreno.WRITE_GE | adreno.CP_WAIT_REG_MEM_0_POLL(adreno.POLL_MEMORY),
              *data64_le(mv_address(signal._signal)), value & 0xFFFFFFFF, 0xFFFFFFFF, 32) # busy wait for 32 cycles
 
   def _update_signal(self, cmd_idx, signal, value):
@@ -262,7 +260,7 @@ class QcomComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x0)
     self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, 0xff) # set to max
     self.reg(adreno.REG_A6XX_SP_CS_IBO_COUNT, 0xff) # set to max
-    self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, adreno.ISAMMODE_CL << adreno.A6XX_SP_MODE_CONTROL_ISAMMODE__SHIFT)
+    self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, adreno.A6XX_SP_MODE_CONTROL_ISAMMODE(adreno.ISAMMODE_CL))
     self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, adreno.A6XX_SP_PERFCTR_ENABLE_CS)
     self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, adreno.ISAMMODE_CL | (1 << 3)) # ISAMMODE|UNK3
     self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
@@ -273,56 +271,57 @@ class QcomComputeQueue(HWComputeQueue):
 
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
     self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
-             (3 << adreno.A6XX_HLSQ_CS_NDRANGE_0_KERNELDIM__SHIFT) | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT)
-             | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT)
-             | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT),
+             adreno.A6XX_HLSQ_CS_NDRANGE_0_KERNELDIM(3) | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX(local_size[0] - 1)
+             | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY(local_size[1] - 1) | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ(local_size[2] - 1),
              global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf,
-             0xfc | (adreno.THREAD128 << adreno.A6XX_HLSQ_CS_CNTL_1_THREADSIZE__SHIFT), global_size[0], global_size[1], global_size[2])
+             0xfc | adreno.A6XX_HLSQ_CS_CNTL_1_THREADSIZE(adreno.THREAD128), global_size[0], global_size[1], global_size[2])
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
-             (adreno.THREAD128 << adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE__SHIFT) | (prg.hlfreg << adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__SHIFT)
-             | (prg.fullreg << adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__SHIFT) | (prg.branch_stack << adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__SHIFT),
+             adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE(adreno.THREAD128) | adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT(prg.hlfreg)
+             | adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT(prg.fullreg) | adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK(prg.branch_stack),
              adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6
-             | (max(1, (prg.shmem - 1) // 1024) << adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE__SHIFT), 0,
-             prg.prg_offset, *data64_le(prg.lib_gpu.va_addr), (prg.pvtmem_size_per_item << adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT),
-             *data64_le(prg.device._stack.va_addr), (prg.pvtmem_size_total << adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT))
+             | adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE(max(1, (prg.shmem - 1) // 1024)), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
+             adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM(prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
+             adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE(prg.pvtmem_size_total))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-             (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
-             | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
-             | ((prg.kernargs_alloc_size // 4) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(args_state.ptr))
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-             (adreno.ST_SHADER << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
-             | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
-             | (math.ceil(prg.image_size / 128) << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(prg.lib_gpu.va_addr))
+             adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_CONSTANTS) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
+             | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_SHADER) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(prg.kernargs_alloc_size // 4),
+             *data64_le(args_state.ptr))
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG, adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_SHADER) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
+             | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_SHADER) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(math.ceil(prg.image_size / 128)),
+             *data64_le(prg.lib_gpu.va_addr))    
     self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc,
-             ((prg.kernargs_alloc_size // 4) >> 2) << adreno.A6XX_HLSQ_CS_CNTL_CONSTLEN__SHIFT | adreno.A6XX_HLSQ_CS_CNTL_ENABLED)
+             adreno.A6XX_HLSQ_CS_CNTL_CONSTLEN(prg.kernargs_alloc_size // 4) | adreno.A6XX_HLSQ_CS_CNTL_ENABLED)
+
     self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, prg.hw_stack_offset)
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.image_size // 4)
 
-    if hasattr(args_state, 'samplers_ptr'):
+    if hasattr(args_state, 'samplers_ptr'):      
       self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-               (adreno.ST_SHADER << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
-               | (adreno.SB6_CS_TEX << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
-               | (args_state.samplers_cnt << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(args_state.samplers_ptr.va_addr))
+               adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_SHADER) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
+               | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_TEX) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(args_state.samplers_cnt),
+               *data64_le(args_state.samplers_ptr.va_addr))
+
       self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.samplers_ptr.va_addr))
       self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.device._border_color_base()))
 
     if hasattr(args_state, 'descriptors_ptr'):
       self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-               (adreno.ST_CONSTANTS << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
-               | (adreno.SB6_CS_TEX << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
-               | (args_state.descriptors_cnt << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(args_state.descriptors_ptr.va_addr))
+               adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_CONSTANTS) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
+               | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_TEX) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(args_state.descriptors_cnt),
+               *data64_le(args_state.descriptors_ptr.va_addr))
       self.reg(adreno.REG_A6XX_SP_CS_TEX_CONST, *data64_le(args_state.descriptors_ptr.va_addr))
 
     if hasattr(args_state, 'ibos_ptr'):
       self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-               (adreno.ST6_IBO << adreno.CP_LOAD_STATE6_0_STATE_TYPE__SHIFT) | (adreno.SS6_INDIRECT << adreno.CP_LOAD_STATE6_0_STATE_SRC__SHIFT)
-               | (adreno.SB6_CS_SHADER << adreno.CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT)
-               | (args_state.ibos_cnt << adreno.CP_LOAD_STATE6_0_NUM_UNIT__SHIFT), *data64_le(args_state.ibos_ptr.va_addr))
+               adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST6_IBO) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
+               | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_SHADER) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(args_state.ibos_cnt),
+               *data64_le(args_state.ibos_ptr.va_addr))
       self.reg(adreno.REG_A6XX_SP_CS_IBO, *data64_le(args_state.ibos_ptr.va_addr))
 
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG,
-             adreno.A6XX_SP_CS_CONFIG_ENABLED | (args_state.samplers_cnt << adreno.A6XX_SP_CS_CONFIG_NSAMP__SHIFT)
-             | (args_state.descriptors_cnt << adreno.A6XX_SP_CS_CONFIG_NTEX__SHIFT) | (args_state.ibos_cnt << adreno.A6XX_SP_CS_CONFIG_NIBO__SHIFT))
+             adreno.A6XX_SP_CS_CONFIG_ENABLED | adreno.A6XX_SP_CS_CONFIG_NSAMP(args_state.samplers_cnt)
+             | adreno.A6XX_SP_CS_CONFIG_NTEX(args_state.descriptors_cnt) | adreno.A6XX_SP_CS_CONFIG_NIBO(args_state.ibos_cnt))
+
     self.cmd(adreno.CP_RUN_OPENCL, 0)
 
   def _update_exec(self, cmd_idx, global_size, local_size):
@@ -330,10 +329,9 @@ class QcomComputeQueue(HWComputeQueue):
       self._patch(cmd_idx, offset=11, data=global_size)
       self.cmd_idx_to_dims[cmd_idx][0] = global_size
 
-    if local_size is not None:
-      payload = (3 | ((local_size[0] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__SHIFT)
-                 | ((local_size[1] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__SHIFT)
-                 | ((local_size[2] - 1) << adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__SHIFT))
+    if local_size is not None:      
+      payload = (3 | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX(local_size[0] - 1) | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY(local_size[1] - 1)
+                 | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ(local_size[2] - 1))
 
       self._patch(cmd_idx, offset=2, data=[payload])
       self.cmd_idx_to_dims[cmd_idx][1] = local_size
