@@ -1,7 +1,7 @@
 import unittest
 
 from tinygrad import Tensor, dtypes, Device
-import operator
+import operator, warnings
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
@@ -80,8 +80,14 @@ def universal_test_unary(a, dtype, op):
 
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
-  numpy_value = np.array([a], dtype=_to_np_dtype(in_dtype)).astype(_to_np_dtype(dtype))
-  np.testing.assert_equal(tensor_value.numpy(), numpy_value)
+  # the values that cannot be represented when casted causes undefined behavior in numpy and raises `RuntimeWarning`
+  # we only run tests for casts with defined behavior
+  with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    numpy_value = np.array([a], dtype=_to_np_dtype(in_dtype)).astype(_to_np_dtype(dtype))
+    if not any(issubclass(warning.category, RuntimeWarning) and str(warning.message) == "invalid value encountered in cast" for warning in w):
+      tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
+      np.testing.assert_equal(tensor_value.numpy(), numpy_value)
 
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op1, tuple): op1 = (op1, op1)
@@ -152,16 +158,42 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "TODO: fix cast inf to int32 in PYTHON")
   def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
 
-  @unittest.skip("broken. TODO: fix it")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
   @given(ht.float32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_float_cast(self, a, dtype): universal_test_cast(a, dtypes.float32, dtype)
 
-  @unittest.skip("broken. TODO: fix it")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
 
   @given(strat.one_of(strat.floats(-1000.0, -9.999999747378752e-05, width=32), strat.floats(255.00010681152344, 1000.0, width=32)))
-  def test_float_cast_to_uint8_overflow_underflow(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint8)
+  def test_float32_cast_to_uint8_overflow_underflow(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint8)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
+  @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16, dtypes.uint32)))
+  def test_float_cast_to_unsigned(self, a, float_dtype, unsigned_dtype):
+    float_value = a.draw({dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype])
+    universal_test_cast(float_value, float_dtype, unsigned_dtype)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
+  @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)))
+  def test_float_cast_to_unsigned_overflow_underflow(self, a, float_dtype, unsigned_dtype):
+    max_value = {dtypes.uint8: 255, dtypes.uint16: 65535, dtypes.uint32: 2**32-1, dtypes.uint64: 2**64-1}[unsigned_dtype]
+    float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
+    underflow_strat = float_strat.filter(lambda x: x < 0)
+    overflow_strat = float_strat.filter(lambda x: x > max_value)
+    universal_test_cast(a.draw(underflow_strat), float_dtype, unsigned_dtype)
+    universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
+
+  @given(ht.int64)
+  def test_cast_float_to_uint64(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint64)
+
+  @unittest.expectedFailure
+  def test_cast_float_to_uint64_overflow_failure(self):
+    # to show why we exclude uint64 in special float to unsigned cast
+    tensor_value = Tensor([9223372036854775807+1], dtype=dtypes.float).cast(dtypes.int64).cast(dtypes.uint64)
+    numpy_value = np.array([9223372036854775807+1], dtype=_to_np_dtype(dtypes.float)).astype(_to_np_dtype(dtypes.uint64))
+    np.testing.assert_equal(tensor_value.numpy(), numpy_value)
 
 class TestFromFuzzer(unittest.TestCase):
   @given(strat.sampled_from(dtypes_float))

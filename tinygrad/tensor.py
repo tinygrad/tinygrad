@@ -3191,7 +3191,9 @@ class Tensor:
     print(t.dtype, t.numpy())
     ```
     """
-    if (dt := to_dtype(dtype)) == dtypes.uint8 and self.dtype == dtypes.float: return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int64), dtype=dt)
+
+    if (dt:=to_dtype(dtype)) in {dtypes.uint8, dtypes.uint16, dtypes.uint32} and dtypes.is_float(self.dtype):
+      return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int64), dtype=dt)
     return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
