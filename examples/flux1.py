@@ -169,7 +169,7 @@ class LastLayer:
 
 class Flux:
   def __init__(
-    self, in_channels:int, vec_in_dim:int, context_in_dim:int, hidden_size:int, mlp_ratio:float, num_heads:int, 
+    self, in_channels:int, vec_in_dim:int, context_in_dim:int, hidden_size:int, mlp_ratio:float, num_heads:int,
     depth:int, depth_single_blocks:int, axes_dim: list[int], theta:int, qkv_bias:bool, guidance_embed:bool
   ):
     self.pe_embedder = EmbedND(hidden_size // num_heads, theta, axes_dim)
