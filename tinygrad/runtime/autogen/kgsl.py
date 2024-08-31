@@ -1363,3 +1363,10 @@ __all__ = \
     'struct_kgsl_timestamp_event_fence',
     'struct_kgsl_timestamp_event_genlock',
     'struct_kgsl_ucode_version', 'struct_kgsl_version']
+def KGSL_CONTEXT_PRIORITY(val): return (val << KGSL_CONTEXT_PRIORITY_SHIFT) & KGSL_CONTEXT_PRIORITY_MASK
+def KGSL_CONTEXT_PREEMPT_STYLE(val): return (val << KGSL_CONTEXT_PREEMPT_STYLE_SHIFT) & KGSL_CONTEXT_PREEMPT_STYLE_MASK
+def KGSL_CONTEXT_TYPE(val): return (val << KGSL_CONTEXT_TYPE_SHIFT) & KGSL_CONTEXT_TYPE_MASK
+def KGSL_CACHEMODE(val): return (val << KGSL_CACHEMODE_SHIFT) & KGSL_CACHEMODE_MASK
+def KGSL_MEMTYPE(val): return (val << KGSL_MEMTYPE_SHIFT) & KGSL_MEMTYPE_MASK
+def KGSL_MEMALIGN(val): return (val << KGSL_MEMALIGN_SHIFT) & KGSL_MEMALIGN_MASK
+def KGSL_MEMFLAGS_USERMEM(val): return (val << KGSL_MEMFLAGS_USERMEM_SHIFT) & KGSL_MEMFLAGS_USERMEM_MASK

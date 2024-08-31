@@ -254,14 +254,14 @@ class QcomComputeQueue(HWComputeQueue):
              *data64_le(args_state.ptr))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG, adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_SHADER) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
              | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_SHADER) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(math.ceil(prg.image_size / 128)),
-             *data64_le(prg.lib_gpu.va_addr))    
+             *data64_le(prg.lib_gpu.va_addr))
     self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc,
              adreno.A6XX_HLSQ_CS_CNTL_CONSTLEN(prg.kernargs_alloc_size // 4) | adreno.A6XX_HLSQ_CS_CNTL_ENABLED)
 
     self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, prg.hw_stack_offset)
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, prg.image_size // 4)
 
-    if hasattr(args_state, 'samplers_ptr'):      
+    if hasattr(args_state, 'samplers_ptr'):
       self.cmd(adreno.CP_LOAD_STATE6_FRAG,
                adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_SHADER) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
                | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_TEX) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(args_state.samplers_cnt),
@@ -295,7 +295,7 @@ class QcomComputeQueue(HWComputeQueue):
       self._patch(cmd_idx, offset=11, data=global_size)
       self.cmd_idx_to_dims[cmd_idx][0] = global_size
 
-    if local_size is not None:      
+    if local_size is not None:
       payload = (3 | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX(local_size[0] - 1) | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY(local_size[1] - 1)
                  | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ(local_size[2] - 1))
 
