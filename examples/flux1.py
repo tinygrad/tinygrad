@@ -188,15 +188,34 @@ class Flux:
     img = self.img_in(img)
 
 
-if __name__ == "__main__":
-  weights_fn = fetch("https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors?download=true")
-  state_dict = safe_load(weights_fn)
+MODEL_VARIANTS = dict(
+  schnell=dict(
+    ckpt_pth="https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
+    config=dict(
+      in_channels=64, vec_in_dim=768, context_in_dim=4096, hidden_size=3072, mlp_ratio=4.0, num_heads=24,
+      depth=19, depth_single_blocks=38, axes_dim=[16, 56, 56], theta=10000, qkv_bias=True, guidance_embed=False
+    )
+  ),
+  dev=dict(
+    ckpt_pth="https://huggingface.co/black-forest-labs/FLUX.1-dev/blob/main/flux1-dev.safetensors", # NOTE: needs HuggingFace account to download
+    config=dict(
+      in_channels=64, vec_in_dim=768, context_in_dim=4096, hidden_size=3072, mlp_ratio=4.0, num_heads=24,
+      depth=19, depth_single_blocks=38, axes_dim=[16, 56, 56], theta=10000, qkv_bias=True, guidance_embed=True,
+    )
+  )
+)
+
+def load_model(variant:dict):
+  state_dict = safe_load(fetch(variant["ckpt_pth"]))
   for key in list(state_dict.keys()):
     if "scale" in key:
       new_key = key.replace("scale", "weight")
       state_dict[new_key] = state_dict.pop(key)
-  model = Flux(
-    in_channels=64, vec_in_dim=768, context_in_dim=4096, hidden_size=3072, mlp_ratio=4.0, num_heads=24,
-    depth=19, depth_single_blocks=38, axes_dim=[16, 56, 56], theta=10_000, qkv_bias=True, guidance_embed=False
-  )
+
+  model = Flux(**variant["config"])
   load_state_dict(model, state_dict)
+  return model
+
+
+if __name__ == "__main__":
+  model = load_model(MODEL_VARIANTS["schnell"])
