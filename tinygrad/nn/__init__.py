@@ -32,33 +32,31 @@ class BatchNorm:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
-    else: self.weight, self.bias = None, None
+    self.weight: Optional[Tensor] = Tensor.ones(sz) if affine else None
+    self.bias: Optional[Tensor] = Tensor.zeros(sz) if affine else None
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+
+  def calc_stats(self, x:Tensor) -> Tuple[Tensor, Tensor]:
+    shape_mask = [1, -1, *([1]*(x.ndim-2))]
+    if self.track_running_stats and not Tensor.training: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
+    # This requires two full memory accesses to x
+    # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
+    # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
+    batch_mean = x.mean(axis=(reduce_axes:=tuple(x for x in range(x.ndim) if x != 1)))
+    y = (x - batch_mean.detach().reshape(shape=shape_mask))  # d(var)/d(mean) = 0
+    batch_var = (y*y).mean(axis=reduce_axes)
+    return batch_mean, batch_var
 
   def __call__(self, x:Tensor):
-    shape_mask = [1, -1, *([1]*(x.ndim-2))]
-    if Tensor.training:
-      # This requires two full memory accesses to x
-      # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
-      # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
-      batch_mean = x.mean(axis=(reduce_axes:=tuple(x for x in range(x.ndim) if x != 1)))
-      y = (x - batch_mean.detach().reshape(shape=shape_mask))  # d(var)/d(mean) = 0
-      batch_var = (y*y).mean(axis=reduce_axes)
-      batch_invstd = batch_var.add(self.eps).pow(-0.5)
-
-      # NOTE: wow, this is done all throughout training in most PyTorch models
-      if self.track_running_stats:
-        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(y.shape)/(prod(y.shape)-y.shape[1]) * batch_var.detach())
-        self.num_batches_tracked += 1
-    else:
-      batch_mean = self.running_mean
-      # NOTE: this can be precomputed for static inference. we expand it here so it fuses
-      batch_invstd = self.running_var.reshape(shape=shape_mask).expand(x.shape).add(self.eps).rsqrt()
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
+    batch_mean, batch_var = self.calc_stats(x)
+    # NOTE: wow, this is done all throughout training in most PyTorch models
+    if self.track_running_stats and Tensor.training:
+      self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
+      self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(x.shape)/(prod(x.shape)-x.shape[1]) * batch_var.detach())
+      self.num_batches_tracked += 1
+    return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
 
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
@@ -319,3 +317,27 @@ class Embedding:
     if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).reshape(arange_shp)
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1,)).expand(big_shp), self.weight.reshape(weight_shp).expand(big_shp)
     return (arange == idx).mul(vals).sum(2, acc_dtype=vals.dtype)
+
+class LSTMCell:
+  """
+  A long short-term memory (LSTM) cell.
+
+  Args:
+    input_size: The number of expected features in the input `x`
+    hidden_size: The number of features in the hidden state `h`
+    bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`
+  """
+  def __init__(self, input_size:int, hidden_size:int, bias:bool=True):
+    stdv = 1.0 / math.sqrt(hidden_size)
+    self.weight_ih = Tensor.uniform(hidden_size*4, input_size, low=-stdv, high=stdv)
+    self.weight_hh = Tensor.uniform(hidden_size*4, hidden_size, low=-stdv, high=stdv)
+    self.bias_ih, self.bias_hh = (Tensor.zeros(hidden_size*4), Tensor.zeros(hidden_size*4)) if bias else (None, None)
+
+  def __call__(self, x:Tensor, hc:Optional[Tuple[Tensor, Tensor]]=None) -> Tuple[Tensor, Tensor]:
+    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device),)*2
+    gates = x.linear(self.weight_ih.T, self.bias_ih) + hc[0].linear(self.weight_hh.T, self.bias_hh)
+    i, f, g, o = gates.chunk(4, dim=1)
+    i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()
+    new_c = f * hc[1] + i * g
+    new_h = o * new_c.tanh()
+    return (new_h.contiguous(), new_c.contiguous())

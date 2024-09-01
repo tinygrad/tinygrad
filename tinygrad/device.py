@@ -19,8 +19,8 @@ class _Device:
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
-    assert ((cpn:=multiprocessing.current_process().name) == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY"], \
-      f"can only open device {ix} from parent, not {cpn}"
+    cpn = multiprocessing.current_process().name
+    assert (cpn == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY"], f"can only open device {ix} from parent, not {cpn}"
     x = ix.split(":")[0].upper()
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
@@ -437,9 +437,8 @@ class HCQArgsState:
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
 class HCQProgram:
-  def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int, kernargs_args_offset:int=0):
-    self.args_state_t, self.device, self.name = args_state_t, device, name
-    self.kernargs_alloc_size, self.kernargs_args_offset = kernargs_alloc_size, kernargs_args_offset
+  def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int):
+    self.args_state_t, self.device, self.name, self.kernargs_alloc_size = args_state_t, device, name, kernargs_alloc_size
 
   def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
     """
@@ -469,10 +468,11 @@ class HCQProgram:
       Execution time of the kernel if 'wait' is True, otherwise None.
     """
 
+    kernargs = self.fill_kernargs(bufs, vals)
     q = self.device.hw_compute_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
     with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-      q.exec(self, self.fill_kernargs(bufs, vals), global_size, local_size)
+      q.exec(self, kernargs, global_size, local_size)
 
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1

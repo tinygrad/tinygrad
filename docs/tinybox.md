@@ -12,7 +12,7 @@ We don't have a stupid cloud service, you don't have to create a tiny account to
 
 ## Plugging it in
 
-tinybox has two 1600W PSUs, which together exceed the capacity of most 120V household circuits. Fortunately, it comes with two plugs. You'll want to plug each plug into a different circuit. You can verify that they are different circuits by flipping the breaker and seeing what turns off. If you have at least a 120V 30A or 220V 15A circuit, you are welcome to use only that one.
+tinybox has two 1600W PSUs, which together exceed the capacity of most 120V household circuits. Fortunately, it comes with two plugs. You'll want to plug each plug into a different circuit. You can verify that they are different circuits by flipping the breaker and seeing what turns off. If you have at least a 120V 30A or 220V 20A circuit, you are welcome to use only that one.
 
 You'll also want to connect the Ethernet port without a rubber stopper to your home network.
 
@@ -32,17 +32,16 @@ tinybox ships with a relatively basic install of Ubuntu 22.04. To do initial set
 
 `ipmitool -H <BMC IP> -U admin -P <BMC PW> -I lanplus sol activate`
 
-The default username is `tiny` and the default password is `tiny`. Once you are logged in, you can add an SSH key to authorized keys to connect over SSH (on the normal IP). Exit `ipmitool` with `~~.`
+The default username is `tiny` and the default password is `tiny`. Once you are logged in, you can add an SSH key to authorized keys to connect over SSH (on the normal IP). Exit `ipmitool` with `~.` after a newline.
 
 The BMC also has a web interface you can use if you find that easier.
 
 ## Changing the BMC password
 
-If you try to change the BMC password over IPMI or over the web interface, you will notice that it does not persist across reboots, and the password will revert to the one displayed on the screen.
+It is recommended that you change the BMC password after setting up the box, as the password on the screen is only the initial password.
 
-If you want to change the password imperatively, remove the `/root/.bmc_password` file and then set the password, the BMC password will also no longer be displayed on the screen. Additionally, you may modify the password stored in the `/root/.bmc_password` file to one that you choose if you still want it displayed on the screen.
-
-Reboot after making these changes.
+If you do decide to change the BMC password and no longer want the initial password to be displayed, remove the `/root/.bmc_password` file.
+Reboot after making these changes or restart the `displayservice.service` service.
 
 ## What do I use it for?
 

@@ -3,8 +3,8 @@ from enum import Enum, auto
 from collections import defaultdict
 from typing import List, Tuple, DefaultDict
 from extra.optimization.helpers import load_worlds, ast_str_to_ast
-from tinygrad.ops import BufferOps, LazyOp
 from tinygrad.helpers import prod, tqdm
+from tinygrad.ops import UOp, UOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sym_infer, Node
 
@@ -135,9 +135,9 @@ def test_rebuild(st: ShapeTracker):
   last_v2 = rebuilt_st.views[-1]
   assert last_v1.shape == last_v2.shape, f"{last_v1.shape} != {last_v2.shape}"
 
-def test_rebuild_bufferop_st(ast:LazyOp):
-  if ast.op in BufferOps:
-    test_rebuild(ast.arg.st)
+def test_rebuild_bufferop_st(ast:UOp):
+  if ast.op is UOps.SHAPETRACKER:
+    test_rebuild(ast.arg)
   for src in ast.src: test_rebuild_bufferop_st(src)
 
 if __name__ == "__main__":

@@ -1,13 +1,15 @@
-import sys, unittest
-from typing import Optional, Set, Tuple
+import sys, unittest, time
+from typing import Callable, Optional, Set, Tuple, TypeVar
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.codegen.uops import UOp
+from tinygrad.ops import UOp, UOps
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
-from tinygrad.dtype import DType
+from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import Context, CI, OSX, getenv
+from tinygrad.shape.symbolic import sint
 
 def derandomize_model(model):
   with Context(GRAPH=0):
@@ -65,8 +67,18 @@ class TestUOps(unittest.TestCase):
       self.assertEqual(uop1.dtype, uop2.dtype)
       self.assertEqual(uop1.arg, uop2.arg)
       self.assertEqual(len(uop1.src), len(uop2.src))
-      for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
+      for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2, cache)
     except AssertionError as e:
       print(f"{uop1=}")
       print(f"{uop2=}")
       raise e
+
+def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]) -> UOp:
+  return UOp(UOps.CONST, dtype, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),),
+             dtypes.as_const(val, dtype))
+
+T = TypeVar("T")
+def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
+  st = time.perf_counter_ns()
+  ret = fxn(*args, **kwargs)
+  return ret, (time.perf_counter_ns()-st)*1e-6

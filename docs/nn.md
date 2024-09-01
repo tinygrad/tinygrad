@@ -12,6 +12,7 @@
 ::: tinygrad.nn.LayerNorm2d
 ::: tinygrad.nn.RMSNorm
 ::: tinygrad.nn.Embedding
+::: tinygrad.nn.LSTMCell
 
 ## Optimizers
 

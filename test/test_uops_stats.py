@@ -1,12 +1,11 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
-from tinygrad.codegen.uops import flops_mem, UOps, UOp
-from tinygrad.codegen.uopgraph import UOpGraph
-from tinygrad.ops import BinaryOps, TernaryOps
-from tinygrad.dtype import dtypes
+from tinygrad.codegen.uopgraph import linearize_uop
+from tinygrad.ops import BinaryOps, TernaryOps, flops_mem, UOps, UOp
+from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 
 # **************** new FlopCounter ****************
@@ -96,9 +95,19 @@ class TestUOpsStats(unittest.TestCase):
     # NOTE: it's hard to assert on the memory here, all depends on caching
     assert required_mem <= mem
 
+  @unittest.skipUnless(getenv("PYTHON"), "only run test on emulated tensor cores")
+  def test_simple_matmul_half(self):
+    GlobalCounters.reset()
+    N = 16
+    a, b = Tensor.empty(N, N, dtype=dtypes.half), Tensor.empty(N, N, dtype=dtypes.half)
+    c = a.matmul(b)
+    c.realize()
+    expected_ops = N ** 3 * 2
+    assert expected_ops == GlobalCounters.global_ops
+
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):
-    globl = UOp(UOps.DEFINE_GLOBAL, dtypes.int, tuple())
+    globl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), tuple())
     o1 = UOp(UOps.CONST, dtypes.int, tuple(), 1)
     o2 = UOp(UOps.CONST, dtypes.int, tuple(), 2)
     u1 = UOp(UOps.LOAD, dtypes.int, (globl, o1))
@@ -106,18 +115,18 @@ class TestUOpsStats(unittest.TestCase):
     u3 = UOp(UOps.CONST, dtypes.int, tuple(), 3)
     u4 = UOp(UOps.ALU, dtypes.int, (u1,u2), BinaryOps.MUL)
     u5 = UOp(UOps.ALU, dtypes.int, (u4,u3), BinaryOps.ADD)
-    uops = UOpGraph([u5])
+    uops = linearize_uop(u5.sink())
 
-    globl = UOp(UOps.DEFINE_GLOBAL, dtypes.int, tuple())
+    globl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), tuple())
     o1 = UOp(UOps.CONST, dtypes.int, tuple(), 1)
     o2 = UOp(UOps.CONST, dtypes.int, tuple(), 2)
     u1 = UOp(UOps.LOAD, dtypes.int, (globl, o1))
     u2 = UOp(UOps.LOAD, dtypes.int, (globl, o2))
     u3 = UOp(UOps.CONST, dtypes.int, tuple(), 3)
     u4 = UOp(UOps.ALU, dtypes.int, (u1,u2,u3), TernaryOps.MULACC)
-    uops_fma = UOpGraph([u4])
+    uops_fma = linearize_uop(u4.sink())
 
-    self.assertEqual(flops_mem(uops.uops), flops_mem(uops_fma.uops))
+    self.assertEqual(flops_mem(uops), flops_mem(uops_fma))
 
 N = 100
 @unittest.skipIf(getenv("PTX"), "wrong in PTX") # maybe?

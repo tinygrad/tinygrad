@@ -8,7 +8,7 @@ from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import UnaryOps
+from tinygrad.ops import UnaryOps, UOps
 from tinygrad.tensor import _to_np_dtype
 from test.helpers import is_dtype_supported
 
@@ -27,7 +27,7 @@ if Device.DEFAULT == "LLVM":
 
 integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
                                                  (Tensor.bitwise_or, np.bitwise_or)]
-unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin),
+unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
 
 # TODO: enable this (this is a dtype issue)
@@ -75,7 +75,7 @@ def universal_test_unary(a, dtype, op):
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
-    op = [x for x in ast.lazyops if x.op in UnaryOps][0]
+    op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
     assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
