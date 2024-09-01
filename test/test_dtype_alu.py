@@ -79,8 +79,8 @@ def universal_test_unary(a, dtype, op):
     assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
-  # the values that cannot be represented when casted causes undefined behavior in numpy and raises `RuntimeWarning`
-  # we only run tests for casts with defined behavior
+  # the values that cannot be represented when casted causes undefined behavior and raises `RuntimeWarning`
+  # we only run tests with defined numpy casting behavior
   with warnings.catch_warnings(record=True) as w:
     warnings.simplefilter("always")
     numpy_value = np.array([a], dtype=_to_np_dtype(in_dtype)).astype(_to_np_dtype(dtype))
