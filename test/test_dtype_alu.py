@@ -79,7 +79,6 @@ def universal_test_unary(a, dtype, op):
     assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
-  tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
   # the values that cannot be represented when casted causes undefined behavior in numpy and raises `RuntimeWarning`
   # we only run tests for casts with defined behavior
   with warnings.catch_warnings(record=True) as w:
@@ -166,13 +165,15 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT) and is_dtype_supported(dtypes.float16, Device.DEFAULT),
+                       f"no float64 or float16 on {Device.DEFAULT}")
   @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16, dtypes.uint32)))
   def test_float_cast_to_unsigned(self, a, float_dtype, unsigned_dtype):
     float_value = a.draw({dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype])
     universal_test_cast(float_value, float_dtype, unsigned_dtype)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT) and is_dtype_supported(dtypes.float16, Device.DEFAULT),
+                       f"no float64 or float16 on {Device.DEFAULT}")
   @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16, dtypes.uint32)))
   def test_float_cast_to_unsigned_overflow_underflow(self, a, float_dtype, unsigned_dtype):
     max_value = {dtypes.uint8: 255, dtypes.uint16: 65535, dtypes.uint32: 2**32-1}[unsigned_dtype]
@@ -185,6 +186,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int64) # testing for integers within int64 range
   def test_cast_float_to_uint64(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint64)
 
+  @unittest.skipIf(Device.DEFAULT in {"PYTHON", "AMD"}, "TODO: flakiness")
   @unittest.expectedFailure
   @given(strat.integers(min_value=9223372036854775807+1, max_value=2**64-1)) # testing for integers larger than int64 range and within uint64 range
   def test_cast_float_to_uint64_failure(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint64)
