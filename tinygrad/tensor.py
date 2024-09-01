@@ -1747,7 +1747,7 @@ class Tensor:
     """
     def parse_formula(formula: str, *operands: Tensor):
       if "." in formula:
-        ell_chars, longest = "".join(list(set('abcdefghijklmnopqrstuvwxyz') - set(formula.replace(".", "").replace(",", "").replace("->", "")))), 0
+        ell_chars, longest = "".join(list(set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ') - set(formula.replace(".", "").replace(",", "").replace("->", "")))), 0
         input_tmp, output_sub = formula.split("->") if (out_sub := "->" in formula) else (formula, "")
         for i, sub in enumerate(filter(lambda x: "." in x, inputs := input_tmp.split(","))):
           if (ell_count := max(operands[i].ndim, 1) - (len(sub) - 3)) > longest: longest = ell_count
