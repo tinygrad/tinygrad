@@ -54,13 +54,8 @@ class NewGELUActivation:
     the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
     """
 
-    def __call__(self, input: Tensor) -> Tensor:
-        return (
-            0.5
-            * input
-            * (1.0 + Tensor.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * Tensor.pow(input, 3.0))))
-        )
-
+    def __call__(self, x: Tensor) -> Tensor:
+        return 0.5 * x * (1.0 + Tensor.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * Tensor.pow(x, 3.0))))
 
 class T5LayerNorm:
     def __init__(self, hidden_size, eps=1e-6):
@@ -239,19 +234,12 @@ class T5Attention:
         query_states = shape(self.q(hidden_states))  # (batch_size, n_heads, seq_length, dim_per_head)
 
         # get key/value states
-        key_states = project(
-            hidden_states,
-            self.k,
-        )
-        value_states = project(
-            hidden_states,
-            self.v,
-        )
+        key_states = project(hidden_states, self.k)
+        value_states = project(hidden_states, self.v)
 
         # compute scores
-        scores = Tensor.matmul(
-            query_states, key_states.transpose(3, 2)
-        )  # equivalent of torch.einsum("bnqd,bnkd->bnqk", query_states, key_states), compatible with onnx op>9
+        scores = Tensor.matmul(query_states, key_states.transpose(3, 2))
+        # equivalent of torch.einsum("bnqd,bnkd->bnqk", query_states, key_states), compatible with onnx op>9
 
         if position_bias is None:
             position_bias = self.compute_bias(real_seq_length, key_length, device=scores.device)
@@ -292,10 +280,7 @@ class T5LayerSelfAttention:
 class T5Block:
     def __init__(self, config, has_relative_attention_bias=False):
         self.layer = []
-        self.layer.append(
-            T5LayerSelfAttention(config, has_relative_attention_bias=has_relative_attention_bias)
-        )
-
+        self.layer.append(T5LayerSelfAttention(config, has_relative_attention_bias=has_relative_attention_bias))
         self.layer.append(T5LayerFF(config))
 
     def __call__(
@@ -308,9 +293,7 @@ class T5Block:
             position_bias=position_bias,
         )
         hidden_states = self_attention_outputs[0]
-        attention_outputs = self_attention_outputs[
-            2:
-        ]  # Keep self-attention outputs and relative position weights
+        attention_outputs = self_attention_outputs[2:]  # Keep self-attention outputs and relative position weights
 
         # Apply Feed Forward layer
         hidden_states = self.layer[-1](hidden_states)
@@ -319,7 +302,7 @@ class T5Block:
 
         outputs = outputs + attention_outputs
 
-        return outputs  # hidden-states, present_key_value_states, (self-attention position bias), (self-attention weights), (cross-attention position bias), (cross-attention weights)
+        return outputs  # hidden-states, present_key_value_states, (self-attention position bias), (self-attention weights), (cross-attention position bias), (cross-attention weights) #noqa:E501
 
 
 class T5Stack:
@@ -327,9 +310,7 @@ class T5Stack:
         self.config = config
         self.embed_tokens = embed_tokens
 
-        self.block = [
-            T5Block(config, has_relative_attention_bias=bool(i == 0)) for i in range(config.num_layers)
-        ]
+        self.block = [T5Block(config, has_relative_attention_bias=bool(i == 0)) for i in range(config.num_layers)]
         self.final_layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
 
     def get_input_embeddings(self):
@@ -362,7 +343,7 @@ class T5Stack:
             )
 
             # layer_outputs is a tuple with:
-            # hidden-states, key-value-states, (self-attention position bias), (self-attention weights), (cross-attention position bias), (cross-attention weights)
+            # hidden-states, key-value-states, (self-attention position bias), (self-attention weights), (cross-attention position bias), (cross-attention weights) #noqa:E501
             hidden_states, position_bias = layer_outputs[0], layer_outputs[1]
 
         hidden_states = self.final_layer_norm(hidden_states)
@@ -377,8 +358,6 @@ class T5EncoderModel:
         self.shared = nn.Embedding(config.vocab_size, config.d_model)
 
         encoder_config = copy.deepcopy(config)
-        encoder_config.use_cache = False
-        encoder_config.is_encoder_decoder = False
         self.encoder = T5Stack(encoder_config, self.shared)
 
     ### TODO: typing
@@ -404,8 +383,4 @@ class T5EncoderModel:
         >>> last_hidden_states = outputs.last_hidden_state
         ```"""
 
-        encoder_outputs = self.encoder(
-            input_ids=input_ids,
-        )
-
-        return encoder_outputs
+        return self.encoder(input_ids=input_ids)

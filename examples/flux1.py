@@ -22,10 +22,8 @@ from extra.models.t5 import T5EncoderModel, T5Config
 
 from sentencepiece import SentencePieceProcessor
 
-
 def TensorIdentity(x: Tensor) -> Tensor:
     return x
-
 
 def transfer_model(model, device: str):
     dtype = "int16" if device == "CLANG" else "bfloat16"
@@ -34,7 +32,6 @@ def transfer_model(model, device: str):
             param.replace(param.bitcast(dtype).to(device)).realize()
         else:
             param.replace(param.to(device)).realize()
-
 
 ##https://github.com/black-forest-labs/flux/blob/main/src/flux/math.py
 
@@ -45,7 +42,6 @@ def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor) -> Tensor:
     x = x.rearrange("B H L D -> B L (H D)")
 
     return x
-
 
 def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     assert dim % 2 == 0
@@ -58,7 +54,6 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     out = out.rearrange("b n d (i j) -> b n d i j", i=2, j=2)
     return out.float()
 
-
 def apply_rope(xq: Tensor, xk: Tensor, freqs_cis: Tensor) -> tuple[Tensor, Tensor]:
     xq_ = xq.float().reshape(*xq.shape[:-1], -1, 1, 2)
     xk_ = xk.float().reshape(*xk.shape[:-1], -1, 1, 2)
@@ -66,23 +61,17 @@ def apply_rope(xq: Tensor, xk: Tensor, freqs_cis: Tensor) -> tuple[Tensor, Tenso
     xk_out = freqs_cis[..., 0] * xk_[..., 0] + freqs_cis[..., 1] * xk_[..., 1]
     return xq_out.reshape(*xq.shape).cast(xq.dtype), xk_out.reshape(*xk.shape).cast(xk.dtype)
 
-
 #Conditioner
-
 class T5Tokenizer:
     def __init__(self):
-        file_path = fetch(
-            "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/tokenizer_2/spiece.model"
-        )
+        file_path = fetch("https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/tokenizer_2/spiece.model")
         self.spp = SentencePieceProcessor(str(file_path))
 
     def __call__(self, text, max_length, *args, **kwargs):
-        if isinstance(text, str):
-            text = [text]
+        if isinstance(text, str): text = [text]
         encoded = self.spp.Encode(text)
         ret = Tensor.zeros((len(encoded), max_length), dtype=dtypes.int).contiguous()
-        for i, row in enumerate(encoded):
-            ret[i, : len(row) + 1] = Tensor(row + [1])
+        for i, row in enumerate(encoded): ret[i, : len(row) + 1] = Tensor(row + [1])
         return {"input_ids": ret}
 
 
@@ -128,7 +117,7 @@ class ClipEmbedder:
         return ret[:, batch_encoding.argmax(axis=-1)].squeeze(0)
 
 
-## Autoencoder from https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/autoencoder.py
+## https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/autoencoder.py
 @dataclass
 class AutoEncoderParams:
     resolution: int
@@ -141,10 +130,8 @@ class AutoEncoderParams:
     scale_factor: float
     shift_factor: float
 
-
 def swish(x: Tensor) -> Tensor:
     return x * Tensor.sigmoid(x)
-
 
 class AttnBlock:
     def __init__(self, in_channels: int):
@@ -174,7 +161,6 @@ class AttnBlock:
     def __call__(self, x: Tensor) -> Tensor:
         return x + self.proj_out(self.attention(x))
 
-
 class ResnetBlock:
     def __init__(self, in_channels: int, out_channels: int):
         self.in_channels = in_channels
@@ -198,11 +184,9 @@ class ResnetBlock:
         h = swish(h)
         h = self.conv2(h)
 
-        if self.in_channels != self.out_channels:
-            x = self.nin_shortcut(x)
+        if self.in_channels != self.out_channels:  x = self.nin_shortcut(x)
 
         return x + h
-
 
 class Downsample:
     def __init__(self, in_channels: int):
@@ -226,7 +210,7 @@ class Upsample:
         return x
 
 
-class named_module:
+class Named_Module:
     def __init__(self):
         pass
 
@@ -262,7 +246,7 @@ class Encoder:
             for _ in range(self.num_res_blocks):
                 block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
                 block_in = block_out
-            down = named_module()
+            down = Named_Module()
             down.block = block
             down.attn = attn
             if i_level != self.num_resolutions - 1:
@@ -271,7 +255,7 @@ class Encoder:
             self.down.append(down)
 
         # middle
-        self.mid = named_module()
+        self.mid = Named_Module()
         self.mid.block_1 = ResnetBlock(in_channels=block_in, out_channels=block_in)
         self.mid.attn_1 = AttnBlock(block_in)
         self.mid.block_2 = ResnetBlock(in_channels=block_in, out_channels=block_in)
@@ -331,7 +315,7 @@ class Decoder:
         self.conv_in = nn.Conv2d(z_channels, block_in, kernel_size=3, stride=1, padding=1)
 
         # middle
-        self.mid = named_module()
+        self.mid = Named_Module()
         self.mid.block_1 = ResnetBlock(in_channels=block_in, out_channels=block_in)
         self.mid.attn_1 = AttnBlock(block_in)
         self.mid.block_2 = ResnetBlock(in_channels=block_in, out_channels=block_in)
@@ -345,7 +329,7 @@ class Decoder:
             for _ in range(self.num_res_blocks + 1):
                 block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
                 block_in = block_out
-            up = named_module()
+            up = Named_Module()
             up.block = block
             up.attn = attn
             if i_level != 0:
@@ -384,7 +368,6 @@ class Decoder:
         h = self.conv_out(h)
         return h
 
-
 class DiagonalGaussian:
     def __init__(self, sample: bool = True, chunk_dim: int = 1):
         self.sample = sample
@@ -397,7 +380,6 @@ class DiagonalGaussian:
             return mean + std * Tensor.randn_like(mean)
         else:
             return mean
-
 
 class AutoEncoder:
     def __init__(self, params: AutoEncoderParams):
@@ -438,10 +420,7 @@ class AutoEncoder:
     def __call__(self, x: Tensor) -> Tensor:
         return self.decode(self.encode(x))
 
-
 #https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/layers.py
-
-
 class EmbedND:
     def __init__(self, dim: int, theta: int, axes_dim: list[int]):
         self.dim = dim
@@ -469,18 +448,13 @@ def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: float = 10
     """
     t = time_factor * t
     half = dim // 2
-    freqs = Tensor.exp(-math.log(max_period) * Tensor.arange(0, stop=half, dtype=dtypes.float32) / half).to(
-        t.device
-    )
+    freqs = Tensor.exp(-math.log(max_period) * Tensor.arange(0, stop=half, dtype=dtypes.float32) / half).to(t.device)
 
     args = t[:, None].float() * freqs[None]
     embedding = Tensor.cat(Tensor.cos(args), Tensor.sin(args), dim=-1)
-    if dim % 2:
-        embedding = Tensor.cat(*[embedding, Tensor.zeros_like(embedding[:, :1])], dim=-1)
-    if Tensor.is_floating_point(t):
-        embedding = embedding.to(t.device)
+    if dim % 2:  embedding = Tensor.cat(*[embedding, Tensor.zeros_like(embedding[:, :1])], dim=-1)
+    if Tensor.is_floating_point(t):  embedding = embedding.to(t.device)
     return embedding
-
 
 class MLPEmbedder:
     def __init__(self, in_dim: int, hidden_dim: int):
@@ -489,7 +463,6 @@ class MLPEmbedder:
 
     def __call__(self, x: Tensor) -> Tensor:
         return self.out_layer(self.in_layer(x).silu())
-
 
 class RMSNorm:
     def __init__(self, dim: int):
@@ -501,7 +474,6 @@ class RMSNorm:
         rrms = Tensor.rsqrt(Tensor.mean(x**2, axis=-1, keepdim=True) + 1e-6)
         return (x * rrms).cast(dtype=x_dtype) * self.scale
 
-
 class QKNorm:
     def __init__(self, dim: int):
         self.query_norm = RMSNorm(dim)
@@ -511,7 +483,6 @@ class QKNorm:
         q = self.query_norm(q)
         k = self.key_norm(k)
         return q.to(v.device).cast(v.dtype), k.to(v.device).cast(v.dtype)
-
 
 class SelfAttention:
     def __init__(self, dim: int, num_heads: int = 8, qkv_bias: bool = False):
@@ -530,13 +501,11 @@ class SelfAttention:
         x = self.proj(x)
         return x
 
-
 @dataclass
 class ModulationOut:
     shift: Tensor
     scale: Tensor
     gate: Tensor
-
 
 class Modulation:
     def __init__(self, dim: int, double: bool):
@@ -549,7 +518,7 @@ class Modulation:
 
         return (
             ModulationOut(*out[:3]),
-            ModulationOut(*out[3:]) if self.is_double else None,
+            ModulationOut(*out[3:]) if self.is_double else None
         )
 
 
@@ -607,15 +576,11 @@ class DoubleStreamBlock:
 
         # calculate the img bloks
         img = img + img_mod1.gate * self.img_attn.proj(img_attn)
-        img = img + img_mod2.gate * ((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift).sequential(
-            self.img_mlp
-        )
+        img = img + img_mod2.gate * ((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift).sequential(self.img_mlp)
 
         # calculate the txt bloks
         txt = txt + txt_mod1.gate * self.txt_attn.proj(txt_attn)
-        txt = txt + txt_mod2.gate * ((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift).sequential(
-            self.txt_mlp
-        )
+        txt = txt + txt_mod2.gate * ((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift).sequential(self.txt_mlp)
         return img, txt
 
 
@@ -678,10 +643,7 @@ class LastLayer:
         x = self.linear(x)
         return x
 
-
 #https://github.com/black-forest-labs/flux/blob/main/src/flux/model.py
-
-
 class Model:
     @dataclass
     class FluxParams:
@@ -784,10 +746,7 @@ class Model:
             img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
             return img
 
-
 #https://github.com/black-forest-labs/flux/blob/main/src/flux/util.py
-
-
 class Util:
     @dataclass
     class ModelSpec:
@@ -936,10 +895,7 @@ class Util:
         nn.state.load_state_dict(ae, state_dict)
         return ae
 
-
 #https://github.com/black-forest-labs/flux/blob/main/src/flux/sampling.py
-
-
 class Sampling:
     def get_noise(
         num_samples: int,
@@ -962,19 +918,17 @@ class Sampling:
         )
 
     def prepare(t5, clip, img: Tensor, prompt: str | list[str]) -> dict[str, Tensor]:
-        bs, c, h, w = img.shape
+        bs, _, h, w = img.shape
         if bs == 1 and not isinstance(prompt, str):
             bs = len(prompt)
 
         img = img.rearrange("b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
         if img.shape[0] == 1 and bs > 1:
-            ##img = repeat(img, "1 ... -> bs ...", bs=bs) ## not supported
             img = img.expand((bs, *img.shape[1:]))
 
         img_ids = Tensor.zeros(h // 2, w // 2, 3).contiguous()
         img_ids[..., 1] = img_ids[..., 1] + Tensor.arange(h // 2)[:, None]
         img_ids[..., 2] = img_ids[..., 2] + Tensor.arange(w // 2)[None, :]
-        ##img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs) ##not supported
         img_ids = img_ids.rearrange("h w c -> 1 (h w) c")
         img_ids = img_ids.expand((bs, *img_ids.shape[1:]))
 
@@ -982,13 +936,11 @@ class Sampling:
             prompt = [prompt]
         txt = t5(prompt)
         if txt.shape[0] == 1 and bs > 1:
-            ##txt = repeat(txt, "1 ... -> bs ...", bs=bs)
             txt = txt.expand((bs, *txt.shape[1:]))
         txt_ids = Tensor.zeros(bs, txt.shape[1], 3)
 
         vec = clip(prompt)
         if vec.shape[0] == 1 and bs > 1:
-            ##vec = repeat(vec, "1 ... -> bs ...", bs=bs)
             vec = vec.expand((bs, *vec.shape[1:]))
 
         return {
@@ -1017,8 +969,7 @@ class Sampling:
         shift: bool = True,
     ) -> list[float]:
         # extra step for zero
-        # timesteps = Tensor.linspace(1, 0, num_steps + 1)
-        step_size = -1.0 / num_steps  # calculate the step size
+        step_size = -1.0 / num_steps
         timesteps = Tensor.arange(1, 0 + step_size, step_size)
 
         # shifting the schedule to favor high timesteps for higher signal images
@@ -1069,7 +1020,6 @@ class Sampling:
         )
 
 #https://github.com/black-forest-labs/flux/blob/main/src/flux/cli.py
-
 @dataclass
 class SamplingOptions:
     prompt: str
@@ -1082,30 +1032,18 @@ class SamplingOptions:
 
 if __name__ == "__main__":
     default_prompt = "a horse sized cat eating a bagel"
-    parser = argparse.ArgumentParser(
-        description="Run Flux.1", formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument("--name", type=str, default="flux-schnell", help="Name of the model to load")
-    parser.add_argument(
-        "--width", type=int, default=512, help="width of the sample in pixels (should be a multiple of 16)"
-    )
-    parser.add_argument(
-        "--height", type=int, default=512, help="height of the sample in pixels (should be a multiple of 16)"
-    )
-    parser.add_argument("--seed", type=int, default=None, help="Set a seed for sampling")
-    parser.add_argument("--prompt", type=str, default=default_prompt, help="Prompt used for sampling")
-    parser.add_argument("--device", type=str, default="NV", help="Pytorch device")
-    parser.add_argument(
-        "--num_steps",
-        type=int,
-        default=None,
-        help="number of sampling steps (default 4 for schnell, 50 for guidance distilled)",
-    )
-    parser.add_argument(
-        "--guidance", type=float, default=3.5, help="guidance value used for guidance distillation"
-    )
-    parser.add_argument("--offload", type=bool, default=False, help="offload to cpu")
-    parser.add_argument("--output_dir", type=str, default="output", help="output directory")
+    parser = argparse.ArgumentParser(description="Run Flux.1", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument("--name",       type=str,   default="flux-schnell", help="Name of the model to load")
+    parser.add_argument("--width",      type=int,   default=512,            help="width of the sample in pixels (should be a multiple of 16)")
+    parser.add_argument("--height",     type=int,   default=512,            help="height of the sample in pixels (should be a multiple of 16)")
+    parser.add_argument("--seed",       type=int,   default=None,           help="Set a seed for sampling")
+    parser.add_argument("--prompt",     type=str,   default=default_prompt, help="Prompt used for sampling")
+    parser.add_argument("--device",     type=str,   default="NV",           help="Computation device")
+    parser.add_argument("--num_steps",  type=int,   default=None,           help="number of sampling steps (default 4 for schnell, 50 for guidance distilled)") #noqa:E501
+    parser.add_argument("--guidance",   type=float, default=3.5,            help="guidance value used for guidance distillation")
+    parser.add_argument("--offload",    type=bool,  default=False,          help="offload to cpu")
+    parser.add_argument("--output_dir", type=str,   default="output",       help="output directory")
     args = parser.parse_args()
 
     if args.name not in Util.configs:
@@ -1126,10 +1064,7 @@ if __name__ == "__main__":
         idx = 0
     else:
         fns = [fn for fn in iglob(output_name.format(idx="*")) if re.search(r"img_[0-9]+\.jpg$", fn)]
-        if len(fns) > 0:
-            idx = max(int(fn.split("_")[-1].split(".")[0]) for fn in fns) + 1
-        else:
-            idx = 0
+        idx = max(int(fn.split("_")[-1].split(".")[0]) for fn in fns) + 1 if len(fns) > 0 else 0
 
     with Tensor.test():
         # init all components
@@ -1163,17 +1098,17 @@ if __name__ == "__main__":
             dtype=dtypes.bfloat16,
             seed=opts.seed,
         )
+
         opts.seed = None
+
         if args.offload:
             ae.to("CLANG")
             t5.to("NV")
             clip.to("NV")
+
         inp = Sampling.prepare(t5, clip, x, prompt=opts.prompt)
-        for k, v in inp.items():
-            v.realize()
-        timesteps = Sampling.get_schedule(
-            opts.num_steps, inp["img"].shape[1], shift=(args.name != "flux-schnell")
-        )
+        for k, v in inp.items():  v.realize()
+        timesteps = Sampling.get_schedule(opts.num_steps, inp["img"].shape[1], shift=(args.name != "flux-schnell"))
 
         # offload TEs to CPU, load model to gpu
         if args.offload:
@@ -1192,6 +1127,7 @@ if __name__ == "__main__":
         # decode latents to pixel space
         x = Sampling.unpack(x.float(), opts.height, opts.width).realize()
         x = ae.decode(x).realize()
+
     t1 = time.perf_counter()
 
     fn = output_name.format(idx=idx)
