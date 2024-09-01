@@ -116,7 +116,7 @@ class QCOMComputeQueue(HWComputeQueue):
              adreno.A6XX_SP_CS_CTRL_REG0_THREADSIZE(adreno.THREAD64) | adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT(prg.hregs_count)
              | adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT(prg.fregs_count) | adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK(prg.branch_stack),
              adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6 | adreno.A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE(prg.shared_size),
-              0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr), adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM(prg.pvtmem_size_per_item), 
+              0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr), adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM(prg.pvtmem_size_per_item),
               *data64_le(prg.device._stack.va_addr), adreno.A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE(prg.pvtmem_size_total))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG,
              adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_CONSTANTS) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
