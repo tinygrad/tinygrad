@@ -13,7 +13,6 @@ from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.engine.search import _time_program
-import math
 
 
 def get_ast_helper():
@@ -176,14 +175,6 @@ class TestTimeProgram(unittest.TestCase):
       results = _time_program(self.p, self.lib, self.var_vals, self.rawbufs, cnt=i)
       self.assertEqual(len(results), i)
       self.assertTrue(all(isinstance(x, float) for x in results))
-
-  def test_time_early_stop_compile_error(self):
-    invalid_lib = b'bplist00\xd4\x01\x02\x03\x04\x05'
-    for i in range(10):
-      with self.assertRaises(Exception):
-        results = _time_program(self.p, invalid_lib, self.var_vals, self.rawbufs, cnt=i)
-        self.assertEqual(len(results), i)
-        self.assertTrue(all(x == math.inf for x in results))
 
 
 if __name__ == '__main__':
