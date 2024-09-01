@@ -185,7 +185,7 @@ class Compiler:
 
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer],
-               compiler:Optional[Compiler], runtime, graph=None, count:Optional[int]=None):
+               compiler:Optional[Compiler], runtime, graph=None, count=0):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph, self.count = device, allocator, compiler or Compiler(), runtime, graph, count
     self.renderer = renderer or Renderer()
   def synchronize(self):
