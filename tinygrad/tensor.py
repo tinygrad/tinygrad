@@ -1745,21 +1745,21 @@ class Tensor:
     print(Tensor.einsum("ij,ij->", x, y).numpy())
     ```
     """
-    def _parse_einsum_input(subscripts: str, *operands: Tensor):
-      if "." in subscripts:
-        ell_chars, longest = "".join(list(set('abcdefghijklmnopqrstuvwxyz') - set(subscripts.replace(".", "").replace(",", "").replace("->", "")))), 0
-        input_tmp, output_sub = subscripts.split("->") if (out_sub := "->" in subscripts) else (subscripts, "")
+    def parse_formula(formula: str, *operands: Tensor):
+      if "." in formula:
+        ell_chars, longest = "".join(list(set('abcdefghijklmnopqrstuvwxyz') - set(formula.replace(".", "").replace(",", "").replace("->", "")))), 0
+        input_tmp, output_sub = formula.split("->") if (out_sub := "->" in formula) else (formula, "")
         for i, sub in enumerate(filter(lambda x: "." in x, inputs := input_tmp.split(","))):
           if (ell_count := max(operands[i].ndim, 1) - (len(sub) - 3)) > longest: longest = ell_count
           inputs[i] = sub.replace('...', '' if ell_count == 0 else ell_chars[-ell_count:])
-        subscripts = ",".join(inputs)
+        formula = ",".join(inputs)
         out_ellipse = "" if longest == 0 else ell_chars[-longest:]
-        return (subscripts, output_sub.replace("...", out_ellipse)) if out_sub else (subscripts, \
-            out_ellipse + ''.join(sorted(set(''.join(s for s in sorted(set(subscripts.replace(",", ""))) if subscripts.replace(",", "").count(s) == 1)) - set(out_ellipse))))
-      return subscripts.split("->") if "->" in subscripts else (subscripts, ''.join(c for c in sorted(subscripts) if subscripts.count(c) == 1))
+        return (formula, output_sub.replace("...", out_ellipse)) if out_sub else (formula, \
+            out_ellipse + ''.join(sorted(c for c in formula if formula.count(c) == 1 and c.isalpha() and c not in out_ellipse)))
+      return formula.split("->") if "->" in formula else (formula, ''.join(c for c in sorted(formula) if formula.count(c) == 1))
 
     xs:Tuple[Tensor] = argfix(*raw_xs)
-    inputs_str, output = _parse_einsum_input(formula.replace(" ", ""), *xs)
+    inputs_str, output = parse_formula(formula.replace(" ", ""), *xs)
     inputs = inputs_str.split(",")
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
 
