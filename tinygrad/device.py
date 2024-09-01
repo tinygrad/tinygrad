@@ -472,7 +472,7 @@ class HCQProgram:
     q = self.device.hw_compute_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
     with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-      q.exec(self, self.fill_kernargs(bufs, vals), global_size, local_size)
+      q.exec(self, _:=self.fill_kernargs(bufs, vals), global_size, local_size)
 
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
