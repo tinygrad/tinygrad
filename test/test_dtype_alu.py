@@ -169,8 +169,10 @@ class TestDTypeALU(unittest.TestCase):
                        f"no float64 or float16 on {Device.DEFAULT}")
   @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16, dtypes.uint32)))
   def test_float_cast_to_unsigned(self, a, float_dtype, unsigned_dtype):
-    float_value = a.draw({dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype])
-    universal_test_cast(float_value, float_dtype, unsigned_dtype)
+    max_value = {dtypes.uint8: 255, dtypes.uint16: 65535, dtypes.uint32: 2**32-1}[unsigned_dtype]
+    float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
+    float_strat = float_strat.filter(lambda x: 0 < x < max_value)
+    universal_test_cast(a.draw(float_strat), float_dtype, unsigned_dtype)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT) and is_dtype_supported(dtypes.float16, Device.DEFAULT),
                        f"no float64 or float16 on {Device.DEFAULT}")
@@ -183,11 +185,11 @@ class TestDTypeALU(unittest.TestCase):
     universal_test_cast(a.draw(underflow_strat), float_dtype, unsigned_dtype)
     universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
 
-  @unittest.skipIf(Device.DEFAULT == "METAL", "TODO: flakiness")
+  @unittest.skipIf(Device.DEFAULT == "METAL", "uint64 casting is unstable")
   @given(ht.int64) # testing for integers within int64 range
   def test_cast_float_to_uint64(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint64)
 
-  @unittest.skipIf(Device.DEFAULT in {"PYTHON", "AMD"}, "TODO: flakiness")
+  @unittest.skipIf(Device.DEFAULT in {"PYTHON", "AMD"}, "uint64 casting is unstable")
   @unittest.expectedFailure
   @given(strat.integers(min_value=9223372036854775807+1, max_value=2**64-1)) # testing for integers larger than int64 range and within uint64 range
   def test_cast_float_to_uint64_failure(self, a): universal_test_cast(a, dtypes.float32, dtypes.uint64)

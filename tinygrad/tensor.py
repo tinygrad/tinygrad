@@ -3191,7 +3191,6 @@ class Tensor:
     print(t.dtype, t.numpy())
     ```
     """
-
     if dtypes.is_unsigned(dt:=to_dtype(dtype)) and dtypes.is_float(self.dtype):
       return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int64), dtype=dt)
     return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
