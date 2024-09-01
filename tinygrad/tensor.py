@@ -1756,7 +1756,7 @@ class Tensor:
         out_ellipse = "" if longest == 0 else ell_chars[-longest:]
         return (formula, output_sub.replace("...", out_ellipse)) if out_sub else (formula, \
             out_ellipse + ''.join(sorted(c for c in formula if formula.count(c) == 1 and c.isalpha() and c not in out_ellipse)))
-      return formula.split("->") if "->" in formula else (formula, ''.join(c for c in sorted(formula) if formula.count(c) == 1))
+      return formula.split("->") if "->" in formula else (formula, ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
 
     xs:Tuple[Tensor] = argfix(*raw_xs)
     inputs_str, output = parse_formula(formula.replace(" ", ""), *xs)
