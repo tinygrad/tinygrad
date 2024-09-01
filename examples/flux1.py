@@ -7,7 +7,6 @@ import re
 import time
 from dataclasses import dataclass
 from glob import iglob
-import torch
 from PIL import Image
 import argparse
 
@@ -835,7 +834,7 @@ class Util:
         elif len(unexpected) > 0:
             print(f"Got {len(unexpected)} unexpected keys:\n\t" + "\n\t".join(unexpected))
 
-    def load_flow_model(name: str, device: str | torch.device = "cuda", hf_download: bool = True):
+    def load_flow_model(name: str, device: str = "NV", hf_download: bool = True):
         # Loading Flux
         print("Init model")
 
@@ -850,7 +849,7 @@ class Util:
 
         return model
 
-    def load_t5(device: str | torch.device = "cuda", max_length: int = 512):
+    def load_t5(device: str = "NV", max_length: int = 512):
         # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
         t5 = T5Embedder()
 
@@ -871,7 +870,7 @@ class Util:
 
         return t5
 
-    def load_clip(device: str | torch.device = "cuda"):
+    def load_clip(device: str = "NV"):
         clip = ClipEmbedder()
 
         state_dict = nn.state.safe_load(
@@ -884,7 +883,7 @@ class Util:
 
         return clip
 
-    def load_ae(name: str, device: str | torch.device = "cuda", hf_download: bool = True) -> AutoEncoder:
+    def load_ae(name: str, device: str  = "NV", hf_download: bool = True) -> AutoEncoder:
         # Loading the autoencoder
         print("Init AE")
         ae = AutoEncoder(Util.configs[name].ae_params)
@@ -901,8 +900,8 @@ class Sampling:
         num_samples: int,
         height: int,
         width: int,
-        device: torch.device,
-        dtype: torch.dtype,
+        device: str,
+        dtype: str,
         seed: int,
     ):
         Tensor.manual_seed(seed)
@@ -1068,13 +1067,12 @@ if __name__ == "__main__":
 
     with Tensor.test():
         # init all components
-        model = Util.load_flow_model(args.name, device="cpu" if args.offload else torch_device)
+        model = Util.load_flow_model(args.name, device="CLANG" if args.offload else torch_device)
         model.to("CLANG")
         t5 = Util.load_t5(torch_device, max_length=256 if args.name == "flux-schnell" else 512)
         clip = Util.load_clip(torch_device)
-        ae = Util.load_ae(args.name, device="cpu" if args.offload else torch_device)
+        ae = Util.load_ae(args.name, device="CLANG" if args.offload else torch_device)
 
-        rng = torch.Generator(device="cpu")
         opts = SamplingOptions(
             prompt=args.prompt,
             width=width,
