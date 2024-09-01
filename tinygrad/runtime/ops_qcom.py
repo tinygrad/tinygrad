@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, time, math, ctypes, fcntl, functools, mmap, struct, array, decimal
+import os, time, ctypes, fcntl, functools, mmap, struct, array, decimal
 from types import SimpleNamespace
 from typing import Tuple, List, Dict, Any, cast
 from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState, hcq_command
@@ -190,7 +190,8 @@ class QCOMArgsState(HCQArgsState):
     for cnst_val, cnst_off, cnst_sz in prg.consts_info:
       ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
 
-    samplers: List[Any] = []; descriptors: List[Any] = []; ibos: List[Any] = []; self.i2descr: Dict[int, int] = {}; self.i2ibo: Dict[int, int] = {}
+    samplers: List[Any] = []; descriptors: List[Any] = []; ibos: List[Any] = [] # noqa: E702
+    self.i2descr: Dict[int, int] = {}; self.i2ibo: Dict[int, int] = {} # noqa: E702
     for i, b in enumerate(bufs):
       if not hasattr(b, 'samplers') and not hasattr(b, 'descriptor') and not hasattr(b, 'ibo'): self.update_buffer(i, b)
       elif self.boffs[i][1]: ibos, self.i2ibo = [*ibos, *getattr(b, 'ibo')], {**self.i2ibo, i: len(ibos)}
