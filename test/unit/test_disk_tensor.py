@@ -202,6 +202,14 @@ class TestSafetensors(unittest.TestCase):
       assert v.numpy().dtype == tensors[k].dtype
       np.testing.assert_allclose(v.numpy(), tensors[k])
 
+  @unittest.expectedFailure
+  def test_save_to_open_disk_device(self):
+    t1 = Tensor([1, 2, 3])
+    state_dict = get_state_dict(t1)
+    safe_save(state_dict, "model.safetensors")
+    state_dict2 = safe_load("model.safetensors")
+    safe_save(state_dict2, "model.safetensors")
+
 def helper_test_disk_tensor(fn, data, np_fxn, tinygrad_fxn=None):
   if tinygrad_fxn is None: tinygrad_fxn = np_fxn
   pathlib.Path(temp(fn)).unlink(missing_ok=True)
