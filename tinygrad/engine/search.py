@@ -34,43 +34,24 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, factor
 
-def _time_program(p: Program, lib: bytes, var_vals: Dict[Variable, int], rawbufs: List[Buffer],
-                  early_stop: Optional[float] = None, max_global_size: Optional[int] = 65536,
-                  clear_l2: bool = False, cnt: int = 3, name: str = "test") -> List[float]:
-  # Adjust global size if necessary
+def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:List[Buffer], early_stop:Optional[float]=None,
+                  max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> List[float]:
   factor = 1
   if p.global_size is not None and max_global_size is not None:
-    p, factor = _adjust_global_size(p, max_global_size, var_vals)
-
-  # Compile program
+    global_size, factor = _get_test_global_size(p.global_size, max_global_size, var_vals)
+    p = replace(p, global_size=global_size)
   try: car = CompiledRunner(p, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
-
-  # Prepare input buffers
-  input_bufs = [rawbufs[i] for i in car.p.globals]
   tms = []
+  input_bufs = [rawbufs[i] for i in car.p.globals]
   for _ in range(cnt):
-    _clear_caches_if_needed(p, clear_l2)
-    execution_time = _run_and_time(car, input_bufs, var_vals) * factor
-    tms.append(execution_time)
-    if early_stop is not None and min(tms) > early_stop:
-      break
-
+    if clear_l2:
+      if hasattr(dev:=Device[p.dname], 'invalidate_caches'): dev.invalidate_caches()
+      else:
+        with Context(DEBUG=0, BEAM=0, CAPTURING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
+    tms.append(cast(float, car(input_bufs, var_vals, wait=True))*factor)
+    if early_stop is not None and early_stop < min(tms): break
   return tms
-
-def _adjust_global_size(p: Program, max_global_size: int, var_vals: Dict[Variable, int]) -> Tuple[Program, int]:
-  global_size, factor = _get_test_global_size(p.global_size, max_global_size, var_vals)
-  return replace(p, global_size=global_size), factor
-
-def _clear_caches_if_needed(p: Program, clear_l2: bool):
-  if clear_l2:
-    dev = Device[p.dname]
-    if hasattr(dev:=Device[p.dname], 'invalidate_caches'): dev.invalidate_caches()
-    else:
-      with Context(DEBUG=0, BEAM=0, CAPTURING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
-
-def _run_and_time(car: CompiledRunner, input_bufs: List[Buffer], var_vals: Dict[Variable, int]) -> float:
-  return cast(float, car(input_bufs, var_vals, wait=True))
 
 class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
