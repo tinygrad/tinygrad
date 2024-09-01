@@ -170,11 +170,16 @@ class TestTimeProgram(unittest.TestCase):
     self.var_vals = {k:(k.max+k.min)//2 for k in k.ast.variables()}
     self.rawbufs = bufs_from_lin(k)
 
-  def test_reasonable_time(self):
+  def test_time_output_size(self):
     for i in range(10):
       results = _time_program(self.p, self.lib, self.var_vals, self.rawbufs, cnt=i)
       self.assertEqual(len(results), i)
       self.assertTrue(all(isinstance(x, float) for x in results))
+
+  def test_early_stop(self):
+    results = _time_program(self.p, self.lib, self.var_vals, self.rawbufs, cnt=3, early_stop=0.0)
+    print(results)
+    self.assertEqual(len(results), 1)
 
 
 if __name__ == '__main__':
