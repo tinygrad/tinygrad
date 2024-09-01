@@ -1745,11 +1745,22 @@ class Tensor:
     print(Tensor.einsum("ij,ij->", x, y).numpy())
     ```
     """
+    def _parse_einsum_input(subscripts: str, *operands: Tensor):
+      if "." in subscripts:
+        ell_chars, longest = "".join(list(set('abcdefghijklmnopqrstuvwxyz') - set(subscripts.replace(".", "").replace(",", "").replace("->", "")))), 0
+        input_tmp, output_sub = subscripts.split("->") if (out_sub := "->" in subscripts) else (subscripts, "")
+        for i, sub in enumerate(filter(lambda x: "." in x, inputs := input_tmp.split(","))):
+          if (ell_count := max(operands[i].ndim, 1) - (len(sub) - 3)) > longest: longest = ell_count
+          inputs[i] = sub.replace('...', '' if ell_count == 0 else ell_chars[-ell_count:])
+        subscripts = ",".join(inputs)
+        out_ellipse = "" if longest == 0 else ell_chars[-longest:]
+        return (subscripts, output_sub.replace("...", out_ellipse)) if out_sub else (subscripts, \
+            out_ellipse + ''.join(sorted(set(''.join(s for s in sorted(set(subscripts.replace(",", ""))) if subscripts.replace(",", "").count(s) == 1)) - set(out_ellipse))))
+      return subscripts.split("->") if "->" in subscripts else (subscripts, ''.join(c for c in sorted(subscripts) if subscripts.count(c) == 1))
+
     xs:Tuple[Tensor] = argfix(*raw_xs)
-    formula = formula.replace(" ", "")
-    inputs_str, output = formula.split("->") if "->" in formula else (formula, \
-                                                                       ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
-    inputs = inputs_str.split(',')
+    inputs_str, output = _parse_einsum_input(formula.replace(" ", ""), *xs)
+    inputs = inputs_str.split(",")
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
 
     # map the value of each letter in the formula

@@ -753,10 +753,8 @@ class TestOps(unittest.TestCase):
     # bilinear transformation
     helper_test_op([(2,3),(5,3,7),(2,7)], lambda a,b,c: torch.einsum('ik,jkl,il->ij', [a,b,c]), lambda a,b,c: Tensor.einsum('ik,jkl,il->ij', [a,b,c]))
 
-  @unittest.expectedFailure
   def test_einsum_ellipsis(self):
     """The expected behavior for einsum is described in the PyTorch docs: https://pytorch.org/docs/stable/generated/torch.einsum.html"""
-    # TODO: implement ellipsis support in einsum to pass these tests
     # test ellipsis
     helper_test_op([(3, 8, 9), (3, 8, 9)], lambda a, b: torch.einsum('...id, ...jd -> ...ij', [a, b]),
                lambda a, b: Tensor.einsum('...id, ...jd -> ...ij', [a, b]))
