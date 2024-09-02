@@ -22,6 +22,7 @@ class MetalGraph(GraphRunner):
     self.icb = self.device.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache),
                                                                                                   Metal.MTLResourceOptions(0))
     if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
+    self.needs_icb_fix = int(type(self.icb).__name__ != "AGXG15XFamilyIndirectCommandBuffer")    # not required on M3
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
     all_resources = [self.int_buf.buf] if len(self.vars) else []
@@ -71,7 +72,7 @@ class MetalGraph(GraphRunner):
     #encoder.useResources_count_usage_(self.all_pipelines, len(self.all_pipelines), Metal.MTLResourceUsageRead)
     # but it fails with "Invalid Resource (00000009:kIOGPUCommandBufferCallbackErrorInvalidResource)"
     # to repro the crash (which can also crash other running GPU apps), run with FIX_METAL_ICB=0
-    if getenv("FIX_METAL_ICB", 1):
+    if getenv("FIX_METAL_ICB", self.needs_icb_fix):
       for ps in self.all_pipelines:
         encoder.setComputePipelineState_(ps)
         encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(0,0,0), Metal.MTLSize(0,0,0))
