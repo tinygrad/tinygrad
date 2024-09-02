@@ -68,16 +68,13 @@ class IndependentLowerer:
         self.idxs = get_grouped_dims("idx", full_shape[:global_dims], opts.global_max, reverse=True)
       else:
         # define indexes for GPU-like execution
-        grouped_axes = range(first_reduce,first_reduce+group_for_reduces)
         reduceops = [x for x in ast.parents if x.op is UOps.REDUCE_AXIS and all(i < first_reduce+group_for_reduces for i in x.arg[1])]
         if len(reduceops) > 0 and not any(r.op is UOps.WMMA for r in reduceops):
           # try to reuse grouped dims across reduceops
           rdims, p = get_reduce_dims([[i-global_dims for i in r.arg[1]] for r in reduceops], full_shape[global_dims:first_reduce+group_for_reduces])
-          print("rdims=",rdims," p=",p)
           lidxs = get_grouped_dims("lidx", rdims, opts.local_max)
           self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + [lidxs[i] for i in p]
         else:
-          lidxs = get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.global_max)
           self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
             get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.global_max)
     else:
