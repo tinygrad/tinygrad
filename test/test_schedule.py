@@ -1330,6 +1330,36 @@ class TestConvBW(unittest.TestCase):
     np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
 
+  def test_fold_conv_relu_backward_ast_rewrite(self):
+    # shared params
+    Tensor.manual_seed(0)
+    img_np = Tensor.randn(2,3,64,64).numpy()
+    c1_w = Tensor.randn(16,3,3,3).numpy()
+    # graph_rewrite
+    GlobalCounters.reset()
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight = Tensor(c1_w, requires_grad=True)
+    img = Tensor(img_np, requires_grad=True)
+    c1(img).relu().mean().backward()
+    assert img.grad is not None and c1.weight.grad is not None
+    with Context(AST_REWRITE=1): self.check_schedule([img.grad, c1.weight.grad], 3)
+    rw_flops = GlobalCounters.global_ops
+    # ref
+    GlobalCounters.reset()
+    c1_ref = nn.Conv2d(3,16,3, bias=False)
+    c1_ref.weight = Tensor(c1_w, requires_grad=True)
+    img_ref = Tensor(img_np, requires_grad=True)
+    c1_ref(img_ref).relu().mean().backward()
+    assert img_ref.grad is not None and c1_ref.weight.grad is not None
+    with Context(AST_REWRITE=0): self.check_schedule([img_ref.grad, c1_ref.weight.grad], 3)
+    ref_flops = GlobalCounters.global_ops
+    # correctness
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_ref.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_ref.grad.numpy(), atol=5e-4, rtol=1e-5)
+    # flops, TODO: This will be fixed once SWIZZLE merges view strides.
+    with self.assertRaises(AssertionError):
+      self.assertEqual(rw_flops, ref_flops)
+
   @unittest.expectedFailure
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_fold_conv_relu_backward_half(self):
