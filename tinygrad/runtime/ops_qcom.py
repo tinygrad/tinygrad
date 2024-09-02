@@ -8,7 +8,6 @@ import tinygrad.runtime.autogen.adreno as adreno
 import tinygrad.runtime.autogen.libc as libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
