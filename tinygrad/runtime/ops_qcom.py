@@ -174,8 +174,7 @@ class QCOMComputeQueue(HWComputeQueue):
 
     global_size_mp = self.cmd_idx_to_dims[cmd_idx][0]
     if self.cmd_idx_to_dims[cmd_idx][1]:
-      global_size_mp = cast(Tuple[int,int,int], tuple(int(g*l)for g,l in zip(
-        self.cmd_idx_to_dims[cmd_idx][0], self.cmd_idx_to_dims[cmd_idx][1])))
+      global_size_mp = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(self.cmd_idx_to_dims[cmd_idx][0], self.cmd_idx_to_dims[cmd_idx][1])))
     self._patch(cmd_idx, offset=3, data=[global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0])
 
 class QCOMArgsState(HCQArgsState):
