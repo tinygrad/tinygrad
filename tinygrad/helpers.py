@@ -3,6 +3,7 @@ import os, functools, platform, time, re, contextlib, operator, hashlib, pickle,
 import itertools, urllib.request, subprocess, shutil, math, json, contextvars
 from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
+from weakref import WeakSet
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   from tinygrad.shape.shapetracker import sint
@@ -315,11 +316,17 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 # *** tqdm
 
 class tqdm:
+  _insts:WeakSet[tqdm] = WeakSet()
   def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:Optional[int]=None, rate:int=100):
     self.iterable, self.disable, self.unit, self.unit_scale, self.rate = iterable, disable, unit, unit_scale, rate
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, getattr(iterable, "__len__", lambda:0)() if total is None else total
+    self.pos = self._get_free_pos(self)
     self.set_description(desc)
     self.update(0)
+  def __new__(cls, *_, **__):
+    inst = super().__new__(cls)
+    cls._insts.add(inst)
+    return inst
   def __iter__(self):
     for item in self.iterable:
       yield item
@@ -339,7 +346,14 @@ class tqdm:
     suf = f'{prog_text} [{elapsed_text}, {it_text}{self.unit}/s]'
     sz = max(ncols-len(self.desc)-3-2-2-len(suf), 1)
     bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
-    print(bar[:ncols+1], flush=True, end='\n'*close, file=sys.stderr)
+    if self.pos: self._move_to(self.pos)
+    print(bar[:ncols+1], flush=True, end='\n' if close and not self.pos else '', file=sys.stderr)
+    if self.pos: self._move_to(-self.pos)
+  @classmethod
+  def _get_free_pos(cls, instance=None):
+    positions = {abs(inst.pos) for inst in cls._insts if inst is not instance and hasattr(inst, "pos")}
+    return min(set(range(len(positions) + 1)).difference(positions))
+  def _move_to(self, n): print('\n' * n + '\x1b[A' * -n, flush=True, end='', file=sys.stderr)
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
