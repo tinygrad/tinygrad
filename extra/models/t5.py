@@ -21,6 +21,8 @@ import math
 
 from tinygrad import nn, Tensor, dtypes
 
+from sentencepiece import SentencePieceProcessor
+
 
 class T5Config:
   def __init__(
@@ -56,6 +58,17 @@ class NewGELUActivation:
 
   def __call__(self, x: Tensor) -> Tensor:
     return 0.5 * x * (1.0 + Tensor.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * Tensor.pow(x, 3.0))))
+
+class T5Tokenizer:
+  def __init__(self, spiece_path):
+    self.spp = SentencePieceProcessor(str(spiece_path))
+
+  def __call__(self, text, max_length, *args, **kwargs):
+    if isinstance(text, str): text = [text]
+    encoded = self.spp.Encode(text)
+    ret = Tensor.zeros((len(encoded), max_length), dtype=dtypes.int).contiguous()
+    for i, row in enumerate(encoded): ret[i, : len(row) + 1] = Tensor(row + [1])
+    return {"input_ids": ret}
 
 class T5LayerNorm:
   def __init__(self, hidden_size, eps=1e-6):
@@ -384,3 +397,27 @@ class T5EncoderModel:
     ```"""
 
     return self.encoder(input_ids=input_ids)
+
+class T5Embedder:
+  def __init__(self, max_length, spiece_path):
+    self.tokenizer = T5Tokenizer(spiece_path)
+    self.max_length = max_length
+
+    config = T5Config(
+        **{
+            "d_ff": 10240,
+            "d_kv": 64,
+            "d_model": 4096,
+            "layer_norm_epsilon": 1e-06,
+            "num_decoder_layers": 24,
+            "num_heads": 64,
+            "num_layers": 24,
+            "relative_attention_num_buckets": 32,
+            "vocab_size": 32128,
+        }
+    )
+    self.encoder = T5EncoderModel(config)
+
+  def __call__(self, text: str):
+    toks = self.tokenizer(text, self.max_length)
+    return self.encoder(toks["input_ids"])["last_hidden_states"]

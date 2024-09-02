@@ -14,23 +14,13 @@ import math
 from typing import Callable
 
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.helpers import fetch, tqdm
+from tinygrad.helpers import fetch
 
 from extra.models.clip import Tokenizer, Closed
-from extra.models.t5 import T5EncoderModel, T5Config
-
-from sentencepiece import SentencePieceProcessor
+from extra.models.t5 import T5Embedder
 
 def TensorIdentity(x: Tensor) -> Tensor:
   return x
-
-def transfer_model(model, device: str):
-  dtype = "int16" if device == "CLANG" else "bfloat16"
-  for param in tqdm(nn.state.get_parameters(model), desc=f"transferring {model} to {device}"):
-    if param.dtype in (dtypes.int16, dtypes.bfloat16):
-      param.replace(param.bitcast(dtype).to(device)).realize()
-    else:
-      param.replace(param.to(device)).realize()
 
 ##https://github.com/black-forest-labs/flux/blob/main/src/flux/math.py
 
@@ -61,54 +51,10 @@ def apply_rope(xq: Tensor, xk: Tensor, freqs_cis: Tensor) -> tuple[Tensor, Tenso
   return xq_out.reshape(*xq.shape).cast(xq.dtype), xk_out.reshape(*xk.shape).cast(xk.dtype)
 
 #Conditioner
-class T5Tokenizer:
-  def __init__(self):
-    file_path = fetch("https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/tokenizer_2/spiece.model")
-    self.spp = SentencePieceProcessor(str(file_path))
-
-  def __call__(self, text, max_length, *args, **kwargs):
-    if isinstance(text, str): text = [text]
-    encoded = self.spp.Encode(text)
-    ret = Tensor.zeros((len(encoded), max_length), dtype=dtypes.int).contiguous()
-    for i, row in enumerate(encoded): ret[i, : len(row) + 1] = Tensor(row + [1])
-    return {"input_ids": ret}
-
-
-class T5Embedder:
-  def __init__(self):
-    self.tokenizer = T5Tokenizer()
-
-    config = T5Config(
-        **{
-            "d_ff": 10240,
-            "d_kv": 64,
-            "d_model": 4096,
-            "layer_norm_epsilon": 1e-06,
-            "num_decoder_layers": 24,
-            "num_heads": 64,
-            "num_layers": 24,
-            "relative_attention_num_buckets": 32,
-            "vocab_size": 32128,
-        }
-    )
-
-    self.encoder = T5EncoderModel(config)
-
-  def to(self, device: str):
-    transfer_model(self.encoder, device)
-
-  def __call__(self, text: str):
-    toks = self.tokenizer(text, 256)
-    return self.encoder(toks["input_ids"])["last_hidden_states"]
-
-
 class ClipEmbedder:
   def __init__(self):
     self.tokenizer = Tokenizer.ClipTokenizer()
     self.encoder = Closed.ClipTextModel(None)
-
-  def to(self, device: str):
-    transfer_model(self.encoder, device)
 
   def __call__(self, text):
     batch_encoding = Tensor([self.tokenizer.encode(text[0])])  ##TODO: allow batch size > 1
@@ -208,12 +154,6 @@ class Upsample:
     x = self.conv(x)
     return x
 
-
-class Named_Module:
-  def __init__(self):
-    pass
-
-
 class Encoder:
   def __init__(
       self,
@@ -245,19 +185,19 @@ class Encoder:
       for _ in range(self.num_res_blocks):
         block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
         block_in = block_out
-      down = Named_Module()
-      down.block = block
-      down.attn = attn
+      down = {}
+      down["block"] = block
+      down["attn"] = attn
       if i_level != self.num_resolutions - 1:
-        down.downsample = Downsample(block_in)
+        down["downsample"] = Downsample(block_in)
         curr_res = curr_res // 2
       self.down.append(down)
 
     # middle
-    self.mid = Named_Module()
-    self.mid.block_1 = ResnetBlock(in_channels=block_in, out_channels=block_in)
-    self.mid.attn_1 = AttnBlock(block_in)
-    self.mid.block_2 = ResnetBlock(in_channels=block_in, out_channels=block_in)
+    self.mid = {}
+    self.mid["block_1"] = ResnetBlock(in_channels=block_in, out_channels=block_in)
+    self.mid["attn_1"] = AttnBlock(block_in)
+    self.mid["block_2"] = ResnetBlock(in_channels=block_in, out_channels=block_in)
 
     # end
     self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
@@ -268,18 +208,18 @@ class Encoder:
     hs = [self.conv_in(x)]
     for i_level in range(self.num_resolutions):
       for i_block in range(self.num_res_blocks):
-        h = self.down[i_level].block[i_block](hs[-1])
-        if len(self.down[i_level].attn) > 0:
-          h = self.down[i_level].attn[i_block](h)
+        h = self.down[i_level]["block"][i_block](hs[-1])
+        if len(self.down[i_level]["attn"]) > 0:
+          h = self.down[i_level]["attn"][i_block](h)
         hs.append(h)
       if i_level != self.num_resolutions - 1:
-        hs.append(self.down[i_level].downsample(hs[-1]))
+        hs.append(self.down[i_level]["downsample"](hs[-1]))
 
     # middle
     h = hs[-1]
-    h = self.mid.block_1(h)
-    h = self.mid.attn_1(h)
-    h = self.mid.block_2(h)
+    h = self.mid["block_1"](h)
+    h = self.mid["attn_1"](h)
+    h = self.mid["block_2"](h)
     # end
     h = self.norm_out(h)
     h = swish(h)
@@ -314,10 +254,10 @@ class Decoder:
     self.conv_in = nn.Conv2d(z_channels, block_in, kernel_size=3, stride=1, padding=1)
 
     # middle
-    self.mid = Named_Module()
-    self.mid.block_1 = ResnetBlock(in_channels=block_in, out_channels=block_in)
-    self.mid.attn_1 = AttnBlock(block_in)
-    self.mid.block_2 = ResnetBlock(in_channels=block_in, out_channels=block_in)
+    self.mid = {}
+    self.mid["block_1"] = ResnetBlock(in_channels=block_in, out_channels=block_in)
+    self.mid["attn_1"] = AttnBlock(block_in)
+    self.mid["block_2"] = ResnetBlock(in_channels=block_in, out_channels=block_in)
 
     # upsampling
     self.up = []
@@ -328,11 +268,11 @@ class Decoder:
       for _ in range(self.num_res_blocks + 1):
         block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
         block_in = block_out
-      up = Named_Module()
-      up.block = block
-      up.attn = attn
+      up = {}
+      up["block"] = block
+      up["attn"] = attn
       if i_level != 0:
-        up.upsample = Upsample(block_in)
+        up["upsample"] = Upsample(block_in)
         curr_res = curr_res * 2
       self.up.insert(0, up)  # prepend to get consistent order
 
@@ -340,26 +280,23 @@ class Decoder:
     self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
     self.conv_out = nn.Conv2d(block_in, out_ch, kernel_size=3, stride=1, padding=1)
 
-  def to(self, device: str):
-    transfer_model(self, device)
-
   def __call__(self, z: Tensor) -> Tensor:
     # z to block_in
     h = self.conv_in(z)
 
     # middle
-    h = self.mid.block_1(h)
-    h = self.mid.attn_1(h)
-    h = self.mid.block_2(h)
+    h = self.mid["block_1"](h)
+    h = self.mid["attn_1"](h)
+    h = self.mid["block_2"](h)
 
     # upsampling
     for i_level in reversed(range(self.num_resolutions)):
       for i_block in range(self.num_res_blocks + 1):
-        h = self.up[i_level].block[i_block](h)
-        if len(self.up[i_level].attn) > 0:
-          h = self.up[i_level].attn[i_block](h)
+        h = self.up[i_level]["block"][i_block](h)
+        if len(self.up[i_level]["attn"]) > 0:
+          h = self.up[i_level]["attn"][i_block](h)
       if i_level != 0:
-        h = self.up[i_level].upsample(h)
+        h = self.up[i_level]["upsample"](h)
 
     # end
     h = self.norm_out(h)
@@ -412,9 +349,6 @@ class AutoEncoder:
   def decode(self, z: Tensor) -> Tensor:
     z = z / self.scale_factor + self.shift_factor
     return self.decoder(z)
-
-  def to(self, device: str):
-    transfer_model(self, device)
 
   def __call__(self, x: Tensor) -> Tensor:
     return self.decode(self.encode(x))
@@ -705,9 +639,6 @@ class Model:
 
       self.final_layer = LastLayer(self.hidden_size, 1, self.out_channels)
 
-    def to(self, device: str):
-      transfer_model(self, device)
-
     def __call__(
         self,
         img: Tensor,
@@ -751,18 +682,21 @@ class Util:
   class ModelSpec:
     params: Model.FluxParams
     ae_params: AutoEncoderParams
-    ckpt_path: str | None
-    ae_path: str | None
     repo_id: str | None
     repo_flow: str | None
     repo_ae: str | None
+    repo_T5: dict
+    repo_clip: list
 
   configs = {
+      "base_url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/",
       "flux-dev": ModelSpec(
           repo_id="black-forest-labs/FLUX.1-dev",
           repo_flow="flux1-dev.safetensors",
           repo_ae="ae.safetensors",
-          ckpt_path=os.getenv("FLUX_DEV"),
+          repo_T5={"tokenizer": "tokenizer_2/spiece.model",
+                   "weights": ["text_encoder_2/model-00001-of-00002.safetensors", "text_encoder_2/model-00002-of-00002.safetensors"]},
+          repo_clip="text_encoder/model.safetensors",
           params=Model.FluxParams(
               in_channels=64,
               vec_in_dim=768,
@@ -777,7 +711,6 @@ class Util:
               qkv_bias=True,
               guidance_embed=True,
           ),
-          ae_path=os.getenv("AE"),
           ae_params=AutoEncoderParams(
               resolution=256,
               in_channels=3,
@@ -794,7 +727,9 @@ class Util:
           repo_id="black-forest-labs/FLUX.1-schnell",
           repo_flow="flux1-schnell.safetensors",
           repo_ae="ae.safetensors",
-          ckpt_path=os.getenv("FLUX_SCHNELL"),
+          repo_T5={"tokenizer": "tokenizer_2/spiece.model",
+                   "weights": ["text_encoder_2/model-00001-of-00002.safetensors", "text_encoder_2/model-00002-of-00002.safetensors"]},
+          repo_clip="text_encoder/model.safetensors",
           params=Model.FluxParams(
               in_channels=64,
               vec_in_dim=768,
@@ -809,7 +744,6 @@ class Util:
               qkv_bias=True,
               guidance_embed=False,
           ),
-          ae_path=os.getenv("AE"),
           ae_params=AutoEncoderParams(
               resolution=256,
               in_channels=3,
@@ -824,73 +758,37 @@ class Util:
       ),
   }
 
-  def print_load_warning(missing: list[str], unexpected: list[str]) -> None:
-    if len(missing) > 0 and len(unexpected) > 0:
-      print(f"Got {len(missing)} missing keys:\n\t" + "\n\t".join(missing))
-      print("\n" + "-" * 79 + "\n")
-      print(f"Got {len(unexpected)} unexpected keys:\n\t" + "\n\t".join(unexpected))
-    elif len(missing) > 0:
-      print(f"Got {len(missing)} missing keys:\n\t" + "\n\t".join(missing))
-    elif len(unexpected) > 0:
-      print(f"Got {len(unexpected)} unexpected keys:\n\t" + "\n\t".join(unexpected))
-
-  def load_flow_model(name: str, device: str = "NV", hf_download: bool = True):
+  def load_flow_model(name: str):
     # Loading Flux
     print("Init model")
 
     model = Model.Flux(Util.configs[name].params)
-
-    state_dict = nn.state.safe_load(
-        fetch(
-            "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors"
-        )
-    )
+    state_dict = nn.state.safe_load(fetch(Util.configs["base_url"] + Util.configs[name].repo_flow))
     nn.state.load_state_dict(model, state_dict)
 
     return model
 
-  def load_t5(device: str = "NV", max_length: int = 512):
+  def load_t5(name: str, max_length: int = 512):
     # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
-    t5 = T5Embedder()
-
-    state_dict_pt_1 = nn.state.safe_load(
-        fetch(
-            "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/text_encoder_2/model-00001-of-00002.safetensors"
-        )
-    )
-    state_dict_pt_2 = nn.state.safe_load(
-        fetch(
-            "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/text_encoder_2/model-00002-of-00002.safetensors"
-        )
-    )
-
+    t5 = T5Embedder(max_length, fetch(Util.configs["base_url"] + Util.configs[name].repo_T5["tokenizer"]))
+    state_dict_pt_1, state_dict_pt_2 = [nn.state.safe_load(fetch(Util.configs["base_url"] + shard)) for shard in Util.configs[name].repo_T5["weights"]]
     state_dict = state_dict_pt_1 | state_dict_pt_2
-
     nn.state.load_state_dict(t5.encoder, state_dict, strict=False)
 
     return t5
 
-  def load_clip(device: str = "NV"):
+  def load_clip(name: str):
     clip = ClipEmbedder()
-
-    state_dict = nn.state.safe_load(
-        fetch(
-            "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/text_encoder/model.safetensors"
-        )
-    )
-
+    state_dict = nn.state.safe_load(fetch(Util.configs["base_url"] + Util.configs[name].repo_clip))
     nn.state.load_state_dict(clip.encoder, state_dict)
 
     return clip
 
-  def load_ae(name: str, device: str  = "NV", hf_download: bool = True) -> AutoEncoder:
+  def load_ae(name: str) -> AutoEncoder:
     # Loading the autoencoder
     print("Init AE")
     ae = AutoEncoder(Util.configs[name].ae_params)
-    state_dict = nn.state.safe_load(
-        fetch("https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors")
-    )
-    # for key in state_dict: print(key)
+    state_dict = nn.state.safe_load(fetch(Util.configs["base_url"] + Util.configs[name].repo_ae))
     nn.state.load_state_dict(ae, state_dict)
     return ae
 
@@ -900,21 +798,12 @@ class Sampling:
       num_samples: int,
       height: int,
       width: int,
-      device: str,
       dtype: str,
       seed: int,
   ):
     Tensor.manual_seed(seed)
 
-    return Tensor.randn(
-        num_samples,
-        16,
-        # allow for packing
-        2 * math.ceil(height / 16),
-        2 * math.ceil(width / 16),
-        device=device,
-        dtype=dtype,
-    )
+    return Tensor.randn(num_samples, 16, 2 * math.ceil(height / 16), 2 * math.ceil(width / 16), dtype=dtype)
 
   def prepare(t5, clip, img: Tensor, prompt: str | list[str]) -> dict[str, Tensor]:
     bs, _, h, w = img.shape
@@ -1028,7 +917,6 @@ class SamplingOptions:
   guidance: float
   seed: int | None
 
-
 if __name__ == "__main__":
   default_prompt = "a horse sized cat eating a bagel"
   parser = argparse.ArgumentParser(description="Run Flux.1", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -1038,7 +926,6 @@ if __name__ == "__main__":
   parser.add_argument("--height",     type=int,   default=512,            help="height of the sample in pixels (should be a multiple of 16)")
   parser.add_argument("--seed",       type=int,   default=None,           help="Set a seed for sampling")
   parser.add_argument("--prompt",     type=str,   default=default_prompt, help="Prompt used for sampling")
-  parser.add_argument("--device",     type=str,   default="NV",           help="Computation device")
   parser.add_argument("--num_steps",  type=int,   default=None,           help="number of sampling steps (default 4 for schnell, 50 for guidance distilled)") #noqa:E501
   parser.add_argument("--guidance",   type=float, default=3.5,            help="guidance value used for guidance distillation")
   parser.add_argument("--offload",    type=bool,  default=False,          help="offload to cpu")
@@ -1049,7 +936,6 @@ if __name__ == "__main__":
     available = ", ".join(Util.configs.keys())
     raise ValueError(f"Got unknown model name: {args.name}, chose from {available}")
 
-  torch_device = args.device
   if args.num_steps is None:
     num_steps = 4 if args.name == "flux-schnell" else 50
 
@@ -1066,13 +952,6 @@ if __name__ == "__main__":
     idx = max(int(fn.split("_")[-1].split(".")[0]) for fn in fns) + 1 if len(fns) > 0 else 0
 
   with Tensor.test():
-    # init all components
-    model = Util.load_flow_model(args.name, device="CLANG" if args.offload else torch_device)
-    model.to("CLANG")
-    t5 = Util.load_t5(torch_device, max_length=256 if args.name == "flux-schnell" else 512)
-    clip = Util.load_clip(torch_device)
-    ae = Util.load_ae(args.name, device="CLANG" if args.offload else torch_device)
-
     opts = SamplingOptions(
         prompt=args.prompt,
         width=width,
@@ -1092,35 +971,33 @@ if __name__ == "__main__":
         1,
         opts.height,
         opts.width,
-        device=torch_device,
         dtype=dtypes.bfloat16,
         seed=opts.seed,
     )
 
-    opts.seed = None
+    #load text embedders
+    t5 = Util.load_t5(args.name, max_length=256 if args.name == "flux-schnell" else 512)
+    clip = Util.load_clip(args.name)
 
-    if args.offload:
-      ae.to("CLANG")
-      t5.to("NV")
-      clip.to("NV")
-
+    #embed text to get inputs for model
     inp = Sampling.prepare(t5, clip, x, prompt=opts.prompt)
     for k, v in inp.items():  v.realize()
     timesteps = Sampling.get_schedule(opts.num_steps, inp["img"].shape[1], shift=(args.name != "flux-schnell"))
 
-    # offload TEs to CPU, load model to gpu
-    if args.offload:
-      t5.to("CLANG")
-      clip.to("CLANG")
-      model.to("NV")
+    # done with text embedders
+    del t5, clip
+
+    #load model
+    model = Util.load_flow_model(args.name)
 
     # denoise initial noise
     x = Sampling.denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance).realize()
 
-    # offload model, load autoencoder to gpu
-    if args.offload:
-      model.to("CLANG")
-      ae.decoder.to("NV")
+    #done with model
+    del model
+
+    #load autoencoder
+    ae = Util.load_ae(args.name)
 
     # decode latents to pixel space
     x = Sampling.unpack(x.float(), opts.height, opts.width).realize()
