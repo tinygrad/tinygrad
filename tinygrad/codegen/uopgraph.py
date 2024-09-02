@@ -233,9 +233,6 @@ constant_folder = PatternMatcher([
   # arange loop folding (reduce)
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  (NOp(UOps.REDUCE, src=((NOp.var("idx") - NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
-   .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
-   lambda **kwargs: loop_collapse(mval=UOp.const(dtypes.int, -1), **kwargs)),
   # arange loop folding (unrolled)
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)) + NOp.var("extra"),),
@@ -253,25 +250,25 @@ constant_folder = PatternMatcher([
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
   # max folding
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
-  # const rules
+  # GEP/CAST const rules
   (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const(c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
-  # a REDUCE without ranges is a NOOP
-  (NOp(UOps.REDUCE, src=(NOp.var('x'),)), lambda x: x),
-  # GEP on a const is the const
-  (NOp(UOps.GEP, src=(NOp.cvar("x"),), name="root"), lambda root,x: root.const(x.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
   (NOp.cvar('gate').where(NOp.var('c0'), NOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
+  # cast NOOP (NOTE: it's str to deal with PtrDType)
+  (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
+  (NOp(UOps.REDUCE, src=(NOp.var('x'),)), lambda x: x),  # a REDUCE without ranges is a NOOP
   (NOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (NOp.var('x') * 1, lambda x: x),    # x*1 -> x
   (NOp.var('x') // NOp.var('x'), lambda x: x.const(1)), # x//x -> 1
   (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
   (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
+  ((NOp.var("x") * NOp.var("x2")) / NOp.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   (NOp.var('x', dtype=dtypes.bool) & NOp.cvar('c'), lambda x,c: x if c.arg else c),
   (NOp.var('x', dtype=dtypes.bool) | NOp.cvar('c'), lambda x,c: c if c.arg else x),
   # ** zero folding **
@@ -284,8 +281,8 @@ constant_folder = PatternMatcher([
   # ** load/store folding **
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.load(NOp.var("buf"), NOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
-  ((NOp.var('x') + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x+x.const(exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
-  ((NOp.var("x") * NOp.cvar("c1")) * NOp.cvar("c2"), lambda x,c1,c2: x*x.const(exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
+  ((NOp.var('x') + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x+(c1+c2)),
+  ((NOp.var("x") * NOp.cvar("c1")) * NOp.cvar("c2"), lambda x,c1,c2: x*(c1*c2)),
   # *** rules from symbolic ***
   # ** lt **
   # c0*x<c1 for positive int c0,c1
@@ -293,7 +290,7 @@ constant_folder = PatternMatcher([
    lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if dtypes.is_int(x.dtype) and c0.arg > 0 and c1.arg > 0 else None),
   # mul add lt
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
-   lambda x,x2,c0,c1: x.lt(c1.arg//c0.arg) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
+   lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax.arg and x2.vmin.arg >= 0 else None),
   # generic lt folding (use div)
   (NOp.var('x').lt(NOp.cvar('c')), lambda x,c: newx.src[0].lt(newx.src[1]) if 0 < c.arg and dtypes.is_int(x.dtype) and \
    not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV else None),
@@ -305,39 +302,26 @@ constant_folder = PatternMatcher([
   # mod folding
   (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # mul mod
-  ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1.arg//c0.arg))*c0 if c1.arg%c0.arg == 0 else None),
-  # (x%c)+(x//c)*c = x
-  (NOp.var('x')%NOp.cvar('c')+(NOp.var('x')//NOp.cvar('c'))*NOp.cvar('c'), lambda x,c: x),
+  ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1//c0))*c0 if c1.arg%c0.arg == 0 else None),
   # ** combine terms **
-  # -(x+y) -> -x + -y
-  (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),
+  (NOp.var('x')%NOp.cvar('c')+(NOp.var('x')//NOp.cvar('c'))*NOp.cvar('c'), lambda x,c: x), # (x%c)+(x//c)*c = x
+  (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
+  (NOp.var("x") + NOp.var("x") * NOp.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
+  (NOp.var("x") + NOp.var("x"), lambda x: x*2), # (x+x)-> x*2
+  ((NOp.var("x") // NOp.cvar("c0")) // NOp.cvar("c1"), lambda x,c0,c1: x//(c0*c1)), # (x//c0)//c1 -> x//(c0*c1)
+  ((NOp.var("x") / NOp.var("x2")) / NOp.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
+  (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  ((NOp.cvar("c0") + NOp.var("x")).lt(NOp.cvar("c1")), lambda x,c0,c1: UOp.lt(x, c1-c0)),  # c0 + x < c1 -> x < c1 - c0
   # (x+c0)*c1 -> x*c1+c0*c1. only for signed int, float have inf*0=nan issue
   ((NOp.var("x") + NOp.cvar("c0")) * NOp.cvar("c1"), lambda x,c0,c1:
-   x*c1+c0.arg*c1.arg if dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
-  # (x*c0)+(x*c1) -> x*(c0+c1)
-  (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  # (x+x*c)-> x*(c+1)
-  (NOp.var("x") + NOp.var("x") * NOp.cvar("c"), lambda x,c: x*(c.arg+1)),
-  # (x+x)-> x*2
-  (NOp.var("x") + NOp.var("x"), lambda x: x*2),
+   x*c1+c0*c1 if dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
   # (x*c0)+(y*c0) -> (x+y)*c0
   #((NOp.var("x") * NOp.cvar("c0")) + (NOp.var("y") * NOp.cvar("c0")), lambda x,y,c0: c0*(x+y)),
-  # (x*x2)/x2 -> x
-  ((NOp.var("x") * NOp.var("x2")) / NOp.var("x2"), lambda x,x2: x),
-  # (x//c0)//c1 -> x//(c0*c1)
-  ((NOp.var("x") // NOp.cvar("c0")) // NOp.cvar("c1"), lambda x,c0,c1: x//x.const(exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
-  # (x/x1)/x2 -> x/(x1*x2)
-  ((NOp.var("x") / NOp.var("x2")) / NOp.var("x3"), lambda x,x2,x3: x/(x2*x3)),
-  # c0 + x < c1 -> x < c1 - c0
-  ((NOp.cvar("c0") + NOp.var("x")).lt(NOp.cvar("c1")), lambda x,c0,c1: UOp.lt(x, x.const(exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, -c0.arg])))),
   # x!=0 -> (bool)x
   (NOp.var("x").ne(0), lambda x: x.cast(dtypes.bool)),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.var("gate").where(NOp.var("alt"), NOp.load(NOp.var("buf"), NOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
-  # cast NOOP (NOTE: it's str to deal with PtrDType)
-  (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
-  (NOp(UOps.VECTORIZE, src=(NOp.var("root_src"),), name="root"), lambda root, root_src: root_src if str(root.dtype) == str(root_src.dtype) else None),
   # fold gated LOAD/STORE
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True)), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
   (NOp.load(NOp.var("buf"), NOp.var("idx"), NOp.var("var"), NOp.const(dtypes.bool, True), NOp.var("barrier")),
@@ -512,7 +496,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
   return sink
 
-def linearize_uop(sink:UOp, skip_check:bool=False) -> List[UOp]:
+def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
   # filter nodes that don't link to a sink
   # BFS toposort

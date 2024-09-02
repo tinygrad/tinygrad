@@ -1,7 +1,7 @@
 from typing import List, Any, Dict, cast, Optional
 import Metal
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import dedup, unwrap2
+from tinygrad.helpers import dedup, getenv
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
@@ -22,18 +22,16 @@ class MetalGraph(GraphRunner):
     self.icb = self.device.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache),
                                                                                                   Metal.MTLResourceOptions(0))
     if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
+    self.needs_icb_fix = int(type(self.icb).__name__ != "AGXG15XFamilyIndirectCommandBuffer")    # not required on M3
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
     all_resources = [self.int_buf.buf] if len(self.vars) else []
-
+    all_pipelines = []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
-      descriptor = Metal.MTLComputePipelineDescriptor.new()
-      descriptor.setComputeFunction_(prg.clprg.fxn)
-      descriptor.setSupportIndirectCommandBuffers_(True)
       icb_command = self.icb.indirectComputeCommandAtIndex_(j)
-      icb_command.setComputePipelineState_(unwrap2(
-        self.device.device.newComputePipelineStateWithDescriptor_options_reflection_error_(descriptor, Metal.MTLPipelineOption(0), None, None)))
+      all_pipelines.append(prg.clprg.pipeline_state)
+      icb_command.setComputePipelineState_(prg.clprg.pipeline_state)
       for i,b in enumerate(ji.bufs):
         if b is not None and b not in input_rawbuffers:
           icb_command.setKernelBuffer_offset_atIndex_(b._buf.buf, b._buf.offset, i)
@@ -45,8 +43,10 @@ class MetalGraph(GraphRunner):
       icb_command.setBarrier()
 
     self.all_resources = dedup(all_resources)
+    self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
     if len(self.vars): self.int_buf_view = self.int_buf.buf.contents().as_buffer(self.int_buf.buf.length()).cast('i')
+    self.range = Metal.MTLIndirectCommandBufferExecutionRangeMake(0, len(self.jit_cache))
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     if self.command_buffer is not None and self.command_buffer in self.device.mtl_buffers_in_flight: wait_check(self.command_buffer)
@@ -66,7 +66,18 @@ class MetalGraph(GraphRunner):
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.useResources_count_usage_(all_resources, len(all_resources), Metal.MTLResourceUsageRead | Metal.MTLResourceUsageWrite)
-    encoder.executeCommandsInBuffer_withRange_(self.icb, Metal.MTLIndirectCommandBufferExecutionRangeMake(0, len(self.jit_cache)))
+
+    # NOTE: the pipelines likely need to be added to the used resources to fix the crash on M1/M2, but I haven't figured out how
+    # this is a O(n) hack to get them used. what should work is:
+    #encoder.useResources_count_usage_(self.all_pipelines, len(self.all_pipelines), Metal.MTLResourceUsageRead)
+    # but it fails with "Invalid Resource (00000009:kIOGPUCommandBufferCallbackErrorInvalidResource)"
+    # to repro the crash (which can also crash other running GPU apps), run with FIX_METAL_ICB=0
+    if getenv("FIX_METAL_ICB", self.needs_icb_fix):
+      for ps in self.all_pipelines:
+        encoder.setComputePipelineState_(ps)
+        encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(0,0,0), Metal.MTLSize(0,0,0))
+
+    encoder.executeCommandsInBuffer_withRange_(self.icb, self.range)
     encoder.endEncoding()
     command_buffer.commit()
     self.command_buffer = command_buffer

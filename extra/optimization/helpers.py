@@ -11,7 +11,7 @@ inf, nan = float('inf'), float('nan')
 
 # kernel unpacker
 from tinygrad.codegen.kernel import Kernel
-def ast_str_to_ast(ast_str:str) -> LazyOp: return LazyOp(MetaOps.KERNEL, val) if isinstance(val:=eval(ast_str), tuple) else val
+def ast_str_to_ast(ast_str:str) -> UOp: return eval(ast_str)
 def ast_str_to_lin(ast_str:str, opts=None): return Kernel(ast_str_to_ast(ast_str), opts=opts)
 def kern_str_to_lin(kern_str:str, opts=None):
   (ast, applied_opts,) = eval(kern_str)
@@ -28,7 +28,7 @@ from tinygrad.helpers import dedup
 def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True):
   fn = Path(__file__).parent.parent / "datasets/sops.gz"
   ast_strs = dedup(gzip.open(fn).read().decode('utf-8').strip().split("\n"))
-  if filter_reduce: ast_strs = [x for x in ast_strs if "ReduceOps" in x]
+  if filter_reduce: ast_strs = [x for x in ast_strs if "REDUCE_AXIS" in x]
   if filter_noimage: ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
   if filter_novariable: ast_strs = [x for x in ast_strs if "Variable" not in x]
   random.seed(1337)

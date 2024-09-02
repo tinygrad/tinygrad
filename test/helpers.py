@@ -1,5 +1,5 @@
-import sys, unittest
-from typing import Optional, Set, Tuple
+import sys, unittest, time
+from typing import Callable, Optional, Set, Tuple, TypeVar
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.ops import UOp, UOps
@@ -76,3 +76,9 @@ class TestUOps(unittest.TestCase):
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]) -> UOp:
   return UOp(UOps.CONST, dtype, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),),
              dtypes.as_const(val, dtype))
+
+T = TypeVar("T")
+def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
+  st = time.perf_counter_ns()
+  ret = fxn(*args, **kwargs)
+  return ret, (time.perf_counter_ns()-st)*1e-6
