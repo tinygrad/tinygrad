@@ -38,8 +38,10 @@ def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int
 def get_reduce_dims(reduces: List[List], full_shape: Tuple) -> Tuple[Tuple[int, ...], List[int]]:
   axismap = [((idxs:=[r[ax] for r in reduces if ax < len(r)]), [full_shape[i] for i in idxs]) for ax in range(max(len(r) for r in reduces))]
   p = list(range(len(full_shape)))
+  # reuse grouped dims if they're used in the same reduce axis and equal
   for ax in axismap:
     for i in ax[0]: p[i] = ax[0][ax[1].index(full_shape[i])]
+  # return a new full_shape and permutation
   return functools.reduce(
     lambda acc, x: ((*acc[0], x[1]), [acc[2] if x[0] == j else j for j in acc[1]], acc[2]+1) if x[0] in p else acc,
     enumerate(full_shape), (cast(Tuple[int, ...], tuple()), p[:], 0))[:2]
@@ -69,7 +71,7 @@ class IndependentLowerer:
       else:
         # define indexes for GPU-like execution
         reduceops = [x for x in ast.parents if x.op is UOps.REDUCE_AXIS and all(i < first_reduce+group_for_reduces for i in x.arg[1])]
-        if len(reduceops) > 0 and not any(r.op is UOps.WMMA for r in reduceops):
+        if len(reduceops) > 0:
           # try to reuse grouped dims across reduceops
           rdims, p = get_reduce_dims([[i-global_dims for i in r.arg[1]] for r in reduceops], full_shape[global_dims:first_reduce+group_for_reduces])
           lidxs = get_grouped_dims("lidx", rdims, opts.local_max)

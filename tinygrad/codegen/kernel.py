@@ -511,8 +511,7 @@ class Kernel:
         for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
             try: # may fail due to excessive smem usage
-              if len(self.reduceops) < 2:
-                self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+              self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
               break
             except KernelOptError: pass
 
