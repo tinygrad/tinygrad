@@ -418,7 +418,15 @@ def create_gate(root:UOp) -> Optional[UOp]:
       # NOTE: gate's bool could be nested within an IF or EXPAND, and we only want to get the bool
       return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate if gate.op is not UOps.IF else gate.src[0], u.src[-1])),), u.arg)
     if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op in {UOps.ALU, UOps.CAST}:
-      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate, u.src[2] if u.src[2].op is not UOps.EXPAND else u.src[2].src[0])),), u.arg)
+      # TODO: use the whole u.src[2] instead of just the beginning?
+      abc = list([gate]) + list(u.src[2].src)
+      if_src = (gate, u.src[2]) if u.src[2].op is not UOps.EXPAND else tuple(abc)
+      return UOp(
+              u.op,
+              u.dtype,
+              # u.src[:-1] + (UOp(UOps.IF, None, (gate, u.src[2] if u.src[2].op is not UOps.EXPAND else u.src[2].src[0])),),
+              u.src[:-1] + (UOp(UOps.IF, None, if_src),),
+              u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
