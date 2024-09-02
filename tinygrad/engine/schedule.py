@@ -183,7 +183,7 @@ def push_swizzle_through_reduce(swizzle:UOp, reduceop:UOp) -> UOp:
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
   assert not any(x.op is UOps.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
-  new_axis: Tuple[int, ...] = first_reduce.arg[1]+root.arg[1]
+  new_axis: Tuple[int, ...] = root.arg[1]+first_reduce.arg[1]
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], new_axis))
 
 def push_reduceop_shape(root:UOp) -> Optional[UOp]:
