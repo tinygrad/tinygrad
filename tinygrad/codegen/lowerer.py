@@ -35,7 +35,7 @@ def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int
   return ret[::-1] if reverse else ret
 
 # gets the max of the full shape for each
-def get_reduce_dims(reduces: List[List], full_shape: Tuple) -> Tuple[Tuple[int, ...], List[int]]:
+def get_reduce_dims(reduces:List[List], full_shape:Tuple) -> Tuple[Tuple[int, ...], List[int]]:
   axismap = [((idxs:=[r[ax] for r in reduces if ax < len(r)]), [full_shape[i] for i in idxs]) for ax in range(max(len(r) for r in reduces))]
   p = list(range(len(full_shape)))
   # reuse grouped dims if they're used in the same reduce axis and equal
