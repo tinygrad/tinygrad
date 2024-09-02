@@ -30,7 +30,7 @@ class _Device:
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
-    for device in ["METAL", "AMD", "NV", "CUDA", "GPU", "CLANG", "LLVM"]:
+    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
       try:
         if self[device]:
           os.environ[device] = "1"   # we set this in environment for spawned children
@@ -468,10 +468,11 @@ class HCQProgram:
       Execution time of the kernel if 'wait' is True, otherwise None.
     """
 
+    kernargs = self.fill_kernargs(bufs, vals)
     q = self.device.hw_compute_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
 
     with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-      q.exec(self, self.fill_kernargs(bufs, vals), global_size, local_size)
+      q.exec(self, kernargs, global_size, local_size)
 
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1

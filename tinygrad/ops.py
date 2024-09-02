@@ -431,7 +431,7 @@ class UPat:
     self.arg, self.name = arg, name
     self.in_src = src
     self.src: Any = None
-    self.custom_early_reject = custom_early_reject
+
     # try all permutations if it's a list
     if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
     # only one if it's a tuple
@@ -442,11 +442,10 @@ class UPat:
     self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
-  @functools.cached_property
-  def early_reject(self) -> Set[Tuple[UOps, Any]]:
-    if self.custom_early_reject is not None: return self.custom_early_reject
-    upat_match = [self.in_src] if isinstance(self.in_src, UPat) else ([] if self.in_src is None else self.src[0])
-    return set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
+    if custom_early_reject is not None: self.early_reject = custom_early_reject
+    else:
+      upat_match = [self.in_src] if isinstance(self.in_src, UPat) else ([] if self.in_src is None else self.src[0])
+      self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
   def printable(self:UPat): return lines(self.location[0])[self.location[1]-1].strip()
   def __repr__(self):
@@ -587,7 +586,6 @@ def uop_alu_resolve(u:UOp) -> sint:
 # ***** uop type spec *****
 
 def type_verify(uops):
-  if not __debug__: return  # python -O sets __debug__ to False
   for u in uops:
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
     if uop is UOps.DEFINE_LOCAL: assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}"
