@@ -1443,7 +1443,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (2, 1)
 
-  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float with size 8")
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim(self):
     a = Tensor.rand(2, 8).realize()
     b = Tensor.rand(2, 8).realize()
@@ -1460,23 +1460,32 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (4, 2)
 
-  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float with size 8")
+  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim_amx(self):
-    a = Tensor.rand(2, 8).realize()
-    b = Tensor.rand(2, 8).realize()
-    c = a + b
+    def create_schedule_for_shape(shape, shifts):
+      a = Tensor.rand(shape).realize()
+      b = Tensor.rand(shape).realize()
+      c = a + b
 
-    s = create_schedule([c.lazydata])[0]
-    k = Kernel(s.ast)
-    k.shift_to(0, 4)  # float4 dimension
-    k.shift_to(0, 2, insert_before=k.shape_len-1)
-    k.upcast()
-    k.upcast()
-    k.local_dims += 1
-    k.linearize()
+      s = create_schedule([c.lazydata])[0]
+      k = Kernel(s.ast)
+      k.shift_to(0, shifts[0])
+      k.shift_to(0, shifts[1], insert_before=k.shape_len-1)
+      k.upcast()
+      k.upcast()
+      k.local_dims += 1
+      k.linearize()
+      return k
 
-    assert TestFloat4.count_float4(k, 8) == (2, 1)
+    shapes = [(2,12), (2,8), (2,16)]
+    shifts = [(4,3), (4,2), (4,4)]
+    excepted_upcast_size = [4, 8, 16]
+    expected_output = [(6,3), (2,1), (2,1)]
 
+    for i in range(len(shapes)):
+      assert TestFloat4.count_float4(create_schedule_for_shape(shapes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
+
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_unaligned_load(self):
     a = Tensor.rand(9).realize().shrink(((1, 9),))
     b = Tensor.rand(9).realize().shrink(((1, 9),))
@@ -1489,7 +1498,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (0, 1)
 
-  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float with size 8")
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load(self):
     a = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
     b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
