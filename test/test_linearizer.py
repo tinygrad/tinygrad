@@ -1515,22 +1515,30 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (0, 2)
 
-  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float with size 8")
+  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load_amx(self):
-    a = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
-    b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
-    c = a + b
+    def kernel_for_shape(size, shifts):
+      a = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
+      b = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
+      c = a + b
 
-    s = create_schedule([c.lazydata])[0]
-    k = Kernel(s.ast)
-    k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
-    k.upcast()
-    k.shift_to(len(k.full_unupcasted_shape)-1, 2, insert_before=k.shape_len-1)
-    k.upcast()
-    k.local_dims += 1
-    k.linearize()
+      s = create_schedule([c.lazydata])[0]
+      k = Kernel(s.ast)
+      k.shift_to(len(k.full_unupcasted_shape)-1, shifts[0])  # manual trigger float4 dim
+      k.upcast()
+      k.shift_to(len(k.full_unupcasted_shape)-1, shifts[1], insert_before=k.shape_len-1)
+      k.upcast()
+      k.local_dims += 1
+      k.linearize()
+      return k
 
-    assert TestFloat4.count_float4(k, 8) == (0, 1)
+    sizes = [13, 9, 17]
+    shifts = [(4,3), (4,2), (4,4)]
+    excepted_upcast_size = [4, 8, 16]
+    expected_output = [(0,3), (0,1), (0,1)]
+
+    for i in range(len(sizes)):
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
 
   def test_float4_sometimes_unaligned(self):
     a = Tensor.rand(1, 1, 8).realize()
