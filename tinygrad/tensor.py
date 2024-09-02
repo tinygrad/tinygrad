@@ -16,8 +16,7 @@ from tinygrad.ops import MetaOps, truncate
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
 from tinygrad.engine.realize import run_schedule, memory_planner
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
-from tinygrad.nn.state import get_state_dict
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars\
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -337,7 +336,7 @@ class Tensor:
 
     """
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
-    canonical_devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
+    canonical_devices = tuple(Device.canonicalize(x) for x in devices)
     if axis is not None and axis < 0: axis += len(self.shape)
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, get_bounds(devices, self.shape[axis], axis, splits)),
                   device=canonical_devices, requires_grad=self.requires_grad)
@@ -350,6 +349,7 @@ class Tensor:
     return self
 
   def FSDP(devices:Tuple[str, ...]):
+    from tinygrad.nn.state import get_state_dict
     def decorator(cls):
       original_init, original_forward = cls.__init__, cls.__call__
       @functools.wraps(original_init)
