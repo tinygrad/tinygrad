@@ -651,7 +651,6 @@ class Kernel:
           rsrc = op.src[0]
           if rsrc.op is UOps.CAST: rsrc = rsrc.src[0]
           assert rsrc.op is UOps.ALU and rsrc.arg is BinaryOps.MUL
-          threads = prod(t[1] for t in tc.threads)
 
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd, tcd = self.global_dims, self.first_upcast
@@ -662,6 +661,7 @@ class Kernel:
                                          [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
+          threads = prod(t[1] for t in tc.threads)
           if self.opts.device in {"AMD", "HIP"}:
             reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
             # https://gpuopen.com/learn/wmma_on_rdna3/
