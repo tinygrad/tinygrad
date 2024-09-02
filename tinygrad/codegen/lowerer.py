@@ -35,9 +35,14 @@ def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int
   return ret[::-1] if reverse else ret
 
 # gets the max of the full shape for each
-def get_reuse_dims(dims: List[Tuple[int, ...]], full_shape: Tuple[int, ...]):
-  max_axes = [max([(a[i],full_shape[a[i]]) for a in dims if i < len(a)], key=lambda v: v[1]) for i in range(max([len(a) for a in dims]))]
-  return {axis:max_axes[i][0] for rarg in dims for i,axis in enumerate(list(rarg))}
+def get_reduce_dims(reduces: List[Tuple[int, ...]], full_shape: Tuple[int, ...]) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+  axismap = [((idxs:=[r[ax] for r in reduces if ax < len(r)]), [full_shape[i] for i in idxs]) for ax in range(max(len(r) for r in reduces))]
+  p = list(range(len(full_shape)))
+  for ax in axismap:
+    for i in ax[0]: p[i] = ax[0][ax[1].index(full_shape[i])]
+  return functools.reduce(
+    lambda acc, x: ((*acc[0], x[1]), [acc[2] if x[0] == j else j for j in acc[1]], acc[2]+1) if x[0] in p else acc,
+    enumerate(full_shape), (tuple(), p[:], 0))[:2]
 
 class IndependentLowerer:
   def lower(self, ast:UOp, opts:Renderer) -> UOp:
@@ -65,13 +70,12 @@ class IndependentLowerer:
         # define indexes for GPU-like execution
         grouped_axes = range(first_reduce,first_reduce+group_for_reduces)
         reduceops = [x for x in ast.parents if x.op is UOps.REDUCE_AXIS and all(i < first_reduce+group_for_reduces for i in x.arg[1])]
-        if len(opts.tensor_cores) == 0 and len(reduceops) > 0:
-          #  Grabs the max of all reduce axes
-          reuse_dims = get_reuse_dims([r.arg[1] for r in reduceops], full_shape)
-          axis_to_lidx = {i:j for j,i in enumerate([i for i in grouped_axes if i in reuse_dims.values()])}
-          lidxs = get_grouped_dims("lidx", tuple(list(full_shape[global_dims:first_reduce]) + [full_shape[i] for i in axis_to_lidx]), opts.local_max)
-          self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
-            lidxs[:first_reduce-global_dims] + [lidxs[axis_to_lidx[reuse_dims[i]]+first_reduce-global_dims] for i in grouped_axes]
+        if len(reduceops) > 0 and not any(r.op is UOps.WMMA for r in reduceops):
+          # try to reuse grouped dims across reduceops
+          rdims, p = get_reduce_dims([[i-global_dims for i in r.arg[1]] for r in reduceops], full_shape[global_dims:first_reduce+group_for_reduces])
+          print("rdims=",rdims," p=",p)
+          lidxs = get_grouped_dims("lidx", rdims, opts.local_max)
+          self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + [lidxs[i] for i in p]
         else:
           lidxs = get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.global_max)
           self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
@@ -119,10 +123,9 @@ class IndependentLowerer:
         x.src[2].src[0].op is UOps.LOAD and x.src[2].src[0].src[0].op is UOps.DEFINE_LOCAL
       # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
       if store_back: idx, _ = x.st_arg.to_indexed_uops([u.const(0) if i in x.src[2].arg[1] else u for i,u in enumerate(self.idxs)])
-      for s, oidx, ridx in zip(x.st_arg.shape, self.idxs, self.ridxs):
-        if oidx != ridx:
-          if x.src[0].op is UOps.DEFINE_GLOBAL or store_back: valid = valid * oidx.eq(0)
-          elif s != 1: valid = valid * oidx.lt(ridx.src[1].arg - ridx.src[0].arg)
+      if x.src[0].op is UOps.DEFINE_GLOBAL or store_back:
+        for oidx, ridx in zip(self.idxs, self.ridxs):
+          if oidx != ridx: valid = valid * oidx.eq(0)
         has_valid = valid.op is not UOps.CONST or valid.arg is not True
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[2])) + ((valid,) if has_valid else ()))
 

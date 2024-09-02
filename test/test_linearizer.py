@@ -282,7 +282,7 @@ class TestLinearizer(unittest.TestCase):
         assert ranges[i-2] != u or ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-2], ranges[i-1], {u}}"
     # check for correctness when dims are grouped differently
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], \
-      opts=[[Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 8), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 2)]])
+      opts=[[Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 8)]])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -290,22 +290,23 @@ class TestLinearizer(unittest.TestCase):
   def test_partial_opt_multireduce(self):
     # check how it works with one reduce optimized and one unoptimized
     Tensor.manual_seed(0)
-    x = Tensor.randn(27, 15, 5, dtype=dtypes.float).softmax(1).realize()
+    x = Tensor.randn(27, 12, 5, dtype=dtypes.float).softmax(1).realize()
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
-    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 12, 5)).expand((27, 12, 12, 5)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
-    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
-    diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 12, 1, 5)).to_uop()))
+    diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 12, 1, 5)))
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
       [Opt(OptOps.GROUPTOP, 0, 3)], # grouping
       [Opt(OptOps.GROUPTOP, 1, 3)],
-      [Opt(OptOps.GROUPTOP, 0, 15)],
-      [Opt(OptOps.GROUPTOP, 1, 15)],
-      [Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 15)], # group the reduces differently
-      [Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 15), Opt(OptOps.UPCAST, 0, 3)],
+      [Opt(OptOps.GROUPTOP, 0, 6)],
+      [Opt(OptOps.GROUPTOP, 1, 6)],
+      [Opt(OptOps.GROUPTOP, 0, 6), Opt(OptOps.GROUPTOP, 1, 3)], # group the reduces differently x
+      [Opt(OptOps.GROUPTOP, 0, 6), Opt(OptOps.GROUPTOP, 1, 12)],
+      [Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 12), Opt(OptOps.UPCAST, 0, 3)],
       [Opt(OptOps.UNROLL, 0, 3)],
       [Opt(OptOps.UNROLL, 1, 3)],
     ]
