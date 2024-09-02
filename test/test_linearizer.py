@@ -14,7 +14,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
-from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup
+from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, PtrDType, dtypes
 
 def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer]]:
@@ -1421,9 +1421,9 @@ class TestLinearizer(unittest.TestCase):
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
-  def count_float4(k):
-    return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
-            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 3 and uop.src[2].dtype == dtypes.float.vec(4)]))
+  def count_float4(k, n=4):
+    return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.float.vec(n)]),
+            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 3 and uop.src[2].dtype == dtypes.float.vec(n)]))
   @staticmethod
   def count_half4(k):
     return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.half.vec(4)]),
@@ -1443,6 +1443,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (2, 1)
 
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float with size 8")
   def test_float4_multidim(self):
     a = Tensor.rand(2, 8).realize()
     b = Tensor.rand(2, 8).realize()
@@ -1459,6 +1460,23 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (4, 2)
 
+  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float with size 8")
+  def test_float4_multidim_amx(self):
+    a = Tensor.rand(2, 8).realize()
+    b = Tensor.rand(2, 8).realize()
+    c = a + b
+
+    s = create_schedule([c.lazydata])[0]
+    k = Kernel(s.ast)
+    k.shift_to(0, 4)  # float4 dimension
+    k.shift_to(0, 2, insert_before=k.shape_len-1)
+    k.upcast()
+    k.upcast()
+    k.local_dims += 1
+    k.linearize()
+
+    assert TestFloat4.count_float4(k, 8) == (2, 1)
+
   def test_float4_unaligned_load(self):
     a = Tensor.rand(9).realize().shrink(((1, 9),))
     b = Tensor.rand(9).realize().shrink(((1, 9),))
@@ -1471,6 +1489,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (0, 1)
 
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float with size 8")
   def test_float4_multidim_unaligned_load(self):
     a = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
     b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
@@ -1486,6 +1505,23 @@ class TestFloat4(unittest.TestCase):
     k.linearize()
 
     assert TestFloat4.count_float4(k) == (0, 2)
+
+  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float with size 8")
+  def test_float4_multidim_unaligned_load_amx(self):
+    a = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
+    b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
+    c = a + b
+
+    s = create_schedule([c.lazydata])[0]
+    k = Kernel(s.ast)
+    k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
+    k.upcast()
+    k.shift_to(len(k.full_unupcasted_shape)-1, 2, insert_before=k.shape_len-1)
+    k.upcast()
+    k.local_dims += 1
+    k.linearize()
+
+    assert TestFloat4.count_float4(k, 8) == (0, 1)
 
   def test_float4_sometimes_unaligned(self):
     a = Tensor.rand(1, 1, 8).realize()
