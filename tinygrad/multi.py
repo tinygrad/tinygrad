@@ -42,6 +42,14 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   pads = [((s,dim-e),) for s,e in chunks]
   return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
+def all_gather(lbs:List[LazyBuffer], axis:int, pads:Tuple[Tuple[int, int], ...]) -> List[LazyBuffer]:
+  n_lbs, chunked = len(lbs), [[lbs[i] if i == j else None for i in range(n_lbs)] for j in range(n_lbs)]
+  for step in range(n_lbs - 1):
+    for i in range(n_lbs):
+      s, r = (i+step-1)%n_lbs, (i+step)%n_lbs
+      chunked[r][i] = chunked[s][i].copy_to_device(chunked[r][r].device, force=True)
+  return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad(tuple(pads[i] + c.shape[1::])) for i,c in enumerate(lb)]) for lb in chunked]
+
 def to_sharded(lbs:List[LazyBuffer], axis:int, bounds: Tuple[Tuple[int, int], ...]) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]

@@ -9,14 +9,15 @@ import numpy as np
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA, Metadata, TRACEMETA
+from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA, Metadata, TRACEMETA, get_bounds
 from tinygrad.lazy import LazyBuffer
-from tinygrad.multi import MultiLazyBuffer
+from tinygrad.multi import MultiLazyBuffer, all_gather, to_sharded
 from tinygrad.ops import MetaOps, truncate
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
+from tinygrad.nn.state import get_state_dict
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -337,15 +338,8 @@ class Tensor:
     """
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     canonical_devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
-    if axis is not None:
-      if axis < 0: axis += len(self.shape)
-      if splits is None:
-        sz = round_up(self.shape[axis], len(devices)) // len(devices)
-        splits = tuple([max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))])
-      assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
-      boundaries = tuple(itertools.accumulate(splits))
-      bounds = tuple(zip((0,) + boundaries, boundaries))
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, bounds),
+    if axis is not None and axis < 0: axis += len(self.shape)
+    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, get_bounds(devices, self.shape[axis], axis, splits)),
                   device=canonical_devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):
@@ -354,6 +348,25 @@ class Tensor:
     """
     self.lazydata = self.shard(devices, axis, splits).lazydata
     return self
+
+  def FSDP(devices:Tuple[str, ...]):
+    def decorator(cls):
+      original_init, original_forward = cls.__init__, cls.__call__
+      @functools.wraps(original_init)
+      def new_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        for _, x in get_state_dict(self).items(): x.shard(devices, 0)
+
+      @functools.wraps(original_forward)
+      def new_forward(self, *args, **kwargs):
+        tensors = get_state_dict(self).items()
+        for _, x in tensors: x.lazydata = MultiLazyBuffer(all_gather(x.lazydata.lbs, 0, get_bounds(devices, x.shape[0], 0, pads=True)), 0)
+        result = original_forward(self, *args, **kwargs)
+        for _, x in tensors: x.lazydata = MultiLazyBuffer(to_sharded(x.lazydata.lbs, 0, get_bounds(devices, x.shape[0], 0)), 0)
+        return result
+      cls.__init__, cls.__call__ = new_init, new_forward
+      return cls
+    return decorator
 
   @staticmethod
   def from_node(y:Node, **kwargs) -> Tensor:
