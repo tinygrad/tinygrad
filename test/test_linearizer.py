@@ -1462,7 +1462,7 @@ class TestFloat4(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim_amx(self):
-    def create_schedule_for_shape(shape, shifts):
+    def kernel_for_shape(shape, shifts):
       a = Tensor.rand(shape).realize()
       b = Tensor.rand(shape).realize()
       c = a + b
@@ -1483,7 +1483,7 @@ class TestFloat4(unittest.TestCase):
     expected_output = [(6,3), (2,1), (2,1)]
 
     for i in range(len(shapes)):
-      assert TestFloat4.count_float4(create_schedule_for_shape(shapes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
+      assert TestFloat4.count_float4(kernel_for_shape(shapes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
 
   @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_unaligned_load(self):
