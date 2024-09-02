@@ -166,8 +166,8 @@ class QCOMComputeQueue(HWComputeQueue):
       self.cmd_idx_to_dims[cmd_idx][0] = global_size
 
     if local_size is not None:
-      payload = (3 | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX(local_size[0] - 1) | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY(local_size[1] - 1)
-                 | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ(local_size[2] - 1))
+      payload = (adreno.A6XX_HLSQ_CS_NDRANGE_0_KERNELDIM(3) | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX(local_size[0] - 1)
+                 | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY(local_size[1] - 1) | adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ(local_size[2] - 1))
 
       self._patch(cmd_idx, offset=2, data=[payload])
       self.cmd_idx_to_dims[cmd_idx][1] = local_size
@@ -189,8 +189,11 @@ class QCOMArgsState(HCQArgsState):
     for cnst_val, cnst_off, cnst_sz in prg.consts_info:
       ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
 
-    samplers: List[Any] = []; descriptors: List[Any] = []; ibos: List[Any] = [] # noqa: E702
-    self.i2descr: Dict[int, int] = {}; self.i2ibo: Dict[int, int] = {} # noqa: E702
+    samplers: List[Any] = []
+    descriptors: List[Any] = []
+    ibos: List[Any] = []
+    self.i2descr: Dict[int, int] = {}
+    self.i2ibo: Dict[int, int] = {}
     for i, b in enumerate(bufs):
       if not hasattr(b, 'samplers') and not hasattr(b, 'descriptor') and not hasattr(b, 'ibo'): self.update_buffer(i, b)
       elif self.boffs[i][1]: ibos, self.i2ibo = [*ibos, *getattr(b, 'ibo')], {**self.i2ibo, i: len(ibos)}
