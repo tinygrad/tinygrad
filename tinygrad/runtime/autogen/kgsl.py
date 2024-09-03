@@ -126,10 +126,23 @@ else:
     c_long_double_t = ctypes.c_ubyte*16
 
 
+import fcntl, functools
+
+def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, __payload=None, **kwargs):
+  ret = fcntl.ioctl(__fd, (__idir<<30) | (ctypes.sizeof(made := (__payload or __user_struct(**kwargs)))<<16) | (__base<<8) | __nr, made)
+  if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
+  return made
+
+def _IO(base, nr): return functools.partial(_do_ioctl, 0, ord(base) if isinstance(base, str) else base, nr, None)
+def _IOW(base, nr, type): return functools.partial(_do_ioctl, 1, ord(base) if isinstance(base, str) else base, nr, type)
+def _IOR(base, nr, type): return functools.partial(_do_ioctl, 2, ord(base) if isinstance(base, str) else base, nr, type)
+def _IOWR(base, nr, type): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, type)
+
+
 
 _UAPI_MSM_KGSL_H = True # macro
-# size_t = unsigned long # macro
-# uint64_t = unsigned long # macro
+size_t = True # macro
+uint64_t = True # macro
 KGSL_VERSION_MAJOR = 3 # macro
 KGSL_VERSION_MINOR = 14 # macro
 KGSL_CONTEXT_SAVE_GMEM = 0x00000001 # macro
@@ -218,13 +231,9 @@ KGSL_MEMALIGN_MASK = 0x00FF0000 # macro
 KGSL_MEMALIGN_SHIFT = 16 # macro
 KGSL_MEMFLAGS_USERMEM_MASK = 0x000000e0 # macro
 KGSL_MEMFLAGS_USERMEM_SHIFT = 5 # macro
-# def KGSL_USERMEM_FLAG(x):  # macro
-#    return (((x)+1)<<5)
+def KGSL_USERMEM_FLAG(x):  # macro
+   return (((x)+1)<<5)
 KGSL_MEMFLAGS_NOT_USERMEM = 0 # macro
-# KGSL_MEMFLAGS_USERMEM_PMEM = (((x)+1)<<5) ( KGSL_USER_MEM_TYPE_PMEM ) # macro
-# KGSL_MEMFLAGS_USERMEM_ASHMEM = (((x)+1)<<5) ( KGSL_USER_MEM_TYPE_ASHMEM ) # macro
-# KGSL_MEMFLAGS_USERMEM_ADDR = (((x)+1)<<5) ( KGSL_USER_MEM_TYPE_ADDR ) # macro
-# KGSL_MEMFLAGS_USERMEM_ION = (((x)+1)<<5) ( KGSL_USER_MEM_TYPE_ION ) # macro
 KGSL_FLAGS_NORMALMODE = 0x00000000 # macro
 KGSL_FLAGS_SAFEMODE = 0x00000001 # macro
 KGSL_FLAGS_INITIALIZED0 = 0x00000002 # macro
@@ -237,10 +246,8 @@ KGSL_FLAGS_RESERVED2 = 0x00000080 # macro
 KGSL_FLAGS_SOFT_RESET = 0x00000100 # macro
 KGSL_FLAGS_PER_CONTEXT_TIMESTAMPS = 0x00000200 # macro
 KGSL_SYNCOBJ_SERVER_TIMEOUT = 2000 # macro
-# def KGSL_CONVERT_TO_MBPS(val):  # macro
-#    return (val*1000*1000)
-# def KGSL_MEMSTORE_OFFSET(ctxt_id, field):  # macro
-#    return ((ctxt_id)*sizeof(structkgsl_devmemstore)+offsetof(structkgsl_devmemstore,field))
+def KGSL_CONVERT_TO_MBPS(val):  # macro
+   return (val*1000*1000)
 KGSL_PROP_DEVICE_INFO = 0x1 # macro
 KGSL_PROP_DEVICE_SHADOW = 0x2 # macro
 KGSL_PROP_DEVICE_POWER = 0x3 # macro
@@ -297,75 +304,26 @@ KGSL_PERFCOUNTER_GROUP_MAX = 0x24 # macro
 KGSL_PERFCOUNTER_NOT_USED = 0xFFFFFFFF # macro
 KGSL_PERFCOUNTER_BROKEN = 0xFFFFFFFE # macro
 KGSL_IOC_TYPE = 0x09 # macro
-IOCTL_KGSL_DEVICE_GETPROPERTY = 0x2
-IOCTL_KGSL_DEVICE_WAITTIMESTAMP = 0x6
-IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID = 0x7
-IOCTL_KGSL_RINGBUFFER_ISSUEIBCMDS = 0x10
-IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_OLD = 0x11
-IOCTL_KGSL_CMDSTREAM_READTIMESTAMP = 0x11
-IOCTL_KGSL_CMDSTREAM_FREEMEMONTIMESTAMP = 0x12
-IOCTL_KGSL_CMDSTREAM_FREEMEMONTIMESTAMP_OLD = 0x12
-IOCTL_KGSL_DRAWCTXT_CREATE = 0x13
-IOCTL_KGSL_DRAWCTXT_DESTROY = 0x14
-IOCTL_KGSL_MAP_USER_MEM = 0x15
-IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID = 0x16
-IOCTL_KGSL_CMDSTREAM_FREEMEMONTIMESTAMP_CTXTID = 0x17
-IOCTL_KGSL_SHAREDMEM_FROM_PMEM = 0x20
-IOCTL_KGSL_SHAREDMEM_FREE = 0x21
-IOCTL_KGSL_CFF_USER_EVENT = 0x31
-IOCTL_KGSL_DRAWCTXT_BIND_GMEM_SHADOW = 0x22
-IOCTL_KGSL_SHAREDMEM_FROM_VMALLOC = 0x23
-IOCTL_KGSL_SHAREDMEM_FLUSH_CACHE = 0x24
-IOCTL_KGSL_DRAWCTXT_SET_BIN_BASE_OFFSET = 0x25
-IOCTL_KGSL_CMDWINDOW_WRITE = 0x2e
-IOCTL_KGSL_GPUMEM_ALLOC = 0x2f
-IOCTL_KGSL_CFF_SYNCMEM = 0x30
-IOCTL_KGSL_TIMESTAMP_EVENT_OLD = 0x31
 KGSL_TIMESTAMP_EVENT_GENLOCK = 1 # macro
 KGSL_TIMESTAMP_EVENT_FENCE = 2 # macro
-IOCTL_KGSL_SETPROPERTY = 0x32
-IOCTL_KGSL_TIMESTAMP_EVENT = 0x33
-IOCTL_KGSL_GPUMEM_ALLOC_ID = 0x34
-IOCTL_KGSL_GPUMEM_FREE_ID = 0x35
-IOCTL_KGSL_GPUMEM_GET_INFO = 0x36
 KGSL_GPUMEM_CACHE_CLEAN = (1<<0) # macro
 KGSL_GPUMEM_CACHE_TO_GPU = (1<<0) # macro
 KGSL_GPUMEM_CACHE_INV = (1<<1) # macro
 KGSL_GPUMEM_CACHE_FROM_GPU = (1<<1) # macro
 KGSL_GPUMEM_CACHE_FLUSH = ((1<<0)|(1<<1)) # macro
 KGSL_GPUMEM_CACHE_RANGE = (1<<31) # macro
-IOCTL_KGSL_GPUMEM_SYNC_CACHE = 0x37
-IOCTL_KGSL_PERFCOUNTER_GET = 0x38
-IOCTL_KGSL_PERFCOUNTER_PUT = 0x39
-IOCTL_KGSL_PERFCOUNTER_QUERY = 0x3A
-IOCTL_KGSL_PERFCOUNTER_READ = 0x3B
-IOCTL_KGSL_GPUMEM_SYNC_CACHE_BULK = 0x3C
 KGSL_IBDESC_MEMLIST = 0x1 # macro
 KGSL_IBDESC_PROFILING_BUFFER = 0x2 # macro
-IOCTL_KGSL_SUBMIT_COMMANDS = 0x3D
 KGSL_CONSTRAINT_NONE = 0 # macro
 KGSL_CONSTRAINT_PWRLEVEL = 1 # macro
 KGSL_CONSTRAINT_PWR_MIN = 0 # macro
 KGSL_CONSTRAINT_PWR_MAX = 1 # macro
-IOCTL_KGSL_SYNCSOURCE_CREATE = 0x40
-IOCTL_KGSL_SYNCSOURCE_DESTROY = 0x41
-IOCTL_KGSL_SYNCSOURCE_CREATE_FENCE = 0x42
-IOCTL_KGSL_SYNCSOURCE_SIGNAL_FENCE = 0x43
-IOCTL_KGSL_CFF_SYNC_GPUOBJ = 0x44
 KGSL_GPUOBJ_ALLOC_METADATA_MAX = 64 # macro
-IOCTL_KGSL_GPUOBJ_ALLOC = 0x45
 KGSL_GPUOBJ_FREE_ON_EVENT = 1 # macro
 KGSL_GPU_EVENT_TIMESTAMP = 1 # macro
 KGSL_GPU_EVENT_FENCE = 2 # macro
-IOCTL_KGSL_GPUOBJ_FREE = 0x46
-IOCTL_KGSL_GPUOBJ_INFO = 0x47
-IOCTL_KGSL_GPUOBJ_IMPORT = 0x48
-IOCTL_KGSL_GPUOBJ_SYNC = 0x49
-IOCTL_KGSL_GPU_COMMAND = 0x4A
-IOCTL_KGSL_PREEMPTIONCOUNTER_QUERY = 0x4B
 KGSL_GPUOBJ_SET_INFO_METADATA = (1<<0) # macro
 KGSL_GPUOBJ_SET_INFO_TYPE = (1<<1) # macro
-IOCTL_KGSL_GPUOBJ_SET_INFO = 0x4C
 
 # values for enumeration 'kgsl_user_mem_type'
 kgsl_user_mem_type__enumvalues = {
@@ -383,6 +341,10 @@ KGSL_USER_MEM_TYPE_ION = 3
 KGSL_USER_MEM_TYPE_DMABUF = 3
 KGSL_USER_MEM_TYPE_MAX = 7
 kgsl_user_mem_type = ctypes.c_uint32 # enum
+KGSL_MEMFLAGS_USERMEM_PMEM = KGSL_USERMEM_FLAG ( KGSL_USER_MEM_TYPE_PMEM ) # macro (from list)
+KGSL_MEMFLAGS_USERMEM_ASHMEM = KGSL_USERMEM_FLAG ( KGSL_USER_MEM_TYPE_ASHMEM ) # macro (from list)
+KGSL_MEMFLAGS_USERMEM_ADDR = KGSL_USERMEM_FLAG ( KGSL_USER_MEM_TYPE_ADDR ) # macro (from list)
+KGSL_MEMFLAGS_USERMEM_ION = KGSL_USERMEM_FLAG ( KGSL_USER_MEM_TYPE_ION ) # macro (from list)
 
 # values for enumeration 'kgsl_ctx_reset_stat'
 kgsl_ctx_reset_stat__enumvalues = {
@@ -437,6 +399,8 @@ struct_kgsl_devmemstore._fields_ = [
     ('sbz5', ctypes.c_uint32),
 ]
 
+# def KGSL_MEMSTORE_OFFSET(ctxt_id, field):  # macro
+#    return ((ctxt_id)*ctypes.sizeof(struct_kgsl_devmemstore)+offsetof(struct_kgsl_devmemstore,field))
 
 # values for enumeration 'kgsl_timestamp_type'
 kgsl_timestamp_type__enumvalues = {
@@ -533,6 +497,8 @@ struct_kgsl_device_getproperty._fields_ = [
     ('sizebytes', ctypes.c_uint64),
 ]
 
+IOCTL_KGSL_DEVICE_GETPROPERTY = _IOWR ( 0x09 , 0x2 , struct_kgsl_device_getproperty ) # macro (from list)
+IOCTL_KGSL_SETPROPERTY = _IOW ( 0x09 , 0x32 , struct_kgsl_device_getproperty ) # macro (from list)
 class struct_kgsl_device_waittimestamp(Structure):
     pass
 
@@ -542,6 +508,7 @@ struct_kgsl_device_waittimestamp._fields_ = [
     ('timeout', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_DEVICE_WAITTIMESTAMP = _IOW ( 0x09 , 0x6 , struct_kgsl_device_waittimestamp ) # macro (from list)
 class struct_kgsl_device_waittimestamp_ctxtid(Structure):
     pass
 
@@ -552,6 +519,7 @@ struct_kgsl_device_waittimestamp_ctxtid._fields_ = [
     ('timeout', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID = _IOW ( 0x09 , 0x7 , struct_kgsl_device_waittimestamp_ctxtid ) # macro (from list)
 class struct_kgsl_ringbuffer_issueibcmds(Structure):
     pass
 
@@ -566,6 +534,7 @@ struct_kgsl_ringbuffer_issueibcmds._fields_ = [
     ('PADDING_1', ctypes.c_ubyte * 4),
 ]
 
+IOCTL_KGSL_RINGBUFFER_ISSUEIBCMDS = _IOWR ( 0x09 , 0x10 , struct_kgsl_ringbuffer_issueibcmds ) # macro (from list)
 class struct_kgsl_cmdstream_readtimestamp(Structure):
     pass
 
@@ -575,6 +544,8 @@ struct_kgsl_cmdstream_readtimestamp._fields_ = [
     ('timestamp', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_OLD = _IOR ( 0x09 , 0x11 , struct_kgsl_cmdstream_readtimestamp ) # macro (from list)
+IOCTL_KGSL_CMDSTREAM_READTIMESTAMP = _IOWR ( 0x09 , 0x11 , struct_kgsl_cmdstream_readtimestamp ) # macro (from list)
 class struct_kgsl_cmdstream_freememontimestamp(Structure):
     pass
 
@@ -585,6 +556,8 @@ struct_kgsl_cmdstream_freememontimestamp._fields_ = [
     ('timestamp', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_CMDSTREAM_FREEMEMONTIMESTAMP = _IOW ( 0x09 , 0x12 , struct_kgsl_cmdstream_freememontimestamp ) # macro (from list)
+IOCTL_KGSL_CMDSTREAM_FREEMEMONTIMESTAMP_OLD = _IOR ( 0x09 , 0x12 , struct_kgsl_cmdstream_freememontimestamp ) # macro (from list)
 class struct_kgsl_drawctxt_create(Structure):
     pass
 
@@ -594,6 +567,7 @@ struct_kgsl_drawctxt_create._fields_ = [
     ('drawctxt_id', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_DRAWCTXT_CREATE = _IOWR ( 0x09 , 0x13 , struct_kgsl_drawctxt_create ) # macro (from list)
 class struct_kgsl_drawctxt_destroy(Structure):
     pass
 
@@ -602,6 +576,7 @@ struct_kgsl_drawctxt_destroy._fields_ = [
     ('drawctxt_id', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_DRAWCTXT_DESTROY = _IOW ( 0x09 , 0x14 , struct_kgsl_drawctxt_destroy ) # macro (from list)
 class struct_kgsl_map_user_mem(Structure):
     pass
 
@@ -617,6 +592,7 @@ struct_kgsl_map_user_mem._fields_ = [
     ('flags', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_MAP_USER_MEM = _IOWR ( 0x09 , 0x15 , struct_kgsl_map_user_mem ) # macro (from list)
 class struct_kgsl_cmdstream_readtimestamp_ctxtid(Structure):
     pass
 
@@ -627,6 +603,7 @@ struct_kgsl_cmdstream_readtimestamp_ctxtid._fields_ = [
     ('timestamp', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID = _IOWR ( 0x09 , 0x16 , struct_kgsl_cmdstream_readtimestamp_ctxtid ) # macro (from list)
 class struct_kgsl_cmdstream_freememontimestamp_ctxtid(Structure):
     pass
 
@@ -639,6 +616,7 @@ struct_kgsl_cmdstream_freememontimestamp_ctxtid._fields_ = [
     ('timestamp', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_CMDSTREAM_FREEMEMONTIMESTAMP_CTXTID = _IOW ( 0x09 , 0x17 , struct_kgsl_cmdstream_freememontimestamp_ctxtid ) # macro (from list)
 class struct_kgsl_sharedmem_from_pmem(Structure):
     pass
 
@@ -651,6 +629,7 @@ struct_kgsl_sharedmem_from_pmem._fields_ = [
     ('offset', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_SHAREDMEM_FROM_PMEM = _IOWR ( 0x09 , 0x20 , struct_kgsl_sharedmem_from_pmem ) # macro (from list)
 class struct_kgsl_sharedmem_free(Structure):
     pass
 
@@ -659,6 +638,8 @@ struct_kgsl_sharedmem_free._fields_ = [
     ('gpuaddr', ctypes.c_uint64),
 ]
 
+IOCTL_KGSL_SHAREDMEM_FREE = _IOW ( 0x09 , 0x21 , struct_kgsl_sharedmem_free ) # macro (from list)
+IOCTL_KGSL_SHAREDMEM_FLUSH_CACHE = _IOW ( 0x09 , 0x24 , struct_kgsl_sharedmem_free ) # macro (from list)
 class struct_kgsl_cff_user_event(Structure):
     pass
 
@@ -674,6 +655,7 @@ struct_kgsl_cff_user_event._fields_ = [
     ('__pad', ctypes.c_uint32 * 2),
 ]
 
+IOCTL_KGSL_CFF_USER_EVENT = _IOW ( 0x09 , 0x31 , struct_kgsl_cff_user_event ) # macro (from list)
 class struct_kgsl_gmem_desc(Structure):
     pass
 
@@ -713,6 +695,7 @@ struct_kgsl_bind_gmem_shadow._fields_ = [
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
+IOCTL_KGSL_DRAWCTXT_BIND_GMEM_SHADOW = _IOW ( 0x09 , 0x22 , struct_kgsl_bind_gmem_shadow ) # macro (from list)
 class struct_kgsl_sharedmem_from_vmalloc(Structure):
     pass
 
@@ -723,6 +706,7 @@ struct_kgsl_sharedmem_from_vmalloc._fields_ = [
     ('flags', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_SHAREDMEM_FROM_VMALLOC = _IOWR ( 0x09 , 0x23 , struct_kgsl_sharedmem_from_vmalloc ) # macro (from list)
 class struct_kgsl_drawctxt_set_bin_base_offset(Structure):
     pass
 
@@ -732,6 +716,7 @@ struct_kgsl_drawctxt_set_bin_base_offset._fields_ = [
     ('offset', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_DRAWCTXT_SET_BIN_BASE_OFFSET = _IOW ( 0x09 , 0x25 , struct_kgsl_drawctxt_set_bin_base_offset ) # macro (from list)
 
 # values for enumeration 'kgsl_cmdwindow_type'
 kgsl_cmdwindow_type__enumvalues = {
@@ -759,6 +744,7 @@ struct_kgsl_cmdwindow_write._fields_ = [
     ('data', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_CMDWINDOW_WRITE = _IOW ( 0x09 , 0x2e , struct_kgsl_cmdwindow_write ) # macro (from list)
 class struct_kgsl_gpumem_alloc(Structure):
     pass
 
@@ -770,6 +756,7 @@ struct_kgsl_gpumem_alloc._fields_ = [
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
+IOCTL_KGSL_GPUMEM_ALLOC = _IOWR ( 0x09 , 0x2f , struct_kgsl_gpumem_alloc ) # macro (from list)
 class struct_kgsl_cff_syncmem(Structure):
     pass
 
@@ -780,6 +767,7 @@ struct_kgsl_cff_syncmem._fields_ = [
     ('__pad', ctypes.c_uint32 * 2),
 ]
 
+IOCTL_KGSL_CFF_SYNCMEM = _IOW ( 0x09 , 0x30 , struct_kgsl_cff_syncmem ) # macro (from list)
 class struct_kgsl_timestamp_event(Structure):
     pass
 
@@ -793,6 +781,8 @@ struct_kgsl_timestamp_event._fields_ = [
     ('len', ctypes.c_uint64),
 ]
 
+IOCTL_KGSL_TIMESTAMP_EVENT_OLD = _IOW ( 0x09 , 0x31 , struct_kgsl_timestamp_event ) # macro (from list)
+IOCTL_KGSL_TIMESTAMP_EVENT = _IOWR ( 0x09 , 0x33 , struct_kgsl_timestamp_event ) # macro (from list)
 class struct_kgsl_timestamp_event_genlock(Structure):
     pass
 
@@ -822,6 +812,7 @@ struct_kgsl_gpumem_alloc_id._fields_ = [
     ('__pad', ctypes.c_uint64 * 2),
 ]
 
+IOCTL_KGSL_GPUMEM_ALLOC_ID = _IOWR ( 0x09 , 0x34 , struct_kgsl_gpumem_alloc_id ) # macro (from list)
 class struct_kgsl_gpumem_free_id(Structure):
     pass
 
@@ -831,6 +822,7 @@ struct_kgsl_gpumem_free_id._fields_ = [
     ('__pad', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_GPUMEM_FREE_ID = _IOWR ( 0x09 , 0x35 , struct_kgsl_gpumem_free_id ) # macro (from list)
 class struct_kgsl_gpumem_get_info(Structure):
     pass
 
@@ -845,6 +837,7 @@ struct_kgsl_gpumem_get_info._fields_ = [
     ('__pad', ctypes.c_uint64 * 4),
 ]
 
+IOCTL_KGSL_GPUMEM_GET_INFO = _IOWR ( 0x09 , 0x36 , struct_kgsl_gpumem_get_info ) # macro (from list)
 class struct_kgsl_gpumem_sync_cache(Structure):
     pass
 
@@ -857,6 +850,7 @@ struct_kgsl_gpumem_sync_cache._fields_ = [
     ('length', ctypes.c_uint64),
 ]
 
+IOCTL_KGSL_GPUMEM_SYNC_CACHE = _IOW ( 0x09 , 0x37 , struct_kgsl_gpumem_sync_cache ) # macro (from list)
 class struct_kgsl_perfcounter_get(Structure):
     pass
 
@@ -869,6 +863,7 @@ struct_kgsl_perfcounter_get._fields_ = [
     ('__pad', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_PERFCOUNTER_GET = _IOWR ( 0x09 , 0x38 , struct_kgsl_perfcounter_get ) # macro (from list)
 class struct_kgsl_perfcounter_put(Structure):
     pass
 
@@ -879,6 +874,7 @@ struct_kgsl_perfcounter_put._fields_ = [
     ('__pad', ctypes.c_uint32 * 2),
 ]
 
+IOCTL_KGSL_PERFCOUNTER_PUT = _IOW ( 0x09 , 0x39 , struct_kgsl_perfcounter_put ) # macro (from list)
 class struct_kgsl_perfcounter_query(Structure):
     pass
 
@@ -892,6 +888,7 @@ struct_kgsl_perfcounter_query._fields_ = [
     ('__pad', ctypes.c_uint32 * 2),
 ]
 
+IOCTL_KGSL_PERFCOUNTER_QUERY = _IOWR ( 0x09 , 0x3A , struct_kgsl_perfcounter_query ) # macro (from list)
 class struct_kgsl_perfcounter_read_group(Structure):
     pass
 
@@ -913,6 +910,7 @@ struct_kgsl_perfcounter_read._fields_ = [
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
+IOCTL_KGSL_PERFCOUNTER_READ = _IOWR ( 0x09 , 0x3B , struct_kgsl_perfcounter_read ) # macro (from list)
 class struct_kgsl_gpumem_sync_cache_bulk(Structure):
     pass
 
@@ -924,6 +922,7 @@ struct_kgsl_gpumem_sync_cache_bulk._fields_ = [
     ('__pad', ctypes.c_uint32 * 2),
 ]
 
+IOCTL_KGSL_GPUMEM_SYNC_CACHE_BULK = _IOWR ( 0x09 , 0x3C , struct_kgsl_gpumem_sync_cache_bulk ) # macro (from list)
 class struct_kgsl_cmd_syncpoint_timestamp(Structure):
     pass
 
@@ -968,6 +967,7 @@ struct_kgsl_submit_commands._fields_ = [
     ('__pad', ctypes.c_uint32 * 4),
 ]
 
+IOCTL_KGSL_SUBMIT_COMMANDS = _IOWR ( 0x09 , 0x3D , struct_kgsl_submit_commands ) # macro (from list)
 class struct_kgsl_device_constraint(Structure):
     pass
 
@@ -996,6 +996,7 @@ struct_kgsl_syncsource_create._fields_ = [
     ('__pad', ctypes.c_uint32 * 3),
 ]
 
+IOCTL_KGSL_SYNCSOURCE_CREATE = _IOWR ( 0x09 , 0x40 , struct_kgsl_syncsource_create ) # macro (from list)
 class struct_kgsl_syncsource_destroy(Structure):
     pass
 
@@ -1005,6 +1006,7 @@ struct_kgsl_syncsource_destroy._fields_ = [
     ('__pad', ctypes.c_uint32 * 3),
 ]
 
+IOCTL_KGSL_SYNCSOURCE_DESTROY = _IOWR ( 0x09 , 0x41 , struct_kgsl_syncsource_destroy ) # macro (from list)
 class struct_kgsl_syncsource_create_fence(Structure):
     pass
 
@@ -1015,6 +1017,7 @@ struct_kgsl_syncsource_create_fence._fields_ = [
     ('__pad', ctypes.c_uint32 * 4),
 ]
 
+IOCTL_KGSL_SYNCSOURCE_CREATE_FENCE = _IOWR ( 0x09 , 0x42 , struct_kgsl_syncsource_create_fence ) # macro (from list)
 class struct_kgsl_syncsource_signal_fence(Structure):
     pass
 
@@ -1025,6 +1028,7 @@ struct_kgsl_syncsource_signal_fence._fields_ = [
     ('__pad', ctypes.c_uint32 * 4),
 ]
 
+IOCTL_KGSL_SYNCSOURCE_SIGNAL_FENCE = _IOWR ( 0x09 , 0x43 , struct_kgsl_syncsource_signal_fence ) # macro (from list)
 class struct_kgsl_cff_sync_gpuobj(Structure):
     pass
 
@@ -1036,6 +1040,7 @@ struct_kgsl_cff_sync_gpuobj._fields_ = [
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
+IOCTL_KGSL_CFF_SYNC_GPUOBJ = _IOW ( 0x09 , 0x44 , struct_kgsl_cff_sync_gpuobj ) # macro (from list)
 class struct_kgsl_gpuobj_alloc(Structure):
     pass
 
@@ -1050,6 +1055,7 @@ struct_kgsl_gpuobj_alloc._fields_ = [
     ('metadata', ctypes.c_uint64),
 ]
 
+IOCTL_KGSL_GPUOBJ_ALLOC = _IOWR ( 0x09 , 0x45 , struct_kgsl_gpuobj_alloc ) # macro (from list)
 class struct_kgsl_gpuobj_free(Structure):
     pass
 
@@ -1063,6 +1069,7 @@ struct_kgsl_gpuobj_free._fields_ = [
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
+IOCTL_KGSL_GPUOBJ_FREE = _IOW ( 0x09 , 0x46 , struct_kgsl_gpuobj_free ) # macro (from list)
 class struct_kgsl_gpu_event_timestamp(Structure):
     pass
 
@@ -1094,6 +1101,7 @@ struct_kgsl_gpuobj_info._fields_ = [
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
+IOCTL_KGSL_GPUOBJ_INFO = _IOWR ( 0x09 , 0x47 , struct_kgsl_gpuobj_info ) # macro (from list)
 class struct_kgsl_gpuobj_import(Structure):
     pass
 
@@ -1106,6 +1114,7 @@ struct_kgsl_gpuobj_import._fields_ = [
     ('id', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_GPUOBJ_IMPORT = _IOWR ( 0x09 , 0x48 , struct_kgsl_gpuobj_import ) # macro (from list)
 class struct_kgsl_gpuobj_import_dma_buf(Structure):
     pass
 
@@ -1143,6 +1152,7 @@ struct_kgsl_gpuobj_sync._fields_ = [
     ('count', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_GPUOBJ_SYNC = _IOW ( 0x09 , 0x49 , struct_kgsl_gpuobj_sync ) # macro (from list)
 class struct_kgsl_command_object(Structure):
     pass
 
@@ -1185,6 +1195,7 @@ struct_kgsl_gpu_command._fields_ = [
     ('timestamp', ctypes.c_uint32),
 ]
 
+IOCTL_KGSL_GPU_COMMAND = _IOWR ( 0x09 , 0x4A , struct_kgsl_gpu_command ) # macro (from list)
 class struct_kgsl_preemption_counters_query(Structure):
     pass
 
@@ -1197,6 +1208,7 @@ struct_kgsl_preemption_counters_query._fields_ = [
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
+IOCTL_KGSL_PREEMPTIONCOUNTER_QUERY = _IOWR ( 0x09 , 0x4B , struct_kgsl_preemption_counters_query ) # macro (from list)
 class struct_kgsl_gpuobj_set_info(Structure):
     pass
 
@@ -1210,6 +1222,7 @@ struct_kgsl_gpuobj_set_info._fields_ = [
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
+IOCTL_KGSL_GPUOBJ_SET_INFO = _IOW ( 0x09 , 0x4C , struct_kgsl_gpuobj_set_info ) # macro (from list)
 __all__ = \
     ['KGSL_CACHEMODE_MASK', 'KGSL_CACHEMODE_SHIFT',
     'KGSL_CACHEMODE_UNCACHED', 'KGSL_CACHEMODE_WRITEBACK',
@@ -1314,9 +1327,10 @@ __all__ = \
     'KGSL_USER_MEM_TYPE_ASHMEM', 'KGSL_USER_MEM_TYPE_DMABUF',
     'KGSL_USER_MEM_TYPE_ION', 'KGSL_USER_MEM_TYPE_MAX',
     'KGSL_USER_MEM_TYPE_PMEM', 'KGSL_VERSION_MAJOR',
-    'KGSL_VERSION_MINOR', '_UAPI_MSM_KGSL_H', 'kgsl_cmdwindow_type',
-    'kgsl_ctx_reset_stat', 'kgsl_deviceid', 'kgsl_timestamp_type',
-    'kgsl_user_mem_type', 'struct_kgsl_bind_gmem_shadow',
+    'KGSL_VERSION_MINOR', '_IO', '_IOR', '_IOW', '_IOWR',
+    '_UAPI_MSM_KGSL_H', 'kgsl_cmdwindow_type', 'kgsl_ctx_reset_stat',
+    'kgsl_deviceid', 'kgsl_timestamp_type', 'kgsl_user_mem_type',
+    'size_t', 'struct_kgsl_bind_gmem_shadow',
     'struct_kgsl_buffer_desc', 'struct_kgsl_cff_sync_gpuobj',
     'struct_kgsl_cff_syncmem', 'struct_kgsl_cff_user_event',
     'struct_kgsl_cmd_syncpoint', 'struct_kgsl_cmd_syncpoint_fence',
@@ -1362,7 +1376,7 @@ __all__ = \
     'struct_kgsl_timestamp_event',
     'struct_kgsl_timestamp_event_fence',
     'struct_kgsl_timestamp_event_genlock',
-    'struct_kgsl_ucode_version', 'struct_kgsl_version']
+    'struct_kgsl_ucode_version', 'struct_kgsl_version', 'uint64_t']
 def KGSL_CONTEXT_PRIORITY(val): return (val << KGSL_CONTEXT_PRIORITY_SHIFT) & KGSL_CONTEXT_PRIORITY_MASK
 def KGSL_CONTEXT_PREEMPT_STYLE(val): return (val << KGSL_CONTEXT_PREEMPT_STYLE_SHIFT) & KGSL_CONTEXT_PREEMPT_STYLE_MASK
 def KGSL_CONTEXT_TYPE(val): return (val << KGSL_CONTEXT_TYPE_SHIFT) & KGSL_CONTEXT_TYPE_MASK
