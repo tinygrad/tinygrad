@@ -3,7 +3,7 @@
 import sys, base64, multiprocessing, itertools, collections
 from typing import Optional, Union, Literal, List
 
-from tinygrad import Tensor, TinyJit, Variable, nn
+from tinygrad import Tensor, TinyJit, Variable, nn, dtypes
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, DEBUG, fetch
 
@@ -302,6 +302,22 @@ def listener(q):
     q.put(waveform)
   print("done listening")
 
+def transcribe_queue(model: Whisper, enc, q: multiprocessing.Queue):
+  lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
+  total = []
+  for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+    total = np.concatenate([total, q.get()])
+    if q.empty():
+      log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True)
+      encoded_audio = model.encoder.encode(Tensor(log_spec))
+      # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
+      while True:
+        out = model.decoder(Tensor([lst] * model.batch_size, dtype=dtypes.long), 0, encoded_audio).realize()
+        idx = int(out[0,-1].argmax().numpy().item())
+        if idx in enc.encode(" [") + [enc._special_tokens["<|endoftext|>"]]: break
+        lst.append(idx)
+      yield enc.decode(lst[2:])
+
 if __name__ == "__main__":
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
 
@@ -310,19 +326,5 @@ if __name__ == "__main__":
   else:
     # online
     q = multiprocessing.Queue()
-    p = multiprocessing.Process(target=listener, args=(q,), daemon=True)
-    p.start()
-
-    lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-    total = []
-    for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-      total = np.concatenate([total, q.get()])
-      if q.empty():
-        log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True)
-        encoded_audio = model.encoder.encode(Tensor(log_spec))
-        # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
-        out = model.decoder(Tensor([lst]), 0, encoded_audio).realize()
-        idx = int(out[0,-1].argmax().numpy().item())
-        if idx not in [enc._special_tokens["<|endoftext|>"]]+ enc.encode(" ["):
-          lst.append(idx)
-          print(enc.decode(lst[2:])) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
+    multiprocessing.Process(target=listener, args=(q,), daemon=True).start()
+    for t in transcribe_queue(model, enc, q): print(t)

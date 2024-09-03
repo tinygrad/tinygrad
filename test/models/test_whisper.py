@@ -1,6 +1,6 @@
 import unittest
 import pathlib
-from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
+from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform, transcribe_queue
 from tinygrad.helpers import CI, fetch
 from tinygrad import Device, dtypes
 from test.helpers import is_dtype_supported
@@ -64,6 +64,19 @@ class TestWhisper(unittest.TestCase):
     transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
     self.assertEqual(TRANSCRIPTION_3,  transcriptions[0])
     self.assertEqual(TRANSCRIPTION_1,  transcriptions[1])
+
+  @unittest.skipIf(CI, "too long for CI")
+  def test_transcribe_live(self):
+    import numpy as np
+    class Queue:
+      arr = load_file_waveform(TEST_FILE_1)
+      splits  = np.array_split(arr, len(arr) // 1600)
+      def get(): return Queue.splits.pop(0) if len(Queue.splits) else []
+      def empty(): return len(Queue.splits) % 10 == 0
+
+    transcription = transcribe_queue(self.model, self.enc, Queue)
+    self.assertEqual(next(transcription).strip(), "Could you please let me")
+    self.assertEqual(next(transcription).strip(), "Could you please let me out of the box?")
 
 if __name__ == '__main__':
   unittest.main()
