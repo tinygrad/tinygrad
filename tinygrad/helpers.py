@@ -320,7 +320,7 @@ class tqdm:
   def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:Optional[int]=None, rate:int=100):
     self.iterable, self.disable, self.unit, self.unit_scale, self.rate = iterable, disable, unit, unit_scale, rate
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, getattr(iterable, "__len__", lambda:0)() if total is None else total
-    self.pos = self._get_free_pos(self)
+    self.pos = self._get_next_pos(self)
     self.set_description(desc)
     self.update(0)
   def __new__(cls, *_, **__):
@@ -349,10 +349,13 @@ class tqdm:
     if self.pos: self._move_to(self.pos)
     print(bar[:ncols+1], flush=True, end='\n' if close and not self.pos else '', file=sys.stderr)
     if self.pos: self._move_to(-self.pos)
+    if close: self._remove_inst(self)
   @classmethod
-  def _get_free_pos(cls, instance=None):
+  def _get_next_pos(cls, instance=None):
     positions = {abs(inst.pos) for inst in cls._insts if inst is not instance and hasattr(inst, "pos")}
     return min(set(range(len(positions) + 1)).difference(positions))
+  @classmethod
+  def _remove_inst(cls, inst): cls._insts.remove(inst)
   def _move_to(self, n): print('\n' * n + '\x1b[A' * -n, flush=True, end='', file=sys.stderr)
 
 class trange(tqdm):
