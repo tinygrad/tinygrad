@@ -43,12 +43,12 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
 def all_gather(lbs:List[LazyBuffer], pads:Tuple[Tuple[int, int], ...]) -> List[LazyBuffer]:
-  n_lbs, bufs = len(lbs), [[lbs[i] if i == j else None for i in range(len(lbs))] for j in range(len(lbs))]
+  n_lbs, len_shape, bufs = len(lbs), len(lbs[0].shape)-1, [[lbs[i] if i == j else None for i in range(len(lbs))] for j in range(len(lbs))]
   for step in range(n_lbs - 1):
     for i in range(n_lbs):
       s, r = (i+step)%n_lbs, (i+step+1)%n_lbs
       bufs[r][i] = bufs[s][i].copy_to_device(bufs[r][r].device, force=True)
-  return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad((pads[i],)+tuple((0,0) for e in c.shape[1::])) for i,c in enumerate(lb)]) for lb in bufs]
+  return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad((pads[i],) + ((0,0),) * len_shape) for i,c in enumerate(lb)]) for lb in bufs]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int, bounds: Tuple[Tuple[int, int], ...]) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
