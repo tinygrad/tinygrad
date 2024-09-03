@@ -10,15 +10,17 @@ class ClangCompiler(Compiler):
     triple = f"{platform.machine()}-none-unknown-elf"
     asm = subprocess.check_output(['clang', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-S', '-ffreestanding', '-nostdlib', '-target',
                                    triple, '-fno-jump-tables', '-fno-math-errno', '-fPIC', '-', '-o', '-'], input=src.encode('utf-8'))
-    lines, data, func = asm.decode('utf-8').split('\n'), [], []
+    lines, data, text, state = asm.decode('utf-8').split('\n'), [], [], ""
     for l in lines:
-      if '.globl' in l: func.append(l)
-      elif len(func) == 0 and '.section' not in l: data.append(l)
-      elif len(func): func.append(l.replace('adrp', 'adr')) # this is really stupid
+      if '.text' in l: state = 'text'
+      elif '.rodata' in l: state = 'rodata'
+      elif '.note.GNU-stack' in l: break
+      elif state == 'text': text.append(l.replace('adrp', 'adr') if platform.machine() == 'aarch64' else l)
+      elif state == 'rodata': data.append(l)
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
       subprocess.check_output(['clang', '-target', triple, '-x', 'assembler', '-c', '-', '-o', str(output_file.name)],
-                              input=('\n'.join(func+data)+'\n').encode('utf-8'))
+                              input=('\n'.join(text+data)+'\n').encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
