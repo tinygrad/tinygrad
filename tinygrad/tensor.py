@@ -16,7 +16,7 @@ from tinygrad.ops import MetaOps, truncate
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
 from tinygrad.engine.realize import run_schedule, memory_planner
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars\
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -3353,19 +3353,18 @@ class Tensor:
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
 def FSDP(devices:Tuple[str, ...]):
-  from tinygrad.nn.state import get_state_dict
+  from tinygrad.nn.state import get_parameters
   def decorator(cls):
     original_init, original_forward = cls.__init__, cls.__call__
     @functools.wraps(original_init)
     def new_init(self, *args, **kwargs):
       original_init(self, *args, **kwargs)
-      for _, x in get_state_dict(self).items(): x.shard(devices, 0)
+      for x in get_parameters(self): x.shard_(devices, 0)
     @functools.wraps(original_forward)
     def new_forward(self, *args, **kwargs):
-      tensors = get_state_dict(self).items()
-      for _, x in tensors: x.lazydata = MultiLazyBuffer(all_gather(x.lazydata.lbs, 0, get_bounds(devices, x.shape[0], 0, None, pads=True)), 0)
+      for x in get_parameters(self): x.lazydata = MultiLazyBuffer(all_gather(x.lazydata.lbs, get_bounds(devices, x.shape, 0, None, pads=True)), None)
       result = original_forward(self, *args, **kwargs)
-      for _, x in tensors: x.lazydata = MultiLazyBuffer(to_sharded(x.lazydata.lbs, 0, get_bounds(devices, x.shape[0], 0, None)), 0)
+      for x in get_parameters(self): x.lazydata = MultiLazyBuffer(to_sharded(x.lazydata.lbs, 0, get_bounds(devices, x.shape, 0, None)), 0)
       return result
     cls.__init__, cls.__call__ = new_init, new_forward
     return cls
