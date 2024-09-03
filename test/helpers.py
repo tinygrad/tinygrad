@@ -32,6 +32,7 @@ def assert_jit_cache_len(fxn, expected_len):
 
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.pyint and device != "PYTHON": return False
+  if dtype == dtypes.void: return False
   if dtype == dtypes.bfloat16:
     # NOTE: this requires bf16 buffer support
     return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
