@@ -300,7 +300,6 @@ def listener(q):
     data = stream.read(CHUNK)
     waveform = ((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3)
     q.put(waveform)
-  print("done listening")
 
 if __name__ == "__main__":
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
@@ -310,27 +309,22 @@ if __name__ == "__main__":
   else:
     # online
     q = multiprocessing.Queue()
-    p = multiprocessing.Process(target=listener, args=(q,))
-    p.daemon = True
+    p = multiprocessing.Process(target=listener, args=(q,), daemon=True)
     p.start()
 
     lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-    total = None
-    did_read = False
+    total = []
     for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-      while not q.empty() or total is None:
-        waveform = q.get()
-        if total is None: total = waveform
-        else: total = np.concatenate([total, waveform])
-        did_read = True
-      if did_read:
+      total = np.concatenate([total, q.get()])
+      if q.empty():
         log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True)
         encoded_audio = model.encoder.encode(Tensor(log_spec))
-      # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
-      out = model.decoder(Tensor([lst]), 0, encoded_audio, streaming=True).realize()
-      idx = int(out[0,-1].argmax().numpy().item())
-      lst.append(idx)
-      dec = enc.decode(lst)
-      print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
-      if dec.endswith("<|endoftext|>"):
-        lst.pop()
+        # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
+        out = model.decoder(Tensor([lst]), 0, encoded_audio).realize()
+        idx = int(out[0,-1].argmax().numpy().item())
+        if idx != enc._special_tokens["<|endoftext|>"]:
+          lst.append(idx)
+          dec = enc.decode(lst[2:])
+          print(dec, end='\r') # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
+    print('\n[done]')
+
