@@ -37,7 +37,6 @@ if __name__ == "__main__":
     ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
-
   suffix = ""
   if IMAGE.value < 2: suffix += f"_image{IMAGE.value}" # image=2 has no suffix for compatibility
   if getenv("FLOAT16") == 1: suffix += "_float16"
