@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, time, ctypes, functools, mmap, struct, array, decimal, math
 from types import SimpleNamespace
-from typing import Optional, Tuple, List, Dict, Any, cast
+from typing import Tuple, List, Dict, Any, cast
 from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState, hcq_command
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
@@ -9,27 +9,11 @@ from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
-class Qreg:
-  def __init__(self):
-    regs: Dict[str, List[Tuple[str, Optional[int], Optional[int]]]] = {}
-    reg, mask, shift, param, val = None, None, None, None, None
-    for nm,dt in adreno.__dict__.items():
-      if nm[:4] == 'REG_': regs[(reg:=nm[4:]).lower()] = []
-      elif reg is not None and nm[:len(reg)] == reg and nm[-6:] == '__MASK': mask = dt
-      elif reg is not None and nm[:len(reg)] == reg and nm[-7:] == '__SHIFT': shift, param = dt, nm[len(reg) + 1: -7]
-      elif reg is not None and nm[:len(reg)] == reg: val, param = dt, nm[len(reg) + 1:]
-
-      if reg and param:
-        if mask is not None and shift is not None: regs[reg.lower()].append((param.lower(), mask, shift))
-        elif val is not None: regs[reg.lower()].append((param.lower(), val, None))
-        param, mask, shift, val = None, None, None, None
-
-    for reg_name, fields in regs.items():
-      setattr(self, reg_name, (lambda fields: (lambda *args, **kwargs: 0 if not args and not kwargs else args[0] if not fields else
-        sum(((kwargs.get(name,0) << shift) & mask if shift is not None else (mask if kwargs.get(name, False) else 0))
-          for f in fields for name, mask, shift in [f])))(fields))
-
-qreg: Any = Qreg()
+def _qreg_exec(reg, __val=0, **kwargs):
+  for k, v in kwargs.items():
+    __val |= (getattr(adreno, reg[4:] + "_" + k.upper())) if isinstance(v, bool) else (v << getattr(adreno, reg[4:] + "_" + k.upper() + "__SHIFT"))
+  return __val
+qreg: Any = type("QREG", (object,), {name[4:].lower(): functools.partial(_qreg_exec, name) for name in adreno.__dict__.keys() if name[:4] == 'REG_'})
 
 def next_power2(x): return 1 if x == 0 else 1 << (x - 1).bit_length()
 
@@ -131,7 +115,7 @@ class QCOMComputeQueue(HWComputeQueue):
              global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf, 0xfc | qreg.a6xx_hlsq_cs_cntl_1(threadsize=adreno.THREAD64),
              int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2])))
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
-             qreg.a6xx_sp_cs_ctrl_reg0(threasize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstack),
+             qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
              qreg.a6xx_sp_cs_unknown_a9b1(unk5=True, unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
@@ -266,7 +250,7 @@ class QCOMProgram(HCQProgram):
 
     # Parse image descriptors
     image_desc_off = _read_lib(0x110)
-    self.prg_offset, self.brnchstack = _read_lib(image_desc_off+0xc4), _read_lib(image_desc_off+0x108) // 2
+    self.prg_offset, self.brnchstck = _read_lib(image_desc_off+0xc4), _read_lib(image_desc_off+0x108) // 2
     self.pvtmem, self.shmem = _read_lib(image_desc_off+0xc8), _read_lib(image_desc_off+0xd8)
 
     # Fill up constants and buffers info
