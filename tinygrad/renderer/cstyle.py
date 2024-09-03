@@ -424,3 +424,4 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
 
 class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDRenderer): device = "HIP"
+class QCOMRenderer(OpenCLRenderer): device = "QCOM"

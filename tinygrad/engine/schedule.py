@@ -180,6 +180,12 @@ def push_swizzle_through_reduce(swizzle:UOp, reduceop:UOp) -> UOp:
   new_input_st, new_axis = swizzle_reduceop(unwrap(get_output_st(rsrc, uop_sts)), swizzle.arg, reduceop.arg[1])
   return UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda _:new_input_st, uop_sts, {}),), (reduceop.arg[0], new_axis))
 
+def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
+  assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
+  assert not any(x.op is UOps.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
+  new_axis: Tuple[int, ...] = root.arg[1]+first_reduce.arg[1]
+  return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], new_axis))
+
 def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   reduceops = [x for x in root.parents if x.op is UOps.REDUCE_AXIS]
   if len(reduceops) == 0: return None
@@ -190,6 +196,7 @@ def push_reduceop_shape(root:UOp) -> Optional[UOp]:
 
 reduceop_fusor = PatternMatcher([
   (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_through_reduce),
+  (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_reduceop_shape),
 ])
 
