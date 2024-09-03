@@ -1,11 +1,9 @@
 from __future__ import annotations
-import os, time, ctypes, fcntl, functools, mmap, struct, array, decimal, math
+import os, time, ctypes, functools, mmap, struct, array, decimal, math
 from types import SimpleNamespace
 from typing import Tuple, List, Dict, Any, cast
 from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState, hcq_command
-import tinygrad.runtime.autogen.kgsl as kgsl
-import tinygrad.runtime.autogen.adreno as adreno
-import tinygrad.runtime.autogen.libc as libc
+from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod
@@ -86,7 +84,7 @@ class QCOMComputeQueue(HWComputeQueue):
   def _submit(self, device):
     if self.binded_device == device: submit_req = self.submit_req
     else: submit_req, _ = self._build_gpu_command(device)
-    device._ioctl(kgsl.IOCTL_KGSL_GPU_COMMAND, submit_req)
+    kgsl.IOCTL_KGSL_GPU_COMMAND(device.fd, __payload=submit_req)
 
   @hcq_command
   def setup(self):
@@ -287,8 +285,7 @@ class QCOMAllocator(HCQAllocator):
 
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.image is not None:
-      pitchalign = 6
-      pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.base.itemsize), 1 << pitchalign)
+      pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.base.itemsize), 1 << (pitchalign:=6))
       texture = self.device._gpu_alloc(pitch * round_up(options.image.shape[0], 16), kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
 
       # save it here to load in one command (the same approach as OpenCL and mesa)
@@ -334,7 +331,7 @@ class QCOMDevice(HCQCompiled):
     QCOMDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
     info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
-    assert QCOMDevice.gpu_id < 700
+    if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
     super().__init__(device, QCOMAllocator(self), QCOMRenderer(), QCOMCompiler(device), functools.partial(QCOMProgram, self),
                      QCOMSignal, QCOMComputeQueue, None, timeline_signals=(QCOMSignal(), QCOMSignal()))
@@ -343,39 +340,25 @@ class QCOMDevice(HCQCompiled):
     self.timeline_value += 1
 
   def _ctx_create(self):
-    cr = kgsl.struct_kgsl_drawctxt_create(flags=(kgsl.KGSL_CONTEXT_TYPE(kgsl.KGSL_CONTEXT_TYPE_CL) | kgsl.KGSL_CONTEXT_PREAMBLE
-                                                 | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE
-                                                 | kgsl.KGSL_CONTEXT_PREEMPT_STYLE(kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)))
-    self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE, cr)
-    self.context_id = cr.drawctxt_id
-    return self.context_id
-
-  def _ctx_destroy(self, ctx_id):
-    dstr = kgsl.struct_kgsl_drawctxt_destroy(drawctxt_id=ctx_id)
-    self._ioctl(kgsl.IOCTL_KGSL_DRAWCTXT_DESTROY, dstr)
+    cr = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=(kgsl.KGSL_CONTEXT_TYPE(kgsl.KGSL_CONTEXT_TYPE_CL) | kgsl.KGSL_CONTEXT_PREAMBLE |
+                                                         kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE |
+                                                         kgsl.KGSL_CONTEXT_PREEMPT_STYLE(kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)))
+    return cr.drawctxt_id
 
   def _info(self):
     info = kgsl.struct_kgsl_devinfo()
-    get_property = kgsl.struct_kgsl_device_getproperty(type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
-    self._ioctl(kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY, get_property)
+    kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
     return info
-
-  def _ioctl(self, nr, arg):
-    ret = fcntl.ioctl(self.fd, (3 << 30) | (ctypes.sizeof(arg) & 0x1FFF) << 16 | 0x9 << 8 | (nr & 0xFF), arg)
-    if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
-    return ret
 
   def _gpu_alloc(self, size:int, flags:int=0, map_to_cpu=False, uncached=False, fill_zeroes=False):
     size = round_up(size, 1 << (alignment_hint:=12))
     flags |= (kgsl.KGSL_MEMALIGN(alignment_hint))
     if uncached: flags |= (kgsl.KGSL_CACHEMODE(kgsl.KGSL_CACHEMODE_UNCACHED))
 
-    alloc = kgsl.struct_kgsl_gpuobj_alloc(size=size, flags=flags)
-    self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_ALLOC, alloc)
+    alloc = kgsl.IOCTL_KGSL_GPUOBJ_ALLOC(self.fd, size=size, flags=flags)
     va_addr, va_len = None, 0
     if not (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP):
-      info = kgsl.struct_kgsl_gpuobj_info(id=alloc.id)
-      self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_INFO, info)
+      info = kgsl.IOCTL_KGSL_GPUOBJ_INFO(self.fd, id=alloc.id)
       va_addr, va_len = info.gpuaddr, info.va_len
 
     if map_to_cpu or (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP):
@@ -386,8 +369,7 @@ class QCOMDevice(HCQCompiled):
     return SimpleNamespace(va_addr=va_addr, size=va_len, mapped=map_to_cpu or (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP), info=alloc)
 
   def _gpu_free(self, mem):
-    free = kgsl.struct_kgsl_gpuobj_free(id=mem.info.id)
-    self._ioctl(kgsl.IOCTL_KGSL_GPUOBJ_FREE, free)
+    kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.info.id)
     if mem.mapped: libc.munmap(mem.va_addr, mem.size)
 
   def _alloc_cmd_buf(self, sz: int):
