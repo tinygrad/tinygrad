@@ -348,26 +348,6 @@ class Tensor:
     self.lazydata = self.shard(devices, axis, splits).lazydata
     return self
 
-  def FSDP(devices:Tuple[str, ...]):
-    from tinygrad.nn.state import get_state_dict
-    def decorator(cls):
-      original_init, original_forward = cls.__init__, cls.__call__
-      @functools.wraps(original_init)
-      def new_init(self, *args, **kwargs):
-        original_init(self, *args, **kwargs)
-        for _, x in get_state_dict(self).items(): x.shard(devices, 0)
-
-      @functools.wraps(original_forward)
-      def new_forward(self, *args, **kwargs):
-        tensors = get_state_dict(self).items()
-        for _, x in tensors: x.lazydata = MultiLazyBuffer(all_gather(x.lazydata.lbs, 0, get_bounds(devices, x.shape[0], 0, pads=True)), 0)
-        result = original_forward(self, *args, **kwargs)
-        for _, x in tensors: x.lazydata = MultiLazyBuffer(to_sharded(x.lazydata.lbs, 0, get_bounds(devices, x.shape[0], 0)), 0)
-        return result
-      cls.__init__, cls.__call__ = new_init, new_forward
-      return cls
-    return decorator
-
   @staticmethod
   def from_node(y:Node, **kwargs) -> Tensor:
     if isinstance(y, NumNode): return Tensor(y.b, **kwargs, requires_grad=False)
@@ -3371,6 +3351,25 @@ class Tensor:
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+
+def FSDP(devices:Tuple[str, ...]):
+  from tinygrad.nn.state import get_state_dict
+  def decorator(cls):
+    original_init, original_forward = cls.__init__, cls.__call__
+    @functools.wraps(original_init)
+    def new_init(self, *args, **kwargs):
+      original_init(self, *args, **kwargs)
+      for _, x in get_state_dict(self).items(): x.shard(devices, 0)
+    @functools.wraps(original_forward)
+    def new_forward(self, *args, **kwargs):
+      tensors = get_state_dict(self).items()
+      for _, x in tensors: x.lazydata = MultiLazyBuffer(all_gather(x.lazydata.lbs, 0, get_bounds(devices, x.shape[0], 0, None, pads=True)), 0)
+      result = original_forward(self, *args, **kwargs)
+      for _, x in tensors: x.lazydata = MultiLazyBuffer(to_sharded(x.lazydata.lbs, 0, get_bounds(devices, x.shape[0], 0, None)), 0)
+      return result
+    cls.__init__, cls.__call__ = new_init, new_forward
+    return cls
+  return decorator
 
 # register functions to move between devices
 for device in Device._devices: setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
