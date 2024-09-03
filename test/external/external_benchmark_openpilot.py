@@ -39,8 +39,8 @@ if __name__ == "__main__":
 
 
   suffix = ""
-  if IMAGE.value < 2: suffix += f"_image{IMAGE.value}"
-  if getenv("FLOAT16") == 1: suffix += f"_float16"
+  if IMAGE.value < 2: suffix += f"_image{IMAGE.value}" # image=2 has no suffix for compatibility
+  if getenv("FLOAT16") == 1: suffix += "_float16"
   path = Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}{suffix}.npy"
 
   # validate if we have records
