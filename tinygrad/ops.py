@@ -310,14 +310,11 @@ class UOp:
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
   def recip(self): return self.alu(UnaryOps.RECIP)
-  def const_like(self, b:ConstType|Variable): return type(self)._const(self.dtype, b)
-  def sconst_like(self, b:ConstType|Variable): return type(self)._const(self.dtype.scalar() if self.dtype is not None else None, b)
-  def const(self:Union[UOp, DType, None], b:ConstType|Variable):
-    assert not isinstance(self, UOp)
-    return UOp._const(self, b)
+  def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
+  def sconst_like(self, b:ConstType|Variable): return type(self).const(self.dtype.scalar() if self.dtype is not None else None, b)
   @classmethod
   @functools.lru_cache(maxsize=None)
-  def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
+  def const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
     if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, (cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))), b)
     if dtype is not None and dtype != (sdtype := dtype.scalar()):
@@ -418,9 +415,6 @@ class NOp(UOp):
   @staticmethod
   @functools.lru_cache(None)
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
-  def const(self:Union[UOp, DType, None], b:ConstType|Variable):
-    assert not isinstance(self, UOp)
-    return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
   @functools.cached_property
   def upat(self:NOp) -> UPat:
