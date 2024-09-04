@@ -119,12 +119,12 @@ class QCOMComputeQueue(HWComputeQueue):
              qreg.a6xx_sp_cs_unknown_a9b1(unk5=True, unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-             adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_CONSTANTS) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
-             | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_SHADER) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(prg.kernargs_alloc_size // 4),
+
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
+                                                               state_block=adreno.SB6_CS_SHADER, num_unit=prg.kernargs_alloc_size // 4),
              *data64_le(args_state.ptr))
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG, adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_SHADER) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
-             | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_SHADER) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(round_up(prg.image_size, 128) // 128),
+    self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_SHADER, state_src=adreno.SS6_INDIRECT,
+                                                               state_block=adreno.SB6_CS_SHADER, num_unit=round_up(prg.image_size, 128) // 128),
              *data64_le(prg.lib_gpu.va_addr))
     self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc,
              qreg.a6xx_hlsq_cs_cntl(constlen=prg.kernargs_alloc_size // 4, enabled=True))
@@ -132,25 +132,21 @@ class QCOMComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, qreg.a6xx_sp_cs_instrlen(prg.image_size // 4))
 
     if hasattr(args_state, 'samplers_ptr'):
-      self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-               adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_SHADER) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
-               | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_TEX) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(args_state.samplers_cnt),
+      self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_SHADER, state_src=adreno.SS6_INDIRECT,
+                                                                 state_block=adreno.SB6_CS_TEX, num_unit=args_state.samplers_cnt),
                *data64_le(args_state.samplers_ptr.va_addr))
-
       self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.samplers_ptr.va_addr))
       self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.device._border_color_base()))
 
     if hasattr(args_state, 'descriptors_ptr'):
-      self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-               adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST_CONSTANTS) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
-               | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_TEX) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(args_state.descriptors_cnt),
+      self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
+                                                                 state_block=adreno.SB6_CS_TEX, num_unit=args_state.descriptors_cnt),
                *data64_le(args_state.descriptors_ptr.va_addr))
       self.reg(adreno.REG_A6XX_SP_CS_TEX_CONST, *data64_le(args_state.descriptors_ptr.va_addr))
 
     if hasattr(args_state, 'ibos_ptr'):
-      self.cmd(adreno.CP_LOAD_STATE6_FRAG,
-               adreno.CP_LOAD_STATE6_0_STATE_TYPE(adreno.ST6_IBO) | adreno.CP_LOAD_STATE6_0_STATE_SRC(adreno.SS6_INDIRECT)
-               | adreno.CP_LOAD_STATE6_0_STATE_BLOCK(adreno.SB6_CS_SHADER) | adreno.CP_LOAD_STATE6_0_NUM_UNIT(args_state.ibos_cnt),
+      self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST6_IBO, state_src=adreno.SS6_INDIRECT,
+                                                                 state_block=adreno.SB6_CS_SHADER, num_unit=args_state.ibos_cnt),
                *data64_le(args_state.ibos_ptr.va_addr))
       self.reg(adreno.REG_A6XX_SP_CS_IBO, *data64_le(args_state.ibos_ptr.va_addr))
 
