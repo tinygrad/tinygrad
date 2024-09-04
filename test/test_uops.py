@@ -11,7 +11,7 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
 from tinygrad.shape.symbolic import Variable
-from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
+from test.helpers import is_dtype_supported, assert_equiv_uops
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
@@ -356,7 +356,7 @@ class TestUOpCompare(unittest.TestCase):
     mul = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.MUL)
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
-class TestUOpStr(TestEqUOps):
+class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
     for _ in range(20): a = a + a
@@ -368,7 +368,7 @@ class TestUOpStr(TestEqUOps):
     # nice big complicated uop
     with Context(NOOPT=1):
       sink = UOp(UOps.SINK, None, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
-    self.assert_equiv_uops(sink, eval(str(sink)))
+    assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
