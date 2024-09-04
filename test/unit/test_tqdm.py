@@ -210,16 +210,16 @@ class TestProgressBar(unittest.TestCase):
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
   def test_tqdm_write(self, mock_terminal_size, mock_stderr):
-    ncols, msg, tqdm_fp = random.randint(80, 120), "Test", StringIO()
+    ncols, tqdm_fp = random.randint(80, 120), StringIO()
     mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
     mock_stderr.truncate(0)
     tqdm_fp.truncate(0)
-
-    tinytqdm.write(msg)
-    tqdm.write(msg, file=tqdm_fp)
-
-    tinytqdm_out, tqdm_out = mock_stderr.getvalue().split("\r\033[K")[-1], tqdm_fp.getvalue()
-    self.assertEqual(tinytqdm_out, tqdm_out)
+    for i in tinytqdm(range(10)):
+      time.sleep(0.01)
+      tinytqdm.write(str(i))
+      tqdm.write(str(i), file=tqdm_fp)
+      tinytqdm_out, tqdm_out = mock_stderr.getvalue().split("\r\033[K")[-1], tqdm_fp.getvalue().split(f"{i-1}\n")[-1]
+      self.assertEqual(tinytqdm_out, tqdm_out)
 
   def test_tqdm_perf(self):
     st = time.perf_counter()
