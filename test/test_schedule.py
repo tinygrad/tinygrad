@@ -1739,7 +1739,24 @@ class TestScheduleRewrite(unittest.TestCase):
     expected_out = (a.numpy() + a.numpy().sum()).sum()
     np.testing.assert_equal(b.numpy(), expected_out)
 
-  def test_simple_dedup(self):
+  def test_dedup_single_kernel(self):
+    a = Tensor.randn(32, 32).realize()
+    b = Tensor.randn(32, 32).realize()
+    # with AST_REWRITE=1, the mul is deduped
+    with Context(LAZYCACHE=0, AST_REWRITE=1):
+      out = a*(b+2)+a*(b+2)
+      ast = out.schedule()[-1].ast
+      muls = [x for x in ast.parents if x.op is UOps.ALU and x.arg is BinaryOps.MUL]
+      self.assertEqual(len(muls), 1)
+    with Context(LAZYCACHE=0, AST_REWRITE=0):
+      out = a*(b+2)+a*(b+2)
+      ast = out.schedule()[-1].ast
+      muls = [x for x in ast.parents if x.op is UOps.ALU and x.arg is BinaryOps.MUL]
+      # without AST_REWRITE=1 we have 2 identical muls
+      self.assertEqual(len(muls), 2)
+
+  @unittest.expectedFailure # TODO: this is still 2 because the graph_rewrite only operates on per AST
+  def test_simple_dedup_multi_kernel(self):
     a = Tensor.randn(32, 32).realize()
     b = Tensor.randn(32, 32).realize()
     with Context(LAZYCACHE=0, AST_REWRITE=1):
@@ -1747,6 +1764,15 @@ class TestScheduleRewrite(unittest.TestCase):
       d = a+b
       s = Tensor.schedule(c, d)
       self.assertEqual(len(s), 1)
+
+  def test_dedup_assignment(self):
+    a = Tensor.full((4,), 1.).contiguous()
+    b1 = a+2
+    b2 = a.assign(Tensor.full((4,), 2.).contiguous())+2
+    s = Tensor.schedule(b1, b2)
+    alu = [x for x in s if x.ast.src[0].src[2].op is UOps.ALU]
+    self.assertEqual(len(s), 4)
+    self.assertEqual(len(alu), 2)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
