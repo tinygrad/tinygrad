@@ -219,7 +219,7 @@ class QCOMProgram(HCQProgram):
     self._parse_lib()
 
     # reserve some space after for gpu to use
-    self.lib_gpu = self.device.allocator.alloc(len(self.image) + 0x20000, options=BufferOptions(cpu_access=True, nolru=True))
+    self.lib_gpu = self.device.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
 
     self.pvtmem_size_per_item = round_up(self.pvtmem, 512) >> 9
