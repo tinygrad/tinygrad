@@ -15,7 +15,7 @@ from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
 from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup, ScheduleItem
-from tinygrad.engine.realize import CompiledRunner, run_schedule
+from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from test.helpers import assert_equiv_uops, is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
@@ -1297,6 +1297,16 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.randn(10, 20).realize()
     out = x.argmax(1)
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
+
+  def test_big_reduceop(self):
+    big = Tensor.randint(getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)).realize()
+    with Context(SPLIT_REDUCEOP=0, AST_REWRITE=1):
+      r = big.sum()
+      schedule_items = r.schedule()
+      self.assertEqual(len(schedule_items), 1)
+      exec_items = list(lower_schedule(schedule_items.copy()))
+      self.assertEqual(len(exec_items), 2)
+    np.testing.assert_equal(r.numpy(), big.numpy().sum())
 
 class TestConvBW(unittest.TestCase):
   def check_schedule(self, xt, cnt:int, flops=None) -> List[ScheduleItem]:
