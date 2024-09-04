@@ -403,7 +403,7 @@ def get_location() -> Tuple[str, int]:
   while (frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>') and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
-def lines(fn): return open(fn).readlines()
+def lines(fn) -> List[str]: return open(fn).readlines()
 
 @dataclass(frozen=True, repr=False)  # reuse repr from UOp
 class NOp(UOp):
@@ -455,7 +455,11 @@ class UPat:
       upat_match = [self.in_src] if isinstance(self.in_src, UPat) else ([] if self.in_src is None else self.src[0])
       self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
-  def printable(self:UPat): return lines(self.location[0])[self.location[1]-1].strip()
+  def printable(self:UPat) -> str:
+    try:
+      return lines(self.location[0])[self.location[1]-1].strip()
+    except FileNotFoundError:
+      return "<missing>"
   def __repr__(self):
     def rep(x):
       form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
