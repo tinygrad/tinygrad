@@ -290,17 +290,11 @@ class QCOMAllocator(HCQAllocator):
       texture.samplers, texture.descriptor, texture.ibo = [0] * 4, [0] * 16, [0] * 16
       texture.samplers[0:2] = [0x1b60, 0x30] # compiled sampler. always the same in tinygrad.
 
-      texture.descriptor[0] = adreno.A6XX_TEX_CONST_0_SWIZ_X(0) | adreno.A6XX_TEX_CONST_0_SWIZ_Y(1) | adreno.A6XX_TEX_CONST_0_SWIZ_Z(2) \
-        | adreno.A6XX_TEX_CONST_0_SWIZ_W(3) \
-        | adreno.A6XX_TEX_CONST_0_FMT(adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT)
-      texture.descriptor[1] = adreno.A6XX_TEX_CONST_1_WIDTH(options.image.shape[1]) | adreno.A6XX_TEX_CONST_1_HEIGHT(options.image.shape[0])
-      texture.descriptor[2] = adreno.A6XX_TEX_CONST_2_TYPE(adreno.A6XX_TEX_2D) | adreno.A6XX_TEX_CONST_2_PITCH(pitch) \
-        | adreno.A6XX_TEX_CONST_2_PITCHALIGN(pitchalign - 6)
-
-      texture.descriptor[4:6] = data64_le(texture.va_addr)
-      texture.descriptor[6] = 0x40000000
-      texture.descriptor[7] = 0xe
-
+      tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
+      texture.descriptor[0] = qreg.a6xx_tex_const_0(swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt)
+      texture.descriptor[1] = qreg.a6xx_tex_const_1(width=options.image.shape[1], height=options.image.shape[0])
+      texture.descriptor[2] = qreg.a6xx_tex_const_2(type=adreno.A6XX_TEX_2D, pitch=pitch, pitchalign=pitchalign-6)
+      texture.descriptor[4:7] = [*data64_le(texture.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000)]
       texture.ibo = [texture.descriptor[0] & (~0xffff), *texture.descriptor[1:len(texture.descriptor)]]
 
       return texture
@@ -312,10 +306,6 @@ class QCOMAllocator(HCQAllocator):
   def copyout(self, dest:memoryview, src:HCQBuffer):
     self.device.synchronize()
     ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
-
-  def as_buffer(self, src:HCQBuffer) -> memoryview:
-    self.device.synchronize()
-    return to_mv(src.va_addr, src.size)
 
   def _free(self, opaque, options:BufferOptions):
     self.device.synchronize()
