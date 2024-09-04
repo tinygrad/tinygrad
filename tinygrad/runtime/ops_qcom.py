@@ -53,8 +53,8 @@ class QCOMComputeQueue(HWComputeQueue):
 
   def _signal(self, signal, value=0, ts=False):
     if QCOMDevice.gpu_id < 700:
-      self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_FLUSH_TS | (0 if not ts else adreno.CP_EVENT_WRITE_0_TIMESTAMP),
-               *data64_le(mv_address(signal._signal) + (0 if not ts else 8)), value & 0xFFFFFFFF)
+      self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS, timestamp=ts),
+               *data64_le(mv_address(signal._signal) + (0 if not ts else 8)), qreg.cp_event_write_3(value&0xFFFFFFFF))
       self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_INVALIDATE)
     else:
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
@@ -63,8 +63,8 @@ class QCOMComputeQueue(HWComputeQueue):
   def _timestamp(self, signal): return self._signal(signal, 0, ts=True)
 
   def _wait(self, signal, value=0):
-    self.cmd(adreno.CP_WAIT_REG_MEM, adreno.WRITE_GE | adreno.CP_WAIT_REG_MEM_0_POLL(adreno.POLL_MEMORY),
-             *data64_le(mv_address(signal._signal)), value & 0xFFFFFFFF, 0xFFFFFFFF, 32) # busy wait for 32 cycles
+    self.cmd(adreno.CP_WAIT_REG_MEM, qreg.cp_wait_reg_mem_0(function=adreno.WRITE_GE, poll=adreno.POLL_MEMORY),*data64_le(mv_address(signal._signal)),
+             qreg.cp_wait_reg_mem_3(ref=value&0xFFFFFFFF), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
 
   def _update_signal(self, cmd_idx, signal, value):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(mv_address(signal._signal)))
@@ -95,7 +95,7 @@ class QCOMComputeQueue(HWComputeQueue):
   @hcq_command
   def setup(self):
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
-    self.cmd(adreno.CP_SET_MARKER, adreno.RM6_COMPUTE)
+    self.cmd(adreno.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=adreno.RM6_COMPUTE))
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, qreg.a6xx_hlsq_invalidate_cmd(cs_state=True, cs_ibo=True))
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, qreg.a6xx_hlsq_invalidate_cmd())
     self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, qreg.a6xx_sp_cs_tex_count(0xff))
