@@ -313,6 +313,10 @@ class QCOMAllocator(HCQAllocator):
     self.device.synchronize()
     ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
+  def as_buffer(self, src:HCQBuffer) -> memoryview:
+    self.device.synchronize()
+    return to_mv(src.va_addr, src.size)
+
   def _free(self, opaque, options:BufferOptions):
     self.device.synchronize()
     self.device._gpu_free(opaque)
@@ -349,26 +353,21 @@ class QCOMDevice(HCQCompiled):
     return info
 
   def _gpu_alloc(self, size:int, flags:int=0, map_to_cpu=False, uncached=False, fill_zeroes=False):
-    size = round_up(size, 1 << (alignment_hint:=12))
-    flags |= (kgsl.KGSL_MEMALIGN(alignment_hint))
-    if uncached: flags |= (kgsl.KGSL_CACHEMODE(kgsl.KGSL_CACHEMODE_UNCACHED))
+    if uncached: flags |= kgsl.KGSL_CACHEMODE(kgsl.KGSL_CACHEMODE_UNCACHED)
 
-    alloc = kgsl.IOCTL_KGSL_GPUOBJ_ALLOC(self.fd, size=size, flags=flags)
-    va_addr, va_len = None, 0
-    if not (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP):
-      info = kgsl.IOCTL_KGSL_GPUOBJ_INFO(self.fd, id=alloc.id)
-      va_addr, va_len = info.gpuaddr, info.va_len
+    alloc = kgsl.IOCTL_KGSL_GPUOBJ_ALLOC(self.fd, size=round_up(size, 1<<(alignment_hint:=12)), flags=flags | kgsl.KGSL_MEMALIGN(alignment_hint))
+    info = kgsl.IOCTL_KGSL_GPUOBJ_INFO(self.fd, id=alloc.id)
+    va_addr, va_len = info.gpuaddr, info.va_len
 
-    if map_to_cpu or (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP):
-      va_addr = libc.mmap(va_addr, va_len := (va_len or alloc.mmapsize), mmap.PROT_READ|mmap.PROT_WRITE,
-                          mmap.MAP_SHARED | (MAP_FIXED if va_addr is not None else 0), self.fd, alloc.id * 0x1000)
+    if map_to_cpu:
+      va_addr = libc.mmap(va_addr, va_len, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|MAP_FIXED, self.fd, alloc.id * 0x1000)
       if fill_zeroes: ctypes.memset(va_addr, 0, va_len)
 
-    return SimpleNamespace(va_addr=va_addr, size=va_len, mapped=map_to_cpu or (flags & kgsl.KGSL_MEMFLAGS_USE_CPU_MAP), info=alloc)
+    return SimpleNamespace(va_addr=va_addr, size=size, mapped=map_to_cpu, info=alloc)
 
   def _gpu_free(self, mem):
     kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.info.id)
-    if mem.mapped: libc.munmap(mem.va_addr, mem.size)
+    if mem.mapped: libc.munmap(mem.va_addr, mem.info.va_len)
 
   def _alloc_cmd_buf(self, sz: int):
     self.cmd_buf_ptr = (cur_ptr:=self.cmd_buf_ptr if self.cmd_buf_ptr + sz < self.cmd_buf.size else 0) + sz
