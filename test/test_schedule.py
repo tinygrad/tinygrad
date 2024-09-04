@@ -12,7 +12,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
-from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, all_same, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -1765,14 +1765,28 @@ class TestScheduleRewrite(unittest.TestCase):
       s = Tensor.schedule(c, d)
       self.assertEqual(len(s), 1)
 
+  @unittest.expectedFailure
+  def test_dedup_asts_different_bufs(self):
+    a = Tensor.full((4,), 1.).contiguous().realize()
+    b = Tensor.full((4,), 2.).contiguous().realize()
+    c = Tensor.full((4,), 3.).contiguous().realize()
+    o0 = a+b
+    o1 = b+c
+    s = Tensor.schedule(o0, o1)
+    self.assertEqual(len(s), 2)
+    assert all_same([si.ast for si in s])
+
+  @unittest.expectedFailure
   def test_dedup_assignment(self):
     a = Tensor.full((4,), 1.).contiguous()
     b1 = a+2
     b2 = a.assign(Tensor.full((4,), 2.).contiguous())+2
     s = Tensor.schedule(b1, b2)
-    alu = [x for x in s if x.ast.src[0].src[2].op is UOps.ALU]
+    alu = [x.ast for x in s if x.ast.src[0].src[2].op is UOps.ALU]
     self.assertEqual(len(s), 4)
     self.assertEqual(len(alu), 2)
+    # TODO: should these ASTs dedup?
+    assert all_same(alu)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
