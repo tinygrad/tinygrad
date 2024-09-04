@@ -1360,7 +1360,7 @@ class TestConvBW(unittest.TestCase):
     # flops, TODO: This will be fixed once SWIZZLE merges view strides.
     with self.assertRaises(AssertionError):
       self.assertEqual(rw_flops, ref_flops)
-    assert_equiv_uops(compare_ast, ref_ast)
+      assert_equiv_uops(compare_ast, ref_ast)
 
   @unittest.expectedFailure
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
