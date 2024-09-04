@@ -286,7 +286,7 @@ class UOp:
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
-  def ufix(self, x): return self.const(x) if not isinstance(x, UOp) else x
+  def ufix(self, x): return self.const_like(x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
@@ -310,17 +310,19 @@ class UOp:
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
   def recip(self): return self.alu(UnaryOps.RECIP)
-  def const(self:Union[UOp, DType, None], b:ConstType|Variable): return UOp._const(self.dtype if isinstance(self, UOp) else self, b)
-  def sconst(self:Union[UOp, DType, None], b:ConstType|Variable):
-    return UOp._const(cast(DType, self.dtype if isinstance(self, UOp) else self).scalar() if self is not None else self, b)
-  @staticmethod
+  def const_like(self, b:ConstType|Variable): return type(self)._const(self.dtype, b)
+  def sconst_like(self, b:ConstType|Variable): return type(self)._const(self.dtype.scalar() if self.dtype is not None else None, b)
+  def const(self:Union[UOp, DType, None], b:ConstType|Variable):
+    assert not isinstance(self, UOp)
+    return UOp._const(self, b)
+  @classmethod
   @functools.lru_cache(maxsize=None)
-  def _const(dtype:Optional[DType], b:ConstType|Variable):
+  def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (UOp.const(dtypes.int, b.min), UOp.const(dtypes.int, cast(int,b.max))), b)
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, (cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))), b)
     if dtype is not None and dtype != (sdtype := dtype.scalar()):
-      return UOp(UOps.VECTORIZE, dtype, src=tuple(UOp(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
-    return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+      return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
+    return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
   @staticmethod
@@ -349,7 +351,7 @@ class UOp:
     return 1
   def divides(self, v) -> Optional[UOp]:
     if v==1: return self
-    if self.op is UOps.CONST: return self.const(self.arg//v) if self.arg%v == 0 else None
+    if self.op is UOps.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
     if self.op is UOps.ALU:
       if self.arg is BinaryOps.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
       if self.arg is BinaryOps.MUL:
@@ -357,32 +359,34 @@ class UOp:
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
   @property
-  def vmin(self) -> UOp: return x if (x:=self._min_max[0]) is not None and not math.isnan(x.arg) else self.sconst(dtypes.min(cast(DType, self.dtype)))
+  def vmin(self) -> UOp:
+    return x if (x:=self._min_max[0]) is not None and not math.isnan(x.arg) else self.sconst_like(dtypes.min(cast(DType, self.dtype)))
   @property
-  def vmax(self) -> UOp: return x if (x:=self._min_max[1]) is not None and not math.isnan(x.arg) else self.sconst(dtypes.max(cast(DType, self.dtype)))
+  def vmax(self) -> UOp:
+    return x if (x:=self._min_max[1]) is not None and not math.isnan(x.arg) else self.sconst_like(dtypes.max(cast(DType, self.dtype)))
   @functools.cached_property
   def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.src: return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else None
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
-    if self.op is UOps.SPECIAL: return self.const(0), self.const(self.arg[1]-1) if isinstance(self.arg[1], int) else None
+    if self.op is UOps.SPECIAL: return self.const_like(0), self.const_like(self.arg[1]-1) if isinstance(self.arg[1], int) else None
     if self.op is UOps.CONST: return self, self
     if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
-      if self.arg is BinaryOps.ADD: return self.sconst(s0.vmin.arg+s1.vmin.arg), self.sconst(s0.vmax.arg+s1.vmax.arg)
+      if self.arg is BinaryOps.ADD: return self.sconst_like(s0.vmin.arg+s1.vmin.arg), self.sconst_like(s0.vmax.arg+s1.vmax.arg)
       if self.arg is BinaryOps.MUL and (s0.vmin.arg >= 0 or s1.vmin.arg >= 0):
         # handle at lease one is non-negative
         Lmin, Lmax = (s0.vmin.arg, s0.vmax.arg) if s1.vmin.arg >= 0 else (s0.vmax.arg, s0.vmin.arg)
         Rmin, Rmax = (s1.vmin.arg, s1.vmax.arg) if s0.vmin.arg >= 0 else (s1.vmax.arg, s1.vmin.arg)
         assert math.isnan(Lmax*Rmax) or math.isnan(Lmin*Rmin) or Lmax*Rmax >= Lmin*Rmin, f"{Lmax=}, {Lmin=}, {Rmax=}, {Rmin=}"
-        return self.sconst(Lmin*Rmin), self.sconst(Lmax*Rmax)
-      if self.arg is BinaryOps.MOD and s1.vmin.arg > 0: return self.sconst(0), self.sconst(s1.vmax.arg-1)
+        return self.sconst_like(Lmin*Rmin), self.sconst_like(Lmax*Rmax)
+      if self.arg is BinaryOps.MOD and s1.vmin.arg > 0: return self.sconst_like(0), self.sconst_like(s1.vmax.arg-1)
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
-        if s1.arg > 0: return self.sconst(s0.vmin.arg//s1.arg), self.sconst(s0.vmax.arg//s1.arg)
-        if s1.arg < 0: return self.sconst(-(s0.vmax.arg//-s1.arg)), self.sconst(-(s0.vmin.arg//-s1.arg))
-      if self.arg is BinaryOps.MAX: return self.sconst(max(s0.vmin.arg, s1.vmin.arg)), self.sconst(max(s0.vmax.arg, s1.vmax.arg))
-      if self.arg is BinaryOps.CMPLT: return (UOp.sconst(dtypes.bool, s0.vmax.arg<s1.vmin.arg), UOp.sconst(dtypes.bool, s0.vmin.arg<s1.vmax.arg))
+        if s1.arg > 0: return self.sconst_like(s0.vmin.arg//s1.arg), self.sconst_like(s0.vmax.arg//s1.arg)
+        if s1.arg < 0: return self.sconst_like(-(s0.vmax.arg//-s1.arg)), self.sconst_like(-(s0.vmin.arg//-s1.arg))
+      if self.arg is BinaryOps.MAX: return self.sconst_like(max(s0.vmin.arg, s1.vmin.arg)), self.sconst_like(max(s0.vmax.arg, s1.vmax.arg))
+      if self.arg is BinaryOps.CMPLT: return (UOp.const(dtypes.bool, s0.vmax.arg<s1.vmin.arg), UOp.const(dtypes.bool, s0.vmin.arg<s1.vmax.arg))
     return None, None
 
 @dataclass(frozen=True)
@@ -414,7 +418,9 @@ class NOp(UOp):
   @staticmethod
   @functools.lru_cache(None)
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
-  def const(self:Union[UOp, DType, None], b:ConstType|Variable): return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
+  def const(self:Union[UOp, DType, None], b:ConstType|Variable):
+    assert not isinstance(self, UOp)
+    return NOp((x:=UOp.const(self, b)).op, x.dtype, x.src, x.arg)
 
   @functools.cached_property
   def upat(self:NOp) -> UPat:
