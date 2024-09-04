@@ -1,9 +1,12 @@
+# ruff: noqa: E501
 #!/usr/bin/env python
 import unittest
-from tinygrad.ops import UOps
+from test.helpers import assert_equiv_st
+from tinygrad.dtype import PtrDType, dtypes
+from tinygrad.ops import BinaryOps, UOp, UOps, graph_rewrite
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.schedule import create_schedule, reduceop_fusor
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.helpers import prod
 from test.unit.test_shapetracker import shapetracker_getitem
@@ -58,6 +61,23 @@ class TestConvShapetracker(unittest.TestCase):
       print(va)
     with self.assertRaises(AssertionError):
       assert len(st.views) <= 2
+
+  def test_swizzle_conv(self):
+    swizzle_st = ShapeTracker(views=(View(shape=(2, 3, 3, 65, 3, 65), strides=(103788, 34596, 3, 558, 1, 9), offset=0, mask=((0, 2), (0, 3), (0, 3), (0, 62), (0, 3), (0, 62)), contiguous=False), View(shape=(2, 3, 256, 256), strides=(114075, 38025, 195, 1), offset=0, mask=((0, 2), (0, 3), (0, 195), (0, 195)), contiguous=False), View(shape=(1, 2, 1, 3, 4, 64, 4, 64), strides=(0, 196608, 0, 65536, 16384, 256, 64, 1), offset=0, mask=None, contiguous=True)))
+    first_ld = ShapeTracker(views=(View(shape=(2, 1, 3, 16, 62, 62, 3, 3), strides=(0, 0, 9, 27, 0, 0, 3, 1), offset=0, mask=None, contiguous=False),))
+    second_ld = ShapeTracker(views=(View(shape=(2, 1, 3, 16, 62, 62, 3, 3), strides=(61504, 0, 0, 3844, 62, 1, 0, 0), offset=0, mask=None, contiguous=False),))
+    sink = UOp(UOps.SWIZZLE, dtypes.float, arg=swizzle_st, src=(
+      UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (3,)), src=(
+        UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+          UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+            UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()), UOp(UOps.SHAPETRACKER, None, arg=first_ld, src=()),)),
+          UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+            UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()), UOp(UOps.SHAPETRACKER, None, arg=second_ld, src=()),)),)),)),))
+    sink = graph_rewrite(sink, reduceop_fusor)
+    first_ld, second_ld = [x.src[1].arg for x in sink.parents if x.op is UOps.LOAD]
+    assert_equiv_st(first_ld, ShapeTracker(views=(View(shape=(2, 3, 3, 65, 3, 65, 16), strides=(0, 9, 3, 0, 1, 0, 27), offset=0, mask=((0, 2), (0, 3), (0, 3), (0, 62), (0, 3), (0, 62), (0, 16)), contiguous=False), View(shape=(2, 3, 256, 256, 16), strides=(1825200, 608400, 3120, 16, 1), offset=0, mask=((0, 2), (0, 3), (0, 195), (0, 195), (0, 16)), contiguous=False), View(shape=(1, 2, 1, 3, 4, 64, 4, 64, 16), strides=(0, 3145728, 0, 1048576, 262144, 4096, 1024, 16, 1), offset=0, mask=None, contiguous=True))))
+    with self.assertRaises(AssertionError):
+      assert_equiv_st(second_ld, ShapeTracker(views=(View(shape=(2, 3, 3, 65, 3, 65, 16), strides=(61504, 0, 0, 62, 0, 1, 3844), offset=0, mask=((0, 2), (0, 3), (0, 3), (0, 62), (0, 3), (0, 62), (0, 16)), contiguous=False), View(shape=(2, 3, 256, 256, 16), strides=(1825200, 608400, 3120, 16, 1), offset=0, mask=((0, 2), (0, 3), (0, 195), (0, 195), (0, 16)), contiguous=False), View(shape=(1, 2, 1, 3, 4, 64, 4, 64, 16), strides=(0, 3145728, 0, 1048576, 262144, 4096, 1024, 16, 1), offset=0, mask=None, contiguous=True))))
 
 if __name__ == '__main__':
   unittest.main()

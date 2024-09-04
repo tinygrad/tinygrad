@@ -62,6 +62,13 @@ def assert_equiv_uops(u1:UOp, u2:UOp) -> None:
     print_diff(u1, u2)
     raise AssertionError("uops aren't equal.")
 
+def assert_equiv_st(st1:ShapeTracker, st2:ShapeTracker) -> None:
+  if st1 != st2:
+    vv0 = "\n".join(map(lambda x:str(x), st1.views))
+    vv1 = "\n".join(map(lambda x:str(x), st2.views))
+    print_diff(vv0, vv1)
+    raise AssertionError("sts aren't the same.")
+
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]) -> UOp:
   return UOp(UOps.CONST, dtype, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),),
              dtypes.as_const(val, dtype))
