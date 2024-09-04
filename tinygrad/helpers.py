@@ -74,7 +74,7 @@ def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> O
   except ValueError: return None
   return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
 
-def get_bounds(devices:Tuple[str, ...], axis_shape:Tuple[int, ...], axis:Optional[int], splits:Optional[Tuple[int, ...]], pads:bool=False):
+def get_bounds(devices:Tuple[str, ...], axis_shape:Tuple[sint, ...], axis:Optional[int], splits:Optional[Tuple[int, ...]], pads:bool=False):
   if axis is not None:
     if splits is None:
       sz = round_up(axis_shape[axis], len(devices)) // len(devices)
