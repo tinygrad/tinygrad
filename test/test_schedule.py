@@ -1739,8 +1739,14 @@ class TestScheduleRewrite(unittest.TestCase):
     expected_out = (a.numpy() + a.numpy().sum()).sum()
     np.testing.assert_equal(b.numpy(), expected_out)
 
-  def test_schedule_dedup(self):
-    a = Tensor.randn(32, 32)
+  def test_simple_dedup(self):
+    a = Tensor.randn(32, 32).realize()
+    b = Tensor.randn(32, 32).realize()
+    with Context(LAZYCACHE=0, AST_REWRITE=1):
+      c = a+b
+      d = a+b
+      s = Tensor.schedule(c, d)
+      self.assertEqual(len(s), 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
