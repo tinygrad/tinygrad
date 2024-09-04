@@ -7,7 +7,7 @@ from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
                              GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
+from tinygrad.dtype import ConstType, DType, ImageDType, PtrDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
@@ -195,9 +195,34 @@ def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   if (root_st:=get_output_st(root, uop_sts)) is not None and rshape == root_st.shape: return None
   return st_fixup(root, lambda st:st.reshape(rshape), uop_sts, {})
 
+def split_reduceop(root:UOp) -> Optional[UOp]:
+  uop_sts: Dict[UOp, ShapeTracker] = {}
+  input_st = unwrap(get_output_st(root.src[0], uop_sts))
+  new_shape = input_st.reduce(axis:=root.arg[1])
+  if not all_int(input_st.shape) or (0 in input_st.shape) or prod(input_st.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
+    return None
+  self_real_strides = input_st.real_strides(ignore_valid=True)
+  split_candidates = [(i, x) for i in axis for x in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(new_shape)),8-1,-1)
+                      if input_st.shape[i] % x == 0 and self_real_strides[i] != 0]
+  if not split_candidates: return None
+  dim_to_split, divisor = split_candidates[0]
+  splitted_shape = input_st.shape[:dim_to_split] + (divisor,) + (input_st.shape[dim_to_split]//divisor,) + input_st.shape[dim_to_split+1:]
+  def fix_st(st:ShapeTracker):
+    return st.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))
+  splitted = st_fixup(root.src[0], fix_st, uop_sts, {})
+  if DEBUG >= 3: print(f"split {divisor}: {input_st.shape} -> {splitted_shape} -> {new_shape}")
+  first_reduce = UOp(UOps.REDUCE_AXIS, dtype:=cast(DType, root.dtype), (splitted,), (root.arg[0], axis))
+  global_store = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 0), \
+      unwrap(get_output_st(first_reduce, uop_sts)).to_uop()), first_reduce)
+  global_load = UOp(UOps.LOAD, dtype, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 1), \
+      unwrap(get_output_st(first_reduce, uop_sts)).to_uop()), global_store)
+  second_reduce = UOp(UOps.REDUCE_AXIS, dtype, (global_load,), (root.arg[0], (len(new_shape),)))
+  return UOp(UOps.SWIZZLE, None, (second_reduce,), unwrap(get_output_st(second_reduce, uop_sts)).reshape(new_shape))
+
 reduceop_fusor = PatternMatcher([
   (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_through_reduce),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
+  (UPat(UOps.REDUCE_AXIS, name="root"), split_reduceop),
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_reduceop_shape),
 ])
 
