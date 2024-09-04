@@ -415,18 +415,10 @@ def create_gate(root:UOp) -> Optional[UOp]:
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
     if u.op is UOps.BARRIER: return u
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
-      # NOTE: gate's bool could be nested within an IF or EXPAND, and we only want to get the bool
+      # NOTE: gate could already be wrapped in an IF, so only take IF's src[0] in that case. Will join IFs in delete_redundant_gates
       return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate if gate.op is not UOps.IF else gate.src[0], u.src[-1])),), u.arg)
-    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op in {UOps.ALU, UOps.CAST}:
-      # TODO: use the whole u.src[2] instead of just the beginning?
-      abc = list([gate]) + list(u.src[2].src)
-      if_src = (gate, u.src[2]) if u.src[2].op is not UOps.EXPAND else tuple(abc)
-      return UOp(
-              u.op,
-              u.dtype,
-              # u.src[:-1] + (UOp(UOps.IF, None, (gate, u.src[2] if u.src[2].op is not UOps.EXPAND else u.src[2].src[0])),),
-              u.src[:-1] + (UOp(UOps.IF, None, if_src),),
-              u.arg)
+    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op not in {UOps.IF, UOps.EXPAND}:
+      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate,)),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
@@ -459,6 +451,11 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
     return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
   return None
 
+def update_gates(root:UOp) -> Optional[UOp]:
+  if len(root.src) == 4 and len(root.src[3].src) < 2:
+    return UOp(UOps.STORE, root.dtype, root.src[:3] + (UOp(UOps.IF, None, (root.src[3].src[0], root.src[2])),), root.arg)
+  return None
+
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
   # no ALU on vectorized dtypes
@@ -467,6 +464,7 @@ reducer = PatternMatcher([
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
+  (NOp(UOps.STORE, name="root"), update_gates),
 ])
 
 no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.pyint, name="x"),

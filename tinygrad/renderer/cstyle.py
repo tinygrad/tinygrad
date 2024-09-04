@@ -167,6 +167,7 @@ class CStyleLanguage(Renderer):
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
           else: val = self.render_vectorize([r[x] for x in src], dtype)
+          # if child_count[u] - len([x.op is UOps.IF and len(x.src) > 1 and u in x.src[1:] for x in u.parents]) <= 1: r[u] = val
           if child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
