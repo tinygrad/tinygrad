@@ -11,7 +11,7 @@ if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # p
 
 def _qreg_exec(reg, __val=0, **kwargs):
   for k, v in kwargs.items():
-    __val |= (getattr(adreno, reg[4:] + "_" + k.upper())) if isinstance(v, bool) else (v << getattr(adreno, reg[4:] + "_" + k.upper() + "__SHIFT"))
+    __val |= (getattr(adreno, f'{reg[4:]}_{k.upper()}') if v else 0) if type(v) is bool else (v << getattr(adreno, f'{reg[4:]}_{k.upper()}__SHIFT'))
   return __val
 qreg: Any = type("QREG", (object,), {name[4:].lower(): functools.partial(_qreg_exec, name) for name in adreno.__dict__.keys() if name[:4] == 'REG_'})
 
