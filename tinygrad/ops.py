@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence
+from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence, TypeVar
 import sys, time, math, operator, ctypes, struct, functools, hashlib, itertools
 from collections import defaultdict
 from enum import Enum, auto
@@ -30,9 +30,10 @@ class MetaOps(Enum):
   EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
+T = TypeVar("T")
 class MathTrait:
   # required to implement
-  def alu(self, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src): raise NotImplementedError
+  def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
   def const_like(self, b:ConstType|Variable): raise NotImplementedError
   def is_bool(self): raise NotImplementedError
 
@@ -59,6 +60,7 @@ class MathTrait:
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
+  def threefry(self, seed): return self.alu(BinaryOps.THREEFRY, seed)
   def recip(self): return self.alu(UnaryOps.RECIP)
   def sqrt(self): return self.alu(UnaryOps.SQRT)
   def sin(self): return self.alu(UnaryOps.SIN)
