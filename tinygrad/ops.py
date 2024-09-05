@@ -76,6 +76,17 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # uops that aren't rendered
+  ST_CONST = auto();
+  """
+  Defines a single scalar constant value with a SHAPETRACKER.
+
+  - **`dtype`**: The scalar DType of the value.
+
+  - **`src`**:
+    `Tuple[UOp]`, a single UOps.SHAPETRACKER.
+
+  - **`arg`**: The value.
+  """
   SINK = auto()
   """
   Holds `UOps.STORE`. SINK defines the AST for a Kernel.
@@ -169,9 +180,7 @@ class UOps(Enum):
   - **`dtype`**: The scalar DType of the value.
 
   - **`src`**:
-    The scheduler creates a CONST with a single SHAPETRACKER UOp src: `Tuple[UOp]`.
-
-    The Lowerer replaces the SHAPETRACKER with an empty src.
+    The Lowerer replaces the SHAPETRACKER of ST_CONST with an empty src.
     It uses the ShapeTracker valid to create a `WHERE` UOp mask with sources: `(The actual CONST UOp, CONST 0, 0.0 or False)`
 
   - **`arg`**: The value.
@@ -319,7 +328,7 @@ class UOps(Enum):
   ENDRANGE = auto()
   ENDIF = auto()
 
-BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
+BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.ST_CONST}
 
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
@@ -349,7 +358,7 @@ class UOp(MathTrait):
   @property
   def st_arg(self) -> ShapeTracker:
     assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
-    ret = self.src[0 if self.op is UOps.CONST else 1]
+    ret = self.src[0 if self.op is UOps.ST_CONST else 1]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
