@@ -285,12 +285,13 @@ class UOps(Enum):
   """
   IF = auto()
   """
-  Gates a block of STOREs to global memory. The IF block could also contain additional UOps the STORE depends on.
+  Gates a single STORE to global memory. The IF block could also contain additional UOps the STORE depends on.
 
   - **`dtype`**: `None`
-  - **`src`**: `Tuple[UOp, UOp]`,
-    - Gate UOp, can only return `dtypes.bool`
-    - The gate block starts with this UOp; All children after this are gated until the final STORE.
+  - **`src`**:
+    `Tuple[UOp, UOp]`
+      - Gate UOp, can only return `dtypes.bool`
+      - The gate block starts with this UOp; All children after this are gated until the final STORE.
   - **`arg`**: `None`
   """
   RANGE = auto()
