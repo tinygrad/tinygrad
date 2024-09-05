@@ -291,8 +291,29 @@ class UOps(Enum):
   - **`src`**:
     `Tuple[UOp, UOp]`
       - Gate UOp, can only return `dtypes.bool`
-      - The gate block starts with this UOp; All children after this are gated until the final STORE.
+      - The second UOp starts the gate block; All of its children are gated until the final STORE.
   - **`arg`**: `None`
+
+  For example, a local reduce must only run on one thread.
+
+  The STORE's IF gate:
+  ```py
+  UOp(UOps.IF, src=(
+    UOp(UOps.ALU, dtypes.bool, (...), BinaryOps.CMPNE),
+    UOp(UOps.BARRIER, None, (...))))
+  ```
+  The kernel:
+  ```c
+  barrier(CLK_LOCAL_MEM_FENCE);
+  if (lidx0!=1) {
+    int acc1 = 0;
+    for (int ridx1 = 0; ridx1 < 16; ridx1++) {
+      int val1 = temp1[ridx1];
+      acc1 = (acc1+val1);
+    }
+    data0[0] = acc1;
+  }
+  ```
   """
   RANGE = auto()
   # ops that are not graph nodes
