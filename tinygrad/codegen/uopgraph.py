@@ -78,7 +78,7 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   if len(new_src) >= 4:
     new_src[2] = UOp(UOps.VECTORIZE, cast(DType, new_src[2].dtype).vec(4), tuple(new_src[2] for _ in range(4)))
   vec_load = UOp(UOps.LOAD, cast(DType, load.dtype).vec(4), tuple(new_src))
-  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const(float('nan')))
+  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const_like(float('nan')))
 
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
@@ -110,13 +110,13 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
       something_changed = True
     else: remainder.append(u)
   if not something_changed: return None
-  return functools.reduce(operator.add, remainder)%c if remainder else x.const(0)
+  return functools.reduce(operator.add, remainder)%c if remainder else x.const_like(0)
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
 
   # simple cancel div case
-  if 0 <= x.vmin.arg and x.vmax.arg < c: return x.const(0)
+  if 0 <= x.vmin.arg and x.vmax.arg < c: return x.const_like(0)
 
   quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
   for u in _get_add_chain(x):
@@ -136,9 +136,9 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # handle the const
   if rem_const%c != rem_const:
     something_changed = True
-    quotient.append(x.const(rem_const//c))
+    quotient.append(x.const_like(rem_const//c))
     rem_const = rem_const%c
-  if rem_const != 0: remainder.append(x.const(rem_const))
+  if rem_const != 0: remainder.append(x.const_like(rem_const))
 
   # x // c -> quotient + (remainder // div) // (c // div)
   div = gcd if gcd > 1 else divisor
@@ -146,7 +146,7 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   if not something_changed: return newx//(c//div) if 1 < div < c and (newx:=div_folding(x, div)) is not None else None
   rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
+  if quo is None: return x.const_like(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
   return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
 
 # ***** transcendental *****
@@ -197,7 +197,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
 
 def index_collapse(idx,rng,buf,add,mul,ld,reduce):
   if rng not in reduce.src: return None
-  return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx, ld.const(0), idx.ge(rng.src[0]) & idx.lt(rng.src[1]))),)+
+  return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx, ld.const_like(0), idx.ge(rng.src[0]) & idx.lt(rng.src[1]))),)+
              tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
 # this is symbolic 2.0
@@ -251,23 +251,23 @@ constant_folder = PatternMatcher([
   # max folding
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # GEP/CAST const rules
-  (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const(c.arg)),
-  (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const(c.arg)),
+  (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const_like(c.arg)),
+  (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const_like(c.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
   (NOp.cvar('gate').where(NOp.var('c0'), NOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
-  (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
+  (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (NOp(UOps.REDUCE, src=(NOp.var('x'),)), lambda x: x),  # a REDUCE without ranges is a NOOP
   (NOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (NOp.var('x') * 1, lambda x: x),    # x*1 -> x
-  (NOp.var('x') // NOp.var('x'), lambda x: x.const(1)), # x//x -> 1
+  (NOp.var('x') // NOp.var('x'), lambda x: x.const_like(1)), # x//x -> 1
   (NOp.var('x') // 1, lambda x: x),   # x//1 -> x
   (NOp.var('x') // -1, lambda x: -x), # x//-1 -> -x
-  (NOp.var('x') / NOp.var('x'), lambda x: x.const(1)), # x/x -> 1
+  (NOp.var('x') / NOp.var('x'), lambda x: x.const_like(1)), # x/x -> 1
   ((NOp.var("x") * NOp.var("x2")) / NOp.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   (NOp.var('x', dtype=dtypes.bool) & NOp.cvar('c'), lambda x,c: x if c.arg else c),
   (NOp.var('x', dtype=dtypes.bool) | NOp.cvar('c'), lambda x,c: c if c.arg else x),
@@ -275,9 +275,9 @@ constant_folder = PatternMatcher([
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
-  (NOp.var('x') * 0, lambda x: x.const(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
+  (NOp.var('x') * 0, lambda x: x.const_like(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # min==max -> CONST (slow!)
-  (UPat({UOps.ALU, UOps.DEFINE_VAR}, name='x'), lambda x: x.const(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
+  (UPat({UOps.ALU, UOps.DEFINE_VAR}, name='x'), lambda x: x.const_like(x.vmin.arg) if x.vmin.arg == x.vmax.arg else None),
   # ** load/store folding **
   (NOp.store(NOp.var("buf"), NOp.var("idx"), NOp.load(NOp.var("buf"), NOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
@@ -381,7 +381,8 @@ def do_reduce(root:UOp):
   ret = root.src[0]
   if len(reduce_parented):
     assert root.dtype is not None
-    acc = UOp(UOps.DEFINE_ACC, root.dtype, (root.const(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (acc_number,))
+    acc = UOp(UOps.DEFINE_ACC, root.dtype,
+              (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (acc_number,))
     acc_number += 1
     ret = UOp(UOps.PHI, root.dtype, (acc, acc.alu(root.arg, ret)))
   # for MAX, we can just ignore the unparented
