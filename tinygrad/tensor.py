@@ -1317,7 +1317,7 @@ class Tensor:
     dim = self._resolve_dim(dim)
     return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
 
-  def roll(self, shifts:Union[int, Tuple[int]], dims:Union[int, Tuple[int]]) -> Tensor:
+  def roll(self, shifts:Union[int, Tuple[int, ...]], dims:Union[int, Tuple[int, ...]]) -> Tensor:
     """
     Roll the tensor along specified dimension(s).
     The rolling operation is circular, meaning that elements that go beyond the edge are wrapped around to the beginning of the dimension.
@@ -1329,8 +1329,8 @@ class Tensor:
     print(Tensor.rand(3, 4, 1).roll(shifts=-1, dims=0))
     ```
     """
-    dims, shifts = [dims, ] if isinstance(dims, int) else dims, [shifts, ] if isinstance(shifts, int) else shifts
-    dims = [i % len(self.shape) for i in dims]
+    dims, shifts = (dims, ) if isinstance(dims, int) else dims, (shifts, ) if isinstance(shifts, int) else shifts
+    dims = tuple(i % len(self.shape) for i in dims)
     all_dims = range(len(self.shape))
     all_shifts = [shifts[dims.index(i)] % self.shape[i] if i in dims else 0 for i in all_dims]
     rolled = self
