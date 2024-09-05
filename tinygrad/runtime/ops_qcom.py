@@ -53,7 +53,7 @@ class QCOMComputeQueue(HWComputeQueue):
 
   def _cache_flush(self, write_back=True, invalidate=False, sync=True, memsync=False):
     # TODO: 7xx support.
-    if write_back: self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_FLUSH_TS, *data64_le(QCOMDevice.dummy_addr.va_addr), 0) # dirty cache write-back.
+    if write_back: self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_FLUSH_TS, *data64_le(QCOMDevice.dummy_addr), 0) # dirty cache write-back.
     if invalidate: self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
     if memsync: self.cmd(adreno.CP_WAIT_MEM_WRITES)
     if sync: self.cmd(adreno.CP_WAIT_FOR_IDLE)
@@ -332,7 +332,7 @@ class QCOMDevice(HCQCompiled):
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
-    QCOMDevice.dummy_addr = self._gpu_alloc(0x1000, map_to_cpu=False)
+    QCOMDevice.dummy_addr = self._gpu_alloc(0x1000, map_to_cpu=False).va_addr
 
     super().__init__(device, QCOMAllocator(self), QCOMRenderer(), QCOMCompiler(device), functools.partial(QCOMProgram, self),
                      QCOMSignal, QCOMComputeQueue, None, timeline_signals=(QCOMSignal(), QCOMSignal()))
