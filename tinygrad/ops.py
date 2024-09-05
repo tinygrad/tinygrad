@@ -337,10 +337,10 @@ class UOp(MathTrait):
     return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
-  @staticmethod
-  def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return type(src[0])(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
-  @staticmethod
-  def store(*src:UOp, **kwargs): return type((src:=(*src, *kwargs.values()))[0])(UOps.STORE, None, src)
+  @classmethod
+  def load(cls, *src:UOp, dtype:Optional[DType]=None, **kwargs): return cls(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
+  @classmethod
+  def store(cls, *src:UOp, **kwargs): return cls(UOps.STORE, None, src)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
