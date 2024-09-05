@@ -1,7 +1,8 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct, math
 from collections import defaultdict
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp
+from tinygrad.rewrite import PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer, TensorCore
 
@@ -211,9 +212,9 @@ class PTXRenderer(Renderer):
           r[u] = "%" + args[0]
           kernel = [f".reg .u32 %{args[0]};"] + kernel
         elif uop is UOps.DEFINE_VAR:
-          bufs.append((args.expr, dtype))
-          r[u] = f"%{args.expr}"
-          kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
+          bufs.append((args[0], dtype))
+          r[u] = f"%{args[0]}"
+          kk(*self.render_load(args[0], ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.CONST: r[u] = const(args, dtype, mov=True)
         elif uop is UOps.GEP: r[u] = r[src[0]][u.arg]
         elif uop is UOps.LOAD:
@@ -230,7 +231,7 @@ class PTXRenderer(Renderer):
           else:
             kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[3]] if has_gate else None,
                                 alt=r[src[2]] if has_gate else None, ss=mem_type, offset=src[1].arg))
-        elif uop is UOps.PHI:
+        elif uop is UOps.ASSIGN:
           if dtype.count > 1:
             for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {r[src[0]]}, {r[src[1]]};")

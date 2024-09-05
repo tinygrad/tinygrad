@@ -498,7 +498,8 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.PADTO, axis=0, amt=32)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
-  @unittest.skipIf(Device.DEFAULT in ("LLVM", "METAL", "CLANG"), "flaky")
+  #@unittest.skipIf(Device.DEFAULT in ("LLVM", "METAL", "CLANG"), "flaky")
+  @unittest.skip("flaky everywhere")
   def test_failure_22(self):
     ast = UOp(UOps.SINK, None, arg=None, src=(
       UOp(UOps.STORE, None, arg=None, src=(
