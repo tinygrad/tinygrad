@@ -120,10 +120,10 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   def _shl_lazy(x, y): return (x.cast(acc_dtype) * _exact_pow2if(y)).cast(dtypes.uint32)
   def _shr_lazy(x, y): return (x.cast(acc_dtype) // _exact_pow2if(y)).cast(dtypes.uint32)
   # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
-  a1 = _take(i.const(0).cast(dtypes.uint32), 0)
-  a2 = _take(i.const(0).cast(dtypes.uint32), 1)
-  a3 = _take(i.const(0).cast(dtypes.uint32), 2)
-  a4 = _take(i.const(0).cast(dtypes.uint32), 3)
+  a1 = _take(UOp.const(dtypes.uint32, 0), 0)
+  a2 = _take(UOp.const(dtypes.uint32, 0), 1)
+  a3 = _take(UOp.const(dtypes.uint32, 0), 2)
+  a4 = _take(UOp.const(dtypes.uint32, 0), 3)
   # Note: e >= 1 for all numbers d >= 1.0. assume e != 0
   hi = _shl_lazy(a1, e) | _shr_lazy(a2, offset)
   mi = _shl_lazy(a2, e) | _shr_lazy(a3, offset)
@@ -139,7 +139,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   r = (p.cast(dtype_via) * (3.4061215800865545e-19)).cast(input_dtype)
 
   # if fraction >= 0.5, r -= pi/2, q += 1
-  return f.lt(0.5).where(r, r + r.const(-math.pi / 2)), f.lt(0.5).where(q, q + 1)
+  return f.lt(0.5).where(r, r + (-math.pi / 2)), f.lt(0.5).where(q, q + 1)
 
 def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
   """
