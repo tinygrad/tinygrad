@@ -1307,7 +1307,7 @@ class TestSchedule(unittest.TestCase):
       run_schedule(s)
     np.testing.assert_equal(r.numpy(), big.numpy().sum())
 
-  def test_lower_multiple_si(self):
+  def test_lower_multi_si_simple(self):
     a = Tensor.full((4, 4), 1.).realize()
     b = Tensor.full((4, 4), 0.)
     data0, data1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), i) for i in range(2)]
@@ -1316,8 +1316,30 @@ class TestSchedule(unittest.TestCase):
     v2 = UOp(UOps.LOAD, dtypes.float, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), st1))+4
     st2 = UOp(UOps.STORE, None, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), v2))
     sink = UOp(UOps.SINK, None, (st2,))
-    si = create_schedule_item(sink, [a.lazydata], [b.lazydata])
-    print(si)
+    ls = create_schedule_item(sink, a.lazydata.lbs, b.lazydata.lbs)
+    self.assertEqual(len(ls), 2)
+    sched = [ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs)) for lsi in ls]
+    run_schedule(sched)
+    np.testing.assert_allclose(b.numpy(), a.numpy()+2+4)
+
+  def test_lower_multi_si_multi_output(self):
+    inputs = [Tensor.full((4, 4), float(i)) for i in range(2)]
+    outputs = [Tensor.full((4, 4), 0.) for _ in range(2)]
+    data0, data1, data2, data3 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), i) for i in range(4)]
+    v1_1 = UOp(UOps.LOAD, dtypes.float, (data2, ShapeTracker.from_shape((4, 4)).to_uop(),))+1
+    v1_2 = UOp(UOps.LOAD, dtypes.float, (data3, ShapeTracker.from_shape((4, 4)).to_uop(),))+1
+    st1_1 = UOp(UOps.STORE, None, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), v1_1))
+    st1_2 = UOp(UOps.STORE, None, (data1, ShapeTracker.from_shape((4, 4)).to_uop(), v1_2))
+    val = UOp(UOps.LOAD, dtypes.float, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), st1_1)) + \
+          UOp(UOps.LOAD, dtypes.float, (data1, ShapeTracker.from_shape((4, 4)).to_uop(), st1_2))
+    st2 = UOp(UOps.STORE, None, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), val))
+    sink = UOp(UOps.SINK, None, (st2,))
+    ls = create_schedule_item(sink, flatten(x.lazydata.lbs for x in inputs), flatten(x.lazydata.lbs for x in outputs))
+    self.assertEqual(len(ls), 2)
+    sched = [ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs)) for lsi in ls]
+    run_schedule(sched)
+    np.testing.assert_allclose(outputs[0].numpy(), inputs[2].numpy()+1+inputs[3].numpy()+1)
+    np.testing.assert_allclose(outputs[1].numpy(), inputs[3].numpy()+1)
 
 class TestConvBW(unittest.TestCase):
   def check_schedule(self, xt, cnt:int, flops=None) -> List[ScheduleItem]:
