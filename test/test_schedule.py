@@ -14,9 +14,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
 from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup
+from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup, ScheduleItem
 from tinygrad.engine.realize import CompiledRunner, run_schedule
-from test.helpers import is_dtype_supported, Context, timeit
+from test.helpers import assert_equiv_uops, is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
 
@@ -1299,7 +1299,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
 class TestConvBW(unittest.TestCase):
-  def check_schedule(self, xt, cnt:int, flops=None):
+  def check_schedule(self, xt, cnt:int, flops=None) -> List[ScheduleItem]:
     with Context(FUSE_CONV_BW=getenv("FUSE_CONV_BW", 1), NOOPT=flops is not None):
       s = create_schedule(flatten([r.lazydata.lbs for r in xt]))
       kernels = [si for si in s if si.ast.op is UOps.SINK]
@@ -1308,6 +1308,7 @@ class TestConvBW(unittest.TestCase):
       run_schedule(s)
       if flops is not None: assert GlobalCounters.global_ops <= flops, f"too many ops {GlobalCounters.global_ops}"
       if FUSE_CONV_BW: self.assertEqual(len(kernels), cnt)
+      return kernels
 
   def test_fold_conv_relu_backward(self):
     c1 = nn.Conv2d(3,16,3, bias=False)
@@ -1342,7 +1343,7 @@ class TestConvBW(unittest.TestCase):
     img = Tensor(img_np, requires_grad=True)
     c1(img).relu().mean().backward()
     assert img.grad is not None and c1.weight.grad is not None
-    with Context(AST_REWRITE=1): self.check_schedule([img.grad, c1.weight.grad], 3)
+    with Context(AST_REWRITE=1): compare_ast = self.check_schedule([img.grad, c1.weight.grad], 3)[1].ast
     rw_flops = GlobalCounters.global_ops
     # ref
     GlobalCounters.reset()
@@ -1351,7 +1352,7 @@ class TestConvBW(unittest.TestCase):
     img_ref = Tensor(img_np, requires_grad=True)
     c1_ref(img_ref).relu().mean().backward()
     assert img_ref.grad is not None and c1_ref.weight.grad is not None
-    with Context(AST_REWRITE=0): self.check_schedule([img_ref.grad, c1_ref.weight.grad], 3)
+    with Context(AST_REWRITE=0): ref_ast = self.check_schedule([img_ref.grad, c1_ref.weight.grad], 3)[1].ast
     ref_flops = GlobalCounters.global_ops
     # correctness
     np.testing.assert_allclose(c1.weight.grad.numpy(), c1_ref.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
@@ -1359,6 +1360,7 @@ class TestConvBW(unittest.TestCase):
     # flops, TODO: This will be fixed once SWIZZLE merges view strides.
     with self.assertRaises(AssertionError):
       self.assertEqual(rw_flops, ref_flops)
+      assert_equiv_uops(compare_ast, ref_ast)
 
   @unittest.expectedFailure
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
