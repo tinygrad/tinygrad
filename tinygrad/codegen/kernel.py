@@ -19,7 +19,7 @@ from enum import Enum, auto
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); SPLIT = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
@@ -35,7 +35,7 @@ class Opt:
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, amt={self.amt})"
   def real_axis(self, k:Kernel):
     if self.axis is None: return -1
-    if self.op is OptOps.UNROLL: return k.first_reduce+self.axis
+    if self.op in {OptOps.UNROLL, OptOps.SPLIT}: return k.first_reduce+self.axis
     if self.op in {OptOps.GROUP, OptOps.GROUPTOP}: return k.first_reduce+k.group_for_reduces+self.axis
     return self.axis
 
@@ -91,6 +91,7 @@ class Kernel:
     # parameters for optimization
     self.applied_opts: List[Opt] = []
     self.group_for_reduces: int = 0
+    self.reduce_split: bool = False
     self.upcasted: int = 0
     self.local_dims: int = 0
     self.tensor_core: Optional[TensorCore] = None
@@ -116,8 +117,8 @@ class Kernel:
     ret.sts = self.sts[:len(ret.bufs)+len(ret.reduceops)*2] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
-    ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
-      self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
+    ret.applied_opts, ret.group_for_reduces, ret.reduce_split, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
+      self.applied_opts[:], self.group_for_reduces, self.reduce_split, self.upcasted, self.local_dims, self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.bufs_for_tensor_core, ret.use_tensor_cores = \
       self.tensor_core, self.tensor_core_opts, self.bufs_for_tensor_core, self.use_tensor_cores
 
@@ -421,6 +422,11 @@ class Kernel:
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.arg[1]]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
+    elif opt.op is OptOps.SPLIT:
+      check(self.full_shape[axis] % amt == 0 and self.sts[self.full_buf_index].real_strides()[axis] != 0, "bad split candidate")
+      check(not self.vars, "can't split with symbolic shape")
+      check(axis >= self.first_reduce and axis < self.shape_len-self.upcasted and len(self.reduceops) == 1, "must be the only reduce axis to split")
+      self.reduce_split = True
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.first_upcast, "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
@@ -532,6 +538,10 @@ class Kernel:
             self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
           else:
             self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
+
+    # split reduce op into two kernels
+    if all_int(self.full_shape) and 0 not in self.full_shape and prod(self.full_shape) // prod(self.output_shape) >= getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
+      self.apply_opt(Opt(OptOps.SPLIT, 0))
 
     # no more opt if we are grouping
     if self.group_for_reduces: return self
@@ -717,6 +727,15 @@ class Kernel:
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
+
+          if self.reduce_split:
+            # insert sink into UOp to later split into separate kernel
+            global_buffer = UOp(UOps.DEFINE_GLOBAL, PtrDType(cast(DType, op.dtype)), (), 0)
+            sink = UOp(UOps.SINK, None, (UOp.store(global_buffer, st_uop, start),), KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
+            global_load = UOp(UOps.LOAD, op.dtype, (global_buffer, st_uop, sink))
+            reduce2 = UOp(UOps.REDUCE_AXIS, op.dtype, (global_load,), (op.arg[0], second_axis))
+            return reduce2
+
           local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(cast(DType, op.dtype)), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
           local_load = UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, start)))
           grouped_reduce = UOp(UOps.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
@@ -729,32 +748,44 @@ class Kernel:
       return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
     return fixup_ast(self.ast)
 
+  def split(self, ast) -> List[Kernel]:
+    parent, op = ast, ast.src[0]
+    trees = [ast]
+    while op.src:
+      if op.op is UOps.SINK:
+        parent.src = parent.src[:-1]
+        trees.insert(0, op)
+      parent = op
+      op = op.src[-1]
+    return list(Kernel(a, opts=self.opts) for a in trees)
+
   # **** this is the lowerer ****
 
-  def linearize(self) -> Kernel:
-    modified_ast = self.get_optimized_ast()
+  def linearize(self) -> List[Kernel]:
+    modified_ast = self.split(self.get_optimized_ast())
 
-    if DEBUG >= 3:
-      print(self.name)
-      if getenv("RAWAST"): print(self.ast)
-      print(modified_ast)
-      print(self.applied_opts)
-    verify_ast(modified_ast)
+    for k in modified_ast:
+      if DEBUG >= 3:
+        print(k.name)
+        if getenv("RAWAST"): print(k.ast)
+        print(k.ast)
+        print("APPLIED OPTS")
+        print(k.applied_opts)
+      verify_ast(k.ast)
 
-    self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
-    if DEBUG >= 5: print_uops(self.uops)
-    if getenv("GRAPHUOPS"):
-      from tinygrad.engine.graph import graph_uops
-      graph_uops(self.uops)
-    return self
+      k.uops = linearize_uop(full_graph_rewrite(ast_to_uop(k.ast, k.opts), k.opts))
+      if DEBUG >= 5: print_uops(k.uops)
+      if getenv("GRAPHUOPS"):
+        from tinygrad.engine.graph import graph_uops
+        graph_uops(k.uops)
+    return modified_ast
 
   def to_program(self, name_override:Optional[str]=None) -> Program:
-    self.linearize()
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
     if getenv("RUN_PROCESS_REPLAY"):
       table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{getenv('GITHUB_RUN_ATTEMPT')}"
-      diskcache_put(table_name, str(id(self)), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+      diskcache_put(table_name, id(self), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
@@ -763,7 +794,6 @@ class Kernel:
                         key=lambda x: (x.op, x.src[0].arg)))
     return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
-
 # the living definition of intermediate UOps
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:

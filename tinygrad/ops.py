@@ -257,7 +257,7 @@ BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
 
-@dataclass(frozen=True, eq=False)
+@dataclass(eq=False)
 class UOp:
   op: UOps
   dtype: Optional[DType] = None
@@ -401,7 +401,7 @@ def get_location() -> Tuple[str, int]:
 @functools.lru_cache(None)
 def lines(fn): return open(fn).readlines()
 
-@dataclass(frozen=True, repr=False)  # reuse repr from UOp
+@dataclass(repr=False)  # reuse repr from UOp
 class NOp(UOp):
   name: Optional[str] = None
   src: Tuple[NOp, ...] = tuple()

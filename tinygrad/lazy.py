@@ -183,6 +183,8 @@ class LazyBuffer:
       if op is ReduceOps.PROD: return self.const(self.base.arg ** prod(self.shape[i] for i in axis), new_shape)
       if op is ReduceOps.MAX: return self.const(self.base.arg, new_shape)
 
+    return self._reduce_op(op, axis)
+
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
       prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
