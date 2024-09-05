@@ -14,8 +14,8 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
 from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup, ScheduleItem
-from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
+from tinygrad.engine.schedule import create_schedule, create_schedule_item, get_output_st, reduceop_fusor, st_fixup, ScheduleItem
+from tinygrad.engine.realize import CompiledRunner, run_schedule
 from test.helpers import assert_equiv_uops, is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
@@ -1302,11 +1302,22 @@ class TestSchedule(unittest.TestCase):
     big = Tensor.randint(getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)).realize()
     with Context(SPLIT_REDUCEOP=0, AST_REWRITE=1):
       r = big.sum()
-      schedule_items = r.schedule()
-      self.assertEqual(len(schedule_items), 1)
-      exec_items = list(lower_schedule(schedule_items.copy()))
-      self.assertEqual(len(exec_items), 2)
+      s = r.schedule()
+      self.assertEqual(len(s), 2)
+      run_schedule(s)
     np.testing.assert_equal(r.numpy(), big.numpy().sum())
+
+  def test_lower_multiple_si(self):
+    a = Tensor.full((4, 4), 1.).realize()
+    b = Tensor.full((4, 4), 0.)
+    data0, data1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), i) for i in range(2)]
+    v1 = UOp(UOps.LOAD, dtypes.float, (data1, ShapeTracker.from_shape((4, 4)).to_uop(),))+2
+    st1 = UOp(UOps.STORE, None, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), v1))
+    v2 = UOp(UOps.LOAD, dtypes.float, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), st1))+4
+    st2 = UOp(UOps.STORE, None, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), v2))
+    sink = UOp(UOps.SINK, None, (st2,))
+    si = create_schedule_item(sink, [a.lazydata], [b.lazydata])
+    print(si)
 
 class TestConvBW(unittest.TestCase):
   def check_schedule(self, xt, cnt:int, flops=None) -> List[ScheduleItem]:
