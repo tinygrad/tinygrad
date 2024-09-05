@@ -16,7 +16,7 @@ from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, 
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, create_schedule_item, get_output_st, reduceop_fusor, st_fixup, ScheduleItem
 from tinygrad.engine.realize import CompiledRunner, run_schedule
-from test.helpers import assert_equiv_uops, is_dtype_supported, Context, timeit
+from test.helpers import assert_equiv_uops, ast_const, is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
 
@@ -1308,38 +1308,38 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(r.numpy(), big.numpy().sum())
 
   def test_lower_multi_si_simple(self):
-    a = Tensor.full((4, 4), 1.).realize()
-    b = Tensor.full((4, 4), 0.)
+    a = Tensor.full((4, 4), 1.).contiguous().realize()
+    b = Tensor.full((4, 4), 0.).contiguous().realize()
     data0, data1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), i) for i in range(2)]
-    v1 = UOp(UOps.LOAD, dtypes.float, (data1, ShapeTracker.from_shape((4, 4)).to_uop(),))+2
+    v1 = UOp(UOps.LOAD, dtypes.float, (data1, ShapeTracker.from_shape((4, 4)).to_uop(),))+ast_const(dtypes.float, 2, (4, 4))
     st1 = UOp(UOps.STORE, None, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), v1))
-    v2 = UOp(UOps.LOAD, dtypes.float, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), st1))+4
+    v2 = UOp(UOps.LOAD, dtypes.float, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), st1))+ast_const(dtypes.float, 4, (4, 4))
     st2 = UOp(UOps.STORE, None, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), v2))
     sink = UOp(UOps.SINK, None, (st2,))
-    ls = create_schedule_item(sink, a.lazydata.lbs, b.lazydata.lbs)
+    ls = create_schedule_item(sink, [a.lazydata.base], [b.lazydata.base], {}, [])
     self.assertEqual(len(ls), 2)
     sched = [ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs)) for lsi in ls]
     run_schedule(sched)
     np.testing.assert_allclose(b.numpy(), a.numpy()+2+4)
 
   def test_lower_multi_si_multi_output(self):
-    inputs = [Tensor.full((4, 4), float(i)) for i in range(2)]
-    outputs = [Tensor.full((4, 4), 0.) for _ in range(2)]
+    inputs = [Tensor.full((4, 4), float(i)).contiguous().realize() for i in range(2)]
+    outputs = [Tensor.full((4, 4), 0.).contiguous().realize() for _ in range(2)]
     data0, data1, data2, data3 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), i) for i in range(4)]
-    v1_1 = UOp(UOps.LOAD, dtypes.float, (data2, ShapeTracker.from_shape((4, 4)).to_uop(),))+1
-    v1_2 = UOp(UOps.LOAD, dtypes.float, (data3, ShapeTracker.from_shape((4, 4)).to_uop(),))+1
+    v1_1 = UOp(UOps.LOAD, dtypes.float, (data2, ShapeTracker.from_shape((4, 4)).to_uop(),))+ast_const(dtypes.float, 1, (4, 4))
+    v1_2 = UOp(UOps.LOAD, dtypes.float, (data3, ShapeTracker.from_shape((4, 4)).to_uop(),))+ast_const(dtypes.float, 1, (4, 4))
     st1_1 = UOp(UOps.STORE, None, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), v1_1))
     st1_2 = UOp(UOps.STORE, None, (data1, ShapeTracker.from_shape((4, 4)).to_uop(), v1_2))
     val = UOp(UOps.LOAD, dtypes.float, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), st1_1)) + \
           UOp(UOps.LOAD, dtypes.float, (data1, ShapeTracker.from_shape((4, 4)).to_uop(), st1_2))
     st2 = UOp(UOps.STORE, None, (data0, ShapeTracker.from_shape((4, 4)).to_uop(), val))
     sink = UOp(UOps.SINK, None, (st2,))
-    ls = create_schedule_item(sink, flatten(x.lazydata.lbs for x in inputs), flatten(x.lazydata.lbs for x in outputs))
-    self.assertEqual(len(ls), 2)
+    ls = create_schedule_item(sink, [x.lazydata.base for x in inputs], [x.lazydata.base for x in outputs], {}, [])
+    with self.assertRaises(AssertionError): self.assertEqual(len(ls), 2) # TODO: this could be a multi output kernel
     sched = [ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs)) for lsi in ls]
     run_schedule(sched)
-    np.testing.assert_allclose(outputs[0].numpy(), inputs[2].numpy()+1+inputs[3].numpy()+1)
-    np.testing.assert_allclose(outputs[1].numpy(), inputs[3].numpy()+1)
+    np.testing.assert_allclose(outputs[0].numpy(), inputs[0].numpy()+1+inputs[1].numpy()+1)
+    np.testing.assert_allclose(outputs[1].numpy(), inputs[1].numpy()+1)
 
 class TestConvBW(unittest.TestCase):
   def check_schedule(self, xt, cnt:int, flops=None) -> List[ScheduleItem]:

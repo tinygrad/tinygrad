@@ -2,6 +2,7 @@ import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
+
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
@@ -226,10 +227,18 @@ reduceop_fusor = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_reduceop_shape),
 ])
 
-def create_schedule_item(sink:UOp, inputs:List[LazyBuffer], outputs:List[LazyBuffer], \
-    var_vals:Dict[Variable, int]={}, metadata:List[Metadata]=[]) -> List[LBScheduleItem]:
-    lsi = LBScheduleItem(sink, outputs, list(inputs), var_vals, metadata)
-    return [lsi]
+sinker = PatternMatcher([(UPat(UOps.LOAD, src=(UPat(), UPat(), UPat(UOps.STORE, name="store")), name="root"),
+                          lambda root,store: UOp(root.op, root.dtype, root.src[:2]+(UOp(UOps.SINK, None, (store,)),)))])
+unsinker = PatternMatcher([(UPat(UOps.LOAD, src=(UPat(), UPat(), UPat(UOps.SINK)), name="root"), lambda root:UOp(root.op, root.dtype, root.src[:2]))])
+
+def create_schedule_item(last_sink:UOp, inputs:List[LazyBuffer], outputs:List[LazyBuffer],
+                         var_vals:Dict[Variable, int], metadata:List[Metadata]) -> List[LBScheduleItem]:
+  full_graph = graph_rewrite(last_sink, sinker)
+  ret: List[LBScheduleItem] = []
+  for u in full_graph.sparents:
+    if u.op is UOps.SINK:
+      ret.append(LBScheduleItem(graph_rewrite(u, unsinker), outputs, list(inputs), var_vals, metadata))
+  return ret
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> List[LBScheduleItem]:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
