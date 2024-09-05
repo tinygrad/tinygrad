@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Union, Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, DTypeLike, ConstType, to_dtype
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP
-from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, REDUCE_ALU, identity_element
+from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, REDUCE_ALU, identity_element, MathTrait
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
@@ -23,7 +23,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DTypeLike, op:Optional[
   return ret
 
 view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "DISK"}
-class LazyBuffer:
+class LazyBuffer(MathTrait):
   def __init__(self, device:str, st:ShapeTracker, dtype:DTypeLike,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None, metadata:Optional[Metadata]=None):
@@ -52,6 +52,10 @@ class LazyBuffer:
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} {str(self.dtype)[7:]} {self.st if self.base != self else (self.op, self.realized)}>"
+
+  def alu(self, op, *in_srcs): return self.e(op, *in_srcs)
+  def const_like(self, b): return self.const(b)
+  def is_bool(self): return self.dtype == dtypes.bool
 
   @property
   def realized(self) -> Optional[Buffer]:

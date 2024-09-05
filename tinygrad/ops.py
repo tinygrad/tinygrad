@@ -32,13 +32,13 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
 class MathTrait:
   # required to implement
-  dtype: Optional[DType]
   def alu(self, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src): raise NotImplementedError
   def const_like(self, b:ConstType|Variable): raise NotImplementedError
+  def is_bool(self): raise NotImplementedError
 
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
-  def __neg__(self): return self*(-1) if self.dtype != dtypes.bool else self.ne(True)
+  def __neg__(self): return self.ne(True) if self.is_bool() else self*(-1)
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __radd__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
@@ -316,6 +316,7 @@ class UOp(MathTrait):
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
+  def is_bool(self): return self.dtype == dtypes.bool
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
