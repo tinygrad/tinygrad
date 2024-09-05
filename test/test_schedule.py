@@ -5,6 +5,7 @@
 import unittest
 import numpy as np
 from typing import List, Optional, Union, cast
+from test.external.process_replay.helpers import print_diff
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.dtype import PtrDType
@@ -1303,10 +1304,17 @@ class TestSchedule(unittest.TestCase):
     big = Tensor.randint(getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)).realize()
     with Context(SPLIT_REDUCEOP=0, AST_REWRITE=1):
       r = big.sum()
-      s = r.schedule()
-      self.assertEqual(len(s), 2)
-      run_schedule(s)
-    np.testing.assert_equal(r.numpy(), big.numpy().sum())
+      rw_s = r.schedule()
+      self.assertEqual(len(rw_s), 2)
+      run_schedule(rw_s.copy())
+    try: np.testing.assert_equal(r.numpy(), big.numpy().sum())
+    except AssertionError as e:
+      r = big.sum()
+      default = r.schedule()
+      for ref,compare in zip(rw_s, default):
+        print_diff(ref.ast, compare.ast)
+        print_diff(Kernel(ref.ast).to_program().src, Kernel(compare.ast).to_program().src)
+      raise e
 
   def test_lower_multi_si_simple(self):
     a = Tensor.full((4, 4), 1.).contiguous().realize()

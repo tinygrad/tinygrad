@@ -215,9 +215,9 @@ def split_reduceop(root:UOp) -> Optional[UOp]:
   if DEBUG >= 3: print(f"split {divisor}: {input_st.shape} -> {splitted_shape} -> {new_shape}")
   first_reduce = UOp(UOps.REDUCE_AXIS, dtype:=cast(DType, root.dtype), (splitted,), (root.arg[0], axis))
   global_store = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 0), \
-      unwrap(get_output_st(first_reduce, uop_sts)).to_uop()), first_reduce)
+      unwrap(get_output_st(first_reduce, uop_sts)).to_uop(), first_reduce))
   global_load = UOp(UOps.LOAD, dtype, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 0), \
-      unwrap(get_output_st(first_reduce, uop_sts)).to_uop()), global_store)
+      unwrap(get_output_st(first_reduce, uop_sts)).to_uop(), global_store))
   second_reduce = UOp(UOps.REDUCE_AXIS, dtype, (global_load,), (root.arg[0], (len(new_shape),)))
   return UOp(UOps.SWIZZLE, None, (second_reduce,), unwrap(get_output_st(second_reduce, uop_sts)).reshape(new_shape))
 
@@ -509,7 +509,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, lsi.var_vals])
-    for out in lsi.outputs: del out.srcs  # can only schedule once
+    for out in lsi.outputs:
+      # TODO: how do i deal w this? maybe don't del here, it's fine if an LB is used twice anyway, maybe Buffer it early?
+      with contextlib.suppress(AttributeError): del out.srcs  # can only schedule once
     schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
     if logops and si.ast.op is UOps.SINK and not any(i.device.startswith("DISK:") for i in si.inputs):
       logops.write(str(si.ast).replace("\n", "").replace(" ", "")+"\n")
