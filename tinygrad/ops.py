@@ -338,9 +338,9 @@ class UOp(MathTrait):
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
   @classmethod
-  def load(cls, *src:UOp, dtype:Optional[DType]=None, **kwargs): return cls(UOps.LOAD, dtype, src+tuple(kwargs.values()))
+  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
   @classmethod
-  def store(cls, *src:UOp, **kwargs): return cls(UOps.STORE, None, src+tuple(kwargs.values()))
+  def store(cls, *src:UOp): return cls(UOps.STORE, None, src)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
