@@ -417,8 +417,6 @@ def create_gate(root:UOp) -> Optional[UOp]:
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
       # NOTE: gate could already be wrapped in an IF, so only take IF's src[0] in that case. Will join IFs in delete_redundant_gates
       return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate if gate.op is not UOps.IF else gate.src[0], u.src[-1])),), u.arg)
-    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op not in {UOps.IF, UOps.EXPAND}:
-      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate,)),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
@@ -452,8 +450,8 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   return None
 
 def update_gates(root:UOp) -> Optional[UOp]:
-  if len(root.src) < 4 or len(root.src[3].src) >= 2: return None
-  return UOp(UOps.STORE, root.dtype, root.src[:3] + (UOp(UOps.IF, None, (root.src[3].src[0], root.src[2])),), root.arg)
+  if len(root.src) < 4 or root.src[3].op is UOps.IF: return None
+  return UOp(UOps.STORE, root.dtype, root.src[:3] + (UOp(UOps.IF, None, (root.src[3], root.src[2])),), root.arg)
 
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
