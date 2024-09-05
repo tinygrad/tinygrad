@@ -346,7 +346,7 @@ def _get_output_groups(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   reduce_of_const: List[LazyBuffer] = []
   for r in allbufs:
-    if r.op not in ReduceOps or r in realizes: continue
+    if r.op not in ReduceOps: continue
 
     group: Dict[LazyBuffer, None] = {}
     _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache={})

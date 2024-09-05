@@ -1299,6 +1299,10 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
+  def test_fuse_realized_reduceop(self):
+    a = Tensor.randn(32, 32)
+    run_schedule(check_schedule([a.sum(), a.sum()+1], 1))
+
 class TestConvBW(unittest.TestCase):
   def check_schedule(self, xt, cnt:int, flops=None) -> List[ScheduleItem]:
     with Context(FUSE_CONV_BW=getenv("FUSE_CONV_BW", 1), NOOPT=flops is not None):
