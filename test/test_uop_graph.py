@@ -593,11 +593,11 @@ class TestLoadStoreFolder(unittest.TestCase):
     gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g1")
     load = [UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(UOps.SINK, None, tuple(load))
-    sink = float4_rewrite(sink)
-    assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 1
+    sink = full_graph_rewrite(sink)
+    assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 4
     one_store = [x for x in sink.sparents if x.op is UOps.STORE][0]
     assert len(one_store.src) == 4
-    assert str(one_store.src[3]) == str(UOp(UOps.IF, None, (gate,),))  # huh, why do i need str here?
+    assert_equiv_uops(one_store.src[3], UOp(UOps.IF, None, (gate, one_store.src[2]),))
 
   def test_simple_store_dont_fold(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
