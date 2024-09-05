@@ -211,24 +211,25 @@ class Shrink(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.pad(self.narg)
 
 class Gather(Function):
-  def forward(self, x:MultiLazyBuffer, arg:Tuple[Tuple[int, int], ...], w_narg:bool=True) -> MultiLazyBuffer: # assumes that the shard is always on axis 0, kinda crazy
+  def forward(self, x:MultiLazyBuffer, arg:Tuple[Tuple[int, int], ...], w_narg:bool=True) -> MultiLazyBuffer:
     n_lbs, lns, self.narg, arg = len(x.lbs), len(x.lbs[0].shape) - 1, arg if w_narg else self.narg, tuple((a, x.shape[0] - b) for a, b in arg)
     bufs = [[x.lbs[i] if i == j else None for i in range(n_lbs)] for j in range(n_lbs)]
     for step in range(n_lbs - 1):
       for i in range(n_lbs):
         s, r = (i+step)%n_lbs, (i+step+1)%n_lbs
         bufs[r][i] = bufs[s][i].copy_to_device(bufs[r][r].device, force=True)
-    return MultiLazyBuffer([functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad((arg[i],) + ((0,0),) * lns) for i,c in enumerate(lb)]) for lb in bufs], None)
+    gathered_bufs = [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad((arg[i],) + ((0,0),) * lns) for i,c in enumerate(lb)]) for lb in bufs]
+    return MultiLazyBuffer(gathered_bufs, None)
 
-  def backward(self, grad_output:MultiLazyBuffer, arg:Optional[Tuple[Tuple[int, int], ...]]) -> MultiLazyBuffer:
-    return MultiLazyBuffer([lb.shrink(tuple((0,s) if a != 0 else bound for a,s in enumerate(lb.shape))) for bound, lb in zip(arg or self.narg, grad_output.lbs)], 0)
+  def backward(self, x:MultiLazyBuffer, arg:Optional[Tuple[Tuple[int, int], ...]]) -> MultiLazyBuffer:
+    return MultiLazyBuffer([lb.shrink(tuple((0,s) if a != 0 else bnd for a,s in enumerate(lb.shape))) for bnd, lb in zip(arg or self.narg, x.lbs)], 0)
 
 class Scatter(Function):
-  def forward(self, x:MultiLazyBuffer, arg:Tuple[Tuple[int, int], ...]):
+  def forward(self, x:MultiLazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> MultiLazyBuffer:
     self.narg = arg
     return Gather.backward(self, x, arg)
 
-  def backward(self, x:MultiLazyBuffer): return Gather.forward(self, x, self.narg, w_narg=False) # this may overwrite self.narg in gather, pose a problem. is the kwarg good?
+  def backward(self, x:MultiLazyBuffer) -> MultiLazyBuffer: return Gather.forward(self, x, self.narg, w_narg=False)
 
 class Flip(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
