@@ -42,6 +42,7 @@ class MathTrait:
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __radd__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
+  def __rsub__(self, x): return self.ufix(x).alu(BinaryOps.ADD, -self)
   def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
   def __rmul__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self)
   def __floordiv__(self, x): return self.alu(BinaryOps.IDIV, self.ufix(x))
@@ -53,11 +54,16 @@ class MathTrait:
   def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
   def eq(self, x): return -self.ne(x)
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
+  def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
   def ge(self, x): return (-self).lt(-x+1)
-  def max(self, x): return self.alu(BinaryOps.MAX, x)
+  def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
   def recip(self): return self.alu(UnaryOps.RECIP)
+  def sqrt(self): return self.alu(UnaryOps.SQRT)
+  def sin(self): return self.alu(UnaryOps.SIN)
+  def log2(self): return self.alu(UnaryOps.LOG2)
+  def exp2(self): return self.alu(UnaryOps.EXP2)
 
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}

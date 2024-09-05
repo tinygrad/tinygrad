@@ -27,49 +27,46 @@ class Cast(Function):
 
 class Reciprocal(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(UnaryOps.RECIP)
+    self.ret = x.recip()
     return self.ret
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.e(BinaryOps.MUL, grad_output.const(-1)).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return -grad_output * self.ret * self.ret
 
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.SIN)
+    return x.sin()
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(BinaryOps.MUL, self.x.const(-1))).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return (math.pi/2 - self.x).sin() * grad_output
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.MAX, x.const(0))
+    self.ret = x.max(0)
     return self.ret
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.const(0).e(BinaryOps.CMPLT, self.ret).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.gt(0).cast(grad_output.dtype) * grad_output
 
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
+    return x.log2() * math.log(2)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.MUL, self.x.e(UnaryOps.RECIP))
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output / self.x
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
+    self.ret = (x * (1/math.log(2))).exp2()
     return self.ret
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret * grad_output
 
 class Sqrt(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.ret = x.e(UnaryOps.SQRT)
     return self.ret
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.e(BinaryOps.MUL, self.ret.e(BinaryOps.MUL, self.ret.const(2)).e(UnaryOps.RECIP))
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output / (self.ret*2)
 
 # NOTE: the implicit derivative of sigmoid is not stable
 # https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
