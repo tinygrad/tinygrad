@@ -1,5 +1,7 @@
-import gzip, unittest
+import gzip, re, unittest
+from io import StringIO
 from PIL import Image
+from unittest.mock import patch
 from tinygrad.helpers import Context, ContextVar
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction, get_shape
 from tinygrad.shape.symbolic import Variable, NumNode
@@ -178,6 +180,13 @@ class TestFetch(unittest.TestCase):
     no_gzip_url: str = 'https://ftp.gnu.org/gnu/gzip/gzip-1.13.zip'
     with self.assertRaises(gzip.BadGzipFile):
       fetch(no_gzip_url, gunzip=True)
+
+  @patch('sys.stderr', new_callable=StringIO)
+  def test_fetch_no_overflow(self, mock_stderr):
+    gzip_url: str = 'https://ftp.gnu.org/gnu/gzip/gzip-1.13.tar.gz'
+    fetch(gzip_url, gunzip=True, allow_caching=False)
+    tqdm_output = mock_stderr.getvalue().split("\r")[-1]
+    assert re.search(r'(\d+)(?=%)', tqdm_output).group(1) == "100"
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
