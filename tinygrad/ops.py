@@ -297,13 +297,13 @@ class UOps(Enum):
   For example, a local reduce must only run on one thread.
 
   The STORE's IF gate:
-  ```py
+  ```
   UOp(UOps.IF, src=(
     UOp(UOps.ALU, dtypes.bool, (...), BinaryOps.CMPNE),
     UOp(UOps.BARRIER, None, (...))))
   ```
   The kernel:
-  ```c
+  ```
   barrier(CLK_LOCAL_MEM_FENCE);
   if (lidx0!=1) {
     int acc1 = 0;
