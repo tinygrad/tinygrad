@@ -76,17 +76,6 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # uops that aren't rendered
-  ST_CONST = auto();
-  """
-  Defines a single scalar constant value with a SHAPETRACKER.
-
-  - **`dtype`**: The scalar DType of the value.
-
-  - **`src`**:
-    `Tuple[UOp]`, a single UOps.SHAPETRACKER.
-
-  - **`arg`**: The value.
-  """
   SINK = auto()
   """
   Holds `UOps.STORE`. SINK defines the AST for a Kernel.
@@ -114,6 +103,17 @@ class UOps(Enum):
   - **`dtype`**: `None`
   - **`src`**: `Tuple[]`
   - **`arg`**: `ShapeTracker`
+  """
+  ST_CONST = auto()
+  """
+  Defines a single scalar constant value with a SHAPETRACKER.
+
+  - **`dtype`**: The scalar DType of the value.
+
+  - **`src`**:
+    `Tuple[UOp]`, a single UOps.SHAPETRACKER.
+
+  - **`arg`**: The value.
   """
   SWIZZLE = auto()
   """

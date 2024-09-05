@@ -63,7 +63,7 @@ def assert_equiv_uops(u1:UOp, u2:UOp) -> None:
     raise AssertionError("uops aren't equal.")
 
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]) -> UOp:
-  return UOp(UOps.CONST, dtype, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),),
+  return UOp(UOps.ST_CONST, dtype, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),),
              dtypes.as_const(val, dtype))
 
 T = TypeVar("T")

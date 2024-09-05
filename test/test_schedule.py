@@ -1666,7 +1666,7 @@ class TestScheduleRewrite(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
     ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
-    r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+    r = r + UOp(UOps.ST_CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, reduceop_fusor)
     with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
@@ -1685,7 +1685,7 @@ class TestScheduleRewrite(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
     ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
-    for _ in range(24): r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+    for _ in range(24): r = r + UOp(UOps.ST_CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
     with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
@@ -1701,7 +1701,7 @@ class TestScheduleRewrite(unittest.TestCase):
       bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
       ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
       r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
-      for _ in range(sz): r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+      for _ in range(sz): r = r + UOp(UOps.ST_CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
       sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
       rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
       with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)

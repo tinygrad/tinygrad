@@ -49,7 +49,7 @@ class TestTimeLinearizer(unittest.TestCase):
       UOp(UOps.STORE, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
         UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))),
-        UOp(UOps.CONST, dtypes.float, arg=0.0, src=(
+        UOp(UOps.ST_CONST, dtypes.float, arg=0.0, src=(
           UOp(UOps.SHAPETRACKER, arg=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),))),)),)),))
     lin = Kernel(ast)
     bufs = bufs_from_lin(lin)
@@ -131,7 +131,7 @@ class TestBEAM(unittest.TestCase):
               UOp(UOps.LOAD, dtypes.float, arg=None, src=(
                 UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=6, src=()),
                 UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-320640, mask=((320640, 384768),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
-            UOp(UOps.CONST, dtypes.float, arg=1.4285714285714286, src=(
+            UOp(UOps.ST_CONST, dtypes.float, arg=1.4285714285714286, src=(
               UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 501, 256), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)) # noqa: E501
     lin = Kernel(ast)
 

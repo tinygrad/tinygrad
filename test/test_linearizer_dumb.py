@@ -30,9 +30,9 @@ class TestLinearizerDumb(unittest.TestCase):
                     UOp(UOps.LOAD, dtypes.half, arg=None, src=(
                       UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
                       UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 512, 3, 3), strides=(0, 0, 4608, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),
-            UOp(UOps.CONST, dtypes.half, arg=0.9999950000374996, src=(
+            UOp(UOps.ST_CONST, dtypes.half, arg=0.9999950000374996, src=(
               UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-          UOp(UOps.CONST, dtypes.half, arg=0.0, src=(
+          UOp(UOps.ST_CONST, dtypes.half, arg=0.0, src=(
             UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.TC, axis=2, amt=2), Opt(op=OptOps.UPCAST, axis=2, amt=0), Opt(op=OptOps.UNROLL, axis=1, amt=0)]
     k = Kernel(ast, opts=Device["METAL"].renderer)
@@ -62,13 +62,13 @@ class TestLinearizerDumb(unittest.TestCase):
                 UOp(UOps.LOAD, dtypes.float, arg=None, src=(
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
                   UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-              UOp(UOps.CONST, dtypes.bool, arg=True, src=(
+              UOp(UOps.ST_CONST, dtypes.bool, arg=True, src=(
                 UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
           UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
             UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (1,)), src=(
-              UOp(UOps.CONST, dtypes.int, arg=-1, src=(
+              UOp(UOps.ST_CONST, dtypes.int, arg=-1, src=(
                 UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1001, 1999), strides=(0, 0), offset=0, mask=((0, 1001), (999, 1999)), contiguous=False), View(shape=(1000, 1000), strides=(1, 2000), offset=0, mask=None, contiguous=False))), src=()),)),)),
-            UOp(UOps.CONST, dtypes.int, arg=1000, src=(
+            UOp(UOps.ST_CONST, dtypes.int, arg=1000, src=(
               UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
@@ -113,14 +113,14 @@ class TestLinearizerDumb(unittest.TestCase):
                     UOp(UOps.ALU, dtypes.bool, arg=BinaryOps.CMPNE, src=(
                       UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
                         UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (2,)), src=(
-                          UOp(UOps.CONST, dtypes.int, arg=1, src=(
+                          UOp(UOps.ST_CONST, dtypes.int, arg=1, src=(
                             UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32001, 63999), strides=(0, 0), offset=0, mask=((0, 32001), (31999, 63999)), contiguous=False), View(shape=(4096, 32000, 32000), strides=(0, 1, 64000), offset=0, mask=None, contiguous=False))), src=()),)),)),
-                        UOp(UOps.CONST, dtypes.int, arg=-1, src=(
+                        UOp(UOps.ST_CONST, dtypes.int, arg=-1, src=(
                           UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4096, 32000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
                       UOp(UOps.LOAD, dtypes.int, arg=None, src=(
                         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
                         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4096, 32000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-                    UOp(UOps.CONST, dtypes.bool, arg=True, src=(
+                    UOp(UOps.ST_CONST, dtypes.bool, arg=True, src=(
                       UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4096, 32000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
                 UOp(UOps.LOAD, dtypes.half, arg=None, src=(
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
@@ -148,7 +148,7 @@ class TestLinearizerDumb(unittest.TestCase):
                     UOp(UOps.LOAD, dtypes.int, arg=None, src=(
                       UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=2, src=()),
                       UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                UOp(UOps.CONST, dtypes.bool, arg=True, src=(
+                UOp(UOps.ST_CONST, dtypes.bool, arg=True, src=(
                   UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
             UOp(UOps.LOAD, dtypes.float, arg=None, src=(
               UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=3, src=()),
@@ -175,11 +175,11 @@ class TestLinearizerDumb(unittest.TestCase):
                 UOp(UOps.LOAD, dtypes.long, arg=None, src=(
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.long), arg=1, src=()),
                   UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True),)), src=()),)),
-                UOp(UOps.CONST, dtypes.long, arg=-1, src=(
+                UOp(UOps.ST_CONST, dtypes.long, arg=-1, src=(
                   UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 6), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-              UOp(UOps.CONST, dtypes.bool, arg=True, src=(
+              UOp(UOps.ST_CONST, dtypes.bool, arg=True, src=(
                 UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 6), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-            UOp(UOps.CONST, dtypes.float, arg=0.0, src=(
+            UOp(UOps.ST_CONST, dtypes.float, arg=0.0, src=(
               UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(3, 6), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
             UOp(UOps.LOAD, dtypes.float, arg=None, src=(
               UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
