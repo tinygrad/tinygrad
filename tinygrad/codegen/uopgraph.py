@@ -452,9 +452,8 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   return None
 
 def update_gates(root:UOp) -> Optional[UOp]:
-  if len(root.src) == 4 and len(root.src[3].src) < 2:
-    return UOp(UOps.STORE, root.dtype, root.src[:3] + (UOp(UOps.IF, None, (root.src[3].src[0], root.src[2])),), root.arg)
-  return None
+  if len(root.src) < 4 or len(root.src[3].src) >= 2: return None
+  return UOp(UOps.STORE, root.dtype, root.src[:3] + (UOp(UOps.IF, None, (root.src[3].src[0], root.src[2])),), root.arg)
 
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),

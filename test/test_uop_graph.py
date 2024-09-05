@@ -627,7 +627,7 @@ class TestIFUOps(unittest.TestCase):
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
-    self.assert_equiv_uops(if_uops[0].src[0], gate)
+    assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
 
@@ -645,7 +645,7 @@ class TestIFUOps(unittest.TestCase):
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
-    self.assert_equiv_uops(if_uops[0].src[0], gate)
+    assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
 
@@ -660,7 +660,7 @@ class TestIFUOps(unittest.TestCase):
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 4)
-    self.assert_equiv_uops(if_uops[0].src[0], gate)
+    assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 4)
 
