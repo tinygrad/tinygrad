@@ -11,7 +11,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA, Metadata, TRACEMETA, get_bounds
 from tinygrad.lazy import LazyBuffer
-from tinygrad.multi import MultiLazyBuffer, all_gather, to_sharded
+from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import MetaOps, truncate
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
@@ -3362,9 +3362,9 @@ def FSDP(devices:Tuple[str, ...]):
       for x in get_parameters(self): x.shard_(devices, 0)
     @functools.wraps(original_forward)
     def new_forward(self, *args, **kwargs):
-      for x in get_parameters(self): x.lazydata = MultiLazyBuffer(all_gather(x.lazydata.lbs, get_bounds(devices, x.shape, 0, None, pads=True)), None)
+      for x in get_parameters(self): x.lazydata = F.Gather.apply(x, arg=get_bounds(devices, x.shape, 0, None)).lazydata
       result = original_forward(self, *args, **kwargs)
-      for x in get_parameters(self): x.lazydata = MultiLazyBuffer(to_sharded(x.lazydata.lbs, 0, get_bounds(devices, x.shape, 0, None)), 0)
+      for x in get_parameters(self): x.lazydata = F.Scatter.apply(x, arg=get_bounds(devices, x.shape, 0, None)).lazydata
       return result
     cls.__init__, cls.__call__ = new_init, new_forward
     return cls

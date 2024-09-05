@@ -74,14 +74,14 @@ def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> O
   except ValueError: return None
   return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
 
-def get_bounds(devices:Tuple[str, ...], axis_shape:Tuple[sint, ...], axis:Optional[int], splits:Optional[Tuple[int, ...]], pads:bool=False):
+def get_bounds(devices:Tuple[str, ...], axis_shape:Tuple[sint, ...], axis:Optional[int], splits:Optional[Tuple[int, ...]]):
   if axis is not None:
     if splits is None:
       sz = round_up(axis_shape[axis], len(devices)) // len(devices)
       splits = tuple([max(0, min(sz, axis_shape[axis] - sz*i)) for i in range(len(devices))])
     assert sum(splits) == axis_shape[axis], "specified splits do not sum up to axis shape"
     boundaries = tuple(itertools.accumulate(splits))
-    return tuple(zip((0,) + boundaries, boundaries)) if not pads else tuple(zip((0,) + boundaries, [axis_shape[axis] - b for b in boundaries]))
+    return tuple(zip((0,) + boundaries, boundaries))
 
 @functools.lru_cache(maxsize=None)
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
