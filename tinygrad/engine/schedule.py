@@ -18,7 +18,6 @@ sys.setrecursionlimit(10000)
 
 # optionally log the ops to disk
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
-# use graph rewrite for reduceop fusion
 
 # *** ScheduleItem return type ***
 
@@ -82,18 +81,20 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
 
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
-    swizzle_arg = st if not st.contiguous and AST_REWRITE else None
-    rinfo: Optional[Tuple[ShapeTracker, Tuple[int, ...]]] = (ShapeTracker.from_shape(buf.srcs[0].shape), buf.arg) \
-        if AST_REWRITE else reduce_info.get((buf, st))
-    rsrc = _recursive_uop(buf.srcs[0], st:=(rinfo[0] if rinfo else st), outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
     alu_op = REDUCE_ALU[cast(ReduceOps, buf.op)]
-    # if we are merging the reduce, skip it
-    if rinfo is None:
-      assert rsrc.op is UOps.REDUCE_AXIS and rsrc.arg[0] is alu_op, f"can't merge reduceop {buf.op} with {rsrc}\n{st}"
-      return rsrc
-    ret = UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (alu_op, rinfo[1]))
-    if swizzle_arg is not None: ret = UOp(UOps.SWIZZLE, dtype, (ret,), swizzle_arg)
-    return cache.setdefault((buf, st), ret)
+    if not AST_REWRITE:
+      rinfo = reduce_info.get((buf, st))
+      rsrc = _recursive_uop(buf.srcs[0], st:=(rinfo[0] if rinfo else st), outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
+      # if we are merging the reduce, skip it
+      if rinfo is None:
+        assert rsrc.op is UOps.REDUCE_AXIS and rsrc.arg[0] is alu_op, f"can't merge reduceop {buf.op} with {rsrc}\n{st}"
+        return rsrc
+      return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (alu_op, rinfo[1])))
+    # this is the new reduceop swizzler with graph_rewrite
+    input_st = ShapeTracker.from_shape(buf.srcs[0].shape)
+    rsrc = _recursive_uop(buf.srcs[0], input_st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
+    ret = UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (alu_op, buf.arg))
+    return cache.setdefault((buf, st), ret if st.contiguous else UOp(UOps.SWIZZLE, dtype, (ret,), st))
 
   # elementwise ops pass shapetracker
   in_uops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache) for x in buf.srcs)

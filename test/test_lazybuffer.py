@@ -62,12 +62,12 @@ class TestLazyBuffer(unittest.TestCase):
 
   def test_const_dtype(self):
     lb: LazyBuffer = Tensor([1], dtype=dtypes.int).lazydata
-    assert lb.const(1).base.arg == 1
-    assert type(lb.const(1).base.arg) is int
+    assert lb.const_like(1).base.arg == 1
+    assert type(lb.const_like(1).base.arg) is int
 
     lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
-    assert lb.const(1).base.arg == 1.0
-    assert type(lb.const(1).base.arg) is float
+    assert lb.const_like(1).base.arg == 1.0
+    assert type(lb.const_like(1).base.arg) is float
 
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
