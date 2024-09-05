@@ -313,6 +313,10 @@ class QCOMAllocator(HCQAllocator):
     self.device.synchronize()
     ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
+  def as_buffer(self, src:HCQBuffer) -> memoryview:
+    self.device.synchronize()
+    return to_mv(src.va_addr, src.size)
+
   def _free(self, opaque, options:BufferOptions):
     self.device.synchronize()
     self.device._gpu_free(opaque)
