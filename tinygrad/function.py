@@ -30,7 +30,7 @@ class Reciprocal(Function):
     self.ret = x.e(UnaryOps.RECIP)
     return self.ret
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.e(BinaryOps.MUL, grad_output.const_like(-1)).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
+    return grad_output.e(BinaryOps.MUL, grad_output.const(-1)).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
@@ -38,28 +38,27 @@ class Sin(Function):
     return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const_like(math.pi / 2).e(BinaryOps.ADD,
-                                            self.x.e(BinaryOps.MUL, self.x.const_like(-1))).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(BinaryOps.MUL, self.x.const(-1))).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.MAX, x.const_like(0))
+    self.ret = x.e(BinaryOps.MAX, x.const(0))
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.const_like(0).e(BinaryOps.CMPLT, self.ret).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
+    return self.ret.const(0).e(BinaryOps.CMPLT, self.ret).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
 
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const_like(math.log(2)))
+    return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.MUL, self.x.e(UnaryOps.RECIP))
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.MUL, x.const_like(1/math.log(2))).e(UnaryOps.EXP2)
+    self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
@@ -70,26 +69,25 @@ class Sqrt(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.e(BinaryOps.MUL, self.ret.e(BinaryOps.MUL, self.ret.const_like(2)).e(UnaryOps.RECIP))
+    return grad_output.e(BinaryOps.MUL, self.ret.e(BinaryOps.MUL, self.ret.const(2)).e(UnaryOps.RECIP))
 
 # NOTE: the implicit derivative of sigmoid is not stable
 # https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.const_like(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const_like(-1/math.log(2))).e(UnaryOps.EXP2)).e(UnaryOps.RECIP)
+    self.ret = x.const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(-1/math.log(2))).e(UnaryOps.EXP2)).e(UnaryOps.RECIP)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.e(BinaryOps.MUL, self.ret.const_like(1).e(BinaryOps.ADD,
-                                                              self.ret.e(BinaryOps.MUL, self.ret.const_like(-1)))).e(BinaryOps.MUL, grad_output)
+    return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.ADD, self.ret.e(BinaryOps.MUL, self.ret.const(-1)))).e(BinaryOps.MUL, grad_output)
 
 class Sign(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    return x.e(BinaryOps.CMPNE, x.const_like(0)).e(
-      TernaryOps.WHERE, x.e(BinaryOps.CMPLT, x.const_like(0)).e(TernaryOps.WHERE, x.const_like(-1), x.const_like(1)), x.const_like(0))
+    return x.e(BinaryOps.CMPNE, x.const(0)).e(
+      TernaryOps.WHERE, x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1)), x.const(0))
   # backward always return 0 to match torch
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.const_like(0)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.const(0)
 
 # ************* binary ops *************
 
@@ -141,8 +139,8 @@ class Where(Function):
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[None, Optional[LazyBuffer], Optional[LazyBuffer]]:
     return None, \
-      self.x.e(TernaryOps.WHERE, grad_output, grad_output.const_like(0)) if self.needs_input_grad[1] else None, \
-      self.x.e(TernaryOps.WHERE, grad_output.const_like(0), grad_output) if self.needs_input_grad[2] else None
+      self.x.e(TernaryOps.WHERE, grad_output, grad_output.const(0)) if self.needs_input_grad[1] else None, \
+      self.x.e(TernaryOps.WHERE, grad_output.const(0), grad_output) if self.needs_input_grad[2] else None
 
 # ************* reduce ops *************
 
@@ -168,8 +166,7 @@ class Max(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = self.x.e(BinaryOps.CMPNE, self.ret.expand(self.x.shape)).e(BinaryOps.CMPNE,
-                                                                           self.x.const_like(1).cast(dtypes.bool)).cast(grad_output.dtype)
+    max_is_1s = self.x.e(BinaryOps.CMPNE, self.ret.expand(self.x.shape)).e(BinaryOps.CMPNE, self.x.const(1).cast(dtypes.bool)).cast(grad_output.dtype)
     div = max_is_1s.r(ReduceOps.SUM, self.axis).expand(self.x.shape)
     return max_is_1s.e(BinaryOps.MUL, div.e(UnaryOps.RECIP)).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
 

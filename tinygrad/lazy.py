@@ -71,7 +71,7 @@ class LazyBuffer:
     assert isinstance(src, tuple)
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
-  def const_like(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
+  def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     assert isinstance(val, get_args(ConstType)), f"{val=} has {type(val)=}, not a ConstType"
     shape = self.shape if shape is None else shape
     return LazyBuffer.metaop(MetaOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
@@ -150,15 +150,15 @@ class LazyBuffer:
 
     # const folding
     if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
-      return self.cast(out_dtype).const_like(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
+      return self.cast(out_dtype).const(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
     if op in BinaryOps:
       x, y = self, in_srcs[0]
       if op is BinaryOps.ADD:
         if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
         if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
       if op is BinaryOps.MUL:
-        if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0): return y if val == 1 else y.const_like(0)
-        if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0): return x if val == 1 else x.const_like(0)
+        if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0): return y if val == 1 else y.const(0)
+        if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0): return x if val == 1 else x.const(0)
       if op is BinaryOps.IDIV and y.is_unrealized_unmasked_const() and y.base.arg == 1: return x
 
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
@@ -174,14 +174,14 @@ class LazyBuffer:
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = self.st.reduce(axis)
     # TODO: this logic should move to the scheduler
-    if 0 in self.shape and 0 not in new_shape: return self.const_like(identity_element(REDUCE_ALU[op], self.dtype), new_shape)
+    if 0 in self.shape and 0 not in new_shape: return self.const(identity_element(REDUCE_ALU[op], self.dtype), new_shape)
 
     # const folding
     # TODO: fold this for symbolic?
     if self.is_unrealized_unmasked_const() and all_int(self.shape):
-      if op is ReduceOps.SUM: return self.const_like(self.base.arg * prod(self.shape[i] for i in axis), new_shape)
-      if op is ReduceOps.PROD: return self.const_like(self.base.arg ** prod(self.shape[i] for i in axis), new_shape)
-      if op is ReduceOps.MAX: return self.const_like(self.base.arg, new_shape)
+      if op is ReduceOps.SUM: return self.const(self.base.arg * prod(self.shape[i] for i in axis), new_shape)
+      if op is ReduceOps.PROD: return self.const(self.base.arg ** prod(self.shape[i] for i in axis), new_shape)
+      if op is ReduceOps.MAX: return self.const(self.base.arg, new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
@@ -207,7 +207,7 @@ class LazyBuffer:
 
   def _view(self, new_st:ShapeTracker) -> LazyBuffer:
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
-      return self.const_like(0, new_st.shape)
+      return self.const(0, new_st.shape)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
