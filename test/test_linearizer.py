@@ -1462,28 +1462,28 @@ class TestFloat4(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim_amx(self):
-    def kernel_for_shape(shape, shifts):
-      a = Tensor.rand(shape).realize()
-      b = Tensor.rand(shape).realize()
+    def kernel_for_shape(size, shift):
+      a = Tensor.rand(2, size).realize()
+      b = Tensor.rand(2, size).realize()
       c = a + b
 
       s = create_schedule([c.lazydata])[0]
       k = Kernel(s.ast)
-      k.shift_to(0, shifts[0])
-      k.shift_to(0, shifts[1], insert_before=k.shape_len-1)
+      k.shift_to(0, 4)
+      k.shift_to(0, shift, insert_before=k.shape_len-1)
       k.upcast()
       k.upcast()
       k.local_dims += 1
       k.linearize()
       return k
 
-    shapes = [(2,12), (2,8), (2,16)]
-    shifts = [(4,3), (4,2), (4,4)]
+    sizes = [12, 8, 16]
+    shifts = [3, 2, 4]
     excepted_upcast_size = [4, 8, 16]
     expected_output = [(6,3), (2,1), (2,1)]
 
-    for i in range(len(shapes)):
-      assert TestFloat4.count_float4(kernel_for_shape(shapes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
+    for i in range(len(sizes)):
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
 
   @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_unaligned_load(self):
@@ -1517,23 +1517,23 @@ class TestFloat4(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load_amx(self):
-    def kernel_for_shape(size, shifts):
+    def kernel_for_shape(size, shift):
       a = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
       b = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
       c = a + b
 
       s = create_schedule([c.lazydata])[0]
       k = Kernel(s.ast)
-      k.shift_to(len(k.full_unupcasted_shape)-1, shifts[0])  # manual trigger float4 dim
+      k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
       k.upcast()
-      k.shift_to(len(k.full_unupcasted_shape)-1, shifts[1], insert_before=k.shape_len-1)
+      k.shift_to(len(k.full_unupcasted_shape)-1, shift, insert_before=k.shape_len-1)
       k.upcast()
       k.local_dims += 1
       k.linearize()
       return k
 
     sizes = [13, 9, 17]
-    shifts = [(4,3), (4,2), (4,4)]
+    shifts = [3, 2, 4]
     excepted_upcast_size = [4, 8, 16]
     expected_output = [(0,3), (0,1), (0,1)]
 
