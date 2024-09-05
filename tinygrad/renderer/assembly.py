@@ -66,7 +66,7 @@ ptx_matcher = PatternMatcher([
                                UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="alu"), UPat(UOps.CONST, name="const")]))),
     lambda root, alu, const: UOp(root.op, root.dtype,
       (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
-       const.const(root.src[0].dtype.itemsize)*const)+root.src[2:])),
+       const*root.src[0].dtype.itemsize)+root.src[2:])),
   (UPat({UOps.LOAD, UOps.STORE}, name="root", allow_any_len=True, src=(UPat({UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL}),
                                                                               UPat(UOps.CONST, name="const"))),
     lambda root, const: UOp(root.op, root.dtype,
