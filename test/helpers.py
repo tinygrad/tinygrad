@@ -1,6 +1,7 @@
-import sys, unittest, time
-from typing import Callable, Optional, Set, Tuple, TypeVar
+import sys, time
+from typing import Callable, Tuple, TypeVar
 import numpy as np
+from test.external.process_replay.helpers import print_diff
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.ops import UOp, UOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -56,22 +57,10 @@ def rand_for_dtype(dt:DType, size:int):
     return np.random.choice([True, False], size=size)
   return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
 
-class TestUOps(unittest.TestCase):
-  def assert_equiv_uops(self, uop1:UOp, uop2:UOp, cache:Optional[Set[Tuple[UOp, UOp]]]=None):
-    if cache is None: cache = set()
-    if (uop1, uop2) in cache: return
-    cache.add((uop1, uop2))
-    # NOTE: direct UOps __eq__ is comparing object reference, use this function to compare two uops
-    try:
-      self.assertIs(uop1.op, uop2.op)
-      self.assertEqual(uop1.dtype, uop2.dtype)
-      self.assertEqual(uop1.arg, uop2.arg)
-      self.assertEqual(len(uop1.src), len(uop2.src))
-      for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2, cache)
-    except AssertionError as e:
-      print(f"{uop1=}")
-      print(f"{uop2=}")
-      raise e
+def assert_equiv_uops(u1:UOp, u2:UOp) -> None:
+  if u1.key != u2.key:
+    print_diff(u1, u2)
+    raise AssertionError("uops aren't equal.")
 
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]) -> UOp:
   return UOp(UOps.CONST, dtype, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),),

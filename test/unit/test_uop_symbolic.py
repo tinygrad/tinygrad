@@ -373,6 +373,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
     self.helper_test_variable((lidx2*2+gidx0*4+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
 
+  def test_sum_mul_distribute(self):
+    gidx0 = Variable("gidx0", 0, 7)
+    lidx2 = Variable("lidx2", 0, 12)
+    lidx3 = Variable("lidx3", 0, 1)
+    self.helper_test_variable((gidx0+lidx2+lidx3)*4, 0, 80, "((gidx0*4)+(lidx2*4)+(lidx3*4))")
+
   # *** below are uop_symbolic only
 
   # NOTE: tests are not correct in symbolic
