@@ -1,13 +1,12 @@
 # create a diff of two schedule graphs
 import shutil, importlib, uuid, os, logging, contextlib
 from collections import defaultdict
-from typing import DefaultDict, Dict, List, Set, Tuple
-from test.external.process_replay.utils import print_diff
+from typing import DefaultDict, List, Set, Tuple
+from test.external.process_replay.helpers import print_diff
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
 from tinygrad.helpers import CI, DEBUG, Context, ContextVar, colored, diskcache_put, fetch, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
-from tinygrad.ops import UOp
 
 CAPTURING_PROCESS_REPLAY = ContextVar("CAPTURING_PROCESS_REPLAY", getenv("RUN_PROCESS_REPLAY"))
 
@@ -29,15 +28,18 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
       for buf in lsi.outputs:
         si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
   changed = 0
-  seen_diffs: Set[Tuple[bytes, ...]] = set()
-  for buf, si in si_for_buf.items():
-    asts: Dict[bytes, UOp] = {x.ast.key:x.ast for x in si}
+  seen_diffs: Set[bytes] = set()
+  for buf,si in si_for_buf.items():
+    si = list({x.ast.key:x for x in si}.values())
+    if len(si) == 1: continue
+    assert len(si) == 2, f"must have a ref and a compare schedule {len(si)}"
+    ref, compare = si
     # no new kernel for buf
-    if len(asts) == 1: continue
-    if (cache_key:=tuple(asts)) in seen_diffs: continue
+    if ref.ast.key == compare.ast.key: continue
+    if (cache_key:=ref.ast.key+compare.ast.key) in seen_diffs: continue
     seen_diffs.add(cache_key)
     changed += 1
-    if CAPTURING_PROCESS_REPLAY: diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), list(asts.values())))
+    if CAPTURING_PROCESS_REPLAY: diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), [ref.ast.key, compare.ast.key]))
     if not CI: print_si_diff(si[0], si[1])
   if DEBUG >= 1: print(f"*** process replay: {changed} unique kernel{'s' if changed>1 else ''} changed")
   return changed
@@ -50,7 +52,7 @@ def print_si_diff(si0:ScheduleItem, si1:ScheduleItem):
     ei0 = lower_schedule_item(si0)
     ei1 = lower_schedule_item(si1)
     assert isinstance(ei0.prg, CompiledRunner) and isinstance(ei1.prg, CompiledRunner)
-    print_diff(ei0.prg.p.src, ei1.prg.p.src)
+    if DEBUG >= 4: print_diff(ei0.prg.p.src, ei1.prg.p.src)
     # TODO: create new Buffers for process replay to test correctness
     if getenv("TIMING"):
       with Context(DEBUG=2):
