@@ -176,6 +176,7 @@ class PTXRenderer(Renderer):
       if uop is UOps.IF:
         assert src[0].dtype is not None
         kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
+        kk(f"bra ENDIF_{r[src[0]][1:]}_{uops.index(u)};")
         kk(f"IF_{r[src[0]][1:]}_{uops.index(u)}:")
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
@@ -183,7 +184,6 @@ class PTXRenderer(Renderer):
             self.code_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[src[0]], r[src[0].src[1]], dtypes.int, self.types[dtypes.int]))
         kk(*self.render_bra(f"LOOP_{r[src[0]][1:]}", pred))
       elif uop is UOps.ENDIF:
-        kk(f"bra ENDIF_{r[src[0].src[0]][1:]}_{uops.index(src[0])};")
         kk(f"ENDIF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
       elif uop is UOps.STORE:
         assert src[0].dtype is not None and src[2].dtype is not None
