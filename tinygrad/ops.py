@@ -300,9 +300,6 @@ class UOp(MathTrait):
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def __hash__(self): return id(self)
-  def commutative(self) -> bool:
-    return (self.op is UOps.ALU and \
-      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
   @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
@@ -330,20 +327,20 @@ class UOp(MathTrait):
   def sconst_like(self, b:ConstType|Variable): return type(self).const(self.dtype.scalar() if self.dtype is not None else None, b)
   @classmethod
   @functools.lru_cache(None)
-  def const(cls, dtype:Optional[DType], b:ConstType|Variable): return UOp._const(cls, dtype, b)
-  @staticmethod
-  def _const(typ, dtype:Optional[DType], b:ConstType|Variable):
+  def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(dtype, b)
+  @classmethod
+  def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return typ(UOps.DEFINE_VAR, dtype, (typ.const(dtypes.int, b.min), typ.const(dtypes.int, cast(int,b.max))), b)
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, (cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))), b)
     if dtype is not None and dtype != (sdtype := dtype.scalar()):
-      return typ(UOps.VECTORIZE, dtype, src=tuple(typ(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
-    return typ(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+      return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
+    return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
-  @staticmethod
-  def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return type(src[0])(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
-  @staticmethod
-  def store(*src:UOp, **kwargs): return type((src:=(*src, *kwargs.values()))[0])(UOps.STORE, None, src)
+  @classmethod
+  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
+  @classmethod
+  def store(cls, *src:UOp): return cls(UOps.STORE, None, src)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
@@ -427,6 +424,10 @@ class NOp(UOp):
   allow_any_len: bool = False
   location: Tuple[str, int] = field(default_factory=get_location)
 
+  def commutative(self) -> bool:
+    return (self.op is UOps.ALU and \
+      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
+
   @staticmethod
   @functools.lru_cache(None)
   def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, name=name)
@@ -437,7 +438,7 @@ class NOp(UOp):
   # this is needed so NOp has a different cache
   @classmethod
   @functools.lru_cache(None)
-  def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(cls, dtype, b)
+  def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(dtype, b)
 
   @functools.cached_property
   def upat(self:NOp) -> UPat:
