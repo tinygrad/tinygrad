@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence
+from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence, TypeVar
 import sys, time, math, operator, ctypes, struct, functools, hashlib, itertools
 from collections import defaultdict
 from enum import Enum, auto
@@ -29,6 +29,42 @@ class ReduceOps(Enum):
 class MetaOps(Enum):
   EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
+
+T = TypeVar("T")
+class MathTrait:
+  # required to implement
+  def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
+  def const_like(self, b:ConstType|Variable): raise NotImplementedError
+
+  # great functions you get!
+  def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
+  def __neg__(self): return self.ne(True) if getattr(self, 'dtype', None) == dtypes.bool else self*(-1)
+  def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
+  def __radd__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
+  def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
+  def __rsub__(self, x): return self.ufix(x).alu(BinaryOps.ADD, -self)
+  def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
+  def __rmul__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self)
+  def __floordiv__(self, x): return self.alu(BinaryOps.IDIV, self.ufix(x))
+  def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
+  def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
+  def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
+  def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
+  def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
+  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
+  def eq(self, x): return -self.ne(x)
+  def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
+  def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
+  def ge(self, x): return (-self).lt(-x+1)
+  def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
+  def min(self, x): return -(-self).max(-x)
+  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
+  def threefry(self, seed): return self.alu(BinaryOps.THREEFRY, seed)
+  def recip(self): return self.alu(UnaryOps.RECIP)
+  def sqrt(self): return self.alu(UnaryOps.SQRT)
+  def sin(self): return self.alu(UnaryOps.SIN)
+  def log2(self): return self.alu(UnaryOps.LOG2)
+  def exp2(self): return self.alu(UnaryOps.EXP2)
 
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
@@ -258,7 +294,7 @@ BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
 
 @dataclass(frozen=True, eq=False)
-class UOp:
+class UOp(MathTrait):
   op: UOps
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
@@ -287,30 +323,9 @@ class UOp:
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
-  def ufix(self, x): return self.const_like(x) if not isinstance(x, UOp) else x
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
-  def __neg__(self): return self*(-1) if self.dtype != dtypes.bool else self.ne(True)
-  def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
-  def __radd__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
-  def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
-  def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
-  def __rmul__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self)
-  def __floordiv__(self, x): return self.alu(BinaryOps.IDIV, self.ufix(x))
-  def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
-  def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
-  def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
-  def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
-  def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
-  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
-  def eq(self, x): return -self.ne(x)
-  def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
-  def ge(self, x): return (-self).lt(-x+1)
-  def max(self, x): return self.alu(BinaryOps.MAX, x)
-  def min(self, x): return -(-self).max(-x)
-  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
-  def recip(self): return self.alu(UnaryOps.RECIP)
   def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
   def sconst_like(self, b:ConstType|Variable): return type(self).const(self.dtype.scalar() if self.dtype is not None else None, b)
   @classmethod
