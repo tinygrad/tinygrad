@@ -1254,10 +1254,10 @@ class Tensor:
     print(t.pad2d((1, 1, 2, 0), value=-float("inf")).numpy())
     ```
     """
-    pads = [tuple(max(p,0) for p in pp) for pp in zip(padding[::2], padding[1::2])][::-1]
-    padded = self.pad((None,)*(self.ndim-len(padding)//2) + tuple(pads), value=value)
-    shrink = [(-min(p0,0), min(p1+s, s)) for p0,p1,s in zip(padding[::2], padding[1::2], padded.shape[::-1])][::-1]
-    return padded.shrink((None,)*(self.ndim-len(padding)//2) + tuple(shrink))
+    pads = tuple((max(p0, 0), max(p1, 0)) for p0, p1 in zip(padding[::2], padding[1::2]))[::-1]
+    padded = self.pad((None,) * (self.ndim - len(padding) // 2) + tuple(pads), value=value)
+    shrink = tuple((-min(p0, 0), min(p1 + s, s)) for p0, p1, s in zip(padding[::2], padding[1::2], padded.shape[::-1]))[::-1]
+    return padded.shrink((None,) * (self.ndim - len(padding) // 2) + shrink)
 
   @property
   def T(self) -> Tensor:
