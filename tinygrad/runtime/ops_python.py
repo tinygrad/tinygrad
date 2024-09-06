@@ -123,7 +123,7 @@ class PythonProgram:
             ul[i] = [load([inp[i][j] if dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
             ul[i] = load(inp)
-        elif uop is UOps.PHI:
+        elif uop is UOps.ASSIGN:
           for j in range(len(inp[0])): inp[0][j] = inp[1][j]
           ul[i] = inp[0]
         elif uop is UOps.GEP:

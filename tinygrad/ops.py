@@ -272,7 +272,7 @@ class UOps(Enum):
       - Gate UOp, can only return `dtypes.bool`. We rewrite this to an IF block in the end.
   - **`arg`**: `None`
   """
-  PHI = auto()
+  ASSIGN = auto()
   # control flow ops
   BARRIER = auto()
   """
@@ -321,7 +321,7 @@ class UOps(Enum):
 
 BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 
-END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
+END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
 @dataclass(frozen=True, eq=False)
 class UOp(MathTrait):
