@@ -1063,12 +1063,6 @@ class Tensor:
     v = v.cast(assign_to.dtype)._broadcast_to(_broadcast_shape(assign_to.shape, v.shape)).contiguous()
     assign_to.assign(v).realize()
 
-  # NOTE: using _slice is discouraged and things should migrate to pad and shrink
-  def _slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
-    arg_ = tuple(a if a is not None else (0, s) for s,a in zip(self.shape, arg))
-    padding = tuple((max(0, -l), max(0, r-s)) for s,(l,r) in zip(self.shape, arg_))
-    return self.pad(padding, value=value).shrink(tuple((l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)))
-
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
     Gathers values along an axis specified by `dim`.
@@ -1260,14 +1254,14 @@ class Tensor:
     print(t.pad2d((1, 1, 2, 0), value=-float("inf")).numpy())
     ```
     """
-    # TODO: real pad2d that actually follows the op description (padding_left, padding_right, padding_top, padding_bottom)
-    # or maybe we change docs?
-    # (pl, pr, pt, pb), (sl, sr, st, sb) = (p if p>0 else 0 for p in padding), (-s if s<0 else 0 for s in padding)
+    # TODO: docs suggests (padding_left, padding_right, padding_top, padding_bottom) but pad2d is currently used for all sorts
+    # of shannanigins len(padding) == 2 or 6 or idk... is this ok?
+    # (pl, pr, pt, pb), (sl, sr, st, sb) = (max(p,0) for p in padding), (max(-s, 0) for s in padding)
     # padded = self.pad((None,) * (self.ndim - 2) + ((pt, pb), (pl, pr)), value=value)
     # return padded.shrink((None,) * (self.ndim - 2) + ((st, padded.shape[-2]+sb), (sl, padded.shape[-1]+sr)))
-    pads = [tuple(p if p > 0 else 0 for p in pp) for pp in zip(padding[::2], padding[1::2])][::-1]
+    pads = [tuple(max(p,0) for p in pp) for pp in zip(padding[::2], padding[1::2])][::-1]
     padded = self.pad((None,)*(self.ndim-len(padding)//2) + tuple(pads), value=value)
-    shrink = [(-p0 if p0 < 0 else 0, p1+s if p1 < 0 else s) for p0,p1,s in zip(padding[::2], padding[1::2], padded.shape[::-1])][::-1]
+    shrink = [(max(-p0,0), min(p1+s, s)) for p0,p1,s in zip(padding[::2], padding[1::2], padded.shape[::-1])][::-1]
     return padded.shrink((None,)*(self.ndim-len(padding)//2) + tuple(shrink))
 
   @property
@@ -1812,7 +1806,6 @@ class Tensor:
     xup = xup.shrink(tuple(noop_ + flatten(((0,o), (0,k)) for o,k in zip(o_, k_))))
     return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
 
-  # TODO: should this be a Tensor method? or staticmethod?
   def _padding2d(self, padding:Union[int, Tuple[int, ...]], dims:int) -> Sequence[int]:
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
@@ -1981,7 +1974,6 @@ class Tensor:
   def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
     assert self.shape[axis] != 0
     pl_sz = self.shape[axis] - int(not _first_zero)
-    # return self.transpose(axis,-1).pad(((pl_sz,-int(_first_zero)),))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
     return self.transpose(axis,-1).pad2d((pl_sz,-int(_first_zero)))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
   def cumsum(self, axis:int=0) -> Tensor:
     """
