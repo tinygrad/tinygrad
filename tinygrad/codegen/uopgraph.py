@@ -438,7 +438,7 @@ def do_contract(con:UOp):
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   srcs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
-    lsrcs = [ex.src[_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})] for lrpk in _choices_from_args(con.arg)]
+    lsrcs = [ex.src[0].gep(_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})) for lrpk in _choices_from_args(con.arg)]
     srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(lsrcs)))
   return srcs[0] if len(srcs) == 1 else UOp(UOps.EXPAND, con.dtype, tuple(srcs), new_ex_args)
 

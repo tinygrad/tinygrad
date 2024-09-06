@@ -365,8 +365,8 @@ class UOp(MathTrait):
   def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
     if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, (cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))), b)
-    if dtype is not None and dtype != (sdtype := dtype.scalar()):
-      return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
+    #if dtype is not None and dtype != (sdtype := dtype.scalar()):
+    #  return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
     return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
@@ -470,7 +470,10 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
       if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
 
-def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+def exec_alu(op:Op, dtype:DType, operands):
+  if dtype.count > 1:
+    return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
+  return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
