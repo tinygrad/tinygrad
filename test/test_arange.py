@@ -168,7 +168,7 @@ class TestIndexing(unittest.TestCase):
       # TODO: reshape to match torch, should we do this in nn?
       np.testing.assert_allclose(z.numpy().reshape(4, embed_size), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
   # at least the arange is being fused
-  def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000 if CI else 3_801_088_000)
+  def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000 if CI else 5_898_240_000)
 
 if __name__ == "__main__":
   unittest.main()

@@ -159,7 +159,7 @@ class CapturedJit(Generic[ReturnType]):
 
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self._jit_cache, input_buffers, var_vals)
+      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals)
       self._input_replace = get_input_replace(self._jit_cache, input_buffers)
       self._graphed = True
 
