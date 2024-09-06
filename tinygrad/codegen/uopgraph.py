@@ -81,16 +81,11 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   vec_load = UOp(UOps.LOAD, cast(DType, load.dtype).vec(4), tuple(new_src))
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const_like(float('nan')))
 
-def vectorize_const(vec:UOp) -> UOp:
-  if all_same(ct:=tuple(x.arg for x in vec.src)): return UOp(UOps.CONST, vec.dtype, (), vec.src[0].arg)
-  return UOp(UOps.CONST, vec.dtype, (), ct)
-
 float4_folding = PatternMatcher([
   #(UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   #(UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   (UPat(UOps.VECTORIZE, src=UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}), name="vec"), vectorize_alu),
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), vectorize_const),
 ])
 
 # ***** mod *****
@@ -206,8 +201,13 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce):
   return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx, ld.const_like(0), idx.ge(rng.src[0]) & idx.lt(rng.src[1]))),)+
              tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
+def vectorize_const(vec:UOp) -> UOp:
+  if all_same(ct:=tuple(x.arg for x in vec.src)): return UOp(UOps.CONST, vec.dtype, (), vec.src[0].arg)
+  return UOp(UOps.CONST, vec.dtype, (), ct)
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), vectorize_const),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat(UOps.ALU, BinaryOps.ADD, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
   (UPat(UOps.ALU, BinaryOps.MUL, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
@@ -303,11 +303,11 @@ constant_folder = PatternMatcher([
    not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV else None),
   # ** div **
   # # div folding
-  (NOp.var('x') // NOp.cvar('c'), lambda x,c:
-   newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
+  #(NOp.var('x') // NOp.cvar('c'), lambda x,c:
+  # newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
   # ** mod **
   # mod folding
-  (NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  #(NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1//c0))*c0 if c1.arg%c0.arg == 0 else None),
   # ** combine terms **
