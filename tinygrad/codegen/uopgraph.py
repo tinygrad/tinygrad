@@ -258,7 +258,8 @@ constant_folder = PatternMatcher([
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin.arg >= y.vmax.arg else y if x.vmax.arg <= y.vmin.arg else None),
   # GEP/CAST const rules
   #(NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const_like(c.arg)),
-  (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const_like(c.arg[root.arg] if isinstance(c.arg, tuple) else c.arg)),
+  (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="gep"), lambda gep, c:
+   gep.const_like((tuple(c.arg[x] for x in gep.arg)) if isinstance(gep.arg, tuple) else c.arg[gep.arg]) if isinstance(c.arg, tuple) else c.arg),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const_like(c.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
@@ -382,8 +383,9 @@ def do_expand(root:UOp):
       if list(range(len(lst))) == lst:
         new_srcs.append(src.src[0])
       else:
-        vec = tuple(src.src[0].gep(l) for l in lst)
-        new_srcs.append(UOp(UOps.VECTORIZE, vec[0].dtype.vec(expand_sz), vec))
+        new_srcs.append(UOp(UOps.GEP, src.src[0].dtype.scalar().vec(expand_sz), (src.src[0],), tuple(lst)))
+        #vec = tuple(src.src[0].gep(l) for l in lst)
+        #new_srcs.append(UOp(UOps.VECTORIZE, vec[0].dtype.vec(expand_sz), vec))
     else:
       assert src.dtype.count == 1, f"this should be an expand {src.dtype}"
       if root.op in {UOps.LOAD, UOps.STORE} and i == 0:
