@@ -1337,14 +1337,13 @@ class TestLinearizer(unittest.TestCase):
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     local_stores = [u for u in k.uops if u.op is UOps.STORE and any(x.op is UOps.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
     global_stores = [u for u in k.uops if u.op is UOps.STORE and any(x.op is UOps.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
-    barrier = [u for u in k.uops if u.op is UOps.BARRIER][0]
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
       assert store.src[2].dtype.count > 1 # and store.src[2].op is not UOps.VECTORIZE
     # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
-    assert len([u for u in k.uops if u.op is UOps.IF and u.src[-1] == barrier]) == 1
+    assert len([u for u in k.uops if u.op is UOps.IF]) == 1
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")

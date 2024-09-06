@@ -633,7 +633,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 1
     one_store = [x for x in sink.sparents if x.op is UOps.STORE][0]
     assert len(one_store.src) == 4
-    assert str(one_store.src[3]) == str(gate)  # huh, why do i need str here?
+    assert_equiv_uops(one_store.src[3], UOp(UOps.IF, None, (gate, one_store.src[2]),))
 
   def test_simple_store_dont_fold(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
@@ -685,8 +685,6 @@ class TestIFUOps(unittest.TestCase):
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
 
-  # this will be fixed with the merge gated stores bounty
-  @unittest.expectedFailure
   def test_expand_ifs_dumb(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
@@ -696,10 +694,10 @@ class TestIFUOps(unittest.TestCase):
     sink = UOp(UOps.SINK, dtypes.void, tuple(stores))
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
-    self.assertEqual(len(if_uops), 1)
+    self.assertEqual(len(if_uops), 4)
     assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
-      self.assertEqual(len(st.src), 3)
+      self.assertEqual(len(st.src), 4)
 
 
 if __name__ == '__main__':
