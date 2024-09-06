@@ -280,8 +280,6 @@ class QCOMProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
 
 class QCOMAllocator(HCQAllocator):
-  def __init__(self, device:QCOMDevice): super().__init__(device)
-
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.image is not None:
       pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.base.itemsize), 1 << (pitchalign:=6))
