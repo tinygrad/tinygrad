@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, time, ctypes, functools, mmap, struct, array, decimal, math
+import os, ctypes, functools, mmap, struct, array, decimal, math
 from types import SimpleNamespace
 from typing import Tuple, List, Dict, Any, cast
 from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState, hcq_command
