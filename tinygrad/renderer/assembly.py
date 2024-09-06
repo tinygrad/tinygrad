@@ -212,9 +212,9 @@ class PTXRenderer(Renderer):
           r[u] = "%" + args[0]
           kernel = [f".reg .u32 %{args[0]};"] + kernel
         elif uop is UOps.DEFINE_VAR:
-          bufs.append((args.expr, dtype))
-          r[u] = f"%{args.expr}"
-          kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
+          bufs.append((args[0].expr, dtype))
+          r[u] = f"%{args[0].expr}"
+          kk(*self.render_load(args[0].expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.CONST: r[u] = const(args, dtype, mov=True)
         elif uop is UOps.GEP: r[u] = r[src[0]][u.arg]
         elif uop is UOps.LOAD:
