@@ -3,9 +3,9 @@ from typing import Optional, Tuple, Dict, List, Set, cast, TYPE_CHECKING, Any, D
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, DType
-from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, NOp, UOps, UPat, PatternMatcher, END_FOR_UOP, graph_rewrite, type_verify, print_uops
-from tinygrad.ops import identity_element
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, prod, CI, all_same, partition
+from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
+from tinygrad.rewrite import NOp, UPat, PatternMatcher, graph_rewrite
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, all_same, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -31,10 +31,11 @@ def fold_expanded(ex, buf):
     offsets_rootsrc[root_src][arg] = i
 
   # then rewrite everything we can
+  lengths = [4] if is_image else ([8,4,2] if buf.dtype == PtrDType(dtypes.half) and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
   used = set()
   for rootsrc, offsets in offsets_rootsrc.items():
     for o in offsets:
-      for fold_length in [4] if is_image else ([8,4,2] if buf.dtype == PtrDType(dtypes.half) and getenv("ALLOW_HALF8") else [4,2]):
+      for fold_length in lengths:
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
@@ -208,7 +209,7 @@ constant_folder = PatternMatcher([
   # VECTORIZE/GEP
   (NOp(UOps.GEP, src=(NOp(UOps.VECTORIZE, name="cast"),), name="gep"), lambda gep, cast: cast.src[gep.arg]),
   *[(NOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(NOp(UOps.GEP, dtypes.float,
-                         src=(NOp.var('x', dtype=dtypes.float.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
+    src=(NOp.var('x', dtype=dtypes.float.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in ([2, 4, 8, 16] + ([256] if AMX else []))],
   *[(NOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(NOp(UOps.GEP, dtypes.half,
                          src=(NOp.var('x', dtype=dtypes.half.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
   # tensor core with a 0 input is acc
@@ -218,7 +219,7 @@ constant_folder = PatternMatcher([
      lambda acc: acc) for i in [2, 4, 8]],
   # tensor core cleanups
   *[(NOp(UOps.REDUCE, src=(NOp(UOps.EXPAND, src=tuple(NOp(UOps.GEP, dtypes.float, src=(NOp.var('x'),), arg=i) for i in range(j)), name="expand"),)
-    ,name="reduce", allow_any_len=True), reduce_before_expand) for j in [2,4,8]],
+    ,name="reduce", allow_any_len=True), reduce_before_expand) for j in ([2,4,8] + ([16,256] if AMX else []))],
   (NOp.var("add") + NOp(UOps.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
@@ -385,7 +386,7 @@ def do_reduce(root:UOp):
     acc = UOp(UOps.DEFINE_ACC, root.dtype,
               (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (acc_number,))
     acc_number += 1
-    ret = UOp(UOps.PHI, root.dtype, (acc, acc.alu(root.arg, ret)))
+    ret = UOp(UOps.ASSIGN, root.dtype, (acc, acc.alu(root.arg, ret)))
   # for MAX, we can just ignore the unparented
   if root.arg is BinaryOps.ADD:
     for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype)
@@ -414,11 +415,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
     if u.op is UOps.BARRIER: return u
-    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
-      # NOTE: gate could already be wrapped in an IF, so only take IF's src[0] in that case. Will join IFs in delete_redundant_gates
-      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate if gate.op is not UOps.IF else gate.src[0], u.src[-1])),), u.arg)
-    if u.op is UOps.STORE and len(u.src) == 4 and u.src[-1].op not in {UOps.IF, UOps.EXPAND}:
-      return UOp(u.op, u.dtype, u.src[:-1] + (UOp(UOps.IF, None, (gate,)),), u.arg)
+    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
@@ -438,8 +435,8 @@ expander = PatternMatcher([
   # empty EXPAND is NOOP
   (NOp(UOps.EXPAND, src=(NOp.var('x'),), arg=()), lambda x: x),
   # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU
-  (NOp(UOps.EXPAND, name="ex", src=tuple(NOp.var('x').gep(i)+NOp.var('y').gep(i) for i in range(8))),
-    lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(8)), ex.arg)),
+  (NOp(UOps.EXPAND, name="ex", src=tuple(NOp.var('x').gep(i)+NOp.var('y').gep(i) for i in range(256 if AMX else 8))),
+    lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
 ])
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:
@@ -447,13 +444,8 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   def find_gate(x:UOp) -> Optional[UOp]:
     if x.op is UOps.IF: return x
     return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-  if len(root.src) == 4 and (sub_gate:=find_gate(root.src[2])) and sub_gate.src[0] is root.src[-1].src[0]:
-    return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
-  return None
-
-def update_gates(root:UOp) -> Optional[UOp]:
-  if len(root.src) < 4 or len(root.src[3].src) >= 2: return None
-  return UOp(UOps.STORE, root.dtype, root.src[:3] + (UOp(UOps.IF, None, (root.src[3].src[0], root.src[2])),), root.arg)
+  if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
+  return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
@@ -463,7 +455,6 @@ reducer = PatternMatcher([
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
-  (NOp(UOps.STORE, name="root"), update_gates),
 ])
 
 no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND}, dtype=dtypes.pyint, name="x"),
@@ -521,7 +512,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   # scope children impact the toposort and END* insertion
   scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
-  range_phi = {r:[p for p in scope_children[r] if p.op is UOps.PHI] for r in scope_children if r.op is UOps.RANGE}
+  range_phi = {r:[p for p in scope_children[r] if p.op is UOps.ASSIGN] for r in scope_children if r.op is UOps.RANGE}
 
   queue:List[Tuple[int, UOp]] = []
   def push(u:UOp):
