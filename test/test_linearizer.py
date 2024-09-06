@@ -14,7 +14,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
-from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup
+from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, PtrDType, dtypes
 
 def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer]]:
@@ -1131,6 +1131,7 @@ class TestLinearizer(unittest.TestCase):
         assert u.src[-1].src[0].op != UOps.PHI
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"}, "CLANG does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi(self):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
@@ -1142,6 +1143,7 @@ class TestLinearizer(unittest.TestCase):
         assert u.src[-1].src[0].op != UOps.PHI
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"}, "CLANG does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
     # all PHI children are outside the loop
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
@@ -1418,9 +1420,9 @@ class TestLinearizer(unittest.TestCase):
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
-  def count_float4(k):
-    return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
-            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 3 and uop.src[2].dtype == dtypes.float.vec(4)]))
+  def count_float4(k, n=4):
+    return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.float.vec(n)]),
+            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 3 and uop.src[2].dtype == dtypes.float.vec(n)]))
   @staticmethod
   def count_half4(k):
     return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.half.vec(4)]),
@@ -1440,6 +1442,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (2, 1)
 
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim(self):
     a = Tensor.rand(2, 8).realize()
     b = Tensor.rand(2, 8).realize()
@@ -1456,6 +1459,32 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (4, 2)
 
+  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
+  def test_float4_multidim_amx(self):
+    def kernel_for_shape(size, shift):
+      a = Tensor.rand(2, size).realize()
+      b = Tensor.rand(2, size).realize()
+      c = a + b
+
+      s = create_schedule([c.lazydata])[0]
+      k = Kernel(s.ast)
+      k.shift_to(0, 4)
+      k.shift_to(0, shift, insert_before=k.shape_len-1)
+      k.upcast()
+      k.upcast()
+      k.local_dims += 1
+      k.linearize()
+      return k
+
+    sizes = [12, 8, 16]
+    shifts = [3, 2, 4]
+    excepted_upcast_size = [4, 8, 16]
+    expected_output = [(6,3), (2,1), (2,1)]
+
+    for i in range(len(sizes)):
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
+
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_unaligned_load(self):
     a = Tensor.rand(9).realize().shrink(((1, 9),))
     b = Tensor.rand(9).realize().shrink(((1, 9),))
@@ -1468,6 +1497,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (0, 1)
 
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load(self):
     a = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
     b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
@@ -1483,6 +1513,31 @@ class TestFloat4(unittest.TestCase):
     k.linearize()
 
     assert TestFloat4.count_float4(k) == (0, 2)
+
+  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
+  def test_float4_multidim_unaligned_load_amx(self):
+    def kernel_for_shape(size, shift):
+      a = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
+      b = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
+      c = a + b
+
+      s = create_schedule([c.lazydata])[0]
+      k = Kernel(s.ast)
+      k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
+      k.upcast()
+      k.shift_to(len(k.full_unupcasted_shape)-1, shift, insert_before=k.shape_len-1)
+      k.upcast()
+      k.local_dims += 1
+      k.linearize()
+      return k
+
+    sizes = [13, 9, 17]
+    shifts = [3, 2, 4]
+    excepted_upcast_size = [4, 8, 16]
+    expected_output = [(0,3), (0,1), (0,1)]
+
+    for i in range(len(sizes)):
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
 
   def test_float4_sometimes_unaligned(self):
     a = Tensor.rand(1, 1, 8).realize()
@@ -1883,6 +1938,7 @@ class TestKernelOpts(unittest.TestCase):
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_invalid_tensor_core_extra_opts(self):
     N = 128
     Tensor.manual_seed(1552)
