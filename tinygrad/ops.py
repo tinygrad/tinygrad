@@ -459,10 +459,7 @@ python_alu: Dict[Op, Callable]  = {
   TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
 def truncate_fp16(x):
-  try:
-    x = float(x)
-    struct.pack("@e", x)
-    return x
+  try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
 truncate: Dict[DType, Callable] = {dtypes.bool: bool,
