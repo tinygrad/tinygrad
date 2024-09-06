@@ -386,7 +386,7 @@ def do_reduce(root:UOp):
     acc = UOp(UOps.DEFINE_ACC, root.dtype,
               (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (acc_number,))
     acc_number += 1
-    ret = UOp(UOps.PHI, root.dtype, (acc, acc.alu(root.arg, ret)))
+    ret = UOp(UOps.ASSIGN, root.dtype, (acc, acc.alu(root.arg, ret)))
   # for MAX, we can just ignore the unparented
   if root.arg is BinaryOps.ADD:
     for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype)
@@ -512,7 +512,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   # scope children impact the toposort and END* insertion
   scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
-  range_phi = {r:[p for p in scope_children[r] if p.op is UOps.PHI] for r in scope_children if r.op is UOps.RANGE}
+  range_phi = {r:[p for p in scope_children[r] if p.op is UOps.ASSIGN] for r in scope_children if r.op is UOps.RANGE}
 
   queue:List[Tuple[int, UOp]] = []
   def push(u:UOp):

@@ -90,7 +90,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       else: kk(f"{ssa(u, 'val')} = {render_cast(f'tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0)', dtype)}")
     elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
     elif uop == UOps.CONST: r[u] = define_scalar([], dtype, args)
-    elif uop == UOps.PHI:
+    elif uop == UOps.ASSIGN:
       kk(f"{r[vin[0]]} = {r[vin[1]].replace('//', '/')}")
       r[u] = r[vin[0]]
     elif uop == UOps.STORE:

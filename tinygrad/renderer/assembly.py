@@ -231,7 +231,7 @@ class PTXRenderer(Renderer):
           else:
             kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[3]] if has_gate else None,
                                 alt=r[src[2]] if has_gate else None, ss=mem_type, offset=src[1].arg))
-        elif uop is UOps.PHI:
+        elif uop is UOps.ASSIGN:
           if dtype.count > 1:
             for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {r[src[0]]}, {r[src[1]]};")

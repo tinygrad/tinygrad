@@ -156,7 +156,7 @@ class CStyleLanguage(Renderer):
           # NOTE: this relies on the load not happening if it's in the unselected branch
           if len(src) > 3 and src[3].op is UOps.ALU: val = self.code_for_op[TernaryOps.WHERE](r[src[3]], val, r[src[2]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
-        elif uop is UOps.PHI:
+        elif uop is UOps.ASSIGN:
           kk(f"{r[src[0]]} = {r[src[1]]};")
           r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}:
