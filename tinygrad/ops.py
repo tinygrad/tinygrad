@@ -333,7 +333,7 @@ class UOp(MathTrait):
   @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg[0].expr) if self.op is not UOps.ALU else \
+    return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg[0]) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   @functools.cached_property
@@ -366,7 +366,7 @@ class UOp(MathTrait):
   @classmethod
   def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
     if dtype is not None and dtype != (sdtype := dtype.scalar()):
       return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
     return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
@@ -388,7 +388,8 @@ class UOp(MathTrait):
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, set([x.arg[0] for x in self.sparents if x.op is UOps.DEFINE_VAR])), key=lambda v: v.expr)
+    return sorted(set.union(*st_vars, set([Variable(x.arg[0], x.arg[1], x.arg[2]) for x in self.sparents if x.op is UOps.DEFINE_VAR])),
+      key=lambda v: v.expr)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -476,7 +477,7 @@ def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x:
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return u.arg[0]
+  if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1].arg, u.arg[2].arg)
   if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
