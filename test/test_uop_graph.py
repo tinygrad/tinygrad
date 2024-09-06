@@ -1,7 +1,7 @@
 from typing import List
 import unittest, time
 from test.helpers import assert_equiv_uops
-from tinygrad import dtypes, Variable, Device
+from tinygrad import dtypes, Device
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, KernelInfo
@@ -131,10 +131,10 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.src[1].arg, 3.0)
 
   def test_consts_go_last(self):
-    a = UOp(UOps.DEFINE_VAR, dtypes.int, arg=(Variable('a', 0, 1), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
-    b = UOp(UOps.DEFINE_VAR, dtypes.int, arg=(Variable('b', 0, 1), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
-    c = UOp(UOps.DEFINE_VAR, dtypes.int, arg=(Variable('c', 0, 1), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
-    d = UOp(UOps.DEFINE_VAR, dtypes.int, arg=(Variable('d', 0, 1), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    a = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('a', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    b = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('b', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    c = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('c', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    d = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('d', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
     outs = [2+a, 2+a+d+3+b+c+4, UOp(UOps.ALU, a.dtype, src=(a.const_like(2), a), arg=BinaryOps.ADD), (4+d)+c+(2+a)+b]
     for out in outs:
       sink = graph_rewrite(out, constant_folder)
@@ -155,7 +155,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.arg, 3.0)
 
   def test_where_same_fold(self):
-    v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=(Variable('tmp', 0, 1), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('tmp', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
     c0 = UOp(UOps.CONST, dtypes.int, arg=0)
     vc = UOp(UOps.ALU, dtypes.bool, (v, c0), BinaryOps.CMPNE)
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
@@ -249,7 +249,7 @@ class TestUOpGraph(unittest.TestCase):
     for i in [2, 4, 8]:
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable('acc', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
       uops = to_uops_list([wmma])
       assert_equiv_uops(uops[0], acc)
@@ -258,7 +258,7 @@ class TestUOpGraph(unittest.TestCase):
     for i in [2, 4, 8]:
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i))
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable('acc', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
       assert_equiv_uops(uops[0], acc)
@@ -268,21 +268,19 @@ class TestUOpGraph(unittest.TestCase):
     for i in [4, 8]:
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp(UOps.DEFINE_VAR, dtypes.half,
-                  arg=(Variable(f'tmp{j}', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
-      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable(f'tmp{i}', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable('acc', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
       uops = to_uops_list([wmma])
       assert_equiv_uops(uops[-1], wmma)
 
     for i in [4, 8]:
-      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable(f'tmp{i}', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp(UOps.DEFINE_VAR, dtypes.half,
-                  arg=(Variable(f'tmp{j}', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable('acc', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
       assert_equiv_uops(uops[-1], wmma)
@@ -290,17 +288,17 @@ class TestUOpGraph(unittest.TestCase):
     for i in [2, 4, 8]:
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable(f'tmp{i}', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable('acc', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
       uops = to_uops_list([wmma])
       assert_equiv_uops(uops[-1], wmma)
 
     for i in [2, 4, 8]:
-      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable(f'tmp{i}', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(Variable('acc', 0.0, 1.0), UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
       assert_equiv_uops(uops[-1], wmma)
@@ -326,7 +324,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([x for x in uops if x.op is UOps.CAST]), 1)
 
   def test_depth_2_const_fold(self):
-    v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=(Variable('tmp', 0, 1), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('tmp', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
     c2 = UOp(UOps.CONST, dtypes.int, arg=2)
     c4 = UOp(UOps.CONST, dtypes.int, arg=4)
     vc = UOp(UOps.ALU, dtypes.int, (v, c2), BinaryOps.ADD)
