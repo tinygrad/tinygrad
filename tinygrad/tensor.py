@@ -3343,7 +3343,7 @@ class Tensor:
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
     # padding
-    padding = x._padding2d(padding, 2)
+    padding = self._padding2d(padding, 2)
     x = x.pad((None, (max(padding[2],0), max(padding[3],0)), (max(padding[0],0), max(padding[1],0)), None, None, None))
     x = x.shrink((None, (-min(padding[2],0), x.shape[1]+min(padding[3],0)), (-min(padding[0],0), x.shape[2]+min(padding[1],0)), None, None, None))
 
