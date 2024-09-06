@@ -1,7 +1,8 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct, math
 from collections import defaultdict
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp
+from tinygrad.rewrite import PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer, TensorCore
 
@@ -124,8 +125,8 @@ class PTXRenderer(Renderer):
     if gate: return [f"@{gate} ld{ss}.{self.mem_types[dtype]} {dest}, [{loc}+{offset}];", f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"]
     return [f"ld{ss}.{self.mem_types[dtype]} {dest}, [{loc}+{offset}];"]
 
-  def render_store(self, loc, val, dtype, ss="", offset=0) -> List[str]:
-    return [f"st{ss}.{self.mem_types[dtype]} [{loc}+{offset}], {val};"]
+  def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> List[str]:
+    return [(f"@{gate} " if gate else "") + f"st{ss}.{self.mem_types[dtype]} [{loc}+{offset}], {val};"]
 
   def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False, pred=False) -> List[str]:
     if bitcast: return [f"mov.b{self.types[dtype][1:]} {d}, {a};"]
@@ -176,24 +177,23 @@ class PTXRenderer(Renderer):
       if uop is UOps.IF:
         assert src[0].dtype is not None
         kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
-        kk(f"bra ENDIF_{r[src[0]][1:]}_{uops.index(u)};")
-        kk(f"IF_{r[src[0]][1:]}_{uops.index(u)}:")
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
         kk(self.code_for_op[BinaryOps.ADD](r[src[0]], r[src[0]], "1", dtypes.int, self.types[dtypes.int]),
             self.code_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[src[0]], r[src[0].src[1]], dtypes.int, self.types[dtypes.int]))
         kk(*self.render_bra(f"LOOP_{r[src[0]][1:]}", pred))
       elif uop is UOps.ENDIF:
-        kk(f"ENDIF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
+        kk(f"IF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
       elif uop is UOps.STORE:
         assert src[0].dtype is not None and src[2].dtype is not None
         assert src[0].dtype == dtypes.int64, "store isn't int64"
         assert src[1].op is UOps.CONST, f"store isn't const {u}"
         mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
         if src[2].dtype.count > 1:
-          kk(f"st{mem_type}.v{src[2].dtype.count}.{self.mem_types[src[2].dtype.scalar()]} [{r[src[0]]}+{src[1].arg}], {{{', '.join(r[src[2]])}}};")
+          kk((f"@{r[src[3]]} " if len(src)>3 else "") + \
+              f"st{mem_type}.v{src[2].dtype.count}.{self.mem_types[src[2].dtype.scalar()]} [{r[src[0]]}+{src[1].arg}], {{{', '.join(r[src[2]])}}};")
         else:
-          kk(*self.render_store(r[src[0]], r[src[2]], src[2].dtype, ss=mem_type, offset=src[1].arg))
+          kk(*self.render_store(r[src[0]], r[src[2]], src[2].dtype, gate=r[src[3]] if len(src)>3 else None, ss=mem_type, offset=src[1].arg))
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
@@ -231,7 +231,7 @@ class PTXRenderer(Renderer):
           else:
             kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[3]] if has_gate else None,
                                 alt=r[src[2]] if has_gate else None, ss=mem_type, offset=src[1].arg))
-        elif uop is UOps.PHI:
+        elif uop is UOps.ASSIGN:
           if dtype.count > 1:
             for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {r[src[0]]}, {r[src[1]]};")
