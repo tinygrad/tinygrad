@@ -388,7 +388,7 @@ def do_expand(root:UOp):
         #new_srcs.append(UOp(UOps.VECTORIZE, vec[0].dtype.vec(expand_sz), vec))
     else:
       assert src.dtype.count == 1, f"this should be an expand {src.dtype}"
-      if root.op in {UOps.LOAD, UOps.STORE} and i == 0:
+      if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
         new_srcs.append(src)
       else:
         new_srcs.append(UOp(UOps.VECTORIZE, src.dtype.vec(expand_sz), (src,)*expand_sz))
