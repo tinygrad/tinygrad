@@ -156,8 +156,11 @@ ResNeXt50_32X4D = lambda num_classes=1000: ResNet(50, num_classes=num_classes, g
 if __name__ == "__main__":
   model = ResNet18()
   model.load_from_pretrained()
-  model(Tensor.rand(1, 3, 224, 224)).realize()
-  from tinygrad.helpers import Context, GlobalCounters
+  from tinygrad import Context, GlobalCounters, TinyJit
+  jmodel = TinyJit(model)
+  jmodel(Tensor.rand(1, 3, 224, 224)).realize()
   GlobalCounters.reset()
-  with Context(GRAPH=1): model(Tensor.rand(1, 3, 224, 224)).realize()
+  with Context(GRAPH=1): jmodel(Tensor.rand(1, 3, 224, 224)).realize()
+  for i in range(10): jmodel(Tensor.rand(1, 3, 224, 224))
+
 
