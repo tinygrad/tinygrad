@@ -557,9 +557,10 @@ class Tensor:
     print(Tensor.eye(2, 4).numpy())
     ```
     """
-    if (b := n if m is None else m) < 0: raise ValueError(f"cannot have negative {b=}")
-    return Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n) \
-      .pad((None,(0,b if b > n else 0))).shrink((None,(0,b)))
+    if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
+    x = Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)
+    return x if m is None else x.pad((None, (0, max(0, m-n)))) if m > n else x.shrink((None, (0, m)))
+
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
@@ -3345,8 +3346,8 @@ class Tensor:
 
     # padding
     padding_ = x._padding2d(padding, 2)
-    x = x.pad(((None, (0, padding_[3]), (0, padding_[1]), None, None, None)))
-    x = x.shrink(((None, (-padding_[2], x.shape[1]), (-padding_[0], x.shape[2]), None, None, None)))
+    x = x.pad((None, (0, padding_[3]), (0, padding_[1]), None, None, None))
+    x = x.shrink((None, (-padding_[2], x.shape[1]), (-padding_[0], x.shape[2]), None, None, None))
 
     # prepare input
     x = x.permute(0,3,4,5,1,2)._pool((H, W), stride, dilation) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
