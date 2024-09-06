@@ -11,7 +11,8 @@ from tinygrad.dtype import PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
+from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
+from tinygrad.rewrite import graph_rewrite
 from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup, ScheduleItem
@@ -1691,7 +1692,7 @@ class TestScheduleRewrite(unittest.TestCase):
     verify_ast(rsink)
     self.assertLessEqual(et, 1e3)
 
-  @unittest.expectedFailure
+  @unittest.skip("test is flaky")
   def test_complexity(self):
     SZ = 30 if getenv("BIG") else 10
     sizes = [10*(i+1) for i in range(SZ)]

@@ -7,7 +7,8 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps, graph_rewrite
+from tinygrad.ops import UOp, UOps
+from tinygrad.rewrite import graph_rewrite
 from tinygrad.codegen.uopgraph import constant_folder
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
