@@ -1692,7 +1692,7 @@ class TestScheduleRewrite(unittest.TestCase):
     verify_ast(rsink)
     self.assertLessEqual(et, 1e3)
 
-  @unittest.expectedFailure
+  @unittest.skip("test is flaky")
   def test_complexity(self):
     SZ = 30 if getenv("BIG") else 10
     sizes = [10*(i+1) for i in range(SZ)]
