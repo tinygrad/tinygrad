@@ -318,8 +318,9 @@ class UOps(Enum):
   # ops that are not graph nodes
   ENDRANGE = auto()
   ENDIF = auto()
+  VALID = auto()
 
-BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
+BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.VALID}
 
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
@@ -349,7 +350,7 @@ class UOp(MathTrait):
   @property
   def st_arg(self) -> ShapeTracker:
     assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
-    ret = self.src[0 if self.op is UOps.CONST else 1]
+    ret = self.src[0 if self.op is UOps.VALID else 1]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
