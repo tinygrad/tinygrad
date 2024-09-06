@@ -1332,8 +1332,11 @@ class Tensor:
     dims, shifts = (dims,) if isinstance(dims, int) else dims, (shifts,) if isinstance(shifts, int) else shifts
     dims = tuple(i % len(self.shape) for i in dims)
     all_shifts = [shifts[dims.index(i)] % self.shape[i] if i in dims else 0 for i in range(len(self.shape))]
-    return functools.reduce(lambda t, args: t[tuple(slice(None) if j != args[0] else slice(-args[1], None) for j in range(len(t.shape)))].cat(
-        t[tuple(slice(None) if j != args[0] else slice(None, -args[1]) for j in range(len(t.shape)))], dim=args[0]), enumerate(all_shifts), self)
+    rolled = self
+    for i, shift in enumerate(all_shifts):
+      rolled = Tensor.cat(rolled[tuple(slice(None) if j != i else slice(-shift, None) for j in range(len(rolled.shape)))],
+                          rolled[tuple(slice(None) if j != i else slice(None, -shift) for j in range(len(rolled.shape)))], dim=i)
+    return rolled
 
   # ***** reduce ops *****
 
