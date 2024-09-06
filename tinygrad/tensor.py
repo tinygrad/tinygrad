@@ -557,8 +557,9 @@ class Tensor:
     print(Tensor.eye(2, 4).numpy())
     ```
     """
-    if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    return Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)._slice((None,(0,n if m is None else m)))
+    if (b := n if m is None else m) < 0: raise ValueError(f"cannot have negative {b=}")
+    return Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n) \
+      .pad((None,(0,b if b > n else 0))).shrink((None,(0,b)))
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
@@ -1259,8 +1260,15 @@ class Tensor:
     print(t.pad2d((1, 1, 2, 0), value=-float("inf")).numpy())
     ```
     """
-    slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
-    return self._slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc, value=value)
+    # TODO: real pad2d that actually follows the op description (padding_left, padding_right, padding_top, padding_bottom)
+    # or maybe we change docs?
+    # (pl, pr, pt, pb), (sl, sr, st, sb) = (p if p>0 else 0 for p in padding), (-s if s<0 else 0 for s in padding)
+    # padded = self.pad((None,) * (self.ndim - 2) + ((pt, pb), (pl, pr)), value=value)
+    # return padded.shrink((None,) * (self.ndim - 2) + ((st, padded.shape[-2]+sb), (sl, padded.shape[-1]+sr)))
+    pads = [tuple(p if p > 0 else 0 for p in pp) for pp in zip(padding[::2], padding[1::2])][::-1]
+    padded = self.pad((None,)*(self.ndim-len(padding)//2) + tuple(pads), value=value)
+    shrink = [(-p0 if p0 < 0 else 0, p1+s if p1 < 0 else s) for p0,p1,s in zip(padding[::2], padding[1::2], padded.shape[::-1])][::-1]
+    return padded.shrink((None,)*(self.ndim-len(padding)//2) + tuple(shrink))
 
   @property
   def T(self) -> Tensor:
@@ -1804,8 +1812,10 @@ class Tensor:
     xup = xup.shrink(tuple(noop_ + flatten(((0,o), (0,k)) for o,k in zip(o_, k_))))
     return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
 
+  # TODO: should this be a Tensor method? or staticmethod?
   def _padding2d(self, padding:Union[int, Tuple[int, ...]], dims:int) -> Sequence[int]:
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
+
 
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, count_include_pad=True):
@@ -1971,6 +1981,7 @@ class Tensor:
   def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
     assert self.shape[axis] != 0
     pl_sz = self.shape[axis] - int(not _first_zero)
+    # return self.transpose(axis,-1).pad(((pl_sz,-int(_first_zero)),))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
     return self.transpose(axis,-1).pad2d((pl_sz,-int(_first_zero)))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
   def cumsum(self, axis:int=0) -> Tensor:
     """
@@ -3346,8 +3357,9 @@ class Tensor:
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
     # padding
-    padding_ = [padding]*4 if isinstance(padding, int) else (padding if len(padding) == 4 else [padding[1], padding[1], padding[0], padding[0]])
-    x = x._slice((None, (-padding_[2], x.shape[1]+padding_[3]), (-padding_[0], x.shape[2]+padding_[1]), None, None, None))
+    padding_ = x._padding2d(padding, 2)
+    x = x.pad(None, (0, x.shape[1]+padding_[3]), (0, x.shape[2]+padding_[1]), None, None, None)
+    x = x.shrink(None, (-padding_[2], 0), (-padding_[0], 0), None, None, None)
 
     # prepare input
     x = x.permute(0,3,4,5,1,2)._pool((H, W), stride, dilation) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
