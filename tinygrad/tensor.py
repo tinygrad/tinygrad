@@ -561,7 +561,6 @@ class Tensor:
     x = Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)
     return x if m is None else x.pad((None, (0, max(0, m-n)))) if m > n else x.shrink((None, (0, m)))
 
-
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
     Creates a tensor with the same shape as `self`, filled with the given value.
@@ -1257,7 +1256,7 @@ class Tensor:
     """
     pads = [tuple(max(p,0) for p in pp) for pp in zip(padding[::2], padding[1::2])][::-1]
     padded = self.pad((None,)*(self.ndim-len(padding)//2) + tuple(pads), value=value)
-    shrink = [(max(-p0,0), min(p1+s, s)) for p0,p1,s in zip(padding[::2], padding[1::2], padded.shape[::-1])][::-1]
+    shrink = [(-min(p0,0), min(p1+s, s)) for p0,p1,s in zip(padding[::2], padding[1::2], padded.shape[::-1])][::-1]
     return padded.shrink((None,)*(self.ndim-len(padding)//2) + tuple(shrink))
 
   @property
@@ -1804,7 +1803,6 @@ class Tensor:
 
   def _padding2d(self, padding:Union[int, Tuple[int, ...]], dims:int) -> Sequence[int]:
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
-
 
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, count_include_pad=True):
@@ -3345,9 +3343,9 @@ class Tensor:
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
     # padding
-    padding_ = x._padding2d(padding, 2)
-    x = x.pad((None, (0, padding_[3]), (0, padding_[1]), None, None, None))
-    x = x.shrink((None, (-padding_[2], x.shape[1]), (-padding_[0], x.shape[2]), None, None, None))
+    padding = x._padding2d(padding, 2)
+    x = x.pad((None, (max(padding[2],0), max(padding[3],0)), (max(padding[0],0), max(padding[1],0)), None, None, None))
+    x = x.shrink((None, (-min(padding[2],0), x.shape[1]+min(padding[3],0)), (-min(padding[0],0), x.shape[2]+min(padding[1],0)), None, None, None))
 
     # prepare input
     x = x.permute(0,3,4,5,1,2)._pool((H, W), stride, dilation) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
