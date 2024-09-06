@@ -1254,11 +1254,6 @@ class Tensor:
     print(t.pad2d((1, 1, 2, 0), value=-float("inf")).numpy())
     ```
     """
-    # TODO: docs suggests (padding_left, padding_right, padding_top, padding_bottom) but pad2d is currently used for all sorts
-    # of shannanigins len(padding) == 2 or 6 or idk... is this ok?
-    # (pl, pr, pt, pb), (sl, sr, st, sb) = (max(p,0) for p in padding), (max(-s, 0) for s in padding)
-    # padded = self.pad((None,) * (self.ndim - 2) + ((pt, pb), (pl, pr)), value=value)
-    # return padded.shrink((None,) * (self.ndim - 2) + ((st, padded.shape[-2]+sb), (sl, padded.shape[-1]+sr)))
     pads = [tuple(max(p,0) for p in pp) for pp in zip(padding[::2], padding[1::2])][::-1]
     padded = self.pad((None,)*(self.ndim-len(padding)//2) + tuple(pads), value=value)
     shrink = [(max(-p0,0), min(p1+s, s)) for p0,p1,s in zip(padding[::2], padding[1::2], padded.shape[::-1])][::-1]
@@ -3350,8 +3345,8 @@ class Tensor:
 
     # padding
     padding_ = x._padding2d(padding, 2)
-    x = x.pad(None, (0, x.shape[1]+padding_[3]), (0, x.shape[2]+padding_[1]), None, None, None)
-    x = x.shrink(None, (-padding_[2], 0), (-padding_[0], 0), None, None, None)
+    x = x.pad(((None, (0, padding_[3]), (0, padding_[1]), None, None, None)))
+    x = x.shrink(((None, (-padding_[2], x.shape[1]), (-padding_[0], x.shape[2]), None, None, None)))
 
     # prepare input
     x = x.permute(0,3,4,5,1,2)._pool((H, W), stride, dilation) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
