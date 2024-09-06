@@ -559,7 +559,7 @@ class Tensor:
     """
     if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
     x = Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)
-    return x if m is None else x.pad((None, (0, max(0, m-n)))) if m > n else x.shrink((None, (0, m)))
+    return x if m is None else x.pad((None, (0, m-n))) if m > n else x.shrink((None, (0, m)))
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
