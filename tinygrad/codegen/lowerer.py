@@ -120,6 +120,7 @@ class IndependentLowerer:
       return UOp(UOps.EXPAND, x.dtype, tuple(UOp(UOps.GEP, x.dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axes[2])
     if x.op is UOps.REDUCE_AXIS:
       # NOTE: always using ridxs is fine here
+      print([i for i in x.arg[1]], self.ridxs)
       reduce_range, reduce_expand = partition([self.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)
       alu_op: BinaryOps = x.arg[0]
       ret = in_uops[0]

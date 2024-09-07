@@ -777,8 +777,8 @@ class Kernel:
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if uop in sts: return
   op, _, src, arg = uop.op, uop.dtype, uop.src, uop.arg
-  # NOTE: UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL, UOps.CONST don't have shape
-  if op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.CONST}: return
+  # NOTE: UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL, UOps.CONST and UOps.DEFINE_VAR don't have shape
+  if op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.CONST, UOps.DEFINE_VAR}: return
   # restore globals from the two stage reduce
   if op is UOps.LOAD and src[0].op is UOps.DEFINE_LOCAL:
     _assert_valid_uop(local_reduce:=src[2].src[2], uop.st_arg, sts)
