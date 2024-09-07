@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, time, ctypes, functools, mmap, struct, array, decimal, math
+import os, ctypes, functools, mmap, struct, array, decimal, math
 from types import SimpleNamespace
 from typing import Tuple, List, Dict, Any, cast
 from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState, hcq_command
@@ -36,11 +36,6 @@ class QCOMSignal(HCQSignal):
   def _get_value(self) -> int: return self._signal[0]
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(19.2) # based on the 19.2MHz always-on timer
   def _set_value(self, new_value:int): self._signal[0] = new_value
-  def wait(self, value:int, timeout:int=60000):
-    start_time = time.time() * 1000
-    while time.time() * 1000 - start_time < timeout:
-      if self._signal[0] >= value: return
-    raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
 class QCOMComputeQueue(HWComputeQueue):
   def __init__(self):
@@ -285,8 +280,6 @@ class QCOMProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
 
 class QCOMAllocator(HCQAllocator):
-  def __init__(self, device:QCOMDevice): super().__init__(device)
-
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.image is not None:
       pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.base.itemsize), 1 << (pitchalign:=6))
