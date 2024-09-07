@@ -27,10 +27,7 @@ def render(self) -> Tuple[str, ConstType, ConstType]:
 
 def NumNode(val): return UOp.const(dtypes.int, val)
 def Variable(expr, nmin, nmax):
-  # TODO: fix DEFINE_VAR to not need this
-  class TempVar:
-    def __init__(self, x): self.expr = x
-  return UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)), TempVar(expr))
+  return UOp(UOps.DEFINE_VAR, dtypes.int, arg=(expr, UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)))
 class Node:
   @staticmethod
   def sum(ops): return functools.reduce(lambda x,y: x+y, ops)
@@ -306,7 +303,6 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_combine_num(self):
     self.helper_test_variable(Node.sum([NumNode(29), Variable("a", 0, 10), NumNode(-23)]), 6, 16, {"(6+a)", "(a+6)"})
 
-  @unittest.expectedFailure
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
@@ -372,6 +368,12 @@ class TestSymbolic(unittest.TestCase):
     lidx3 = Variable("lidx3", 0, 1)
     self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
     self.helper_test_variable((lidx2*2+gidx0*4+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
+
+  def test_sum_mul_distribute(self):
+    gidx0 = Variable("gidx0", 0, 7)
+    lidx2 = Variable("lidx2", 0, 12)
+    lidx3 = Variable("lidx3", 0, 1)
+    self.helper_test_variable((gidx0+lidx2+lidx3)*4, 0, 80, "((gidx0*4)+(lidx2*4)+(lidx3*4))")
 
   # *** below are uop_symbolic only
 

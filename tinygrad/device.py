@@ -30,7 +30,7 @@ class _Device:
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
-    for device in ["METAL", "AMD", "NV", "CUDA", "GPU", "CLANG", "LLVM"]:
+    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
       try:
         if self[device]:
           os.environ[device] = "1"   # we set this in environment for spawned children
@@ -411,7 +411,10 @@ class HCQSignal:
       value: The value to wait for.
       timeout: Maximum time to wait in milliseconds. Defaults to 10s.
     """
-    raise NotImplementedError("wait() method must be implemented")
+    start_time = time.time() * 1000
+    while time.time() * 1000 - start_time < timeout:
+      if self.value >= value: return
+    raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 @contextlib.contextmanager
 def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
