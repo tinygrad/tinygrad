@@ -18,7 +18,7 @@ def get_location() -> Tuple[str, int]:
 @functools.lru_cache(None)
 def lines(fn) -> List[str]: return open(fn).readlines()
 
-@dataclass(frozen=True, repr=False)  # reuse repr from UOp
+@dataclass(repr=False)  # reuse repr from UOp
 class NOp(UOp):
   name: Optional[str] = None
   src: Tuple[NOp, ...] = tuple()
