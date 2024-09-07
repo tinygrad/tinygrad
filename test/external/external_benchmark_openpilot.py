@@ -4,7 +4,7 @@ import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, dtypes, TinyJit
-from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv
+from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv, trange
 from tinygrad.tensor import _from_np_dtype
 import numpy as np
 
@@ -37,15 +37,25 @@ if __name__ == "__main__":
     ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
     print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
-  # validate (only if IMAGE=2 and FLOAT16=0)
-  if IMAGE.value == 2 and getenv("FLOAT16") == 0:
-    tinygrad_out = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
-    if getenv("SAVE_OUTPUT"):
-      np.save(Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}.npy", tinygrad_out)
-    else:
-      known_good_out = np.load(Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}.npy")
+  suffix = ""
+  if IMAGE.value < 2: suffix += f"_image{IMAGE.value}" # image=2 has no suffix for compatibility
+  if getenv("FLOAT16") == 1: suffix += "_float16"
+  path = Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}{suffix}.npy"
 
-      np.testing.assert_allclose(known_good_out, tinygrad_out, atol=1e-2, rtol=1e-2)
-      print(colored("outputs validated!", "green"))
+  # validate if we have records
+  tinygrad_out = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
+  if getenv("SAVE_OUTPUT"):
+    np.save(path, tinygrad_out)
+    print(f"saved output to {path}!")
+  elif getenv("FUZZ") and path.exists():
+    known_good_out = np.load(path)
+    for _ in trange(1000):
+      ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
+      np.testing.assert_allclose(known_good_out, ret, atol=1e-2, rtol=1e-2)
+    print(colored("fuzz validated!", "green"))
+  elif path.exists():
+    known_good_out = np.load(path)
+    np.testing.assert_allclose(known_good_out, tinygrad_out, atol=1e-2, rtol=1e-2)
+    print(colored("outputs validated!", "green"))
   else:
     print(colored("skipping validation", "yellow"))

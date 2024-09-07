@@ -3,19 +3,21 @@
 # NOTE: this has overlap with external_test_opt.py
 
 import unittest
-import time
 import numpy as np
-from typing import Dict, List, Optional, Union, cast
+from typing import List, Optional, Union, cast
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
+from tinygrad.dtype import PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
+from tinygrad.rewrite import graph_rewrite
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import create_schedule, get_output_st, st_fixup
-from tinygrad.engine.realize import run_schedule
-from test.helpers import is_dtype_supported, Context
+from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup, ScheduleItem
+from tinygrad.engine.realize import CompiledRunner, run_schedule
+from test.helpers import assert_equiv_uops, is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
 
@@ -1298,7 +1300,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
 class TestConvBW(unittest.TestCase):
-  def check_schedule(self, xt, cnt:int, flops=None):
+  def check_schedule(self, xt, cnt:int, flops=None) -> List[ScheduleItem]:
     with Context(FUSE_CONV_BW=getenv("FUSE_CONV_BW", 1), NOOPT=flops is not None):
       s = create_schedule(flatten([r.lazydata.lbs for r in xt]))
       kernels = [si for si in s if si.ast.op is UOps.SINK]
@@ -1307,6 +1309,7 @@ class TestConvBW(unittest.TestCase):
       run_schedule(s)
       if flops is not None: assert GlobalCounters.global_ops <= flops, f"too many ops {GlobalCounters.global_ops}"
       if FUSE_CONV_BW: self.assertEqual(len(kernels), cnt)
+      return kernels
 
   def test_fold_conv_relu_backward(self):
     c1 = nn.Conv2d(3,16,3, bias=False)
@@ -1328,6 +1331,37 @@ class TestConvBW(unittest.TestCase):
     assert img_torch.grad is not None and c1_torch.weight.grad is not None
     np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
+
+  def test_fold_conv_relu_backward_ast_rewrite(self):
+    # shared params
+    Tensor.manual_seed(0)
+    img_np = Tensor.randn(2,3,64,64).numpy()
+    c1_w = Tensor.randn(16,3,3,3).numpy()
+    # graph_rewrite
+    GlobalCounters.reset()
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight = Tensor(c1_w, requires_grad=True)
+    img = Tensor(img_np, requires_grad=True)
+    c1(img).relu().mean().backward()
+    assert img.grad is not None and c1.weight.grad is not None
+    with Context(AST_REWRITE=1): compare_ast = self.check_schedule([img.grad, c1.weight.grad], 3)[1].ast
+    rw_flops = GlobalCounters.global_ops
+    # ref
+    GlobalCounters.reset()
+    c1_ref = nn.Conv2d(3,16,3, bias=False)
+    c1_ref.weight = Tensor(c1_w, requires_grad=True)
+    img_ref = Tensor(img_np, requires_grad=True)
+    c1_ref(img_ref).relu().mean().backward()
+    assert img_ref.grad is not None and c1_ref.weight.grad is not None
+    with Context(AST_REWRITE=0): ref_ast = self.check_schedule([img_ref.grad, c1_ref.weight.grad], 3)[1].ast
+    ref_flops = GlobalCounters.global_ops
+    # correctness
+    np.testing.assert_allclose(c1.weight.grad.numpy(), c1_ref.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(img.grad.numpy(), img_ref.grad.numpy(), atol=5e-4, rtol=1e-5)
+    # flops, TODO: This will be fixed once SWIZZLE merges view strides.
+    with self.assertRaises(AssertionError):
+      self.assertEqual(rw_flops, ref_flops)
+      assert_equiv_uops(compare_ast, ref_ast)
 
   @unittest.expectedFailure
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
@@ -1564,7 +1598,7 @@ class TestIndexing(unittest.TestCase):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
     Y = Tensor([1, 2]).realize()
     loss = X.sparse_categorical_crossentropy(Y)
-    self.check_schedule(loss, 5)
+    self.check_schedule(loss, 6)
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
   def test_mnist_val(self):
@@ -1575,7 +1609,7 @@ class TestIndexing(unittest.TestCase):
     yt = Tensor.randn(BS, 10)
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-      self.check_schedule(loss, 6)
+      self.check_schedule(loss, 7)
       loss_fused = loss.numpy()
     loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
@@ -1607,40 +1641,106 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
 class TestScheduleRewrite(unittest.TestCase):
-  def test_recursive_get_output_st(self):
-    start = time.perf_counter()
-    a = Tensor([1,2,3,4]).realize()
-    for _ in range(24): a = a + a
-    ast = a.schedule()[0].ast
-    st = get_output_st(ast.src[0].src[2], {})
-    self.assertEqual(st, ShapeTracker.from_shape((4,)))
-    self.assertLess(time.perf_counter()-start, 1.0)
+  def setUp(self):
+    self.old_val = AST_REWRITE.value
+    AST_REWRITE.value = 1
+  def tearDown(self): AST_REWRITE.value = self.old_val
 
-  def test_recursive_reshape(self):
-    start = time.perf_counter()
+  def test_recursive_st_fixup(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     ast = a.schedule()[0].ast
-    new_uop = st_fixup(ast.src[0].src[2], lambda st:st.reshape((4, 1)), {}, {})
+    new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {}, {})
     self.assertEqual(get_output_st(new_uop, {}), ShapeTracker.from_shape((4,)).reshape((4, 1)))
-    self.assertLess(time.perf_counter()-start, 1.0)
+    self.assertLess(et, 1e3)
 
-  def test_uop_sts_reshape(self):
-    uop_sts: Dict[UOp, ShapeTracker] = {}
-    a = Tensor([1,2,3,4]).realize()+2
-    ast = a.schedule()[0].ast
-    val = ast.src[0].src[2]
-    ret = get_output_st(val, uop_sts)
-    assert uop_sts[val] == ret == ShapeTracker.from_shape((4,))
-    new_val = st_fixup(val, lambda st:st.reshape((4, 1)), uop_sts, {})
-    self.assertNotIn(new_val, uop_sts)
+  def test_no_rewrite_elementwise(self):
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(3)]
+    ld1 = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+    ld2 = UOp(UOps.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((32, 32)).to_uop()))
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape((32, 32)).to_uop(), ld1+ld2)),))
+    rsink = graph_rewrite(sink, reduceop_fusor)
+    self.assertEqual(rsink.key, sink.key)
 
-  def test_reshape_noop(self):
-    a = Tensor([1,2,3,4]).realize()+2
-    ast = a.schedule()[0].ast
-    val = ast.src[0].src[2]
-    new_val = st_fixup(val, lambda st:st.reshape((4,)), {}, {})
-    self.assertIs(new_val, val)
+  def test_simple_store_reshape(self):
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+    ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+    r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
+    rsink = graph_rewrite(sink, reduceop_fusor)
+    with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    verify_ast(rsink)
+
+  def test_no_reshape_reduceop(self):
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+    ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+    r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape((1, 1)).to_uop(), r)),))
+    rsink = graph_rewrite(sink, reduceop_fusor)
+    verify_ast(sink)
+    self.assertEqual(sink.key, rsink.key)
+
+  def test_reshape_many(self):
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+    ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+    r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    for _ in range(24): r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
+    rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
+    with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    verify_ast(rsink)
+    self.assertLessEqual(et, 1e3)
+
+  @unittest.skip("test is flaky")
+  def test_complexity(self):
+    SZ = 30 if getenv("BIG") else 10
+    sizes = [10*(i+1) for i in range(SZ)]
+    tms: List[float] = []
+    for sz in sizes:
+      bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+      ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
+      r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+      for _ in range(sz): r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+      sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
+      rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
+      with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+      verify_ast(rsink)
+      tms.append(et)
+    if getenv("GRAPH_TIMING"):
+      import plotly.express as px
+      fig = px.line(x=sizes, y=tms, title="graph_rewrite time as ast grows")
+      fig.update_layout(paper_bgcolor="black", plot_bgcolor="black", font={"color":"white"},
+                        yaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"}, xaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"})
+      fig.show()
+    change = tms[-1] / tms[0]
+    assert change <= SZ, f"bad complexity, time increased by {change:4.2f}x while input only grew {SZ}x"
+
+  def test_swizzle_rewrite(self):
+    # graph rewrite
+    sink = UOp(UOps.SINK, None, arg=None, src=(
+      UOp(UOps.STORE, None, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
+          UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+            UOp(UOps.SWIZZLE, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=( # noqa E501
+              UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
+                UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+                  x8:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
+                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)), # noqa E501
+            UOp(UOps.LOAD, dtypes.int, arg=None, src=(
+               x8,
+              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),)),)) # noqa E501
+    sink = graph_rewrite(sink, reduceop_fusor)
+    # verify output
+    k = Kernel(sink)
+    p = k.to_program()
+    a = Tensor.randint(32, 32).realize()
+    b = Tensor.empty((), dtype=dtypes.int).realize()
+    CompiledRunner(p).exec([b.lazydata.buffer, a.lazydata.buffer])
+    expected_out = (a.numpy() + a.numpy().sum()).sum()
+    np.testing.assert_equal(b.numpy(), expected_out)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

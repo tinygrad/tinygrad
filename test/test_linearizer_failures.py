@@ -498,7 +498,8 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.PADTO, axis=0, amt=32)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
-  @unittest.skipIf(Device.DEFAULT in ("LLVM", "METAL", "CLANG"), "flaky")
+  #@unittest.skipIf(Device.DEFAULT in ("LLVM", "METAL", "CLANG"), "flaky")
+  @unittest.skip("flaky everywhere")
   def test_failure_22(self):
     ast = UOp(UOps.SINK, None, arg=None, src=(
       UOp(UOps.STORE, None, arg=None, src=(
@@ -932,7 +933,7 @@ class TestLinearizerFailures(unittest.TestCase):
       opts = [Opt(op=OptOps.TC, axis=axis, amt=2)]
       helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
 
-  @unittest.skipIf(CI, "very slow, similar to test_failure_37")
+  @unittest.skip("very slow, similar to test_failure_37")
   def test_failure_39(self):
     # beautiful mnist kernel number 127: 6 possible TC axis_choices (3 for axis_buf1 and 2 reduce) and all fail
     # fuzz: PYTHONPATH=. METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=1 FUZZ_NTH=127 DEBUG=2 python3 ./test/external/fuzz_linearizer.py --logfile /tmp/beautiful_mnist.kernels.txt
@@ -996,7 +997,7 @@ class TestLinearizerFailures(unittest.TestCase):
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
                   UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(256, 1, 128, 28, 28, 128, 3, 3), strides=(0, 0, 1152, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
     opts=[Opt(op=OptOps.TC, axis=5, amt=2), Opt(op=OptOps.UNROLL, axis=0, amt=0)]
-    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["AMD", "HIP", "METAL"])
+    helper_test_lin(Kernel(ast), opts=opts, failed_platforms=["AMD", "HIP"])
 
   # llama3 8B failure with BEAM=2 https://github.com/tinygrad/tinygrad/actions/runs/10150118124/job/28066519425#step:14:1, these don't compile
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")

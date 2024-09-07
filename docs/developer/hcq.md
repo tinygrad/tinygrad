@@ -134,6 +134,8 @@ Backends must adhere to the `HCQBuffer` protocol when returning allocation resul
         members: true
         show_source: false
 
+**Lifetime**: The `HCQArgsState` is passed to `HWComputeQueue.exec` and is guaranteed not to be freed until `HWComputeQueue.submit` for the same queue is called.
+
 ### Synchronization
 
 HCQ-compatible devices use a global timeline signal for synchronizing all operations. This mechanism ensures proper ordering and completion of tasks across the device. By convention, `self.timeline_value` points to the next value to signal. So, to wait for all previous operations on the device to complete, wait for `self.timeline_value - 1` value. The following Python code demonstrates the typical usage of signals to synchronize execution to other operations on the device:
