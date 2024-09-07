@@ -3372,11 +3372,8 @@ class Tensor:
     if cin_last: w = w.reshape(cout//4, H, rcin_hi, W, 4, rcin_lo)
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
-    # padding
-    x = x.permute(0,3,4,5,1,2).pad2d(self._padding2d(padding, 2)) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
-
     # prepare input
-    x = x._pool((H, W), stride, dilation)
+    x = x.permute(0,3,4,5,1,2).pad2d(self._padding2d(padding, 2))._pool((H, W), stride, dilation) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
     x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, (oy := x.shape[4]), (ox := x.shape[5]), *cout_expand[0:2], 1, 1, rcin_hi, rcin_lo, H, W)
 
     # prepare weights
