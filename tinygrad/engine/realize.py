@@ -14,12 +14,12 @@ from tinygrad.engine.schedule import ScheduleItem
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
+def get_kernel(renderer:Renderer, ast:UOp) -> Union[Kernel, List[Kernel]]:
   if DEBUG >= 5:
     print(ast)
   k = Kernel(ast, opts=renderer).required_optimizations()
   if not NOOPT:
-    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
+    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k = k.hand_coded_optimizations()
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
       kb, k_opt = Kernel(ast, opts=renderer).required_optimizations(), k
@@ -154,7 +154,7 @@ def get_runners(dname:str, ast:UOp) -> List[CompiledRunner]:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = [CompiledRunner(replace(runner.p, dname=dname), runner.lib) for runner in bret]
   else:
-    prgs: List[Program] = [k.to_program() for k in get_kernel(Device[dname].renderer, ast).linearize()]
+    prgs: List[Program] = [k.to_program() for k in get_kernel(Device[dname].renderer, ast)]
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return [UOpsFuzzerRunner(replace(p, dname=dname)) for p in prgs]

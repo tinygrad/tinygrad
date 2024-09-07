@@ -489,6 +489,17 @@ class Kernel:
     return self
 
   def hand_coded_optimizations(self) -> Kernel:
+    # split kernel if necessary before applying optimizations
+    if all_int(self.full_shape) and 0 not in self.full_shape and prod(self.full_shape) // prod(self.output_shape) >= getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):  # noqa: E501
+      self_real_strides = self.sts[self.full_buf_index].real_strides(ignore_valid=True)
+      amt = next((x for x in range(min(256, 2**getenv("REDUCEOP_SPLIT_SIZE", 22) // prod(self.output_shape)), 8-1, -1)
+                              if self.full_shape[self.first_reduce] % x == 0 and self_real_strides[self.first_reduce] != 0), None)
+      if amt: self.apply_opt(Opt(OptOps.SPLIT, 0, amt))
+
+      asts = self.split(self.get_optimized_ast())
+      kernels = [Kernel(a, opts=self.opts) for a in asts]
+      return [k.hand_coded_optimizations() for k in kernels]
+
     self.required_optimizations()
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
@@ -508,13 +519,6 @@ class Kernel:
             if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return self
-          
-    # split reduce op into two kernels
-    if all_int(self.full_shape) and 0 not in self.full_shape and prod(self.full_shape) // prod(self.output_shape) >= getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):  # noqa: E501
-      self_real_strides = self.sts[self.full_buf_index].real_strides(ignore_valid=True)
-      amt = next((x for x in range(min(256, 2**getenv("REDUCEOP_SPLIT_SIZE", 22) // prod(self.output_shape)), 8-1, -1)
-                              if self.full_shape[self.first_reduce] % x == 0 and self_real_strides[self.first_reduce] != 0), None)
-      if amt: self.apply_opt(Opt(OptOps.SPLIT, 0, amt))
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
@@ -729,6 +733,7 @@ class Kernel:
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
               for i in range(self.first_reduce, self.first_reduce+last_reduce)]) + \
             (1,) * (self.shape_len - self.upcasted - last_reduce - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
+          local_shape = (self.full_shape[0],) + local_shape[1:]
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           #TODO: local_shape is wrong for reduce split
           if self.reduce_split:
@@ -762,12 +767,18 @@ class Kernel:
         trees.insert(0, op)
       parent = op
       op = op.src[-1]
+    for a in trees: print("---------"); print(a)
     return list(Kernel(a, opts=self.opts) for a in trees)
 
   # **** this is the lowerer ****
 
   def linearize(self) -> List[Kernel]:
-    kernels = self.split(self.get_optimized_ast())
+    print("FULL SHAPE")
+    print(self.full_shape)
+    yo = self.get_optimized_ast()
+    print("OOOOPTS")
+    print(self.applied_opts)
+    kernels = self.split(yo)
 
     for k in kernels:
       if DEBUG >= 3:
