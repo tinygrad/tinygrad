@@ -91,7 +91,7 @@ class Kernel:
     # parameters for optimization
     self.applied_opts: List[Opt] = []
     self.group_for_reduces: int = 0
-    self.reduce_split: bool = False
+    self.reduce_split: int = 0
     self.upcasted: int = 0
     self.local_dims: int = 0
     self.tensor_core: Optional[TensorCore] = None
@@ -424,9 +424,8 @@ class Kernel:
       self.group_for_reduces += 1
     elif opt.op is OptOps.SPLIT:
       check(self.full_shape[axis] % amt == 0 and self.sts[self.full_buf_index].real_strides()[axis] != 0, "bad split candidate")
-      check(not self.vars, "can't split with symbolic shape")
-      check(axis >= self.first_reduce and axis < self.shape_len-self.upcasted and len(self.reduceops) == 1, "must be the only reduce axis to split")
-      self.reduce_split = True
+      self.shift_to(axis, amt, top=True, insert_before=self.first_reduce + self.reduce_split)
+      self.reduce_split += 1
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.first_upcast, "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
@@ -509,6 +508,13 @@ class Kernel:
             if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return self
+          
+    # split reduce op into two kernels
+    if all_int(self.full_shape) and 0 not in self.full_shape and prod(self.full_shape) // prod(self.output_shape) >= getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):  # noqa: E501
+      self_real_strides = self.sts[self.full_buf_index].real_strides(ignore_valid=True)
+      amt = next((x for x in range(min(256, 2**getenv("REDUCEOP_SPLIT_SIZE", 22) // prod(self.output_shape)), 8-1, -1)
+                              if self.full_shape[self.first_reduce] % x == 0 and self_real_strides[self.first_reduce] != 0), None)
+      if amt: self.apply_opt(Opt(OptOps.SPLIT, 0, amt))
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
@@ -538,10 +544,6 @@ class Kernel:
             self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
           else:
             self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
-
-    # split reduce op into two kernels
-    if all_int(self.full_shape) and 0 not in self.full_shape and prod(self.full_shape) // prod(self.output_shape) >= getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
-      self.apply_opt(Opt(OptOps.SPLIT, 0))
 
     # no more opt if we are grouping
     if self.group_for_reduces: return self
@@ -650,8 +652,9 @@ class Kernel:
         return replace(op, src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is UOps.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
+        last_reduce = self.reduce_split if self.reduce_split else self.group_for_reduces
         alu_op: BinaryOps = op.arg[0]
-        axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
+        axis = tuple(i for i in range(self.first_reduce+last_reduce, self.shape_len)
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
@@ -716,22 +719,22 @@ class Kernel:
             ret = UOp(UOps.WMMA, tc.dtype_out, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
           new_reduce_axes = tuple(i for i in axis if i-self.first_upcast not in reduce_axes)
           return replace(op, src=(ret,), arg=(alu_op, new_reduce_axes)) if new_reduce_axes else ret
-        if self.group_for_reduces:
+        if last_reduce:
           start = UOp(UOps.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(alu_op, axis))
-          second_axis = tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) \
+          second_axis = tuple(i for i in range(self.first_reduce, self.first_reduce+last_reduce) \
                       if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
           # NOTE: if there's a grouped reduce, but no reduce axes for this reduce, we can skip it
           if len(second_axis) == 0: return start
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
-              for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
-            (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
+              for i in range(self.first_reduce, self.first_reduce+last_reduce)]) + \
+            (1,) * (self.shape_len - self.upcasted - last_reduce - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
-
+          #TODO: local_shape is wrong for reduce split
           if self.reduce_split:
             # insert sink into UOp to later split into separate kernel
             global_buffer = UOp(UOps.DEFINE_GLOBAL, PtrDType(cast(DType, op.dtype)), (), 0)
-            sink = UOp(UOps.SINK, None, (UOp.store(global_buffer, st_uop, start),), KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
+            sink = UOp(UOps.SINK, None, (UOp.store(global_buffer, st_uop, start),))
             global_load = UOp(UOps.LOAD, op.dtype, (global_buffer, st_uop, sink))
             reduce2 = UOp(UOps.REDUCE_AXIS, op.dtype, (global_load,), (op.arg[0], second_axis))
             return reduce2
@@ -748,6 +751,8 @@ class Kernel:
       return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
     return fixup_ast(self.ast)
 
+  # TODO: clean this, should new kernel have KernelInfo, don't create new kernel for inner sink?
+  # TODO: what to if group after split?
   def split(self, ast) -> List[Kernel]:
     parent, op = ast, ast.src[0]
     trees = [ast]
@@ -762,9 +767,9 @@ class Kernel:
   # **** this is the lowerer ****
 
   def linearize(self) -> List[Kernel]:
-    modified_ast = self.split(self.get_optimized_ast())
+    kernels = self.split(self.get_optimized_ast())
 
-    for k in modified_ast:
+    for k in kernels:
       if DEBUG >= 3:
         print(k.name)
         if getenv("RAWAST"): print(k.ast)
@@ -778,7 +783,7 @@ class Kernel:
       if getenv("GRAPHUOPS"):
         from tinygrad.engine.graph import graph_uops
         graph_uops(k.uops)
-    return modified_ast
+    return kernels
 
   def to_program(self, name_override:Optional[str]=None) -> Program:
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
