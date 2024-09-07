@@ -1,9 +1,9 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import dataclasses
-import time, math, itertools, functools, struct, sys, inspect, pathlib
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set, Literal
 from collections import defaultdict
 import numpy as np
 
@@ -88,6 +88,8 @@ def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
   return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else max(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
+
+ReductionStr = Literal["mean", "sum", "none"]
 
 class Tensor:
   """
@@ -1317,6 +1319,25 @@ class Tensor:
     dim = self._resolve_dim(dim)
     return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
 
+  def roll(self, shifts:Union[int, Tuple[int, ...]], dims:Union[int, Tuple[int, ...]]) -> Tensor:
+    """
+    Rolls the tensor along specified dimension(s).
+    The rolling operation is circular, meaning that elements that go beyond the edge are wrapped around to the beginning of the dimension.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.rand(3, 4, 1).roll(shifts=1, dims=0))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.rand(3, 4, 1).roll(shifts=-1, dims=0))
+    ```
+    """
+    dims, rolled = tuple(self._resolve_dim(d) for d in make_pair(dims, 1)), self
+    for dim, shift in zip(dims, make_pair(shifts, 1)):
+      shift = shift % self.shape[dim]
+      rolled = Tensor.cat(rolled[tuple(slice(None) if i != dim else slice(-shift, None) for i in range(rolled.ndim))],
+                          rolled[tuple(slice(None) if i != dim else slice(None, -shift) for i in range(rolled.ndim))], dim=dim)
+    return rolled
+
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False) -> Tensor:
@@ -1745,11 +1766,20 @@ class Tensor:
     print(Tensor.einsum("ij,ij->", x, y).numpy())
     ```
     """
+    def parse_formula(formula: str, *operands: Tensor):
+      if "." in formula:
+        ell_chars, ell_longest = "".join(set(string.ascii_letters) - set(formula)), 0
+        for i, inp in enumerate(filter(lambda x: "..." in x, inputs := formula.split("->")[0].split(","))):
+          if (ell_count := max(operands[i].ndim, 1) - (len(inp) - 3)) > ell_longest: ell_longest = ell_count
+          inputs[i] = inp.replace("...", "" if ell_count == 0 else ell_chars[-ell_count:])
+        inputs_str, out_ellipse = ",".join(inputs), "" if ell_longest == 0 else ell_chars[-ell_longest:]
+        return (inputs_str, formula.split("->")[1].replace("...", out_ellipse)) if "->" in formula else (inputs_str, \
+            out_ellipse + ''.join(sorted(c for c in inputs_str if inputs_str.count(c) == 1 and c.isalpha() and c not in out_ellipse)))
+      return formula.split("->") if "->" in formula else (formula, ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
+
     xs:Tuple[Tensor] = argfix(*raw_xs)
-    formula = formula.replace(" ", "")
-    inputs_str, output = formula.split("->") if "->" in formula else (formula, \
-                                                                       ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
-    inputs = inputs_str.split(',')
+    inputs_str, output = parse_formula(formula.replace(" ", ""), *xs)
+    inputs = inputs_str.split(",")
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
 
     # map the value of each letter in the formula
@@ -3022,7 +3052,12 @@ class Tensor:
     qk = self.matmul(key.transpose(-2,-1), acc_dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
     return ((qk+attn_mask) if attn_mask is not None else qk).softmax(-1).cast(self.dtype).dropout(dropout_p) @ value
 
-  def binary_crossentropy(self, y:Tensor) -> Tensor:
+  def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
+    assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
+    reductions: Dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
+    return reductions [reduction](self)
+
+  def binary_crossentropy(self, y:Tensor, reduction:ReductionStr="mean") -> Tensor:
     """
     Computes the binary cross-entropy loss between `self` and `y`.
 
@@ -3034,9 +3069,9 @@ class Tensor:
     print(t.binary_crossentropy(y).item())
     ```
     """
-    return (-y*self.log() - (1-y)*(1-self).log()).mean()
+    return (-y*self.log() - (1-y)*(1-self).log())._do_reduction(reduction)
 
-  def binary_crossentropy_logits(self, y:Tensor) -> Tensor:
+  def binary_crossentropy_logits(self, y:Tensor, reduction:ReductionStr="mean") -> Tensor:
     """
     Computes the binary cross-entropy loss between `self` and `y` where `self` is logits.
 
@@ -3048,13 +3083,14 @@ class Tensor:
     print(t.binary_crossentropy_logits(y).item())
     ```
     """
-    return (self.maximum(0) - y * self + (1 + self.abs().neg().exp()).log()).mean()
+    return (self.maximum(0) - y * self + (1 + self.abs().neg().exp()).log())._do_reduction(reduction)
 
-  def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index=-1, label_smoothing=0.0) -> Tensor:
+  def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index=-1, label_smoothing=0.0, reduction:ReductionStr="mean") -> Tensor:
     """
     Computes the sparse categorical cross-entropy loss between `self` and `Y`.
 
     NOTE: `self` is logits and `Y` is the target labels.
+    NOTE: unlike PyTorch, this function expects the class axis to be -1
 
     See: https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
 
@@ -3065,13 +3101,16 @@ class Tensor:
     ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
+    assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
     log_probs, loss_mask = self.log_softmax(), (Y != ignore_index)
     y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
     y = ((y_counter == Y.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
-    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask).sum()
-    return -((1 - label_smoothing) * (log_probs * y).sum() + smoothing) / loss_mask.sum()
+    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
+    unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
+    # NOTE: because of ignore_index, we can't use Tensor.mean (so can't use `_do_reduction` here)
+    return -(unreduced.sum() / loss_mask.sum() if reduction == "mean" else (unreduced.sum() if reduction == "sum" else unreduced))
 
-  def cross_entropy(self, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
+  def cross_entropy(self, y:Tensor, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Tensor:
     """
     Compute the cross entropy loss between input logits and target.
 
@@ -3091,12 +3130,10 @@ class Tensor:
     ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
-    assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
     y = y.one_hot(num_classes=cast(int, self.shape[1])) if y.ndim < 2 else y
     y = (1 - label_smoothing)*y + label_smoothing / cast(int, y.shape[1])
     ret = -self.log_softmax(axis=1).mul(y).sum(axis=1)
-    do_reduction: Dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
-    return do_reduction[reduction](ret)
+    return ret._do_reduction(reduction)
 
   # ***** Tensor Properties *****
 

@@ -14,7 +14,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
-from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup
+from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, PtrDType, dtypes
 
 def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer]]:
@@ -865,7 +865,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    # RANGE -> LOAD -> RANGE -> PHI
+    # RANGE -> LOAD -> RANGE -> ASSIGN
     #assert any(x.op is UOps.LOAD for x in lin.uops[ranges[0]:ranges[1]])
 
   def test_three_nested_range(self):
@@ -874,7 +874,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)), (2, 2, 3)).sum()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    # RANGE -> RANGE -> LOAD -> RANGE -> PHI
+    # RANGE -> RANGE -> LOAD -> RANGE -> ASSIGN
     # NOTE: nothing should toposort between the first two ranges
     #assert ranges[0]+1 == ranges[1]
     #assert any(x.op is UOps.LOAD for x in lin.uops[ranges[1]:ranges[2]])
@@ -884,7 +884,7 @@ class TestLinearizer(unittest.TestCase):
     out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
-    # RANGE -> ALU -> RANGE -> ALU + LOAD -> PHI
+    # RANGE -> ALU -> RANGE -> ALU + LOAD -> ASSIGN
     assert any(x.op is UOps.ALU for x in lin.uops[ranges[0]:ranges[1]])
     assert not any(x.op is UOps.LOAD for x in lin.uops[ranges[0]:ranges[1]])
     assert any(x.op in {UOps.ALU, UOps.LOAD} for x in lin.uops[ranges[1]:])
@@ -895,7 +895,7 @@ class TestLinearizer(unittest.TestCase):
     out = (a + b[0]).sum() + b[0]
     lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
-    # LOAD -> RANGE -> LOAD -> PHI
+    # LOAD -> RANGE -> LOAD -> ASSIGN
     assert lin.uops[ranges[0]-2].op is UOps.LOAD
 
   def test_range_outer_op_before_phi_nested_range(self):
@@ -906,11 +906,11 @@ class TestLinearizer(unittest.TestCase):
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
     #if getenv("PTX"):
-    # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> PHI
+    # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> ASSIGN
     #  assert lin.uops[ranges[0]-2].op is UOps.LOAD
     #  assert ranges[1] == ranges[0]+6
     #  assert [x.op for x in lin.uops[ranges[1]-2:ranges[1]]] == [UOps.LOAD, UOps.ALU]
-    # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> PHI
+    # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> ASSIGN
     #else:
     #  assert lin.uops[ranges[0]-2].op is UOps.LOAD
     #  assert ranges[1] == ranges[0]+3
@@ -920,7 +920,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(4, 1).realize()
     out = a.sum() * a.sum()
     lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
-    # RANGE -> LOAD -> PHI -> ALU
+    # RANGE -> LOAD -> ASSIGN -> ALU
     end = max(i for i,u in enumerate(lin.uops) if u.op is UOps.ENDRANGE)
     assert lin.uops[end+1].op is UOps.ALU
 
@@ -928,7 +928,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum() + a.reshape(2, 1).expand(2, 3).sum()
     lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
-    # RANGE -> LOAD -> PHI -> ALU
+    # RANGE -> LOAD -> ASSIGN -> ALU
     end = max(i for i,u in enumerate(lin.uops) if u.op is UOps.ENDRANGE)
     assert lin.uops[end+1].op is UOps.ALU
 
@@ -1128,9 +1128,10 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.op is UOps.WMMA:
-        assert u.src[-1].src[0].op != UOps.PHI
+        assert u.src[-1].src[0].op != UOps.ASSIGN
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"}, "CLANG does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi(self):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
@@ -1139,11 +1140,12 @@ class TestLinearizer(unittest.TestCase):
     for u in k.uops:
       if u.op is UOps.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != UOps.PHI
+        assert u.src[-1].src[0].op != UOps.ASSIGN
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"}, "CLANG does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
-    # all PHI children are outside the loop
+    # all ASSIGN children are outside the loop
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, acc_dtype=tc.dtype_out).relu()
@@ -1151,19 +1153,19 @@ class TestLinearizer(unittest.TestCase):
     for u in k.uops:
       if u.op is UOps.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != UOps.PHI
+        assert u.src[-1].src[0].op != UOps.ASSIGN
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     r = (x@y).relu()
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]])[-1]
-    # the uops graph is RANGE -> DEFINE_ACC -> 4x ALU -> 4x PHI -> ENDRANGE
+    # the uops graph is RANGE -> DEFINE_ACC -> 4x ALU -> 4x ASSIGN -> ENDRANGE
     for u in k.uops:
-      if u.op is UOps.PHI:
+      if u.op is UOps.ASSIGN:
         assert u.src[1].op is UOps.ALU
-      # children of PHI are placed after ENDRANGE
-      if any(x.op is UOps.PHI for x in u.src):
+      # children of ASSIGN are placed after ENDRANGE
+      if any(x.op is UOps.ASSIGN for x in u.src):
         end_range = [i for i, x in enumerate(k.uops) if x.op is UOps.ENDRANGE][0]
         assert end_range < k.uops.index(u)
 
@@ -1290,7 +1292,7 @@ class TestLinearizer(unittest.TestCase):
       if if_op:=next((u for u in uops if u.op is UOps.IF), None):
         uops = uops[:uops.index(if_op)]
       assert len(set([u.op for u in uops if u.op in {UOps.RANGE, UOps.SPECIAL}])) == 1, "has either specials or ranges, not both"
-      assert len([u for u in uops if u.op is UOps.PHI]) == 0, "PHI should have been simplified"
+      assert len([u for u in uops if u.op is UOps.ASSIGN]) == 0, "ASSIGN should have been simplified"
       # TODO: once uops track min/max this will be fixed
       #assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
 
@@ -1419,9 +1421,9 @@ class TestLinearizer(unittest.TestCase):
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
-  def count_float4(k):
-    return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
-            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 3 and uop.src[2].dtype == dtypes.float.vec(4)]))
+  def count_float4(k, n=4):
+    return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.float.vec(n)]),
+            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 3 and uop.src[2].dtype == dtypes.float.vec(n)]))
   @staticmethod
   def count_half4(k):
     return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.half.vec(4)]),
@@ -1441,6 +1443,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (2, 1)
 
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim(self):
     a = Tensor.rand(2, 8).realize()
     b = Tensor.rand(2, 8).realize()
@@ -1457,6 +1460,32 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (4, 2)
 
+  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
+  def test_float4_multidim_amx(self):
+    def kernel_for_shape(size, shift):
+      a = Tensor.rand(2, size).realize()
+      b = Tensor.rand(2, size).realize()
+      c = a + b
+
+      s = create_schedule([c.lazydata])[0]
+      k = Kernel(s.ast)
+      k.shift_to(0, 4)
+      k.shift_to(0, shift, insert_before=k.shape_len-1)
+      k.upcast()
+      k.upcast()
+      k.local_dims += 1
+      k.linearize()
+      return k
+
+    sizes = [12, 8, 16]
+    shifts = [3, 2, 4]
+    excepted_upcast_size = [4, 8, 16]
+    expected_output = [(6,3), (2,1), (2,1)]
+
+    for i in range(len(sizes)):
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
+
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_unaligned_load(self):
     a = Tensor.rand(9).realize().shrink(((1, 9),))
     b = Tensor.rand(9).realize().shrink(((1, 9),))
@@ -1469,6 +1498,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (0, 1)
 
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load(self):
     a = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
     b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
@@ -1484,6 +1514,31 @@ class TestFloat4(unittest.TestCase):
     k.linearize()
 
     assert TestFloat4.count_float4(k) == (0, 2)
+
+  @unittest.skipUnless(Device.DEFAULT in {"CLANG"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
+  def test_float4_multidim_unaligned_load_amx(self):
+    def kernel_for_shape(size, shift):
+      a = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
+      b = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
+      c = a + b
+
+      s = create_schedule([c.lazydata])[0]
+      k = Kernel(s.ast)
+      k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
+      k.upcast()
+      k.shift_to(len(k.full_unupcasted_shape)-1, shift, insert_before=k.shape_len-1)
+      k.upcast()
+      k.local_dims += 1
+      k.linearize()
+      return k
+
+    sizes = [13, 9, 17]
+    shifts = [3, 2, 4]
+    excepted_upcast_size = [4, 8, 16]
+    expected_output = [(0,3), (0,1), (0,1)]
+
+    for i in range(len(sizes)):
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
 
   def test_float4_sometimes_unaligned(self):
     a = Tensor.rand(1, 1, 8).realize()
@@ -1884,6 +1939,7 @@ class TestKernelOpts(unittest.TestCase):
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_invalid_tensor_core_extra_opts(self):
     N = 128
     Tensor.manual_seed(1552)

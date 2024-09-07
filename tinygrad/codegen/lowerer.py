@@ -93,16 +93,16 @@ class IndependentLowerer:
       idx, valid = x.st_arg.to_indexed_uops(self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
-      if x.op is UOps.CONST: return valid.where(x.const(x.arg), x.const(0))
+      if x.op is UOps.CONST: return valid.where(x.const_like(x.arg), x.const_like(0))
       buf = x.src[0]
       if x.op is UOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[2]),)),) if x.src[0].op is UOps.DEFINE_LOCAL else ()
-        return UOp(UOps.LOAD, x.dtype, (buf, idx) + ((x.const(0), valid) if has_valid else ()) + barrier)
+        return UOp(UOps.LOAD, x.dtype, (buf, idx) + ((x.const_like(0), valid) if has_valid else ()) + barrier)
       # NOTE: only store the local reduceop in the threads that are actually doing the reduce
       store_back = x.src[0].op is UOps.DEFINE_LOCAL and x.src[2].op is UOps.REDUCE_AXIS and \
         x.src[2].src[0].op is UOps.LOAD and x.src[2].src[0].src[0].op is UOps.DEFINE_LOCAL
       # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
-      if store_back: idx, _ = x.st_arg.to_indexed_uops([u.const(0) if i in x.src[2].arg[1] else u for i,u in enumerate(self.idxs)])
+      if store_back: idx, _ = x.st_arg.to_indexed_uops([u.const_like(0) if i in x.src[2].arg[1] else u for i,u in enumerate(self.idxs)])
       if x.src[0].op is UOps.DEFINE_GLOBAL or store_back:
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
