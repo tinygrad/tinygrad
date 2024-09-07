@@ -14,7 +14,7 @@ from tinygrad.engine.schedule import ScheduleItem
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_kernel(renderer:Renderer, ast:UOp) -> Union[Kernel, List[Kernel]]:
+def get_kernels(renderer:Renderer, ast:UOp) -> List[Kernel]:
   if DEBUG >= 5:
     print(ast)
   k = Kernel(ast, opts=renderer).required_optimizations()
@@ -61,7 +61,7 @@ def get_kernel(renderer:Renderer, ast:UOp) -> Union[Kernel, List[Kernel]]:
                   raise RuntimeError(f"mismatch of {diff_count}/{b.numel()} items with type {b.dtype}, max {(b-bufs[0]).abs().max().item()}")
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
-  return k
+  return list(k)
 
 # **************** Runners ****************
 
@@ -154,7 +154,7 @@ def get_runners(dname:str, ast:UOp) -> List[CompiledRunner]:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = [CompiledRunner(replace(runner.p, dname=dname), runner.lib) for runner in bret]
   else:
-    prgs: List[Program] = [k.to_program() for k in get_kernel(Device[dname].renderer, ast)]
+    prgs: List[Program] = [k.to_program() for k in get_kernels(Device[dname].renderer, ast)]
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return [UOpsFuzzerRunner(replace(p, dname=dname)) for p in prgs]

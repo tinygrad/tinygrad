@@ -488,7 +488,7 @@ class Kernel:
         self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
     return self
 
-  def hand_coded_optimizations(self) -> Kernel:
+  def hand_coded_optimizations(self) -> List[Kernel]:
     # split kernel if necessary before applying optimizations
     if all_int(self.full_shape) and 0 not in self.full_shape and prod(self.full_shape) // prod(self.output_shape) >= getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):  # noqa: E501
       self_real_strides = self.sts[self.full_buf_index].real_strides(ignore_valid=True)
@@ -498,7 +498,7 @@ class Kernel:
 
       asts = self.split(self.get_optimized_ast())
       kernels = [Kernel(a, opts=self.opts) for a in asts]
-      return [k.hand_coded_optimizations() for k in kernels]
+      return [opt for k in kernels for opt in k.hand_coded_optimizations()]
 
     self.required_optimizations()
 
@@ -550,7 +550,7 @@ class Kernel:
             self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
 
     # no more opt if we are grouping
-    if self.group_for_reduces: return self
+    if self.group_for_reduces: return [self]
 
     # **** below this line need to be optional and benchmarked ****
 
@@ -624,7 +624,7 @@ class Kernel:
           self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
           if will_delete_shape: deleted_shape += 1
 
-    return self
+    return [self]
 
   # **** kernel outputs ****
 
@@ -756,47 +756,39 @@ class Kernel:
       return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
     return fixup_ast(self.ast)
 
-  # TODO: clean this, should new kernel have KernelInfo, don't create new kernel for inner sink?
-  # TODO: what to if group after split?
-  def split(self, ast) -> List[Kernel]:
+  # TODO: clean this
+  def split(self, ast: UOp) -> List[UOp]:
     parent, op = ast, ast.src[0]
-    trees = [ast]
+    asts = [ast]
     while op.src:
       if op.op is UOps.SINK:
         parent.src = parent.src[:-1]
-        trees.insert(0, op)
+        asts.insert(0, op)
       parent = op
       op = op.src[-1]
-    for a in trees: print("---------"); print(a)
-    return list(Kernel(a, opts=self.opts) for a in trees)
+    return asts
 
   # **** this is the lowerer ****
 
-  def linearize(self) -> List[Kernel]:
-    print("FULL SHAPE")
-    print(self.full_shape)
-    yo = self.get_optimized_ast()
-    print("OOOOPTS")
-    print(self.applied_opts)
-    kernels = self.split(yo)
+  def linearize(self) -> Kernel:
+    modified_ast = self.get_optimized_ast()
 
-    for k in kernels:
-      if DEBUG >= 3:
-        print(k.name)
-        if getenv("RAWAST"): print(k.ast)
-        print(k.ast)
-        print("APPLIED OPTS")
-        print(k.applied_opts)
-      verify_ast(k.ast)
+    if DEBUG >= 3:
+      print(self.name)
+      if getenv("RAWAST"): print(self.ast)
+      print(modified_ast)
+      print(self.applied_opts)
+    verify_ast(modified_ast)
 
-      k.uops = linearize_uop(full_graph_rewrite(ast_to_uop(k.ast, k.opts), k.opts))
-      if DEBUG >= 5: print_uops(k.uops)
-      if getenv("GRAPHUOPS"):
-        from tinygrad.engine.graph import graph_uops
-        graph_uops(k.uops)
-    return kernels
+    self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
+    if DEBUG >= 5: print_uops(self.uops)
+    if getenv("GRAPHUOPS"):
+      from tinygrad.engine.graph import graph_uops
+      graph_uops(self.uops)
+    return self
 
   def to_program(self, name_override:Optional[str]=None) -> Program:
+    self.linearize()
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
     if getenv("RUN_PROCESS_REPLAY"):
