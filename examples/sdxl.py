@@ -285,7 +285,7 @@ class SDXL:
 class Guider(ABC):
   def __init__(self, scale:float):
     self.scale = scale
-  
+
   @abstractmethod
   def __call__(self, denoiser, x:Tensor, s:Tensor, c:Dict, uc:Dict) -> Tensor:
     pass
