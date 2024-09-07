@@ -492,9 +492,9 @@ class Kernel:
     # split kernel if necessary before applying optimizations
     if all_int(self.full_shape) and 0 not in self.full_shape and prod(self.full_shape) // prod(self.output_shape) >= getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):  # noqa: E501
       self_real_strides = self.sts[self.full_buf_index].real_strides(ignore_valid=True)
-      amt = next((x for x in range(min(256, 2**getenv("REDUCEOP_SPLIT_SIZE", 22) // prod(self.output_shape)), 8-1, -1)
-                              if self.full_shape[self.first_reduce] % x == 0 and self_real_strides[self.first_reduce] != 0), None)
-      if amt: self.apply_opt(Opt(OptOps.SPLIT, 0, amt))
+      divisor = next((x for x in range(min(256, 2**getenv("REDUCEOP_SPLIT_SIZE", 22) // prod(self.output_shape)), 8-1, -1)
+                      if self.full_shape[self.first_reduce] % x == 0 and self_real_strides[self.first_reduce] != 0), None)
+      if divisor: self.apply_opt(Opt(OptOps.SPLIT, 0, self.full_shape[self.first_reduce] // divisor))
 
       asts = self.split(self.get_optimized_ast())
       kernels = [Kernel(a, opts=self.opts) for a in asts]

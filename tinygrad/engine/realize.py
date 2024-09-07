@@ -191,7 +191,6 @@ def lower_schedule_item(si:ScheduleItem) -> List[ExecItem]:
   if si.ast.op is UOps.SINK:
     runners = get_runners(si.outputs[0].device, si.ast)
     return [ExecItem(r, [si.bufs[x] for x in r.p.globals], si.metadata) for r in runners]
-    return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
   out, (op, arg) = si.outputs[0], si.ast.arg
   if op is MetaOps.COPY:
     kernel_type = BufferCopy
@@ -206,7 +205,6 @@ def lower_schedule_item(si:ScheduleItem) -> List[ExecItem]:
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule):
     si = schedule.pop(0)
-    #try: yield lower_schedule_item(si)
     try:
       for ei in lower_schedule_item(si): yield ei
     except Exception as e:
