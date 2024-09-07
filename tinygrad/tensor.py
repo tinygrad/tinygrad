@@ -3334,11 +3334,8 @@ class Tensor:
   def image_conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype=None):
     base_image_type = dtypes.imageh if getenv("FLOAT16", 0) else dtypes.imagef
 
-    # padding
-    x = self.pad2d(self._padding2d(padding, 2))
-
-    (bs,_,iy,ix), (cout,cin,H,W) = x.shape, weight.shape
-    w = weight.reshape(groups, (rcout := cout//groups), cin, H, W)
+    (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
+    x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
 
     # hack for non multiples of 4 on cin
     if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
@@ -3376,12 +3373,10 @@ class Tensor:
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
     # padding
-    # pt, pb, pl, pr = self._padding2d(padding, 2)
-    # py, px, sy, sx = (max(pl,0), max(pr,0)), (max(pt,0), max(pb,0)), (-min(pl,0), x.shape[1]+min(pr,0)), (-min(pt,0), x.shape[2]+min(pb,0))
-    # x = x.pad((None, py, px, None, None, None)).shrink((None, sy, sx, None, None, None))
+    x = x.permute(0,3,4,5,1,2).pad2d(self._padding2d(padding, 2)) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
 
     # prepare input
-    x = x.permute(0,3,4,5,1,2)._pool((H, W), stride, dilation) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
+    x = x._pool((H, W), stride, dilation)
     x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, (oy := x.shape[4]), (ox := x.shape[5]), *cout_expand[0:2], 1, 1, rcin_hi, rcin_lo, H, W)
 
     # prepare weights
