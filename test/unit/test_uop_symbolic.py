@@ -27,10 +27,7 @@ def render(self) -> Tuple[str, ConstType, ConstType]:
 
 def NumNode(val): return UOp.const(dtypes.int, val)
 def Variable(expr, nmin, nmax):
-  # TODO: fix DEFINE_VAR to not need this
-  class TempVar:
-    def __init__(self, x): self.expr = x
-  return UOp(UOps.DEFINE_VAR, dtypes.int, arg=(TempVar(expr), UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)))
+  return UOp(UOps.DEFINE_VAR, dtypes.int, arg=(expr, UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)))
 class Node:
   @staticmethod
   def sum(ops): return functools.reduce(lambda x,y: x+y, ops)
@@ -306,7 +303,6 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_combine_num(self):
     self.helper_test_variable(Node.sum([NumNode(29), Variable("a", 0, 10), NumNode(-23)]), 6, 16, {"(6+a)", "(a+6)"})
 
-  @unittest.expectedFailure
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
