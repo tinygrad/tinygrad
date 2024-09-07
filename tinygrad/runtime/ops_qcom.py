@@ -223,7 +223,6 @@ class QCOMProgram(HCQProgram):
     self.device, self.name, self.lib = device, name, lib
     self._parse_lib()
 
-    # reserve some space after for gpu to use
     self.lib_gpu = self.device.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
 
@@ -285,9 +284,12 @@ class QCOMAllocator(HCQAllocator):
       pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.base.itemsize), 1 << (pitchalign:=6))
       texture = self.device._gpu_alloc(pitch * round_up(options.image.shape[0], 16), kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
 
-      # save it here to load in one command (the same approach as OpenCL and mesa)
+      # Extend HCQBuffer with texture-related info.
       texture.samplers, texture.descriptor, texture.ibo = [0] * 4, [0] * 16, [0] * 16
-      texture.samplers[0:2] = [0x1b60, 0x30] # compiled sampler. always the same in tinygrad.
+
+      # Compiled sampler (always the same in tinygrad).
+      texture.samplers[0] = qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=adreno.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode)
+      texture.samplers[1] = qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True)
 
       tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
       texture.descriptor[0] = qreg.a6xx_tex_const_0(swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt)
