@@ -353,7 +353,6 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
         if len(u.src) > 3: dont_count = dont_count.union(u.src[2].sparents)
       elif u.op is UOps.STORE:
         dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
       elif u.op is UOps.IF:
         dont_count = dont_count.union(u.src[0].sparents)
   for u in uops:
