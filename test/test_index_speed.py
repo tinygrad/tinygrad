@@ -5,11 +5,11 @@ import copy, time
 def clone(original:Tensor): return copy.copy(original)
 
 def get_item(tensor, indexer):
-    tensor[indexer]
+  tensor[indexer]
 
 def set_item(tensor, indexer, val):
-    pyt = clone(tensor)
-    pyt[indexer] = val
+  pyt = clone(tensor)
+  pyt[indexer] = val
 
 reference = Tensor.arange(0., 160).reshape(4, 8, 5)
 reference_t = torch.arange(0., 160).view(4, 8, 5)
