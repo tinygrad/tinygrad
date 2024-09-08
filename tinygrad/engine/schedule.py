@@ -2,13 +2,14 @@ import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
+
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps
 from tinygrad.rewrite import PatternMatcher, UPat, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
-                             GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
+                             GlobalCounters, all_same, colored, flatten, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
+from tinygrad.dtype import ConstType, DType, ImageDType, PtrDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
@@ -196,21 +197,59 @@ def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   if (root_st:=get_output_st(root, uop_sts)) is not None and rshape == root_st.shape: return None
   return st_fixup(root, lambda st:st.reshape(rshape), uop_sts, {})
 
+def split_reduceop(root:UOp) -> Optional[UOp]:
+  uop_sts: Dict[UOp, ShapeTracker] = {}
+  input_st = unwrap(get_output_st(root.src[0], uop_sts))
+  new_shape = input_st.reduce(axis:=root.arg[1])
+  if not all_int(input_st.shape) or (0 in input_st.shape) or prod(input_st.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
+    return None
+  self_real_strides = input_st.real_strides(ignore_valid=True)
+  split_candidates = [(i, x) for i in axis for x in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(new_shape)),8-1,-1)
+                      if input_st.shape[i] % x == 0 and self_real_strides[i] != 0]
+  if not split_candidates: return None
+  dim_to_split, divisor = split_candidates[0]
+  splitted_shape = input_st.shape[:dim_to_split] + (divisor,) + (input_st.shape[dim_to_split]//divisor,) + input_st.shape[dim_to_split+1:]
+  def fix_st(st:ShapeTracker):
+    return st.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))
+  splitted = st_fixup(root.src[0], fix_st, uop_sts, {})
+  if DEBUG >= 3: print(f"split {divisor}: {input_st.shape} -> {splitted_shape} -> {new_shape}")
+  first_reduce = UOp(UOps.REDUCE_AXIS, dtype:=cast(DType, root.dtype), (splitted,), (root.arg[0], axis))
+  global_store = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 0), \
+      unwrap(get_output_st(first_reduce, uop_sts)).to_uop(), first_reduce))
+  global_load = UOp(UOps.LOAD, dtype, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 0), \
+      unwrap(get_output_st(first_reduce, uop_sts)).to_uop(), global_store))
+  second_reduce = UOp(UOps.REDUCE_AXIS, dtype, (global_load,), (root.arg[0], (len(new_shape),)))
+  return UOp(UOps.SWIZZLE, None, (second_reduce,), unwrap(get_output_st(second_reduce, uop_sts)).reshape(new_shape))
+
 reduceop_fusor = PatternMatcher([
   (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_through_reduce),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
+  (UPat(UOps.REDUCE_AXIS, name="root"), split_reduceop),
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_reduceop_shape),
 ])
 
-def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> LBScheduleItem:
+sinker = PatternMatcher([(UPat(UOps.LOAD, src=(UPat(), UPat(), UPat(UOps.STORE, name="store")), name="root"),
+                          lambda root,store: UOp(root.op, root.dtype, root.src[:2]+(UOp(UOps.SINK, None, (store,)),)))])
+unsinker = PatternMatcher([(UPat(UOps.LOAD, src=(UPat(), UPat(), UPat(UOps.SINK)), name="root"), lambda root:UOp(root.op, root.dtype, root.src[:2]))])
+
+def create_schedule_item(last_sink:UOp, inputs:List[LazyBuffer], outputs:List[LazyBuffer],
+                         var_vals:Dict[Variable, int], metadata:List[Metadata]) -> List[LBScheduleItem]:
+  full_graph = graph_rewrite(last_sink, sinker)
+  ret: List[LBScheduleItem] = []
+  for u in full_graph.sparents:
+    if u.op is UOps.SINK:
+      ret.append(LBScheduleItem(graph_rewrite(u, unsinker), outputs, list(inputs), var_vals, metadata))
+  return ret
+
+def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> List[LBScheduleItem]:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
   if (out:=outs[0]).op is MetaOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
     st_uop = ShapeTracker.from_shape(out.arg).to_uop()
     rd = UOp(UOps.LOAD, dtypes.uint8, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.uint8), (), 1), st_uop))
     wr = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(out.dtype), (), 0), st_uop, rd))
-    return LBScheduleItem(UOp(UOps.SINK, None, (wr,)), outs, [x.base for x in out.srcs])
+    return [LBScheduleItem(UOp(UOps.SINK, None, (wr,)), outs, [x.base for x in out.srcs])]
   if out.op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
-    return LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), outs, [x.base for x in out.srcs])
+    return [LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), outs, [x.base for x in out.srcs])]
   reduce_info: Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]] = {}
   if not AST_REWRITE:
     # push through all movementops between reduceops
@@ -245,7 +284,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
   sink = UOp(UOps.SINK, None, tuple(ast))
   if AST_REWRITE:
     sink = graph_rewrite(sink, reduceop_fusor)
-  return LBScheduleItem(sink, outs, list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))
+  return create_schedule_item(sink, list(inputs), outs, var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -424,7 +463,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
   """create a graph for realizing the outputs"""
   output_groups, realizes, assign_targets = _get_output_groups(outs, seen)
   # preschedule all buffers in realizes
-  prescheduled = [_lower_lazybuffer(group, realizes) for group in output_groups.values()]
+  prescheduled = flatten([_lower_lazybuffer(group, realizes) for group in output_groups.values()])
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
   graph: DefaultDict[LBScheduleItem, List[LBScheduleItem]] = defaultdict(list)
@@ -470,7 +509,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, lsi.var_vals])
-    for out in lsi.outputs: del out.srcs  # can only schedule once
+    for out in lsi.outputs:
+      # TODO: how do i deal w this? maybe don't del here, it's fine if an LB is used twice anyway, maybe Buffer it early?
+      with contextlib.suppress(AttributeError): del out.srcs  # can only schedule once
     schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
     if logops and si.ast.op is UOps.SINK and not any(i.device.startswith("DISK:") for i in si.inputs):
       logops.write(str(si.ast).replace("\n", "").replace(" ", "")+"\n")
