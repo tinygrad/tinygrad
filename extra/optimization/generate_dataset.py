@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # extract asts from process replay artifacts
-import os, pickle, gzip, shutil
+import os, pickle
 from tinygrad.helpers import db_connection, getenv, VERSION
 from test.external.process_replay.process_replay import _run_differ
 
@@ -20,5 +20,3 @@ if __name__ == "__main__":
   conn = db_connection()
   row_count = conn.execute(f"SELECT COUNT(*) FROM '{TABLE_NAME}'").fetchone()[0]
   _run_differ(row_count, extract_ast)
-  with open(LOGOPS, "rb") as asts:
-    with gzip.open(f"{LOGOPS}.gz", "wb") as gz: shutil.copyfileobj(asts, gz)
