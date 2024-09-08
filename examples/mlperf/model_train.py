@@ -346,6 +346,16 @@ def train_retinanet():
   pass
 
 def train_unet3d():
+  """
+  Trains the UNet3D model.
+
+  Instructions:
+  1) Run the following script from the root folder of `tinygrad`:
+  ```./examples/mlperf/scripts/setup_kits19_dataset.sh```
+
+  2) To start training the model, run the following:
+  ```time PYTHONPATH=. WANDB=1 TRAIN_BEAM=3 FUSE_CONV_BW=1 GPUS=6 BS=6 MODEL=unet3d python3 examples/mlperf/model_train.py```
+  """
   from examples.mlperf.losses import dice_ce_loss
   from examples.mlperf.metrics import dice_score
   from examples.mlperf.dataloader import batch_load_unet3d
