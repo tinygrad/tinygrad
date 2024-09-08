@@ -1,10 +1,11 @@
 from typing import List
 import unittest, time
-from test.helpers import TestUOps
-from tinygrad import dtypes, Variable, Device
+from test.helpers import assert_equiv_uops
+from tinygrad import dtypes, Device
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, NOp, PatternMatcher, KernelInfo
+from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, KernelInfo
+from tinygrad.rewrite import NOp, PatternMatcher
 from tinygrad.codegen.lowerer import ast_to_uop
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, constant_folder, float4_folding
 from tinygrad.shape.shapetracker import ShapeTracker, View
@@ -13,7 +14,7 @@ simple_pm = PatternMatcher([
   (NOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
   (NOp.cvar('x') + NOp.cvar('y'), lambda x,y: UOp.const(dtypes.float, x.arg+y.arg)),
   (NOp.cvar('x') * NOp.cvar('y') * NOp.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
-  ((NOp.var('x') + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x + x.const(c1.arg+c2.arg)),
+  ((NOp.var('x') + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
 ])
 
 def to_uops_list(u:List[UOp]) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u)))
@@ -130,19 +131,19 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.src[1].arg, 3.0)
 
   def test_consts_go_last(self):
-    a = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)), arg=Variable('a', 0, 1))
-    b = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)), arg=Variable('b', 0, 1))
-    c = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)), arg=Variable('c', 0, 1))
-    d = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)), arg=Variable('d', 0, 1))
-    outs = [2+a, 2+a+d+3+b+c+4, UOp(UOps.ALU, a.dtype, src=(a.const(2), a), arg=BinaryOps.ADD), (4+d)+c+(2+a)+b]
+    a = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('a', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    b = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('b', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    c = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('c', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    d = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('d', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
+    outs = [2+a, 2+a+d+3+b+c+4, UOp(UOps.ALU, a.dtype, src=(a.const_like(2), a), arg=BinaryOps.ADD), (4+d)+c+(2+a)+b]
     for out in outs:
       sink = graph_rewrite(out, constant_folder)
       print(sink)
       self.assertEqual(sink.op, UOps.ALU)
       self.assertEqual(sink.src[1].op, UOps.CONST)
-      self.assertEqual(len([x for x in sink.sparents if x.op is UOps.CONST]), 3)
+      self.assertEqual(len([x for x in sink.sparents if x.op is UOps.CONST]), 1)
 
-class TestUOpGraph(TestUOps):
+class TestUOpGraph(unittest.TestCase):
   def test_add_constant_fold(self):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
@@ -154,7 +155,7 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(out.arg, 3.0)
 
   def test_where_same_fold(self):
-    v = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp(UOps.CONST, dtypes.int, (), 0), UOp(UOps.CONST, dtypes.int, (), 1)), arg=Variable('tmp', 0, 1))
+    v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('tmp', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
     c0 = UOp(UOps.CONST, dtypes.int, arg=0)
     vc = UOp(UOps.ALU, dtypes.bool, (v, c0), BinaryOps.CMPNE)
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
@@ -214,7 +215,7 @@ class TestUOpGraph(TestUOps):
     # possible
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
     xyzw = tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(4))
-    self.assert_equiv_uops(_test_vec(xyzw), val)
+    assert_equiv_uops(_test_vec(xyzw), val)
 
     # unaligned
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
@@ -242,65 +243,65 @@ class TestUOpGraph(TestUOps):
       vec = UOp(UOps.VECTORIZE, dtypes.float.vec(vec_size), tuple(consts))
       uops = to_uops_list([UOp(UOps.GEP, dtypes.float, (vec,), i) for i in range(vec_size)])
       for uop, const in zip(uops, consts):
-        self.assert_equiv_uops(uop, const)
+        assert_equiv_uops(uop, const)
 
   def test_wmma_vectorize_fold(self):
     for i in [2, 4, 8]:
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
       uops = to_uops_list([wmma])
-      self.assert_equiv_uops(uops[0], acc)
+      assert_equiv_uops(uops[0], acc)
       self.assertEqual(len(uops), 1)
 
     for i in [2, 4, 8]:
       var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i))
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
-      self.assert_equiv_uops(uops[0], acc)
+      assert_equiv_uops(uops[0], acc)
       self.assertEqual(len(uops), 1)
 
   def test_wmma_vectorize_no_fold(self):
     for i in [4, 8]:
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=Variable(f'tmp{j}', 0.0, 1.0)) for j in range(i//2)))
-      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
       uops = to_uops_list([wmma])
-      self.assert_equiv_uops(uops[-1], wmma)
+      assert_equiv_uops(uops[-1], wmma)
 
     for i in [4, 8]:
-      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=Variable(f'tmp{j}', 0.0, 1.0)) for j in range(i//2)))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+                tuple(UOp(UOps.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
-      self.assert_equiv_uops(uops[-1], wmma)
+      assert_equiv_uops(uops[-1], wmma)
 
     for i in [2, 4, 8]:
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (vec, var, acc))
       uops = to_uops_list([wmma])
-      self.assert_equiv_uops(uops[-1], wmma)
+      assert_equiv_uops(uops[-1], wmma)
 
     for i in [2, 4, 8]:
-      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable(f'tmp{i}', 0.0, 1.0))
+      var = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       vec = UOp(UOps.VECTORIZE, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=Variable('acc', 0.0, 1.0))
+      acc = UOp(UOps.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(UOps.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
-      self.assert_equiv_uops(uops[-1], wmma)
+      assert_equiv_uops(uops[-1], wmma)
 
   def test_cast_alu_fold(self):
     d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=0)
@@ -323,13 +324,13 @@ class TestUOpGraph(TestUOps):
     self.assertEqual(len([x for x in uops if x.op is UOps.CAST]), 1)
 
   def test_depth_2_const_fold(self):
-    v = UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)), arg=Variable('tmp', 0, 1))
+    v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=('tmp', UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)))
     c2 = UOp(UOps.CONST, dtypes.int, arg=2)
     c4 = UOp(UOps.CONST, dtypes.int, arg=4)
     vc = UOp(UOps.ALU, dtypes.int, (v, c2), BinaryOps.ADD)
     out = UOp(UOps.ALU, dtypes.int, (vc, c4), BinaryOps.ADD)
     uops = to_uops_list([out])
-    self.assertEqual(len(uops), 5)
+    self.assertEqual(len(uops), 3)
     out = uops[-1]
     self.assertEqual(out.op, UOps.ALU)
     self.assertEqual(out.arg, BinaryOps.ADD)
@@ -346,9 +347,9 @@ class TestUOpGraph(TestUOps):
     uops = to_uops_list([UOp(UOps.STORE, None, (glbl0, idx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
-    self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
+    assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
     # the gate and invalid value are deleted from ld1
-    self.assert_equiv_uops(ld0, UOp.load(glbl2, idx, dtype=dtypes.int))
+    assert_equiv_uops(ld0, UOp.load(glbl2, idx, dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
@@ -361,9 +362,9 @@ class TestUOpGraph(TestUOps):
     uops = to_uops_list([UOp(UOps.STORE, None, (glbl0, lidx, ld1+ld0))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 becomes the invalid value
-    self.assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
+    assert_equiv_uops(ld1, UOp.const(dtypes.int, 2))
     # the gate and invalid value are deleted from ld1
-    self.assert_equiv_uops(ld0, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
+    assert_equiv_uops(ld0, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
 
   def test_fold_gated_store(self):
     glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
@@ -375,7 +376,7 @@ class TestUOpGraph(TestUOps):
     uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len(uops), 4)
-    self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
+    assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
 
   def test_asserts_bad_gate(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
@@ -574,8 +575,8 @@ class TestLoadStoreFolder(unittest.TestCase):
 
   def test_simple_load_dont_fold_different_gated(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
-    gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g1")
-    gate2 = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g2")
+    gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg=("g1", UOp.const(dtypes.bool, False), UOp.const(dtypes.bool, True)))
+    gate2 = UOp(UOps.DEFINE_VAR, dtypes.bool, arg=("g2", UOp.const(dtypes.bool, False), UOp.const(dtypes.bool, True)))
     load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate if i == 0 else gate2)) for i in range(4)]
     sink = UOp(UOps.EXPAND, dtypes.float, tuple(load), ((0,4),))
     sink = float4_rewrite(sink)
@@ -590,7 +591,7 @@ class TestLoadStoreFolder(unittest.TestCase):
 
   def test_simple_store_fold_gate(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
-    gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g1")
+    gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg=("g1", UOp.const(dtypes.bool, False), UOp.const(dtypes.bool, True)))
     load = [UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(UOps.SINK, None, tuple(load))
     sink = float4_rewrite(sink)
@@ -601,8 +602,8 @@ class TestLoadStoreFolder(unittest.TestCase):
 
   def test_simple_store_dont_fold(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
-    gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g1")
-    gate2 = UOp(UOps.DEFINE_VAR, dtypes.bool, arg="g2")
+    gate = UOp(UOps.DEFINE_VAR, dtypes.bool, arg=("g1", UOp.const(dtypes.bool, False), UOp.const(dtypes.bool, True)))
+    gate2 = UOp(UOps.DEFINE_VAR, dtypes.bool, arg=("g2", UOp.const(dtypes.bool, False), UOp.const(dtypes.bool, True)))
     load = [UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate if i == 0 else gate2)) for i in range(4)]
     sink = UOp(UOps.SINK, None, tuple(load))
     sink = float4_rewrite(sink)
@@ -611,7 +612,7 @@ class TestLoadStoreFolder(unittest.TestCase):
 
 def gate_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + reducer)
 
-class TestIFUOps(TestUOps):
+class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
     gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
     sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float), (), ("smem", 4))
@@ -627,7 +628,7 @@ class TestIFUOps(TestUOps):
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
-    self.assert_equiv_uops(if_uops[0].src[0], gate)
+    assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
 
@@ -645,7 +646,7 @@ class TestIFUOps(TestUOps):
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
-    self.assert_equiv_uops(if_uops[0].src[0], gate)
+    assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
 
@@ -661,7 +662,7 @@ class TestIFUOps(TestUOps):
     sink = gate_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
-    self.assert_equiv_uops(if_uops[0].src[0], gate)
+    assert_equiv_uops(if_uops[0].src[0], gate)
     for st in sink.src:
       self.assertEqual(len(st.src), 3)
 

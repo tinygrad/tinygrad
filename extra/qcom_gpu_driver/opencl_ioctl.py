@@ -1,3 +1,4 @@
+# type: ignore
 import ctypes, ctypes.util, struct, fcntl, re
 from hexdump import hexdump
 import pathlib, sys
