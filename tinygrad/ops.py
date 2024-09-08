@@ -99,7 +99,7 @@ class UOps(Enum):
   CONTRACT = auto()
   SHAPETRACKER = auto()
   """
-  Defines the ShapeTracker for a buffer UOp `UOps.LOAD`, `UOps.STORE` or `UOps.CONST`.
+  Defines the ShapeTracker for a buffer UOp `UOps.LOAD`, `UOps.STORE` or `UOps.VALID`.
 
   - **`dtype`**: `None`
   - **`src`**: `Tuple[]`
@@ -169,13 +169,21 @@ class UOps(Enum):
 
   - **`dtype`**: The scalar DType of the value.
 
-  - **`src`**:
-    The scheduler creates a CONST with a single SHAPETRACKER UOp src: `Tuple[UOp]`.
-
-    The Lowerer replaces the SHAPETRACKER with an empty src.
-    It uses the ShapeTracker valid to create a `WHERE` UOp mask with sources: `(The actual CONST UOp, CONST 0, 0.0 or False)`
+  - **`src`**: `Tuple[]`
 
   - **`arg`**: The value.
+  """
+  VALID = auto()
+  """
+  This is the first argument in a masked CONST.
+
+  - **`dtype`**: `dtypes.bool`
+  - **`src`**:
+    `Tuple[UOp]`
+      - UOps.SHAPETRACKER
+  - **`arg`**: `None`
+
+  A masked CONST is defined as `valid.where(value, 0)`.
   """
   SPECIAL = auto()
   NOOP = auto()
@@ -319,7 +327,6 @@ class UOps(Enum):
   # ops that are not graph nodes
   ENDRANGE = auto()
   ENDIF = auto()
-  VALID = auto()
 
 BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.VALID}
 
