@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, time, array, decimal
+import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal
 from typing import Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
 from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
@@ -66,7 +66,6 @@ assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
 
-
 class NVSignal(HCQSignal):
   def __init__(self, value=0):
     self._signal = NVDevice.signals_pool.pop()
@@ -76,11 +75,6 @@ class NVSignal(HCQSignal):
   def _get_value(self) -> int: return self._signal[0]
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(1000)
   def _set_value(self, new_value:int): self._signal[0] = new_value
-  def wait(self, value:int, timeout:int=10000):
-    start_time = time.time() * 1000
-    while time.time() * 1000 - start_time < timeout:
-      if self._signal[0] >= value: return
-    raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
 class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
   def __del__(self):
