@@ -136,8 +136,9 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
 def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> Optional[ShapeTracker]:
   if (st:=uop_sts.get(uop)): return st
   if uop.op in BUFFER_UOPS: return uop.st_arg
-  src_sts = [xst for x in uop.src if (xst:=get_output_st(x, uop_sts)) is not None]
-  if len(src_sts) != len(uop.src) or not all_same([x.shape for x in src_sts]): return None
+  src = [x for x in uop.src if x.op not in {UOps.CONST, UOps.DEFINE_VAR}]
+  src_sts = [xst for x in src if (xst:=get_output_st(x, uop_sts)) is not None]
+  if len(src_sts) != len(src) or not all_same([x.shape for x in src_sts]): return None
   uop_sts[uop] = st = ShapeTracker.from_shape(src_sts[0].reduce(uop.arg[1])) if uop.op is UOps.REDUCE_AXIS else src_sts[0]
   return st
 
