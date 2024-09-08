@@ -660,8 +660,6 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   def find_gate(x:UOp) -> Optional[UOp]:
     if x.op is UOps.IF: return x
     return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-  # if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
-  # return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
   if len(root.src) == 4 and (sub_gate:=find_gate(root.src[2])) and sub_gate.src[0] is root.src[-1].src[0]:
     return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
   return None
