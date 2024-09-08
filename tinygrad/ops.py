@@ -338,6 +338,15 @@ class UOp(MathTrait):
   arg: Any = None
   def __hash__(self): return id(self)
   @functools.cached_property
+  def st(self) -> Optional[ShapeTracker]:
+    from tinygrad.shape.shapetracker import ShapeTracker
+    if len(self.src) == 0: return None
+    if self.op in BUFFER_UOPS: return self.st_arg
+    src = [x for x in self.src if x.op not in {UOps.CONST, UOps.DEFINE_VAR}]
+    src_sts = [x.st for x in src if x.st is not None]
+    if len(src_sts) != len(src) or not all_same([x.shape for x in src_sts]): return None
+    return ShapeTracker.from_shape(src_sts[0].reduce(self.arg[1])) if self.op is UOps.REDUCE_AXIS else src_sts[0]
+  @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg[0]) if self.op is not UOps.ALU else \
