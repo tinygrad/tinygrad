@@ -22,7 +22,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is UOps.STORE]
   inbufs = [cast(LazyBuffer,x.lazydata).base.buffer for x in inputs]
   src = Device[Device.DEFAULT].renderer.render("test", uops)
-  ei = CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops, local_size=None))
+  ei = CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops, local_size=local_size))
   ei.exec(outbufs+inbufs)
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
 
