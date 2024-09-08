@@ -304,66 +304,66 @@ class Kernel:
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
   def _apply_tc_opt(self, use_tensor_cores: int, axis: int, opt_level: int) -> bool:
-          def amd_hip_optimization(tc_opts, tc):
-              self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2] - self.first_reduce, tc.dims[2]), append_opt=False)
-              for (tc_dim, tc_amt) in tc.threads:
-                  self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-              for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0] == dim] for dim in range(2)]]):
-                  if tc.dims[i] > sz:
-                      self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i] // sz), append_opt=False)
-      
-          def metal_intel_optimization(tc_opts, tc):
-              self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2] - self.first_reduce, tc.dims[2]), append_opt=False)
-              for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0] == dim] for dim in range(2)]]):
-                  if tc.dims[i] > sz:
-                      self.apply_opt(Opt(OptOps.UPCAST, tc.opts.axes[i], tc.dims[i] // sz), append_opt=False)
-              for (tc_dim, tc_amt) in tc.threads:
-                  self.apply_opt(Opt(OptOps.LOCAL, tc.opts.axes[tc_dim], tc_amt), append_opt=False)
-      
-          def clang_optimization(tc_opts, tc):
-              for (i, sz) in tc.threads:
-                  self.apply_opt(Opt(OptOps.UPCAST, tc.opts.axes[i], sz), append_opt=False)
-      
-          def cuda_nv_optimization(tc_opts, tc):
-              self.apply_opt(Opt(OptOps.UNROLL, tc.opts.axes[2] - self.first_reduce, 8), append_opt=False)
-              self.apply_opt(Opt(OptOps.UNROLL, tc.opts.axes[2] - self.first_reduce, 2), append_opt=False)
-              self.apply_opt(Opt(OptOps.UPCAST, tc.opts.axes[1], 2), append_opt=False)
-              self.apply_opt(Opt(OptOps.UPCAST, tc.opts.axes[0], 2), append_opt=False)
-              for (tc_dim, tc_amt) in tc.threads:
-                  self.apply_opt(Opt(OptOps.LOCAL, tc.opts.axes[tc_dim], tc_amt), append_opt=False)
-      
-          device_optimizations = {
-              "AMD": amd_hip_optimization,
-              "HIP": amd_hip_optimization,
-              "METAL": metal_intel_optimization,
-              "INTEL": metal_intel_optimization,
-              "CLANG": clang_optimization,
-              "CUDA": cuda_nv_optimization,
-              "NV": cuda_nv_optimization
-          }
-      
-          if use_tensor_cores and (self.opts.has_local or (self.opts.device == "CLANG" and AMX)) and self.reduceop is not None \
-                  and self.reduceop.arg[0] is BinaryOps.ADD:
-              for tc in self.opts.tensor_cores:
-                  tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
-                  assert all_same(tensor_core_opts)
-                  if tensor_core_opts[0] is None:
-                      continue
-                  self.tensor_core_opts = tc_opts = tensor_core_opts[0]
-      
-                  try:
-                      for axis, dim in tc_opts.axis_pads:
-                          self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False)
-                  except KernelOptError:
-                      continue
-      
-                  if self.opts.device in device_optimizations:
-                      device_optimizations[self.opts.device](tc_opts, tc)
-      
-                  self.tensor_core = tc
-                  self.use_tensor_cores = use_tensor_cores
-                  return True
-          return False
+      def amd_hip_optimization(tc_opts, tc):
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2] - self.first_reduce, tc.dims[2]), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+              self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0] == dim] for dim in range(2)]]):
+              if tc.dims[i] > sz:
+                  self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i] // sz), append_opt=False)
+  
+      def metal_intel_optimization(tc_opts, tc):
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2] - self.first_reduce, tc.dims[2]), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0] == dim] for dim in range(2)]]):
+              if tc.dims[i] > sz:
+                  self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i] // sz), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+              self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+  
+      def clang_optimization(tc_opts, tc):
+          for (i, sz) in tc.threads:
+              self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], sz), append_opt=False)
+  
+      def cuda_nv_optimization(tc_opts, tc):
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2] - self.first_reduce, 8), append_opt=False)
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2] - self.first_reduce, 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[0], 2), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+              self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+  
+      device_optimizations = {
+          "AMD": amd_hip_optimization,
+          "HIP": amd_hip_optimization,
+          "METAL": metal_intel_optimization,
+          "INTEL": metal_intel_optimization,
+          "CLANG": clang_optimization,
+          "CUDA": cuda_nv_optimization,
+          "NV": cuda_nv_optimization
+      }
+  
+      if use_tensor_cores and (self.opts.has_local or (self.opts.device == "CLANG" and AMX)) and self.reduceop is not None \
+              and self.reduceop.arg[0] is BinaryOps.ADD:
+          for tc in self.opts.tensor_cores:
+              tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
+              assert all_same(tensor_core_opts)
+              if tensor_core_opts[0] is None:
+                  continue
+              self.tensor_core_opts = tc_opts = tensor_core_opts[0]
+  
+              try:
+                  for axis, dim in tc_opts.axis_pads:
+                      self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False)
+              except KernelOptError:
+                  continue
+  
+              if self.opts.device in device_optimizations:
+                  device_optimizations[self.opts.device](tc_opts, tc)
+  
+              self.tensor_core = tc
+              self.use_tensor_cores = use_tensor_cores
+              return True
+      return False
 
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts: Optional[List[Opt]] = None, axis: int = 0, tc_opt: Optional[int] = None) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel.  If one exists and applies properly, return true, otherwise return false.
