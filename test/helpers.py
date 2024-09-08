@@ -62,9 +62,10 @@ def assert_equiv_uops(u1:UOp, u2:UOp) -> None:
     print_diff(u1, u2)
     raise AssertionError("uops aren't equal.")
 
-def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional[ShapeTracker]=None) -> UOp:
-  st = st if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)
-  return UOp(UOps.VALID, dtypes.bool, (st.to_uop(),)).where(UOp.const(dtype, val), UOp.const(dtype, 0))
+def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional[ShapeTracker]=None, st_src:Optional[Tuple[UOp]]=None) -> UOp:
+  if st_src is None:
+    st_src = st.to_uop() if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),
+  return UOp(UOps.VALID, dtypes.bool, st_src).where(UOp.const(dtype, val), UOp.const(dtype, 0))
 
 T = TypeVar("T")
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
