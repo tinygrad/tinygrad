@@ -80,7 +80,8 @@ def graph_uops(uops:List[UOp]):
   G = nx.DiGraph()
   for u in uops:
     if u.op in {UOps.ENDRANGE, UOps.ENDIF}: continue
-    G.add_node(uops.index(u), label=f"{str(u.op)[5:]}{(' '+str(u.arg).replace(':', '')) if u.arg is not None else ''}\n{str(u.dtype)}",
+    def farg(x, wrap=80): return x if len(x) <= wrap else (x[0:wrap] + "\n" + farg(x[wrap:]))
+    G.add_node(uops.index(u), label=f"{str(u.op)[5:]}{(' '+farg(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}",
                style="filled", fillcolor=uops_colors.get(u.op, "#ffffff"))
     for v in u.src: G.add_edge(uops.index(v), uops.index(u))
   save_graph(G, f'{GRAPHPATH}.{graph_uops_cnt}.uops', '-Grankdir=LR')
