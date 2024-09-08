@@ -318,6 +318,14 @@ class TestSymbolic(unittest.TestCase):
     lidx3 = Variable("lidx3", 0, 1)
     self.helper_test_variable((gidx0+lidx2+lidx3)*4, 0, 80, "((gidx0*4)+(lidx2*4)+(lidx3*4))")
 
+  def test_variable_divmod(self):
+    start_pos = Variable("start_pos", 0, 127)
+    v = start_pos + 1
+    idx0 = Variable("idx0", 0, 2)
+    idx1 = Variable("idx1", 0, start_pos)
+    self.helper_test_variable((idx0*v+idx1)//v, 0, 2, "(idx0)")
+    self.helper_test_variable((idx0*v+idx1)%v, 0, start_pos, "idx1")
+
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
     # TODO: why are the negative tests broken? (even if we did support negative variables)
