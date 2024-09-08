@@ -5,11 +5,17 @@ import copy, time
 def clone(original:Tensor): return copy.copy(original)
 
 def get_item(tensor, indexer):
+  start = time.time()
   tensor[indexer]
+  end = time.time()
+  return end - start
 
 def set_item(tensor, indexer, val):
   pyt = clone(tensor)
+  start = time.time()
   pyt[indexer] = val
+  end = time.time()
+  return end - start
 
 reference = Tensor.arange(0., 160).reshape(4, 8, 5)
 reference_t = torch.arange(0., 160).view(4, 8, 5)
@@ -59,25 +65,10 @@ indices_to_test = [
 ]
 get_time, get_time_t, set_time, set_time_t = 0, 0, 0, 0
 
-start = time.time()
-for indexer in indices_to_test: get_item(reference, indexer)
-end = time.time()
-get_time += end - start
-
-start = time.time()
-for indexer in indices_to_test: get_item(reference_t, indexer)
-end = time.time()
-get_time_t += end - start
-
-start = time.time()
-for indexer in indices_to_test: set_item(reference, indexer, 212)
-end = time.time()
-set_time += end - start
-
-start = time.time()
-for indexer in indices_to_test: set_item(reference_t, indexer, 212)
-end = time.time()
-set_time_t += end - start
+for indexer in indices_to_test: get_time += get_item(reference, indexer)
+for indexer in indices_to_test: get_time_t += get_item(reference_t, indexer)
+for indexer in indices_to_test: set_time += set_item(reference, indexer, 212)
+for indexer in indices_to_test: set_time_t += set_item(reference_t, indexer, 212)
 
 reference = Tensor.arange(0., 1296).reshape(3, 9, 8, 6)
 reference_t = torch.arange(0., 1296).view(3, 9, 8, 6)
@@ -147,25 +138,10 @@ indices_to_test = [
     [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
 ]
 
-start = time.time()
-for indexer in indices_to_test: get_item(reference, indexer)
-end = time.time()
-get_time += end - start
-
-start = time.time()
-for indexer in indices_to_test: get_item(reference_t, indexer)
-end = time.time()
-get_time_t += end - start
-
-start = time.time()
-for indexer in indices_to_test: set_item(reference, indexer, 1333)
-end = time.time()
-set_time += end - start
-
-start = time.time()
-for indexer in indices_to_test: set_item(reference_t, indexer, 1333)
-end = time.time()
-set_time_t += end - start
+for indexer in indices_to_test: get_time += get_item(reference, indexer)
+for indexer in indices_to_test: get_time_t += get_item(reference_t, indexer)
+for indexer in indices_to_test: set_time += set_item(reference, indexer, 1333)
+for indexer in indices_to_test: set_time_t += set_item(reference_t, indexer, 1333)
 
 print(f"tinygrad get: {get_time}")
 print(f"torch get: {get_time_t}")
