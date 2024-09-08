@@ -303,47 +303,69 @@ class Kernel:
     if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
-  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
-    if use_tensor_cores and (self.opts.has_local or (self.opts.device == "CLANG" and AMX)) and self.reduceop is not None \
-      and self.reduceop.arg[0] is BinaryOps.ADD:
-      for tc in self.opts.tensor_cores:
-        tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
-        # can only fuse reduces with the same tc options
-        assert all_same(tensor_core_opts)
-        if tensor_core_opts[0] is None: continue
-        # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
-        self.tensor_core_opts = tc_opts = tensor_core_opts[0]
+  def _apply_tc_opt(self, use_tensor_cores: int, axis: int, opt_level: int) -> bool:
+      def amd_hip_optimization(tc_opts, tc):
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2] - self.first_reduce, tc.dims[2]), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+              self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0] == dim] for dim in range(2)]]):
+              if tc.dims[i] > sz:
+                  self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i] // sz), append_opt=False)
+  
+      def metal_intel_optimization(tc_opts, tc):
+          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2] - self.first_reduce, tc.dims[2]), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0] == dim] for dim in range(2)]]):
+              if tc.dims[i] > sz:
+                  self.apply_opt(Opt(OptOps.UPCAST, tc.opts.axes[i], tc.dims[i] // sz), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+              self.apply_opt(Opt(OptOps.LOCAL, tc.opts.axes[tc_dim], tc_amt), append_opt=False)
+  
+      def clang_optimization(tc_opts, tc):
+          for (i, sz) in tc.threads:
+              self.apply_opt(Opt(OptOps.UPCAST, tc.opts.axes[i], sz), append_opt=False)
+  
+      def cuda_nv_optimization(tc_opts, tc):
+          self.apply_opt(Opt(OptOps.UNROLL, tc.opts.axes[2] - self.first_reduce, 8), append_opt=False)
+          self.apply_opt(Opt(OptOps.UNROLL, tc.opts.axes[2] - self.first_reduce, 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.UPCAST, tc.opts.axes[1], 2), append_opt=False)
+          self.apply_opt(Opt(OptOps.UPCAST, tc.opts.axes[0], 2), append_opt=False)
+          for (tc_dim, tc_amt) in tc.threads:
+              self.apply_opt(Opt(OptOps.LOCAL, tc.opts.axes[tc_dim], tc_amt), append_opt=False)
+  
+      device_optimizations = {
+          "AMD": amd_hip_optimization,
+          "HIP": amd_hip_optimization,
+          "METAL": metal_intel_optimization,
+          "INTEL": metal_intel_optimization,
+          "CLANG": clang_optimization,
+          "CUDA": cuda_nv_optimization,
+          "NV": cuda_nv_optimization
+      }
+  
+      if use_tensor_cores and (self.opts.has_local or (self.opts.device == "CLANG" and AMX)) and self.reduceop is not None \
+              and self.reduceop.arg[0] is BinaryOps.ADD:
+          for tc in self.opts.tensor_cores:
+              tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
+              assert all_same(tensor_core_opts)
+              if tensor_core_opts[0] is None:
+                  continue
+              self.tensor_core_opts = tc_opts = tensor_core_opts[0]
+  
+              try:
+                  for axis, dim in tc_opts.axis_pads:
+                      self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False)
+              except KernelOptError:
+                  continue
+  
+              if self.opts.device in device_optimizations:
+                  device_optimizations[self.opts.device](tc_opts, tc)
+  
+              self.tensor_core = tc
+              self.use_tensor_cores = use_tensor_cores
+              return True
+      return False
 
-        # attempt to pad the tensor axes that require it
-        try:
-          for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
-        except KernelOptError: continue
-        if self.opts.device in {"AMD", "HIP"}:
-          # NOTE: AMD requires locals first
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
-            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
-        elif self.opts.device == "METAL" or self.opts.suffix == "INTEL":
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
-          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
-            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-        elif self.opts.device == "CLANG":
-          for (i, sz) in tc.threads: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], sz), append_opt=False)
-        elif self.opts.device in {"CUDA", "NV"}:
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
-          # NOTE: LOCALS and UPCAST can be swapped here. it doesn't seem faster
-          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
-          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[0], 2), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-        self.tensor_core = tc
-        self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
-        return True
-    return False
-
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None, axis:int=0, tc_opt:Optional[int]=None) -> bool:
+  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts: Optional[List[Opt]] = None, axis: int = 0, tc_opt: Optional[int] = None) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel.  If one exists and applies properly, return true, otherwise return false.
     Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
 
@@ -358,32 +380,41 @@ class Kernel:
       1: allows kernels with multiple reduce axes and also multiplication of UOps.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
-    if tc_opt is None: tc_opt = TC_OPT.value
-    if not self.opts.tensor_cores and use_tensor_cores != 2: return False
-    try: # check TC first and apply hand-coded opts if successful
-      self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
+    if tc_opt is None:
+        tc_opt = TC_OPT.value
+    if not self.opts.tensor_cores and use_tensor_cores != 2:
+        return False
 
-      if (tc_opts:=self.tensor_core_opts) is not None:
-        if extra_opts is not None:
-          for opt in extra_opts: self.apply_opt(opt)
-        else:
-          if (self.opts.device == "CLANG" and AMX): return True # skip hand-coded TC opts if CLANG, upcasting will make kernel slower
-          # hand-coded TC opts
-          def late_upcast_tc(tc_dim: int):
-            if tc_opts.axes_exist[tc_dim]:
-              ax_div = [upc for upc in [5,4,3,2,1] if self.full_shape[tc_opts.axes[tc_dim]]%upc == 0][0]
-              if ax_div != 1: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], ax_div))
-          late_upcast_tc(1) # attempt to upcast M
-          late_upcast_tc(0) # attempt to upcast N
+    try:
+        # Check TC first and apply hand-coded opts if successful
+        self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
 
-          if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
-            for upc in [4,2]:
-              if self.full_shape[tc_opts.axes[0]] % upc == 0:
-                self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
-                break
-      return True
+        if (tc_opts := self.tensor_core_opts) is not None:
+            if extra_opts is not None:
+                for opt in extra_opts:
+                    self.apply_opt(opt)
+            else:
+                if self.opts.device == "CLANG" and AMX:
+                    return True  # Skip hand-coded TC opts if CLANG, upcasting will make kernel slower
+
+                # Hand-coded TC opts
+                def late_upcast_tc(tc_dim: int):
+                    if tc_opts.axes_exist[tc_dim]:
+                        ax_div = next((upc for upc in [5, 4, 3, 2, 1] if self.full_shape[tc_opts.axes[tc_dim]] % upc == 0), 1)
+                        if ax_div != 1:
+                            self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], ax_div))
+
+                late_upcast_tc(1)  # Attempt to upcast M
+                late_upcast_tc(0)  # Attempt to upcast N
+
+                if self.tensor_core and tc_opts.axes_exist[0]:  # Attempt to local N
+                    for upc in [4, 2]:
+                        if self.full_shape[tc_opts.axes[0]] % upc == 0:
+                            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
+                            break
+        return True
     except KernelOptError:
-      return False
+        return False
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
