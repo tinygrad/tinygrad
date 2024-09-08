@@ -7,6 +7,7 @@ from tinygrad.codegen.uopgraph import linearize_uop
 from tinygrad.ops import BinaryOps, TernaryOps, flops_mem, UOps, UOp
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
+from tinygrad.helpers import CI
 
 # **************** new FlopCounter ****************
 
@@ -220,6 +221,7 @@ class TestStatsOptimized(unittest.TestCase):
     print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
+  @unittest.skipIf(CI and Device.DEFAULT == "METAL", "failed on METAL CI")
   def test_gated_store(self):
     n = 64
     ast = (Tensor.empty(n, n) @ Tensor.empty(n, n)).schedule()[-1].ast

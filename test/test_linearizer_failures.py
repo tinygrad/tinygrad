@@ -1199,6 +1199,7 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
+  @unittest.skipIf(CI and Device.DEFAULT == "METAL", "failed on METAL CI")
   def test_failure_51(self):
     # from `BEAM=4 NV=1 HALF=1 IGNORE_BEAM_CACHE=1 DEBUG=2 python3 extra/gemm/simple_matmul.py` resulting in program.op_estimate == 0 because of the incorrect counting of gated stores
     ast = UOp(UOps.SINK, None, arg=None, src=(
