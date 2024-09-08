@@ -1,5 +1,5 @@
 import sys, time
-from typing import Callable, Tuple, TypeVar
+from typing import Callable, Optional, Tuple, TypeVar
 import numpy as np
 from test.external.process_replay.helpers import print_diff
 from tinygrad import Tensor, Device, dtypes
@@ -62,9 +62,9 @@ def assert_equiv_uops(u1:UOp, u2:UOp) -> None:
     print_diff(u1, u2)
     raise AssertionError("uops aren't equal.")
 
-def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]) -> UOp:
-  return UOp(UOps.CONST, dtype, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),),
-             dtypes.as_const(val, dtype))
+def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional[ShapeTracker]=None) -> UOp:
+  st = st if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)
+  return UOp(UOps.CONST, dtype, (st.to_uop(),), dtypes.as_const(val, dtype))
 
 T = TypeVar("T")
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
