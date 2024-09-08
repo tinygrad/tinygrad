@@ -5,7 +5,6 @@ rm $LOGOPS
 test/external/process_replay/reset.py
 
 python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
-IMAGE=2 python3 test/test_ops.py
 STEPS=3 python3 examples/hlb_cifar10.py
 WINO=1 STEPS=3 python3 examples/hlb_cifar10.py
 python3 examples/stable_diffusion.py --noshow
@@ -23,6 +22,6 @@ JIT=2 BIG=1 MPS=1 python -m pytest test/test_jit.py
 JIT=2 BIG=1 MPS=1 python -m pytest test/test_speed_v_torch.py
 
 # extract, sort and uniq
-extra/optimization/generate_dataset.py
+extra/optimization/extract_dataset.py
 sort -u /tmp/ops > /tmp/sops	
 ls -lh /tmp/ops /tmp/sops	
