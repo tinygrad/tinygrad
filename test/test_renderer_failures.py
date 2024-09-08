@@ -16,8 +16,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], global_size=(1, 1, 1
   for x in inputs: x.realize()
   # NOTE: we only toposort the stores
   uops: List[UOp] = []
-  def _recursive_add(uop:UOp) -> List[UOp]:
-    return flatten([_recursive_add(x) for x in uop.src])+[uop]
+  def _recursive_add(uop:UOp) -> List[UOp]: return flatten([_recursive_add(x) for x in uop.src])+[uop]
   uops = dedup(flatten(_recursive_add(st) for st in stores))
   outbufs = [Buffer(Device.DEFAULT, prod(global_size), cast(DType,u.src[2].dtype), \
       initial_value=np.zeros(prod(global_size), dtype=_to_np_dtype(cast(DType,u.src[2].dtype))).data) for u in uops if u.op is UOps.STORE]
