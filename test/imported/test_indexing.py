@@ -639,7 +639,6 @@ class TestIndexing(unittest.TestCase):
 
     for indexer in indices_to_test:
       assert_get_eq(reference, indexer)
-
       assert_set_eq(reference, indexer, 1333)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
 
