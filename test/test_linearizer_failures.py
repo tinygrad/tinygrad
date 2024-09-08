@@ -8,7 +8,7 @@ from tinygrad import Device, dtypes, Tensor
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import CI
 from test.external.fuzz_linearizer import compare_linearizer
-from test.helpers import is_dtype_supported
+from test.helpers import ast_const, is_dtype_supported
 
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -1191,10 +1191,8 @@ class TestLinearizerFailures(unittest.TestCase):
                   UOp(UOps.LOAD, dtypes.int, arg=None, src=(
                     UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=3, src=()),
                     UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 20, 20, 20), strides=(0, 0, 0, 1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-                UOp(UOps.CONST, dtypes.bool, arg=True, src=(
-                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 20, 20, 20), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),
-          UOp(UOps.CONST, dtypes.bool, arg=True, src=(
-            UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1, 20, 1, 20), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
+                ast_const(dtypes.bool, True, (1, 1, 20, 20, 20)),)),)),)),
+          ast_const(dtypes.bool, True, (1, 1, 20, 1, 20)),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=1, amt=2)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
