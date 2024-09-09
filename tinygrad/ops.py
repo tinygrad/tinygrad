@@ -411,35 +411,40 @@ class UOp(MathTrait):
         if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
+  def resolve_const(self):
+    x = graph_rewrite(self, simple_constant_folder)
+    assert x.op is UOps.CONST, f"{x} didn't resolve to const"
+    return x
   @property
   def vmin(self) -> UOp: return self._min_max[0]
   @property
   def vmax(self) -> UOp: return self._min_max[1]
   @functools.cached_property
   def _min_max(self) -> Tuple[UOp, UOp]:
-    vmin, vmax = self._min_max_unfolded()
-    return graph_rewrite(vmin, simple_constant_folder), graph_rewrite(vmax, simple_constant_folder)
-  def _min_max_unfolded(self) -> Tuple[UOp, UOp]:
+    vmin, vmax = self._min_max_unresolved()
+    return vmin.resolve_const(), vmax.resolve_const()
+  def _min_max_unresolved(self) -> Tuple[UOp, UOp]:
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2] if isinstance(self.arg[2].arg, int) else _max_bound(self.dtype)
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return self.const_like(0), self.const_like(self.arg[1]-1) if isinstance(self.arg[1], int) else _max_bound(self.dtype)
     if self.op is UOps.CONST: return self, self
-    if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
-      s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
-      if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
+    if self.op is UOps.ALU and cast(DType, self.dtype).count == 1 and self.arg in BinaryOps:
+      s0_min, s0_max = self.src[0]._min_max
+      s1_min, s1_max = self.src[1]._min_max
+      if self.arg is BinaryOps.ADD: return s0_min+s1_min, s0_max+s1_max
       if self.arg is BinaryOps.MUL:
-        Lmin, Lmax = (s1.vmin.lt(0).where(s0.vmax, s0.vmin), s1.vmin.lt(0).where(s0.vmin, s0.vmax))
-        Rmin, Rmax = (s0.vmin.lt(0).where(s1.vmax, s1.vmin), s0.vmin.lt(0).where(s1.vmin, s1.vmax))
+        Lmin, Lmax = (s1_min.lt(0).where(s0_max, s0_min), s1_min.lt(0).where(s0_min, s0_max))
+        Rmin, Rmax = (s0_min.lt(0).where(s1_max, s1_min), s0_min.lt(0).where(s1_min, s1_max))
         # if both negative, we return the bounds
-        return (s0.vmin.lt(0) & s1.vmin.lt(0)).where(_min_bound(self.dtype), Lmin*Rmin), \
-               (s0.vmin.lt(0) & s1.vmin.lt(0)).where(_max_bound(self.dtype), Lmax*Rmax)
-      if self.arg is BinaryOps.MOD: return s1.vmin.lt(0).where(s1.vmin, self.const_like(0)), (s1.vmax-1)
-      if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
-        return s1.gt(0).where(s0.vmin//s1, -(s0.vmax//(-s1))), s1.gt(0).where(s0.vmax//s1, -(s0.vmin//(-s1)))
-      if self.arg is BinaryOps.MAX: return s0.vmin.max(s1.vmin), s0.vmax.max(s1.vmax)
-      if self.arg is BinaryOps.CMPLT: return (s0.vmax.lt(s1.vmin), s0.vmin.lt(s1.vmax))
+        return (s0_min.lt(0) & s1_min.lt(0)).where(_min_bound(self.dtype), Lmin*Rmin), \
+               (s0_min.lt(0) & s1_min.lt(0)).where(_max_bound(self.dtype), Lmax*Rmax)
+      if self.arg is BinaryOps.MOD: return s1_min.lt(0).where(s1_min, self.const_like(0)), (s1_max-1)
+      if self.arg is BinaryOps.IDIV and (s1:=self.src[1]).op is UOps.CONST:
+        return s1.gt(0).where(s0_min//s1, -(s0_max//(-s1))), s1.gt(0).where(s0_max//s1, -(s0_min//(-s1)))
+      if self.arg is BinaryOps.MAX: return s0_min.max(s1_min), s0_max.max(s1_max)
+      if self.arg is BinaryOps.CMPLT: return (s0_max.lt(s1_min), s0_min.lt(s1_max))
     return _min_bound(self.dtype), _max_bound(self.dtype)
 
 @dataclass(frozen=True)
