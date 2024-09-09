@@ -5,6 +5,8 @@
 import unittest
 import numpy as np
 from typing import List, Optional, Union, cast
+
+from torch import qr
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.dtype import PtrDType
@@ -13,7 +15,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
 from tinygrad.ops import graph_rewrite
-from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, reduceop_fusor, st_fixup, ScheduleItem
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -1744,6 +1746,27 @@ class TestScheduleRewrite(unittest.TestCase):
     b = Tensor.empty((), dtype=dtypes.int).realize()
     CompiledRunner(p).exec([b.lazydata.buffer, a.lazydata.buffer])
     expected_out = (a.numpy() + a.numpy().sum()).sum()
+    np.testing.assert_equal(b.numpy(), expected_out)
+
+  def test_single_swizzle(self):
+    # ast in tensor style
+    a = Tensor.randint(4,).realize()
+    expected_out = a.numpy().sum(0)+1
+    # LazyBuffer to pre-rewrite AST
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+    ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((4,)).to_uop()))
+    r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0,)))
+    swizzle_r = UOp(UOps.SWIZZLE, dtypes.int, (r,), unwrap(r.st).reshape(()))
+    const = ast_const(dtypes.int, 1, ())
+    alu = swizzle_r+const
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu,),),))
+    # graph rewrite
+    sink = graph_rewrite(sink, reduceop_fusor)
+    # verify output
+    k = Kernel(sink)
+    p = k.to_program()
+    b = Tensor.empty((1,), dtype=dtypes.int).realize()
+    CompiledRunner(p).exec([b.lazydata.buffer, a.lazydata.buffer])
     np.testing.assert_equal(b.numpy(), expected_out)
 
 if __name__ == '__main__':
