@@ -17,9 +17,6 @@ from tinygrad.shape.view import View, strides_for_shape
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
 
-# optionally log the ops to disk
-logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
-
 # *** ScheduleItem return type ***
 
 @dataclass(frozen=True)
@@ -471,9 +468,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, lsi.var_vals])
     for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
-    if logops and si.ast.op is UOps.SINK and not any(i.device.startswith("DISK:") for i in si.inputs):
-      logops.write(str(si.ast).replace("\n", "").replace(" ", "")+"\n")
+    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
     for x in graph[lsi]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
