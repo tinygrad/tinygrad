@@ -406,23 +406,23 @@ class UOp(MathTrait):
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
   @property
-  def vmin(self) -> UOp:
-    return x if (x:=self._min_max_folded[0]) is not None and not math.isnan(x.arg) else self.const_like(dtypes.min(cast(DType, self.dtype)))
+  def vmin(self) -> UOp: return self._min_max[0]
   @property
-  def vmax(self) -> UOp:
-    return x if (x:=self._min_max_folded[1]) is not None and not math.isnan(x.arg) else self.const_like(dtypes.max(cast(DType, self.dtype)))
+  def vmax(self) -> UOp: return self._min_max[1]
   @functools.cached_property
-  def _min_max_folded(self) -> Tuple[Optional[UOp], Optional[UOp]]:
-    from tinygrad.codegen.uopgraph import graph_rewrite, constant_folder # TODO: this import is terrible
-    vmin, vmax = self._min_max()
-    return graph_rewrite(vmin, constant_folder) if vmin is not None else vmin, graph_rewrite(vmax, constant_folder) if vmax is not None else vmax
-  def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
-    if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2] if isinstance(self.arg[2].arg, int) else None
+  def _min_max(self) -> Tuple[UOp, UOp]:
+    from tinygrad.codegen.uopgraph import graph_rewrite, simple_constant_folder # TODO: this import is terrible
+    vmin, vmax = self._min_max_unfolded()
+    return graph_rewrite(vmin, simple_constant_folder), graph_rewrite(vmax, simple_constant_folder)
+  def _min_bound(self) -> UOp: return self.const_like(dtypes.min(cast(DType, self.dtype)))
+  def _max_bound(self) -> UOp: return self.const_like(dtypes.max(cast(DType, self.dtype)))
+  def _min_max_unfolded(self) -> Tuple[UOp, UOp]:
+    if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2] if isinstance(self.arg[2].arg, int) else self._max_bound()
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
-    if self.op is UOps.SPECIAL: return self.const_like(0), self.const_like(self.arg[1]-1) if isinstance(self.arg[1], int) else None
+    if self.op is UOps.SPECIAL: return self.const_like(0), self.const_like(self.arg[1]-1) if isinstance(self.arg[1], int) else self._max_bound()
     if self.op is UOps.CONST: return self, self
-    if self.op is UOps.ALU:
+    if self.op is UOps.ALU and False:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
       if self.arg is BinaryOps.ADD: return (s0.vmin+s1.vmin), (s0.vmax+s1.vmax)
       if self.arg is BinaryOps.MUL:
@@ -434,7 +434,9 @@ class UOp(MathTrait):
         return s1.gt(0).where(s0.vmin//s1, -(s0.vmax//(-s1))), s1.gt(0).where(s0.vmax//s1, -(s0.vmin//(-s1)))
       if self.arg is BinaryOps.MAX: return s0.vmin.max(s1.vmin), s0.vmax.max(s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax.lt(s1.vmin), s0.vmin.lt(s1.vmax))
-    return None, None
+
+    # fallthrough
+    return self._min_bound(), self._max_bound()
 
 @dataclass(frozen=True)
 class KernelInfo:
