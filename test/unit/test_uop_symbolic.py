@@ -292,6 +292,20 @@ class TestSymbolic(unittest.TestCase):
   def test_lt_sum_remove(self):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6) + 2, 3), 0, 1, "(a<1)")
 
+  def test_lt_simple_factor(self):
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6+Variable("b", 0, 6)*6, 8), 0, 1,
+                              "(((a*3)+(b*3))<4)")
+
+  @unittest.expectedFailure
+  def test_lt_sum_factor_rhs_partial(self):
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8, 4), 0, 1,
+                              "(((a*3)+(b*2)+(c*4))<2)")
+
+  @unittest.expectedFailure
+  def test_lt_sum_factor_rhs_all(self):
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8, 2), 0, 1,
+                              "(((a*3)+(b*2)+(c*4))<1)")
+
   def test_and_fold(self):
     self.helper_test_variable(Node.ands([NumNode(0), Variable("a", 0, 1)]), 0, 0, "0")
 
