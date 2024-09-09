@@ -165,11 +165,18 @@ def swizzle_reduceop(input_st:ShapeTracker, swizzle:ShapeTracker, axis:Tuple[int
 
 # ***** reduceop fusor *****
 
-def push_swizzle_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
+def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
   if swizzle.arg.contiguous: return None
   rsrc = reduceop.src[0]
   new_input_st, new_axis = swizzle_reduceop(unwrap(rsrc.st), swizzle.arg, reduceop.arg[1])
-  return UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda _:new_input_st, {}),), (reduceop.arg[0], new_axis))
+  return UOp(UOps.SWIZZLE, reduceop.dtype, (UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda _:new_input_st, {}),),
+                                                (reduceop.arg[0], new_axis)),), ShapeTracker.from_shape(swizzle.arg.shape))
+
+def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
+  assert swizzle.arg.contiguous, "can't push a non contiguous SWIZZLE down to STORE"
+  assert prod(swizzle.arg.shape) == prod(unwrap(swizzle.src[0].st).shape), "can't push expands down to STORE"
+  return UOp(UOps.SWIZZLE, root.dtype, (UOp(UOps.REDUCE_AXIS, root.dtype, swizzle.src, root.arg),),
+             ShapeTracker.from_shape(unwrap(swizzle.st).reduce(root.arg[1])))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
@@ -177,7 +184,7 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   new_axis: Tuple[int, ...] = root.arg[1]+first_reduce.arg[1]
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], new_axis))
 
-def swizzle_elementwise_child(root:UOp) -> Optional[UOp]:
+def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   swizzles = [x for x in root.src if x.op is UOps.SWIZZLE]
   if len(swizzles) == 0: return None
   assert all_same([(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles])
@@ -188,8 +195,12 @@ def swizzle_elementwise_child(root:UOp) -> Optional[UOp]:
   return ret if ret.op is UOps.STORE else UOp(UOps.SWIZZLE, None, (ret,), ShapeTracker.from_shape(sw_shape))
 
 reduceop_fusor = PatternMatcher([
-  (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_through_reduce),
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), swizzle_elementwise_child),
+  # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
+  (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
+  # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
+  (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.SWIZZLE, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
+  # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_swizzle_down_through_elementwise),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
