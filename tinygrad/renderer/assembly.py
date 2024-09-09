@@ -176,7 +176,7 @@ class PTXRenderer(Renderer):
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.IF:
         kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
-        kk(f"bra ENDIF_{r[src[0]][1:]}_{uops.index(u)};")
+        kk(*self.render_bra(f"ENDIF_{r[src[0]][1:]}_{uops.index(u)}"))
         kk(f"IF_{r[src[0]][1:]}_{uops.index(u)}:")
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
