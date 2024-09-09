@@ -361,7 +361,6 @@ class UOp(MathTrait):
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
   def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
-  def sconst_like(self, b:ConstType|Variable): return type(self).const(self.dtype.scalar() if self.dtype is not None else None, b)
   @classmethod
   @functools.lru_cache(None)
   def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(dtype, b)
