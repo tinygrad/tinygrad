@@ -309,11 +309,12 @@ constant_folder = PatternMatcher([
     lambda x,c: lt_folding(x, c.arg) if 0 < c.arg and dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
   # ** div **
   # # div folding
-  #(NOp.var('x') // NOp.cvar('c'), lambda x,c:
-  # newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
+  (NOp.var('x') // NOp.cvar('c'), lambda x,c:
+   newx if not isinstance(c.arg, tuple) and 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
   # ** mod **
   # mod folding
-  #(NOp.var('x') % NOp.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  (NOp.var('x') % NOp.cvar('c'),
+   lambda x,c: newx if not isinstance(c.arg, tuple) and 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # mul mod
   ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1//c0))*c0 if c1.arg%c0.arg == 0 else None),
   # ** combine terms **
