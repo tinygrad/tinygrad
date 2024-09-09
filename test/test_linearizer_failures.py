@@ -8,7 +8,7 @@ from tinygrad import Device, dtypes, Tensor
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import CI
 from test.external.fuzz_linearizer import compare_linearizer
-from test.helpers import ast_const, is_dtype_supported
+from test.helpers import is_dtype_supported, ast_const
 
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
