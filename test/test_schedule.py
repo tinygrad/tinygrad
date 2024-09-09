@@ -12,12 +12,12 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
-from tinygrad.rewrite import graph_rewrite
+from tinygrad.ops import graph_rewrite
 from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup, ScheduleItem
 from tinygrad.engine.realize import CompiledRunner, run_schedule
-from test.helpers import assert_equiv_uops, is_dtype_supported, Context, timeit
+from test.helpers import assert_equiv_uops, ast_const, is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
 
@@ -1666,7 +1666,7 @@ class TestScheduleRewrite(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
     ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
-    r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+    r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, reduceop_fusor)
     with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
@@ -1685,7 +1685,7 @@ class TestScheduleRewrite(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
     ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
-    for _ in range(24): r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+    for _ in range(24): r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
     with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
@@ -1701,7 +1701,7 @@ class TestScheduleRewrite(unittest.TestCase):
       bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
       ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
       r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
-      for _ in range(sz): r = r + UOp(UOps.CONST, dtypes.int, (ShapeTracker.from_shape(()).to_uop(),), 2)
+      for _ in range(sz): r = r + ast_const(dtypes.int, 2, ())
       sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
       rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
       with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)

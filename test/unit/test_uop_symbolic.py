@@ -23,11 +23,13 @@ def render(self) -> Tuple[str, ConstType, ConstType]:
     code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
   rewritten_uop = [uop for uop in uops if uop.op is UOps.STORE][0].src[-1]
   fxn = TestRenderer().render("", uops)
-  return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin.arg, rewritten_uop.vmax.arg
+  return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin, rewritten_uop.vmax
 
 def NumNode(val): return UOp.const(dtypes.int, val)
 def Variable(expr, nmin, nmax):
-  return UOp(UOps.DEFINE_VAR, dtypes.int, arg=(expr, UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)))
+  vmin = UOp.const(dtypes.int, nmin)
+  vmax = UOp.const(dtypes.int, nmax) if isinstance(nmax, int) else nmax
+  return UOp(UOps.DEFINE_VAR, dtypes.int, arg=(expr, vmin, vmax))
 class Node:
   @staticmethod
   def sum(ops): return functools.reduce(lambda x,y: x+y, ops)
@@ -290,6 +292,20 @@ class TestSymbolic(unittest.TestCase):
   def test_lt_sum_remove(self):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6) + 2, 3), 0, 1, "(a<1)")
 
+  def test_lt_simple_factor(self):
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6+Variable("b", 0, 6)*6, 8), 0, 1,
+                              "(((a*3)+(b*3))<4)")
+
+  @unittest.expectedFailure
+  def test_lt_sum_factor_rhs_partial(self):
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8, 4), 0, 1,
+                              "(((a*3)+(b*2)+(c*4))<2)")
+
+  @unittest.expectedFailure
+  def test_lt_sum_factor_rhs_all(self):
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8, 2), 0, 1,
+                              "(((a*3)+(b*2)+(c*4))<1)")
+
   def test_and_fold(self):
     self.helper_test_variable(Node.ands([NumNode(0), Variable("a", 0, 1)]), 0, 0, "0")
 
@@ -374,6 +390,15 @@ class TestSymbolic(unittest.TestCase):
     lidx2 = Variable("lidx2", 0, 12)
     lidx3 = Variable("lidx3", 0, 1)
     self.helper_test_variable((gidx0+lidx2+lidx3)*4, 0, 80, "((gidx0*4)+(lidx2*4)+(lidx3*4))")
+
+  @unittest.expectedFailure
+  def test_variable_divmod(self):
+    start_pos = Variable("start_pos", 0, 127)
+    v = start_pos + 1
+    idx0 = Variable("idx0", 0, 2)
+    idx1 = Variable("idx1", 0, start_pos)
+    self.helper_test_variable((idx0*v+idx1)//v, 0, 2, "(idx0)")
+    self.helper_test_variable((idx0*v+idx1)%v, 0, start_pos, "idx1")
 
   # *** below are uop_symbolic only
 
