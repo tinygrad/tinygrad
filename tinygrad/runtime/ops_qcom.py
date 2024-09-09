@@ -112,7 +112,7 @@ class QCOMComputeQueue(HWComputeQueue):
 
   def _exec(self, prg, args_state, global_size, local_size):
     global_size_mp = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size))) if local_size else global_size
-    self.cmd_idx_to_dims[len(self) - 1] = [global_size, local_size]
+    self.cmd_idx_to_dims[self._cur_cmd_idx()] = [global_size, local_size]
 
     self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
              qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1),
