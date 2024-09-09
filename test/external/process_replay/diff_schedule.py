@@ -40,27 +40,24 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
     seen_diffs.add(cache_key)
     changed += 1
     if CAPTURING_PROCESS_REPLAY: diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), [ref.ast.key, compare.ast.key]))
-    if not CI: print_si_diff(ref, compare)
+    if not CI: print_si_diff(si[0], si[1])
   if DEBUG >= 1: print(f"*** process replay: {changed} unique kernel{'s' if changed>1 else ''} changed")
   return changed
 
-def print_si_diff(ref:ScheduleItem, compare:ScheduleItem) -> None:
+def print_si_diff(si0:ScheduleItem, si1:ScheduleItem):
   logging.basicConfig(level=logging.INFO)
-  print_diff(ref.ast, compare.ast)
+  print_diff(si0.ast, si1.ast)
   # skip lowering/runtime error
-  with contextlib.suppress(Exception): lower_si_diff(ref, compare)
-
-def lower_si_diff(ref:ScheduleItem, compare:ScheduleItem) -> None:
-  if DEBUG >= 4:
-    ref_ei = lower_schedule_item(ref)
-    compare_ei = lower_schedule_item(compare)
-    assert isinstance(ref_ei.prg, CompiledRunner) and isinstance(compare_ei.prg, CompiledRunner)
-    print_diff(ref_ei.prg.p.src, compare_ei.prg.p.src)
+  with contextlib.suppress(Exception):
+    ei0 = lower_schedule_item(si0)
+    ei1 = lower_schedule_item(si1)
+    assert isinstance(ei0.prg, CompiledRunner) and isinstance(ei1.prg, CompiledRunner)
+    if DEBUG >= 4: print_diff(ei0.prg.p.src, ei1.prg.p.src)
     # TODO: create new Buffers for process replay to test correctness
     if getenv("TIMING"):
       with Context(DEBUG=2):
-        tm0 = ref_ei.run(wait=True)
-        tm1 = compare_ei.run(wait=True)
+        tm0 = ei0.run(wait=True)
+        tm1 = ei1.run(wait=True)
       assert tm0 is not None and tm1 is not None
       tm_diff = ((tm0 - tm1) / tm0) * 100
       if tm_diff > 0: print(colored(f"{tm_diff:.2f}% faster", "green"))
