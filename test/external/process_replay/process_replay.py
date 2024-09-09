@@ -82,18 +82,16 @@ def diff_kernel(offset:int) -> bool:
   cur.close()
   return bool(changed)
 
-# *** generic runner for executing fxn across all rows of a table in parallel
+# *** differ runners with multiprocessing
 
-def _pmap(row_count:int, fxn:Callable[[int], bool], maxtasksperchild:int=16) -> None:
-  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=maxtasksperchild) as pool:
+def _run_differ(row_count:int, differ:Callable[[int], bool]) -> None:
+  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=16) as pool:
     inputs = list(range(0, row_count, PAGE_SIZE))
-    changed: List[bool] = list(tqdm(pool.imap_unordered(fxn, inputs), total=len(inputs)))
+    changed: List[bool] = list(tqdm(pool.imap_unordered(differ, inputs), total=len(inputs)))
     pool.close()
     pool.join()
     pool.terminate()
     if any(changed) and ASSERT_DIFF: raise AssertionError("process replay detected changes")
-
-# *** process replay parallel differ runners
 
 def process_replay_schedule() -> None:
   conn = db_connection()
@@ -107,7 +105,7 @@ def process_replay_schedule() -> None:
     if row_count != 0: logging.info("***** schedule diff")
     conn.commit()
     cur.close()
-    _pmap(row_count, diff_schedule)
+    _run_differ(row_count, diff_schedule)
 
 def process_replay_kernel() -> None:
   conn = db_connection()
@@ -118,7 +116,7 @@ def process_replay_kernel() -> None:
     return None
   conn.commit()
   cur.close()
-  _pmap(row_count, diff_kernel)
+  _run_differ(row_count, diff_kernel)
 
 # *** main loop
 
