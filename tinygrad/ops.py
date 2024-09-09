@@ -435,7 +435,7 @@ class UOp(MathTrait):
         # if both negative, we return the bounds
         return (s0.vmin.lt(0) & s1.vmin.lt(0)).where(_min_bound(self.dtype), Lmin*Rmin), \
                (s0.vmin.lt(0) & s1.vmin.lt(0)).where(_max_bound(self.dtype), Lmax*Rmax)
-      if self.arg is BinaryOps.MOD and s1.vmin.arg > 0: return self.const_like(0), (s1.vmax-1)
+      if self.arg is BinaryOps.MOD: return s1.vmin.lt(0).where(s1.vmin, self.const_like(0)), (s1.vmax-1)
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
         return s1.gt(0).where(s0.vmin//s1, -(s0.vmax//(-s1))), s1.gt(0).where(s0.vmax//s1, -(s0.vmin//(-s1)))
       if self.arg is BinaryOps.MAX: return s0.vmin.max(s1.vmin), s0.vmax.max(s1.vmax)
