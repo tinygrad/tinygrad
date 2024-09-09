@@ -66,7 +66,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
         val, var_val = val.unbind()
         var_vals[val] = var_val
       else: assert isinstance(val, get_args(ConstType)), f"cannot create ConstBuffer with value {val}"
-      return UOp(UOps.CONST, dtype, (unbound_st.to_uop(),), val)
+      return UOp(UOps.VALID, dtypes.bool, (unbound_st.to_uop(),)).where(UOp.const(dtype, val), UOp.const(dtype, 0))
     # otherwise, it's a load and we add it to the inputs
     if buf in assign_targets and not (unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and \
         ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask))):
@@ -136,8 +136,9 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
 def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> Optional[ShapeTracker]:
   if (st:=uop_sts.get(uop)): return st
   if uop.op in BUFFER_UOPS: return uop.st_arg
-  src_sts = [xst for x in uop.src if (xst:=get_output_st(x, uop_sts)) is not None]
-  if len(src_sts) != len(uop.src) or not all_same([x.shape for x in src_sts]): return None
+  src = [x for x in uop.src if x.op not in {UOps.CONST, UOps.DEFINE_VAR}]
+  src_sts = [xst for x in src if (xst:=get_output_st(x, uop_sts)) is not None]
+  if len(src_sts) != len(src) or not all_same([x.shape for x in src_sts]): return None
   uop_sts[uop] = st = ShapeTracker.from_shape(src_sts[0].reduce(uop.arg[1])) if uop.op is UOps.REDUCE_AXIS else src_sts[0]
   return st
 

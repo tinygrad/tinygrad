@@ -1,5 +1,5 @@
 #!/bin/bash
-export LOGOPS=/tmp/sops
+export LOGOPS=/tmp/ops
 export RUN_PROCESS_REPLAY=1
 rm $LOGOPS
 test/external/process_replay/reset.py
