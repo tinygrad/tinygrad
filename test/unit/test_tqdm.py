@@ -218,8 +218,9 @@ class TestProgressBar(unittest.TestCase):
       time.sleep(0.01)
       tinytqdm.write(str(i))
       tqdm.write(str(i), file=tqdm_fp)
-      tinytqdm_out, tqdm_out = mock_stderr.getvalue().split("\r\033[K")[-1], tqdm_fp.getvalue().split(f"{i-1}\n")[-1]
-      self.assertEqual(tinytqdm_out, tqdm_out)
+      tinytqdm_out, tqdm_out = mock_stderr.getvalue(), tqdm_fp.getvalue()
+      self.assertEqual(tinytqdm_out.split("\r\033[K")[-1], tqdm_out.split(f"{i-1}\n")[-1])
+    self.assertEqual(tinytqdm_out, tinytqdm_out)
 
   def test_tqdm_perf(self):
     st = time.perf_counter()
