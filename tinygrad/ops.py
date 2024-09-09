@@ -427,7 +427,9 @@ class UOp(MathTrait):
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(cast(DType, self.dtype))
-    if self.op is UOps.CONST: return self.arg, self.arg
+    if self.op is UOps.CONST:
+      if isinstance(self.arg, tuple): return min(self.arg), max(self.arg)
+      return self.arg, self.arg
     if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
