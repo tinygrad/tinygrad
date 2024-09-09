@@ -324,6 +324,11 @@ BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
+@functools.lru_cache(None)
+def _min_bound(dtype:DType): return UOp.const(dtype.scalar(), dtypes.min(dtype))
+@functools.lru_cache(None)
+def _max_bound(dtype:DType): return UOp.const(dtype.scalar(), dtypes.max(dtype))
+
 @dataclass(frozen=True, eq=False)
 class UOp(MathTrait):
   op: UOps
@@ -414,14 +419,12 @@ class UOp(MathTrait):
   def _min_max(self) -> Tuple[UOp, UOp]:
     vmin, vmax = self._min_max_unfolded()
     return graph_rewrite(vmin, simple_constant_folder), graph_rewrite(vmax, simple_constant_folder)
-  def _min_bound(self) -> UOp: return self.sconst_like(dtypes.min(cast(DType, self.dtype)))
-  def _max_bound(self) -> UOp: return self.sconst_like(dtypes.max(cast(DType, self.dtype)))
   def _min_max_unfolded(self) -> Tuple[UOp, UOp]:
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2] if isinstance(self.arg[2].arg, int) else self._max_bound()
+    if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2] if isinstance(self.arg[2].arg, int) else _max_bound(self.dtype)
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
-    if self.op is UOps.SPECIAL: return self.const_like(0), self.const_like(self.arg[1]-1) if isinstance(self.arg[1], int) else self._max_bound()
+    if self.op is UOps.SPECIAL: return self.const_like(0), self.const_like(self.arg[1]-1) if isinstance(self.arg[1], int) else _max_bound(self.dtype)
     if self.op is UOps.CONST: return self, self
     if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
@@ -435,7 +438,7 @@ class UOp(MathTrait):
         return s1.gt(0).where(s0.vmin//s1, -(s0.vmax//(-s1))), s1.gt(0).where(s0.vmax//s1, -(s0.vmin//(-s1)))
       if self.arg is BinaryOps.MAX: return s0.vmin.max(s1.vmin), s0.vmax.max(s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax.lt(s1.vmin), s0.vmin.lt(s1.vmax))
-    return self._min_bound(), self._max_bound()
+    return _min_bound(self.dtype), _max_bound(self.dtype)
 
 @dataclass(frozen=True)
 class KernelInfo:
