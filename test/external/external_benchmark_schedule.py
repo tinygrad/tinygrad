@@ -1,7 +1,7 @@
 from typing import List
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor, Device
-from tinygrad.helpers import Profiling, Timing, getenv, BEAM, DEBUG, Context, ansilen
+from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen
 from tinygrad.ops import UOps
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.lowerer import ast_to_uop
@@ -33,6 +33,7 @@ if __name__ == "__main__":
             k = Kernel(ast)
             if BEAM:
               with Context(DEBUG=max(2, DEBUG.value)): k = beam_search(k, bufs_from_lin(k), BEAM.value)
+            elif NOOPT: pass
             else: k.hand_coded_optimizations()
             kernels.append(k)
 

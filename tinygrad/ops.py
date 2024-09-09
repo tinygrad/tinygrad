@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Any, DefaultDict, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Sequence, TypeVar
-import sys, time, math, operator, ctypes, struct, functools, hashlib, itertools
-from collections import defaultdict
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, Sequence, DefaultDict
+import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib
 from enum import Enum, auto
+from collections import defaultdict
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
 from tinygrad.helpers import pretty_print, prod, getenv, all_same
@@ -40,7 +40,7 @@ class MathTrait:
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
   def __neg__(self): return self.ne(True) if getattr(self, 'dtype', None) == dtypes.bool else self*(-1)
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
-  def __radd__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
+  def __radd__(self, x): return self.ufix(x).alu(BinaryOps.ADD, self)
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
   def __rsub__(self, x): return self.ufix(x).alu(BinaryOps.ADD, -self)
   def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
@@ -270,10 +270,10 @@ class UOps(Enum):
       - Buffer UOp `UOps.DEFINE_GLOBAL` or `UOps.DEFINE_LOCAL`.
       - Indexing UOp, can only return `dtypes.int32`.
       - Value to store.
-      - Gate UOp, can only return `dtypes.bool`.
+      - Gate UOp, can only return `dtypes.bool`. We rewrite this to an IF block in the end.
   - **`arg`**: `None`
   """
-  PHI = auto()
+  ASSIGN = auto()
   # control flow ops
   BARRIER = auto()
   """
@@ -284,14 +284,46 @@ class UOps(Enum):
   - **`arg`**: `None`
   """
   IF = auto()
+  """
+  Gates a single STORE to global memory. The IF block could also contain additional UOps the STORE depends on.
+
+  - **`dtype`**: `None`
+  - **`src`**:
+    `Tuple[UOp, UOp]`
+      - Gate UOp, can only return `dtypes.bool`
+      - The second UOp starts the gate block; All of its children are gated until the final STORE.
+  - **`arg`**: `None`
+
+  For example, a local reduce must only run on one thread.
+
+  The STORE's IF gate:
+  ```
+  UOp(UOps.IF, src=(
+    UOp(UOps.ALU, dtypes.bool, (...), BinaryOps.CMPNE),
+    UOp(UOps.BARRIER, None, (...))))
+  ```
+  The kernel:
+  ```
+  barrier(CLK_LOCAL_MEM_FENCE);
+  if (lidx0!=1) {
+    int acc1 = 0;
+    for (int ridx1 = 0; ridx1 < 16; ridx1++) {
+      int val1 = temp1[ridx1];
+      acc1 = (acc1+val1);
+    }
+    data0[0] = acc1;
+  }
+  ```
+  """
   RANGE = auto()
   # ops that are not graph nodes
   ENDRANGE = auto()
   ENDIF = auto()
+  VALID = auto()
 
-BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
+BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.VALID}
 
-END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
+END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
 @dataclass(frozen=True, eq=False)
 class UOp(MathTrait):
@@ -303,7 +335,7 @@ class UOp(MathTrait):
   @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
+    return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg[0]) if self.op is not UOps.ALU else \
             self.arg.value, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   @functools.cached_property
@@ -312,11 +344,16 @@ class UOp(MathTrait):
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self):
     return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else repr(self.arg) if isinstance(self.arg, Variable) else self.arg
+  def commutative(self) -> bool:
+    return (self.op is UOps.ALU and \
+      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
   # *** uop syntactic sugar
+  @property
+  def st_loc(self) -> int: return 0 if self.op is UOps.VALID else 1
   @property
   def st_arg(self) -> ShapeTracker:
     assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
-    ret = self.src[0 if self.op is UOps.CONST else 1]
+    ret = self.src[self.st_loc]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
@@ -324,14 +361,13 @@ class UOp(MathTrait):
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
   def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
-  def sconst_like(self, b:ConstType|Variable): return type(self).const(self.dtype.scalar() if self.dtype is not None else None, b)
   @classmethod
   @functools.lru_cache(None)
   def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(dtype, b)
   @classmethod
   def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, (cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))), b)
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
     if dtype is not None and dtype != (sdtype := dtype.scalar()):
       return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
     return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
@@ -349,11 +385,12 @@ class UOp(MathTrait):
   def full_shape(self) -> Tuple[sint, ...]:
     if self.op is UOps.SHAPETRACKER: return self.arg.shape
     # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
-    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL}]))
+    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL, \
+        UOps.CONST, UOps.DEFINE_VAR}]))
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, set([x.arg for x in self.sparents if x.op is UOps.DEFINE_VAR])), key=lambda v: v.expr)
+    return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1].arg, x.arg[2].arg) for x in self.vars()]), key=lambda v: v.expr)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -371,35 +408,35 @@ class UOp(MathTrait):
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
   @property
-  def vmin(self) -> UOp:
-    return x if (x:=self._min_max[0]) is not None and not math.isnan(x.arg) else self.sconst_like(dtypes.min(cast(DType, self.dtype)))
+  def vmin(self) -> ConstType: return self._min_max[0]
   @property
-  def vmax(self) -> UOp:
-    return x if (x:=self._min_max[1]) is not None and not math.isnan(x.arg) else self.sconst_like(dtypes.max(cast(DType, self.dtype)))
+  def vmax(self) -> ConstType: return self._min_max[1]
   @functools.cached_property
-  def _min_max(self) -> Tuple[Optional[UOp], Optional[UOp]]:
+  def _min_max(self) -> Tuple[ConstType, ConstType]:
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is UOps.DEFINE_VAR and self.src: return self.src[0], self.src[1] if isinstance(self.src[1].arg, int) else None
+    if self.op is UOps.DEFINE_VAR and self.arg:
+      return self.arg[1].arg, self.arg[2].arg if self.arg[2].op is UOps.CONST else dtypes.max(cast(DType, self.dtype))
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
+    if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
-    if self.op is UOps.SPECIAL: return self.const_like(0), self.const_like(self.arg[1]-1) if isinstance(self.arg[1], int) else None
-    if self.op is UOps.CONST: return self, self
+    if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(cast(DType, self.dtype))
+    if self.op is UOps.CONST: return self.arg, self.arg
     if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
-      if self.arg is BinaryOps.ADD: return self.sconst_like(s0.vmin.arg+s1.vmin.arg), self.sconst_like(s0.vmax.arg+s1.vmax.arg)
-      if self.arg is BinaryOps.MUL and (s0.vmin.arg >= 0 or s1.vmin.arg >= 0):
+      if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
+      if self.arg is BinaryOps.MUL and (s0.vmin >= 0 or s1.vmin >= 0):
         # handle at lease one is non-negative
-        Lmin, Lmax = (s0.vmin.arg, s0.vmax.arg) if s1.vmin.arg >= 0 else (s0.vmax.arg, s0.vmin.arg)
-        Rmin, Rmax = (s1.vmin.arg, s1.vmax.arg) if s0.vmin.arg >= 0 else (s1.vmax.arg, s1.vmin.arg)
+        Lmin, Lmax = (s0.vmin, s0.vmax) if s1.vmin >= 0 else (s0.vmax, s0.vmin)
+        Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
         assert math.isnan(Lmax*Rmax) or math.isnan(Lmin*Rmin) or Lmax*Rmax >= Lmin*Rmin, f"{Lmax=}, {Lmin=}, {Rmax=}, {Rmin=}"
-        return self.sconst_like(Lmin*Rmin), self.sconst_like(Lmax*Rmax)
-      if self.arg is BinaryOps.MOD and s1.vmin.arg > 0: return self.sconst_like(0), self.sconst_like(s1.vmax.arg-1)
+        return Lmin*Rmin, Lmax*Rmax
+      if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
-        if s1.arg > 0: return self.sconst_like(s0.vmin.arg//s1.arg), self.sconst_like(s0.vmax.arg//s1.arg)
-        if s1.arg < 0: return self.sconst_like(-(s0.vmax.arg//-s1.arg)), self.sconst_like(-(s0.vmin.arg//-s1.arg))
-      if self.arg is BinaryOps.MAX: return self.sconst_like(max(s0.vmin.arg, s1.vmin.arg)), self.sconst_like(max(s0.vmax.arg, s1.vmax.arg))
-      if self.arg is BinaryOps.CMPLT: return (UOp.const(dtypes.bool, s0.vmax.arg<s1.vmin.arg), UOp.const(dtypes.bool, s0.vmin.arg<s1.vmax.arg))
-    return None, None
+        if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
+        if s1.arg < 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
+      if self.arg is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
+      if self.arg is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
+    return dtypes.min(cast(DType, self.dtype)), dtypes.max(cast(DType, self.dtype))
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -407,12 +444,140 @@ class KernelInfo:
   upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to EXPAND)
   dont_use_locals: bool = False # don't use local indexing
 
+# ***** ops in python *****
+
+def hook_overflow(dv, fxn):
+  def wfxn(*args):
+    try: return fxn(*args)
+    except OverflowError: return dv
+  return wfxn
+
+python_alu: Dict[Op, Callable]  = {
+  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
+  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
+  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
+  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift, BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
+  BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
+  BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
+  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
+  TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
+
+def truncate_fp16(x):
+  try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
+  except OverflowError: return math.copysign(math.inf, x)
+
+truncate: Dict[DType, Callable] = {dtypes.bool: bool,
+  # TODO: bfloat16
+  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
+  dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
+  dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
+  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
+      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
+
+def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+
+def uop_alu_resolve(u:UOp) -> sint:
+  if u.op is UOps.CONST: return u.arg
+  if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1].arg, u.arg[2].arg)
+  if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
+  raise RuntimeError(f"ALU resolve fail @ {u.op}")
+
+# ***** uop type spec *****
+
+def type_verify(uops):
+  for u in uops:
+    uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
+    if uop is UOps.DEFINE_LOCAL: assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}"
+    if uop is UOps.DEFINE_GLOBAL: assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}"
+    if isinstance(dtype, ImageDType): assert uop is UOps.DEFINE_GLOBAL, f"{uop} can't be image"
+    if uop is UOps.SHAPETRACKER: assert len(src) == 0, f"SHAPETRACKER must only define a ShapeTracker arg {uop}"
+    if uop is UOps.REDUCE_AXIS: assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in BinaryOps, f"invalid arg for REDUCE_AXIS {arg}"
+    if uop in {UOps.CONST, UOps.DEFINE_ACC}:
+      if uop is UOps.CONST:
+        assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
+        # TODO: intermediate CONST of Variable is DEFINE_VAR
+        assert (isinstance(arg, Variable) and u.src) or (type(arg) is type(dtypes.as_const(arg, dtype))), f"type of {arg=} does not match {dtype}"
+      if uop is UOps.DEFINE_ACC: assert dtype is not None and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
+    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
+    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
+    if uop is UOps.VECTORIZE:
+      assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
+      assert all(dtype == x.dtype.vec(len(src)) for x in src), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
+    if uop is UOps.LOAD and len(src) > 3 and src[3].op is UOps.ALU: assert src[3].dtype == dtypes.bool and src[2].dtype == dtype
+    if uop is UOps.GEP: assert dtype == src[0].dtype.scalar(), f"GEP of {src[0].dtype=} should be {src[0].dtype.scalar()} != {dtype}"
+    if uop is UOps.IF: assert dtype is None and len(src) == 2 and src[0].dtype == dtypes.bool
+    if uop is UOps.STORE:
+      assert dtype is None, f"{uop} dtype must be None, got {dtype}"
+      if len(src) == 4: assert src[3].dtype == dtypes.bool or src[3].op is UOps.IF, f"bad gate {src[3]}"
+    if uop is UOps.ALU:
+      if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
+      elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
+        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
+        assert dtype == bd, f"{arg} output dtype mismatch {dtype=} != {bd=}"
+        assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
+      elif arg is BinaryOps.IDIV:
+        assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), f"input dtype is not int {src[0].dtype=}, {src[1].dtype=}"
+        assert dtypes.is_int(dtype), f"output dtype is not int {dtype=}"
+      elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
+        # the distance to shift isn't typechecked
+        assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
+      elif arg in BinaryOps: assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
+      elif arg == TernaryOps.WHERE:
+        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
+        assert src[0].dtype == bd, f"{arg} selector dtype mismatch {src[0].dtype=} != {bd}"
+        assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
+
+# ***** uop helpers *****
+
+def print_uops(uops:List[UOp]):
+  for i,u in enumerate(uops):
+    formatted_parents = [uops.index(x) if x.op is not UOps.CONST else f"{x.arg}" for x in u.src]
+    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str(formatted_parents):32s} {u.arg}")
+
+def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
+  flops: sint = 0
+  mem: sint = 0
+  mults: sint = 1
+  mult_stack: List[sint] = []
+  dont_count: Set[UOp] = set()
+  if ignore_indexing:
+    for u in uops:
+      if u.op is UOps.LOAD:
+        dont_count = dont_count.union(u.src[1].sparents)
+        if len(u.src) > 3: dont_count = dont_count.union(u.src[2].sparents)
+      elif u.op is UOps.STORE:
+        dont_count = dont_count.union(u.src[1].sparents)
+        if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
+      elif u.op is UOps.IF:
+        dont_count = dont_count.union(u.src[0].sparents)
+  for u in uops:
+    if u.op is UOps.RANGE:
+      mult_stack.append(mults)
+      mults *= uop_alu_resolve(u.src[1] - u.src[0])
+    elif u.op is UOps.ENDRANGE:
+      mults = mult_stack.pop(-1)
+    elif u.op is UOps.SPECIAL:
+      mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
+    elif u.op is UOps.LOAD:
+      assert u.dtype is not None
+      mem += u.dtype.itemsize * mults
+    elif u.op is UOps.STORE:
+      assert u.src[2].dtype is not None
+      mem += u.src[2].dtype.itemsize * mults
+    elif u.op is UOps.ALU and u not in dont_count:
+      assert u.dtype is not None
+      flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
+    elif u.op is UOps.WMMA and u not in dont_count:
+      assert u.arg[1] is not None
+      flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
+  return flops, mem
+
 # ***** pattern matcher *****
 
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
   # no matchers in ops.py, find the real frame
-  while (frm.f_code.co_filename.endswith("/ops.py") or frm.f_code.co_filename == '<string>') and frm.f_back is not None: frm = frm.f_back
+  while (frm.f_code.co_filename.split('/')[-1] in {"rewrite.py", "ops.py", '<string>'}) and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
 def lines(fn) -> List[str]: return open(fn).readlines()
@@ -423,10 +588,6 @@ class NOp(UOp):
   src: Tuple[NOp, ...] = tuple()
   allow_any_len: bool = False
   location: Tuple[str, int] = field(default_factory=get_location)
-
-  def commutative(self) -> bool:
-    return (self.op is UOps.ALU and \
-      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
 
   @staticmethod
   @functools.lru_cache(None)
@@ -570,132 +731,3 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
       nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x)) else x
     return found
   return __inner_rewrite(sink)
-
-# ***** ops in python *****
-
-def hook_overflow(dv, fxn):
-  def wfxn(*args):
-    try: return fxn(*args)
-    except OverflowError: return dv
-  return wfxn
-
-python_alu: Dict[Op, Callable]  = {
-  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
-  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
-  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift, BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
-  BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
-  BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
-  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
-  TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
-
-def truncate_fp16(x):
-  try:
-    x = float(x)
-    struct.pack("@e", x)
-    return x
-  except OverflowError: return math.copysign(math.inf, x)
-
-truncate: Dict[DType, Callable] = {dtypes.bool: bool,
-  # TODO: bfloat16
-  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
-  dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
-  dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
-  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
-      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
-
-def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
-
-def uop_alu_resolve(u:UOp) -> sint:
-  if u.op in {UOps.CONST, UOps.DEFINE_VAR}: return u.arg
-  if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
-  raise RuntimeError(f"ALU resolve fail @ {u.op}")
-
-# ***** uop type spec *****
-
-def type_verify(uops):
-  for u in uops:
-    uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
-    if uop is UOps.DEFINE_LOCAL: assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}"
-    if uop is UOps.DEFINE_GLOBAL: assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}"
-    if isinstance(dtype, ImageDType): assert uop is UOps.DEFINE_GLOBAL, f"{uop} can't be image"
-    if uop is UOps.SHAPETRACKER: assert len(src) == 0, f"SHAPETRACKER must only define a ShapeTracker arg {uop}"
-    if uop is UOps.REDUCE_AXIS: assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in BinaryOps, f"invalid arg for REDUCE_AXIS {arg}"
-    if uop in {UOps.CONST, UOps.DEFINE_ACC}:
-      if uop is UOps.CONST:
-        assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
-        # TODO: intermediate CONST of Variable is DEFINE_VAR
-        assert (isinstance(arg, Variable) and u.src) or (type(arg) is type(dtypes.as_const(arg, dtype))), f"type of {arg=} does not match {dtype}"
-      if uop is UOps.DEFINE_ACC: assert dtype is not None and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
-    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
-    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
-    if uop is UOps.VECTORIZE:
-      assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
-      assert all(dtype == x.dtype.vec(len(src)) for x in src), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
-    if uop is UOps.LOAD and len(src) > 3 and src[3].op is UOps.ALU: assert src[3].dtype == dtypes.bool and src[2].dtype == dtype
-    if uop is UOps.GEP: assert dtype == src[0].dtype.scalar(), f"GEP of {src[0].dtype=} should be {src[0].dtype.scalar()} != {dtype}"
-    if uop is UOps.STORE:
-      assert dtype is None, f"{uop} dtype must be None, got {dtype}"
-      if len(src) == 4: assert src[3].dtype == dtypes.bool, f"gate dtype mismatch {src[3].dtype} != {dtypes.bool}"
-    if uop is UOps.ALU:
-      if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-      elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
-        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
-        assert dtype == bd, f"{arg} output dtype mismatch {dtype=} != {bd=}"
-        assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
-      elif arg is BinaryOps.IDIV:
-        assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), f"input dtype is not int {src[0].dtype=}, {src[1].dtype=}"
-        assert dtypes.is_int(dtype), f"output dtype is not int {dtype=}"
-      elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
-        # the distance to shift isn't typechecked
-        assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-      elif arg in BinaryOps: assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
-      elif arg == TernaryOps.WHERE:
-        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
-        assert src[0].dtype == bd, f"{arg} selector dtype mismatch {src[0].dtype=} != {bd}"
-        assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
-
-# ***** uop helpers *****
-
-def print_uops(uops:List[UOp]):
-  for i,u in enumerate(uops):
-    formatted_parents = [uops.index(x) if x.op is not UOps.CONST else f"{x.arg}" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str(formatted_parents):32s} {u.arg}")
-
-def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
-  flops: sint = 0
-  mem: sint = 0
-  mults: sint = 1
-  mult_stack: List[sint] = []
-  dont_count: Set[UOp] = set()
-  if ignore_indexing:
-    for u in uops:
-      if u.op is UOps.LOAD:
-        dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[2].sparents)
-      elif u.op is UOps.STORE:
-        dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
-      elif u.op is UOps.IF:
-        dont_count = dont_count.union(u.src[0].sparents)
-  for u in uops:
-    if u.op is UOps.RANGE:
-      mult_stack.append(mults)
-      mults *= uop_alu_resolve(u.src[1] - u.src[0])
-    elif u.op is UOps.ENDRANGE:
-      mults = mult_stack.pop(-1)
-    elif u.op is UOps.SPECIAL:
-      mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
-    elif u.op is UOps.LOAD:
-      assert u.dtype is not None
-      mem += u.dtype.itemsize * mults
-    elif u.op is UOps.STORE:
-      assert u.src[2].dtype is not None
-      mem += u.src[2].dtype.itemsize * mults
-    elif u.op is UOps.ALU and u not in dont_count:
-      assert u.dtype is not None
-      flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
-    elif u.op is UOps.WMMA and u not in dont_count:
-      assert u.arg[1] is not None
-      flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
-  return flops, mem
