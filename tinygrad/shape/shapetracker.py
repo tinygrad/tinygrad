@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, Iterable, Any, cast
+from typing import Tuple, List, Optional, Dict, Set, Iterable, Any
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
 from tinygrad.shape.view import View, strides_for_shape
@@ -98,22 +98,6 @@ class ShapeTracker:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
-  def old_real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
-    if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
-    idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    idx, valid = self.expr_idxs(idxs)
-    ret: List[Optional[sint]] = [None] * len(self.views[-1].shape)
-    bad_idx_vars: Set[Variable] = set()
-    for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
-      idx_maybe, stride_maybe = (this_dim.a, this_dim.b) if isinstance(this_dim, MulNode) else (this_dim, 1)
-      try: ret[idxs.index(idx_maybe)] = cast(sint, stride_maybe)
-      except ValueError: bad_idx_vars = bad_idx_vars.union(idx_maybe.vars())
-    idx_vars, valid_vars = idx.vars(), valid.vars()
-    for i,tidx in enumerate(idxs):
-      if tidx in bad_idx_vars or (tidx in valid_vars and not ignore_valid): ret[i] = None
-      elif tidx not in idx_vars: ret[i] = 0
-    return tuple(ret)
-
   # NOTE: if a stride is not always valid, it will be None
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
@@ -129,10 +113,6 @@ class ShapeTracker:
     if not ignore_valid:
       masked_axis = [x.arg for x in graph_rewrite(valid, pm=constant_folder).sparents if x.op is UOps.RANGE]
       ret = [None if i in masked_axis else x for i,x in enumerate(ret)]
-    if tuple(ret) != (old := self.old_real_strides(ignore_valid)):
-      for stride, old_stride in zip(ret, old):
-        if stride is None and old_stride is not None:
-          raise RuntimeError(f"{ret=}, {old=}, {self=}")
     return tuple(ret)
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
