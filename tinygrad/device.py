@@ -226,7 +226,7 @@ class HWCommandQueue:
   def _patch(self, cmd_idx, offset, data): self.q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
   def _cur_cmd_idx(self) -> int:
     """
-    Returns the index of the command currently being enqueued. 
+    Returns the index of the command currently being enqueued.
     Should be called only within functions that enqueue commands and are decorated with `@hcq_command`.
     """
     return len(self) - 1
