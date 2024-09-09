@@ -429,10 +429,12 @@ class UOp(MathTrait):
     if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
-      if self.arg is BinaryOps.MUL and (s0.vmin.arg >= 0 or s1.vmin.arg >= 0):
+      if self.arg is BinaryOps.MUL:
         Lmin, Lmax = (s1.vmin.lt(0).where(s0.vmax, s0.vmin), s1.vmin.lt(0).where(s0.vmin, s0.vmax))
         Rmin, Rmax = (s0.vmin.lt(0).where(s1.vmax, s1.vmin), s0.vmin.lt(0).where(s1.vmin, s1.vmax))
-        return Lmin*Rmin, Lmax*Rmax
+        # if both negative, we return the bounds
+        return (s0.vmin.lt(0) & s1.vmin.lt(0)).where(_min_bound(self.dtype), Lmin*Rmin), \
+               (s0.vmin.lt(0) & s1.vmin.lt(0)).where(_max_bound(self.dtype), Lmax*Rmax)
       if self.arg is BinaryOps.MOD and s1.vmin.arg > 0: return self.const_like(0), (s1.vmax-1)
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
         return s1.gt(0).where(s0.vmin//s1, -(s0.vmax//(-s1))), s1.gt(0).where(s0.vmax//s1, -(s0.vmin//(-s1)))
