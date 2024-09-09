@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps
-from tinygrad.rewrite import PatternMatcher, UPat, graph_rewrite
+from tinygrad.ops import PatternMatcher, UPat, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
                              GlobalCounters, all_same, colored, flatten, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
@@ -16,9 +16,6 @@ from tinygrad.shape.view import View, strides_for_shape
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
-
-# optionally log the ops to disk
-logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 
 # *** ScheduleItem return type ***
 
@@ -471,9 +468,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, lsi.var_vals])
     for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
-    if logops and si.ast.op is UOps.SINK and not any(i.device.startswith("DISK:") for i in si.inputs):
-      logops.write(str(si.ast).replace("\n", "").replace(" ", "")+"\n")
+    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
     for x in graph[lsi]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
