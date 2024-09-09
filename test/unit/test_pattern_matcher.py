@@ -1,7 +1,7 @@
 import unittest, itertools
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOps, UOp, BinaryOps, TernaryOps, ReduceOps, UnaryOps # noqa: F401
-from tinygrad.rewrite import PatternMatcher, UPat
+from tinygrad.ops import PatternMatcher, UPat
 
 class TestPatternMatcher(unittest.TestCase):
   def test_simple_match(self):
