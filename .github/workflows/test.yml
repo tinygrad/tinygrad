@@ -83,7 +83,7 @@ jobs:
       run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
 
   linter:
-    name: Linters
+    name: Linters+Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
