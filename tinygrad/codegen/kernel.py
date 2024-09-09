@@ -639,7 +639,7 @@ class Kernel:
         # for locals, we use the ShapeTracker that's in the srcs
         st = op.st_arg if op.src[0].op is UOps.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
         st_uop = (st if apply_to_st is None else apply_to_st(st)).to_uop()
-        if op.op is UOps.CONST: return replace(op, src=(st_uop,))
+        if op.op is UOps.VALID: return replace(op, src=(st_uop,))
         if op.op is UOps.STORE: return replace(op, src=(op.src[0], st_uop, fixup_ast(op.src[2], apply_to_st)))
         return replace(op, src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is UOps.REDUCE_AXIS:
@@ -777,8 +777,8 @@ class Kernel:
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if uop in sts: return
   op, _, src, arg = uop.op, uop.dtype, uop.src, uop.arg
-  # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
-  if op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
+  # NOTE: UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL, UOps.CONST and UOps.DEFINE_VAR don't have shape
+  if op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.CONST, UOps.DEFINE_VAR}: return
   # restore globals from the two stage reduce
   if op is UOps.LOAD and src[0].op is UOps.DEFINE_LOCAL:
     _assert_valid_uop(local_reduce:=src[2].src[2], uop.st_arg, sts)
@@ -791,8 +791,8 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
     assert op in {UOps.SHAPETRACKER, UOps.ALU, UOps.CAST, UOps.BITCAST, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
     # movementops are pushed to the edges with SHAPETRACKER
     # elementwise inherits shape
-    st = arg if op is UOps.SHAPETRACKER else sts[src[uop.st_loc if op in BUFFER_UOPS else -1]]
-    for x in (src[1:] if op in BUFFER_UOPS else src):
+    st = arg if op is UOps.SHAPETRACKER else sts[src[uop.st_loc if op in BUFFER_UOPS else 0]]
+    for x in (src[0:1] if len(src) and src[0].op is UOps.VALID else src[1:] if op in BUFFER_UOPS else src):
       if sts[x].shape != st.shape:
         if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op} {sts[x].shape} != {st.shape}")
         raise AssertionError(f"found implicit expand {x.op} {sts[x].shape} != {op} {st.shape} {prod(sts[x].shape)} != {prod(st.shape)}")
