@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, Sequence, DefaultDict
 import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib
-from enum import Enum, auto
+from enum import auto
 from collections import defaultdict
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import pretty_print, prod, getenv, all_same
+from tinygrad.helpers import pretty_print, prod, getenv, all_same, HashEnum
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -13,20 +13,20 @@ if TYPE_CHECKING:
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
-class UnaryOps(Enum):
+class UnaryOps(HashEnum):
   """A -> A (elementwise)"""
   EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto() # noqa: E702
-class BinaryOps(Enum):
+class BinaryOps(HashEnum):
   """A + A -> A (elementwise)"""
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto() # noqa: E702
-class TernaryOps(Enum):
+class TernaryOps(HashEnum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
-class ReduceOps(Enum):
+class ReduceOps(HashEnum):
   """A -> B (reduce)"""
   SUM = auto(); PROD = auto(); MAX = auto() # noqa: E702
-class MetaOps(Enum):
+class MetaOps(HashEnum):
   EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
@@ -75,7 +75,7 @@ REDUCE_ALU: Dict[ReduceOps, BinaryOps] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps
 def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
 
 # the order of these UOps controls the order of the toposort
-class UOps(Enum):
+class UOps(HashEnum):
   # uops that aren't rendered
   SINK = auto()
   """
@@ -99,7 +99,7 @@ class UOps(Enum):
   CONTRACT = auto()
   SHAPETRACKER = auto()
   """
-  Defines the ShapeTracker for a buffer UOp `UOps.LOAD`, `UOps.STORE` or `UOps.CONST`.
+  Defines the ShapeTracker for a buffer UOp `UOps.LOAD`, `UOps.STORE` or `UOps.VALID`.
 
   - **`dtype`**: `None`
   - **`src`**: `Tuple[]`
@@ -169,13 +169,21 @@ class UOps(Enum):
 
   - **`dtype`**: The scalar DType of the value.
 
-  - **`src`**:
-    The scheduler creates a CONST with a single SHAPETRACKER UOp src: `Tuple[UOp]`.
-
-    The Lowerer replaces the SHAPETRACKER with an empty src.
-    It uses the ShapeTracker valid to create a `WHERE` UOp mask with sources: `(The actual CONST UOp, CONST 0, 0.0 or False)`
+  - **`src`**: `Tuple[]`
 
   - **`arg`**: The value.
+  """
+  VALID = auto()
+  """
+  This is the first argument in a masked CONST.
+
+  - **`dtype`**: `dtypes.bool`
+  - **`src`**:
+    `Tuple[UOp]`
+      - UOps.SHAPETRACKER
+  - **`arg`**: `None`
+
+  A masked CONST is defined as `valid.where(value, 0)`.
   """
   SPECIAL = auto()
   NOOP = auto()
@@ -319,16 +327,10 @@ class UOps(Enum):
   # ops that are not graph nodes
   ENDRANGE = auto()
   ENDIF = auto()
-  VALID = auto()
 
-BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.VALID}
+BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
-
-@functools.lru_cache(None)
-def _min_bound(dtype:DType): return UOp.const(dtype.scalar(), dtypes.min(dtype))
-@functools.lru_cache(None)
-def _max_bound(dtype:DType): return UOp.const(dtype.scalar(), dtypes.max(dtype))
 
 @dataclass(frozen=True, eq=False)
 class UOp(MathTrait):
@@ -336,15 +338,13 @@ class UOp(MathTrait):
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
-  def __hash__(self): return id(self)
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     from tinygrad.shape.shapetracker import ShapeTracker
     if len(self.src) == 0: return None
     if self.op in BUFFER_UOPS: return self.st_arg
-    src = [x for x in self.src if x.op not in {UOps.CONST, UOps.DEFINE_VAR}]
-    src_sts = [x.st for x in src if x.st is not None]
-    if len(src_sts) != len(src) or not all_same([x.shape for x in src_sts]): return None
+    src_sts = [x.st for x in self.src if x.st is not None]
+    if len(src_sts) != len(self.src) or not all_same([x.shape for x in src_sts]): return None
     return ShapeTracker.from_shape(src_sts[0].reduce(self.arg[1])) if self.op is UOps.REDUCE_AXIS else src_sts[0]
   @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
@@ -363,7 +363,7 @@ class UOp(MathTrait):
       self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
   # *** uop syntactic sugar
   @property
-  def st_loc(self) -> int: return 0 if self.op is UOps.VALID else 1
+  def st_loc(self) -> int: return 0 if self.op is UOps.CONST else 1
   @property
   def st_arg(self) -> ShapeTracker:
     assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
@@ -375,7 +375,6 @@ class UOp(MathTrait):
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
   def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
-  def sconst_like(self, b:ConstType|Variable): return type(self).const(self.dtype.scalar() if self.dtype is not None else None, b)
   @classmethod
   @functools.lru_cache(None)
   def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(dtype, b)
@@ -400,12 +399,11 @@ class UOp(MathTrait):
   def full_shape(self) -> Tuple[sint, ...]:
     if self.op is UOps.SHAPETRACKER: return self.arg.shape
     # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
-    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL, \
-        UOps.CONST, UOps.DEFINE_VAR}]))
+    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL}]))
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1].arg, x.arg[2].arg) for x in self.vars()]), key=lambda v: v.expr)
+    return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1], x.arg[2]) for x in self.vars()]), key=lambda v: v.expr)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -423,33 +421,35 @@ class UOp(MathTrait):
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
   @property
-  def vmin(self) -> UOp: return self._min_max[0]
+  def vmin(self) -> ConstType: return self._min_max[0]
   @property
-  def vmax(self) -> UOp: return self._min_max[1]
+  def vmax(self) -> ConstType: return self._min_max[1]
   @functools.cached_property
-  def _min_max(self) -> Tuple[UOp, UOp]:
+  def _min_max(self) -> Tuple[ConstType, ConstType]:
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2] if isinstance(self.arg[2].arg, int) else _max_bound(self.dtype)
+    if self.op is UOps.DEFINE_VAR and self.arg:
+      return self.arg[1].arg, self.arg[2].arg if self.arg[2].op is UOps.CONST else dtypes.max(cast(DType, self.dtype))
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
+    if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
-    if self.op is UOps.SPECIAL: return self.const_like(0), self.const_like(self.arg[1]-1) if isinstance(self.arg[1], int) else _max_bound(self.dtype)
-    if self.op is UOps.CONST: return self, self
+    if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(cast(DType, self.dtype))
+    if self.op is UOps.CONST: return self.arg, self.arg
     if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
-      if self.arg is BinaryOps.ADD: return self.sconst_like(s0.vmin.arg+s1.vmin.arg), self.sconst_like(s0.vmax.arg+s1.vmax.arg)
-      if self.arg is BinaryOps.MUL and (s0.vmin.arg >= 0 or s1.vmin.arg >= 0):
+      if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
+      if self.arg is BinaryOps.MUL and (s0.vmin >= 0 or s1.vmin >= 0):
         # handle at lease one is non-negative
-        Lmin, Lmax = (s0.vmin.arg, s0.vmax.arg) if s1.vmin.arg >= 0 else (s0.vmax.arg, s0.vmin.arg)
-        Rmin, Rmax = (s1.vmin.arg, s1.vmax.arg) if s0.vmin.arg >= 0 else (s1.vmax.arg, s1.vmin.arg)
+        Lmin, Lmax = (s0.vmin, s0.vmax) if s1.vmin >= 0 else (s0.vmax, s0.vmin)
+        Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
         assert math.isnan(Lmax*Rmax) or math.isnan(Lmin*Rmin) or Lmax*Rmax >= Lmin*Rmin, f"{Lmax=}, {Lmin=}, {Rmax=}, {Rmin=}"
-        return self.sconst_like(Lmin*Rmin), self.sconst_like(Lmax*Rmax)
-      if self.arg is BinaryOps.MOD and s1.vmin.arg > 0: return self.sconst_like(0), self.sconst_like(s1.vmax.arg-1)
+        return Lmin*Rmin, Lmax*Rmax
+      if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
-        if s1.arg > 0: return self.sconst_like(s0.vmin.arg//s1.arg), self.sconst_like(s0.vmax.arg//s1.arg)
-        if s1.arg < 0: return self.sconst_like(-(s0.vmax.arg//-s1.arg)), self.sconst_like(-(s0.vmin.arg//-s1.arg))
-      if self.arg is BinaryOps.MAX: return self.sconst_like(max(s0.vmin.arg, s1.vmin.arg)), self.sconst_like(max(s0.vmax.arg, s1.vmax.arg))
-      if self.arg is BinaryOps.CMPLT: return (UOp.const(dtypes.bool, s0.vmax.arg<s1.vmin.arg), UOp.const(dtypes.bool, s0.vmin.arg<s1.vmax.arg))
-    return _min_bound(self.dtype), _max_bound(self.dtype)
+        if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
+        if s1.arg < 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
+      if self.arg is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
+      if self.arg is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
+    return dtypes.min(cast(DType, self.dtype)), dtypes.max(cast(DType, self.dtype))
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -519,6 +519,7 @@ def type_verify(uops):
     if uop is UOps.LOAD and len(src) > 3 and src[3].op is UOps.ALU: assert src[3].dtype == dtypes.bool and src[2].dtype == dtype
     if uop is UOps.GEP: assert dtype == src[0].dtype.scalar(), f"GEP of {src[0].dtype=} should be {src[0].dtype.scalar()} != {dtype}"
     if uop is UOps.IF: assert dtype is None and len(src) == 2 and src[0].dtype == dtypes.bool
+    if uop is UOps.VALID: assert dtype == dtypes.bool and len(src) == 1 and src[0].op is UOps.SHAPETRACKER and arg is None
     if uop is UOps.STORE:
       assert dtype is None, f"{uop} dtype must be None, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool or src[3].op is UOps.IF, f"bad gate {src[3]}"
@@ -595,7 +596,7 @@ def get_location() -> Tuple[str, int]:
 @functools.lru_cache(None)
 def lines(fn) -> List[str]: return open(fn).readlines()
 
-@dataclass(frozen=True, repr=False)  # reuse repr from UOp
+@dataclass(frozen=True, eq=False, repr=False)  # reuse repr from UOp
 class NOp(UOp):
   name: Optional[str] = None
   src: Tuple[NOp, ...] = tuple()
