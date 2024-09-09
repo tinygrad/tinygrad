@@ -1,5 +1,6 @@
 # ruff: noqa: E501
 import unittest
+from test.helpers import ast_const
 from tinygrad import dtypes, Device
 from tinygrad.helpers import CI
 from tinygrad.codegen.kernel import Kernel
@@ -41,19 +42,19 @@ class TestLinearizerOverflow(unittest.TestCase):
                       UOp(UOps.LOAD, dtypes.float, arg=None, src=(
                         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
                         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(64, 1, 64, 112, 112, 3, 7, 7), strides=(0, 0, 147, 0, 0, 49, 7, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                  x16:=UOp(UOps.CONST, dtypes.float, arg=0.0, src=(
+                  x16:=ast_const(dtypes.float, 0.0, st_src=(
                     UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(64, 1, 64, 112, 112, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
                 UOp(UOps.LOAD, dtypes.float, arg=None, src=(
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=3, src=()),
                   UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(64, 1, 64, 112, 112, 1, 1, 1), strides=(0, 0, 1, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
               UOp(UOps.ALU, dtypes.float, arg=UnaryOps.SQRT, src=(
                 UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
-                  x23:=UOp(UOps.CONST, dtypes.float, arg=1.0, src=(
+                  x23:=ast_const(dtypes.float, 1.0, st_src=(
                     UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(64, 1, 64, 112, 112, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
                   UOp(UOps.ALU, dtypes.float, arg=UnaryOps.RECIP, src=(
                     UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
                        x23,
-                      UOp(UOps.CONST, dtypes.float, arg=1e-05, src=(
+                      ast_const(dtypes.float, 1e-05, st_src=(
                         UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(64, 1, 64, 112, 112, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),
             UOp(UOps.LOAD, dtypes.float, arg=None, src=(
               UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=4, src=()),

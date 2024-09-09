@@ -5,7 +5,7 @@ from tinygrad import dtypes, Device
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, KernelInfo
-from tinygrad.rewrite import NOp, PatternMatcher
+from tinygrad.ops import NOp, PatternMatcher
 from tinygrad.codegen.lowerer import ast_to_uop
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, constant_folder, float4_folding
 from tinygrad.shape.shapetracker import ShapeTracker, View
