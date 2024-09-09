@@ -1671,7 +1671,7 @@ class TestScheduleRewrite(unittest.TestCase):
     r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, reduceop_fusor)
-    # NOTE: this AST always correct in the entire lifecycle of graph_rewrite!
+    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
     # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
     verify_ast(sink)
     verify_ast(rsink)
@@ -1693,7 +1693,7 @@ class TestScheduleRewrite(unittest.TestCase):
     for _ in range(24): r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
-    # NOTE: this AST always correct in the entire lifecycle of graph_rewrite!
+    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
     # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
     verify_ast(sink)
     verify_ast(rsink)
@@ -1770,6 +1770,29 @@ class TestScheduleRewrite(unittest.TestCase):
     b = Tensor.empty((1,), dtype=dtypes.int).realize()
     CompiledRunner(p).exec([b.lazydata.buffer, a.lazydata.buffer])
     np.testing.assert_equal(b.numpy(), expected_out)
+
+  def test_double_swizzle_possible(self):
+    # ast in tensor style
+    Tensor.manual_seed(0)
+    a = Tensor.randint(4,).realize()
+    b = Tensor.randint(4,).realize()
+    expected_out = a.numpy().sum(0)+b.numpy().sum(0)+2
+    # LazyBuffer to pre-rewrite AST
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(3)]
+    ld1 = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((4,)).to_uop()))
+    r1 = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld1,), (BinaryOps.ADD, (0,)))
+    ld2 = UOp(UOps.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((4,)).to_uop()))
+    r2 = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld2,), (BinaryOps.ADD, (0,)))
+    alu = UOp(UOps.SWIZZLE, r1.dtype, (r1,), ShapeTracker.from_shape(()))+UOp(UOps.SWIZZLE, r2.dtype, (r2,), ShapeTracker.from_shape(()))+ast_const(dtypes.int, 2, ())
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu,),),))
+    # graph rewrite
+    sink = graph_rewrite(sink, reduceop_fusor)
+    # verify output
+    k = Kernel(sink)
+    p = k.to_program()
+    c = Tensor.empty((1,), dtype=dtypes.int).realize()
+    CompiledRunner(p).exec([c.lazydata.buffer, a.lazydata.buffer, b.lazydata.buffer])
+    np.testing.assert_equal(c.numpy(), expected_out)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
