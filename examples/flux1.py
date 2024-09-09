@@ -123,18 +123,6 @@ class ResnetBlock:
 
     return x + h
 
-class Downsample:
-  def __init__(self, in_channels: int):
-    # no asymmetric padding in torch conv, must do it ourselves
-    self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=2, padding=0)
-
-  def __call__(self, x: Tensor):
-    pad = (0, 1, 0, 1)
-    x = nn.functional.pad(x, pad, mode="constant", value=0)
-    x = self.conv(x)
-    return x
-
-
 class Upsample:
   def __init__(self, in_channels: int):
     self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
@@ -143,78 +131,6 @@ class Upsample:
     x = Tensor.interpolate(x, size=(x.shape[-2] * 2, x.shape[-1] * 2), mode="nearest")
     x = self.conv(x)
     return x
-
-class Encoder:
-  def __init__(
-      self,
-      resolution: int,
-      in_channels: int,
-      ch: int,
-      ch_mult: list[int],
-      num_res_blocks: int,
-      z_channels: int,
-  ):
-    self.ch = ch
-    self.num_resolutions = len(ch_mult)
-    self.num_res_blocks = num_res_blocks
-    self.resolution = resolution
-    self.in_channels = in_channels
-    # downsampling
-    self.conv_in = nn.Conv2d(in_channels, self.ch, kernel_size=3, stride=1, padding=1)
-
-    curr_res = resolution
-    in_ch_mult = (1,) + tuple(ch_mult)
-    self.in_ch_mult = in_ch_mult
-    self.down = []
-    block_in = self.ch
-    for i_level in range(self.num_resolutions):
-      block = []
-      attn = []
-      block_in = ch * in_ch_mult[i_level]
-      block_out = ch * ch_mult[i_level]
-      for _ in range(self.num_res_blocks):
-        block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
-        block_in = block_out
-      down = {}
-      down["block"] = block
-      down["attn"] = attn
-      if i_level != self.num_resolutions - 1:
-        down["downsample"] = Downsample(block_in)
-        curr_res = curr_res // 2
-      self.down.append(down)
-
-    # middle
-    self.mid = {}
-    self.mid["block_1"] = ResnetBlock(in_channels=block_in, out_channels=block_in)
-    self.mid["attn_1"] = AttnBlock(block_in)
-    self.mid["block_2"] = ResnetBlock(in_channels=block_in, out_channels=block_in)
-
-    # end
-    self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
-    self.conv_out = nn.Conv2d(block_in, 2 * z_channels, kernel_size=3, stride=1, padding=1)
-
-  def __call__(self, x: Tensor) -> Tensor:
-    # downsampling
-    hs = [self.conv_in(x)]
-    for i_level in range(self.num_resolutions):
-      for i_block in range(self.num_res_blocks):
-        h = self.down[i_level]["block"][i_block](hs[-1])
-        if len(self.down[i_level]["attn"]) > 0:
-          h = self.down[i_level]["attn"][i_block](h)
-        hs.append(h)
-      if i_level != self.num_resolutions - 1:
-        hs.append(self.down[i_level]["downsample"](hs[-1]))
-
-    # middle
-    h = hs[-1]
-    h = self.mid["block_1"](h)
-    h = self.mid["attn_1"](h)
-    h = self.mid["block_2"](h)
-    # end
-    h = self.norm_out(h).swish()
-    h = self.conv_out(h)
-    return h
-
 
 class Decoder:
   def __init__(
@@ -292,29 +208,8 @@ class Decoder:
     h = self.conv_out(h)
     return h
 
-class DiagonalGaussian:
-  def __init__(self, sample: bool = True, chunk_dim: int = 1):
-    self.sample = sample
-    self.chunk_dim = chunk_dim
-
-  def __call__(self, z: Tensor) -> Tensor:
-    mean, logvar = Tensor.chunk(z, 2, dim=self.chunk_dim)
-    if self.sample:
-      std = Tensor.exp(0.5 * logvar)
-      return mean + std * Tensor.randn_like(mean)
-    else:
-      return mean
-
 class AutoEncoder:
   def __init__(self, params: AutoEncoderParams):
-    self.encoder = Encoder(
-        resolution=params.resolution,
-        in_channels=params.in_channels,
-        ch=params.ch,
-        ch_mult=params.ch_mult,
-        num_res_blocks=params.num_res_blocks,
-        z_channels=params.z_channels,
-    )
     self.decoder = Decoder(
         resolution=params.resolution,
         in_channels=params.in_channels,
@@ -324,22 +219,14 @@ class AutoEncoder:
         num_res_blocks=params.num_res_blocks,
         z_channels=params.z_channels,
     )
-    self.reg = DiagonalGaussian()
 
     self.scale_factor = params.scale_factor
     self.shift_factor = params.shift_factor
-
-  def encode(self, x: Tensor) -> Tensor:
-    z = self.reg(self.encoder(x))
-    z = self.scale_factor * (z - self.shift_factor)
-    return z
 
   def decode(self, z: Tensor) -> Tensor:
     z = z / self.scale_factor + self.shift_factor
     return self.decoder(z)
 
-  def __call__(self, x: Tensor) -> Tensor:
-    return self.decode(self.encode(x))
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/layers.py
 class EmbedND:
@@ -733,125 +620,114 @@ class Util:
     return ae
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/sampling.py
-class Sampling:
-  def get_noise(
-      num_samples: int,
-      height: int,
-      width: int,
-      dtype: str,
-      seed: int,
-  ):
-    Tensor.manual_seed(seed)
+def get_noise(
+    num_samples: int,
+    height: int,
+    width: int,
+    dtype: str,
+    seed: int,
+):
+  Tensor.manual_seed(seed)
 
-    return Tensor.randn(num_samples, 16, 2 * math.ceil(height / 16), 2 * math.ceil(width / 16), dtype=dtype)
+  return Tensor.randn(num_samples, 16, 2 * math.ceil(height / 16), 2 * math.ceil(width / 16), dtype=dtype)
 
-  def prepare(T5, clip, img: Tensor, prompt: str | list[str]) -> dict[str, Tensor]:
-    bs, _, h, w = img.shape
-    if bs == 1 and not isinstance(prompt, str):
-      bs = len(prompt)
+def prepare(T5, clip, img: Tensor, prompt: str | list[str]) -> dict[str, Tensor]:
+  bs, _, h, w = img.shape
+  if bs == 1 and not isinstance(prompt, str):
+    bs = len(prompt)
 
-    img = img.rearrange("b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
-    if img.shape[0] == 1 and bs > 1:
-      img = img.expand((bs, *img.shape[1:]))
+  img = img.rearrange("b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
+  if img.shape[0] == 1 and bs > 1:
+    img = img.expand((bs, *img.shape[1:]))
 
-    img_ids = Tensor.zeros(h // 2, w // 2, 3).contiguous()
-    img_ids[..., 1] = img_ids[..., 1] + Tensor.arange(h // 2)[:, None]
-    img_ids[..., 2] = img_ids[..., 2] + Tensor.arange(w // 2)[None, :]
-    img_ids = img_ids.rearrange("h w c -> 1 (h w) c")
-    img_ids = img_ids.expand((bs, *img_ids.shape[1:]))
+  img_ids = Tensor.zeros(h // 2, w // 2, 3).contiguous()
+  img_ids[..., 1] = img_ids[..., 1] + Tensor.arange(h // 2)[:, None]
+  img_ids[..., 2] = img_ids[..., 2] + Tensor.arange(w // 2)[None, :]
+  img_ids = img_ids.rearrange("h w c -> 1 (h w) c")
+  img_ids = img_ids.expand((bs, *img_ids.shape[1:]))
 
-    if isinstance(prompt, str):
-      prompt = [prompt]
-    txt = T5(prompt)
-    if txt.shape[0] == 1 and bs > 1:
-      txt = txt.expand((bs, *txt.shape[1:]))
-    txt_ids = Tensor.zeros(bs, txt.shape[1], 3)
+  if isinstance(prompt, str):
+    prompt = [prompt]
+  txt = T5(prompt)
+  if txt.shape[0] == 1 and bs > 1:
+    txt = txt.expand((bs, *txt.shape[1:]))
+  txt_ids = Tensor.zeros(bs, txt.shape[1], 3)
 
-    vec = clip(prompt)
-    if vec.shape[0] == 1 and bs > 1:
-      vec = vec.expand((bs, *vec.shape[1:]))
+  vec = clip(prompt)
+  if vec.shape[0] == 1 and bs > 1:
+    vec = vec.expand((bs, *vec.shape[1:]))
 
-    return {
-        "img": img,
-        "img_ids": img_ids.to(img.device),
-        "txt": txt.to(img.device),
-        "txt_ids": txt_ids.to(img.device),
-        "vec": vec.to(img.device),
-    }
+  return {
+      "img": img,
+      "img_ids": img_ids.to(img.device),
+      "txt": txt.to(img.device),
+      "txt_ids": txt_ids.to(img.device),
+      "vec": vec.to(img.device),
+  }
 
-  def time_shift(mu: float, sigma: float, t: Tensor):
-    return math.exp(mu) / (math.exp(mu) + (1 / t - 1) ** sigma)
+def time_shift(mu: float, sigma: float, t: Tensor):
+  return math.exp(mu) / (math.exp(mu) + (1 / t - 1) ** sigma)
 
-  def get_lin_function(
-      x1: float = 256, y1: float = 0.5, x2: float = 4096, y2: float = 1.15
-  ) -> Callable[[float], float]:
-    m = (y2 - y1) / (x2 - x1)
-    b = y1 - m * x1
-    return lambda x: m * x + b
+def get_lin_function(
+    x1: float = 256, y1: float = 0.5, x2: float = 4096, y2: float = 1.15
+) -> Callable[[float], float]:
+  m = (y2 - y1) / (x2 - x1)
+  b = y1 - m * x1
+  return lambda x: m * x + b
 
-  def get_schedule(
-      num_steps: int,
-      image_seq_len: int,
-      base_shift: float = 0.5,
-      max_shift: float = 1.15,
-      shift: bool = True,
-  ) -> list[float]:
-    # extra step for zero
-    step_size = -1.0 / num_steps
-    timesteps = Tensor.arange(1, 0 + step_size, step_size)
+def get_schedule(
+    num_steps: int,
+    image_seq_len: int,
+    base_shift: float = 0.5,
+    max_shift: float = 1.15,
+    shift: bool = True,
+) -> list[float]:
+  # extra step for zero
+  step_size = -1.0 / num_steps
+  timesteps = Tensor.arange(1, 0 + step_size, step_size)
 
-    # shifting the schedule to favor high timesteps for higher signal images
-    if shift:
-      # estimate mu based on linear estimation between two points
-      mu = Sampling.get_lin_function(y1=base_shift, y2=max_shift)(image_seq_len)
-      timesteps = Sampling.time_shift(mu, 1.0, timesteps)
+  # shifting the schedule to favor high timesteps for higher signal images
+  if shift:
+    # estimate mu based on linear estimation between two points
+    mu = get_lin_function(y1=base_shift, y2=max_shift)(image_seq_len)
+    timesteps = time_shift(mu, 1.0, timesteps)
 
-    return timesteps.tolist()
+  return timesteps.tolist()
 
-  def denoise(
-      model: Model.Flux,
-      # model input
-      img: Tensor,
-      img_ids: Tensor,
-      txt: Tensor,
-      txt_ids: Tensor,
-      vec: Tensor,
-      # sampling parameters
-      timesteps: list[float],
-      guidance: float = 4.0,
-  ):
-    # this is ignored for schnell
-    guidance_vec = Tensor.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
-    for t_curr, t_prev in tqdm(list(zip(timesteps[:-1], timesteps[1:])), f"Denoising"):
-      img = step(model, img, t_curr, t_prev, img_ids, txt, txt_ids, vec, guidance_vec)
+@TinyJit
+def run(model, *args): return model(*args).realize()
 
+def denoise(
+    model: Model.Flux,
+    # model input
+    img: Tensor,
+    img_ids: Tensor,
+    txt: Tensor,
+    txt_ids: Tensor,
+    vec: Tensor,
+    # sampling parameters
+    timesteps: list[float],
+    guidance: float = 4.0,
+):
+  # this is ignored for schnell
+  guidance_vec = Tensor((guidance,), device=img.device, dtype=img.dtype).expand((img.shape[0],))
+  for t_curr, t_prev in tqdm(list(zip(timesteps[:-1], timesteps[1:])), f"Denoising"):
+    t_vec = Tensor((t_curr,), device=img.device, dtype=img.dtype).expand((img.shape[0],))
+    pred = run(model, img, img_ids, txt, txt_ids, t_vec, vec, guidance_vec)
+    img = img + (t_prev - t_curr) * pred
 
-    return img
+  return img
 
-  def unpack(x: Tensor, height: int, width: int) -> Tensor:
-    return x.rearrange(
-        "b (h w) (c ph pw) -> b c (h ph) (w pw)",
-        h=math.ceil(height / 16),
-        w=math.ceil(width / 16),
-        ph=2,
-        pw=2,
-    )
-
-# @TinyJit
-def step(model, img, t_curr, t_prev, img_ids, txt, txt_ids, vec, guidance_vec):
-  t_vec = Tensor.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
-  pred = model(
-      img=img,
-      img_ids=img_ids,
-      txt=txt,
-      txt_ids=txt_ids,
-      y=vec,
-      timesteps=t_vec,
-      guidance=guidance_vec,
+def unpack(x: Tensor, height: int, width: int) -> Tensor:
+  return x.rearrange(
+      "b (h w) (c ph pw) -> b c (h ph) (w pw)",
+      h=math.ceil(height / 16),
+      w=math.ceil(width / 16),
+      ph=2,
+      pw=2,
   )
 
-  img = img + (t_prev - t_curr) * pred
-  return img.realize()
+
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/cli.py
 @dataclass
@@ -913,7 +789,7 @@ if __name__ == "__main__":
     t0 = time.perf_counter()
 
     # prepare input
-    x = Sampling.get_noise(
+    x = get_noise(
         1,
         opts.height,
         opts.width,
@@ -926,9 +802,9 @@ if __name__ == "__main__":
     clip = Util.load_clip(args.name)
 
     # embed text to get inputs for model
-    inp = Sampling.prepare(T5, clip, x, prompt=opts.prompt)
+    inp = prepare(T5, clip, x, prompt=opts.prompt)
     for k, v in inp.items():  v.realize()
-    timesteps = Sampling.get_schedule(opts.num_steps, inp["img"].shape[1], shift=(args.name != "flux-schnell"))
+    timesteps = get_schedule(opts.num_steps, inp["img"].shape[1], shift=(args.name != "flux-schnell"))
 
     # done with text embedders
     del T5, clip
@@ -937,16 +813,16 @@ if __name__ == "__main__":
     model = Util.load_flow_model(args.name)
 
     # denoise initial noise
-    x = Sampling.denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
+    x = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
 
     # done with model
-    del model
+    del model, run
 
     # load autoencoder
     ae = Util.load_ae(args.name)
 
     # decode latents to pixel space
-    x = Sampling.unpack(x.float(), opts.height, opts.width).realize()
+    x = unpack(x.float(), opts.height, opts.width).realize()
     x = ae.decode(x).realize()
 
   t1 = time.perf_counter()
