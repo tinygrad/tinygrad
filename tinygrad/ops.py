@@ -55,7 +55,7 @@ class MathTrait:
   def eq(self, x): return -self.ne(x)
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
-  def ge(self, x): return (-self).lt(-x+1)
+  def ge(self, x): return (-self).lt(-x+1)  # NOTE: this is sketchy
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
@@ -430,14 +430,9 @@ class UOp(MathTrait):
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
       if self.arg is BinaryOps.MUL and (s0.vmin.arg >= 0 or s1.vmin.arg >= 0):
-        #Lmin, Lmax = (s1.vmin.ge(0).where(s0.vmin, s0.vmax), s1.vmin.ge(0).where(s0.vmax, s0.vmin))
-        #Rmin, Rmax = (s0.vmin.ge(0).where(s1.vmin, s1.vmax), s0.vmin.ge(0).where(s1.vmax, s1.vmin))
-        #return Lmin*Rmin, Lmax*Rmax
-        # PYTHONPATH="." python3 test/test_linearizer_failures.py TestLinearizerFailures.test_failure_7
-        Lmin, Lmax = (s0.vmin.arg, s0.vmax.arg) if s1.vmin.arg >= 0 else (s0.vmax.arg, s0.vmin.arg)
-        Rmin, Rmax = (s1.vmin.arg, s1.vmax.arg) if s0.vmin.arg >= 0 else (s1.vmax.arg, s1.vmin.arg)
-        assert math.isnan(Lmax*Rmax) or math.isnan(Lmin*Rmin) or Lmax*Rmax >= Lmin*Rmin, f"{Lmax=}, {Lmin=}, {Rmax=}, {Rmin=}"
-        return self.sconst_like(Lmin*Rmin), self.sconst_like(Lmax*Rmax)
+        Lmin, Lmax = (s1.vmin.lt(0).where(s0.vmax, s0.vmin), s1.vmin.lt(0).where(s0.vmin, s0.vmax))
+        Rmin, Rmax = (s0.vmin.lt(0).where(s1.vmax, s1.vmin), s0.vmin.lt(0).where(s1.vmin, s1.vmax))
+        return Lmin*Rmin, Lmax*Rmax
       if self.arg is BinaryOps.MOD and s1.vmin.arg > 0: return self.const_like(0), (s1.vmax-1)
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
         return s1.gt(0).where(s0.vmin//s1, -(s0.vmax//(-s1))), s1.gt(0).where(s0.vmax//s1, -(s0.vmin//(-s1)))
