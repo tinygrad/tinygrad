@@ -1783,8 +1783,8 @@ class TestScheduleRewrite(unittest.TestCase):
     r1 = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld1,), (BinaryOps.ADD, (0,)))
     ld2 = UOp(UOps.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((4,)).to_uop()))
     r2 = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld2,), (BinaryOps.ADD, (0,)))
-    alu = UOp(UOps.SWIZZLE, r1.dtype, (r1,), ShapeTracker.from_shape(()))+UOp(UOps.SWIZZLE, r2.dtype, (r2,), ShapeTracker.from_shape(()))+ast_const(dtypes.int, 2, ())
-    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu,),),))
+    alu = UOp(UOps.SWIZZLE, r1.dtype, (r1,), ShapeTracker.from_shape(()))+UOp(UOps.SWIZZLE, r2.dtype, (r2,), ShapeTracker.from_shape(()))
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu+ast_const(dtypes.int, 2, ()),),),))
     # graph rewrite
     sink = graph_rewrite(sink, reduceop_fusor)
     # verify output
