@@ -414,12 +414,19 @@ class UOp(MathTrait):
         if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
+  def resolve_const(self):
+    x = graph_rewrite(self, simple_constant_folder)
+    assert x.op is UOps.CONST, f"{x} didn't resolve to const"
+    return x
   @property
   def vmin(self) -> UOp: return self._min_max[0]
   @property
   def vmax(self) -> UOp: return self._min_max[1]
   @functools.cached_property
   def _min_max(self) -> Tuple[UOp, UOp]:
+    vmin, vmax = self._min_max_unresolved()
+    return vmin.resolve_const(), vmax.resolve_const()
+  def _min_max_unresolved(self) -> Tuple[UOp, UOp]:
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2] if isinstance(self.arg[2].arg, int) else _max_bound(self.dtype)
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
@@ -428,6 +435,20 @@ class UOp(MathTrait):
     if self.op is UOps.CONST: return self, self
     if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
+      # this is slow!
+      if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
+      if self.arg is BinaryOps.MUL:
+        Lmin, Lmax = (s1.vmin.lt(0).where(s0.vmax, s0.vmin), s1.vmin.lt(0).where(s0.vmin, s0.vmax))
+        Rmin, Rmax = (s0.vmin.lt(0).where(s1.vmax, s1.vmin), s0.vmin.lt(0).where(s1.vmin, s1.vmax))
+        # if both negative, we return the bounds
+        return (s0.vmin.lt(0) & s1.vmin.lt(0)).where(_min_bound(self.dtype), Lmin*Rmin), \
+               (s0.vmin.lt(0) & s1.vmin.lt(0)).where(_max_bound(self.dtype), Lmax*Rmax)
+      if self.arg is BinaryOps.MOD: return s1.vmin.lt(0).where(s1.vmin, self.const_like(0)), (s1.vmax-1)
+      if self.arg is BinaryOps.IDIV and (s1:=self.src[1]).op is UOps.CONST:
+        return s1.gt(0).where(s0.vmin//s1, -(s0.vmax//(-s1))), s1.gt(0).where(s0.vmax//s1, -(s0.vmin//(-s1)))
+      if self.arg is BinaryOps.MAX: return s0.vmin.max(s1.vmin), s0.vmax.max(s1.vmax)
+      if self.arg is BinaryOps.CMPLT: return (s0.vmax.lt(s1.vmin), s0.vmin.lt(s1.vmax))
+      """
       if self.arg is BinaryOps.ADD: return self.sconst_like(s0.vmin.arg+s1.vmin.arg), self.sconst_like(s0.vmax.arg+s1.vmax.arg)
       if self.arg is BinaryOps.MUL and (s0.vmin.arg >= 0 or s1.vmin.arg >= 0):
         # handle at lease one is non-negative
@@ -441,6 +462,7 @@ class UOp(MathTrait):
         if s1.arg < 0: return self.sconst_like(-(s0.vmax.arg//-s1.arg)), self.sconst_like(-(s0.vmin.arg//-s1.arg))
       if self.arg is BinaryOps.MAX: return self.sconst_like(max(s0.vmin.arg, s1.vmin.arg)), self.sconst_like(max(s0.vmax.arg, s1.vmax.arg))
       if self.arg is BinaryOps.CMPLT: return (UOp.const(dtypes.bool, s0.vmax.arg<s1.vmin.arg), UOp.const(dtypes.bool, s0.vmin.arg<s1.vmax.arg))
+      """
     return _min_bound(self.dtype), _max_bound(self.dtype)
 
 @dataclass(frozen=True)
@@ -739,3 +761,9 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
       nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x)) else x
     return found
   return __inner_rewrite(sink)
+
+# *** pattern used by UOp ***
+
+simple_constant_folder = PatternMatcher([
+  (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const_like(exec_alu(root.arg, dtypes.pyint, [x.arg for x in root.src]))),
+])
