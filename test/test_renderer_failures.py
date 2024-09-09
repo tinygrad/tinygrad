@@ -5,7 +5,7 @@ from tinygrad.codegen.uopgraph import full_graph_rewrite, linearize_uop
 from tinygrad.device import Buffer, Device
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.engine.realize import CompiledRunner
-from tinygrad.helpers import dedup, flatten, getenv, prod
+from tinygrad.helpers import dedup, flatten, prod
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.ops import BinaryOps, UOp, UOps
 from tinygrad.renderer import Program
@@ -59,11 +59,7 @@ class TestPTXFailures(unittest.TestCase):
     sink = UOp(UOps.SINK, dtypes.void, (gated_alu_store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
-
-    if getenv("PTX"):
-      with self.assertRaises(AssertionError):
-        np.testing.assert_equal(ret, [0, 1, 1, 1])
-    else: np.testing.assert_equal(ret, [0, 1, 1, 1])
+    np.testing.assert_equal(ret, [0, 1, 1, 1])
 
 if __name__ == '__main__':
   unittest.main()
