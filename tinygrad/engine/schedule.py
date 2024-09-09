@@ -1,7 +1,7 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
+from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps
 from tinygrad.ops import PatternMatcher, UPat, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
@@ -320,7 +320,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def _get_output_groups(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
+def _get_output_groups(outs:List[LazyBuffer]) -> \
   Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # these are the output groups
         Dict[LazyBuffer, None],                     # these are all the realizes in the graph
         Dict[LazyBuffer, LazyBuffer]]:              # these are the buffers we ASSIGN to in this schedule
@@ -399,7 +399,7 @@ def _get_output_groups(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
-    if buf.realized is not None or buf.op is MetaOps.CONST or buf in seen: continue
+    if buf.realized is not None or buf.op is MetaOps.CONST: continue
     output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
 
     # make things that can't be images not images
@@ -415,11 +415,11 @@ def _get_output_groups(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
   return output_groups, realizes, assign_targets
 
 SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
-def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
+def _graph_schedule(outs:List[LazyBuffer]) -> \
   Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
         DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
   """create a graph for realizing the outputs"""
-  output_groups, realizes, assign_targets = _get_output_groups(outs, seen)
+  output_groups, realizes, assign_targets = _get_output_groups(outs)
   # preschedule all buffers in realizes
   prescheduled = flatten([_lower_lazybuffer(group, realizes) for group in output_groups.values()])
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
@@ -449,9 +449,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
 
 # *** DAG ordering: breadth first search ***
 
-def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if seen is None: seen = set()
-  graph, in_degree = _graph_schedule(outs, seen)
+def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  graph, in_degree = _graph_schedule(outs)
   if getenv("RUN_PROCESS_REPLAY") and getenv("COMPARE_SCHEDULE", 1):
     # NOTE: process relpay needs PYTHONPATH=., remove this once it just pickles LazyBuffers
     with contextlib.suppress(Exception): importlib.import_module("test.external.process_replay.diff_schedule").process_replay(outs, graph, in_degree)
@@ -462,7 +461,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   kernel_number = GlobalCounters.kernel_count
   while queue:
     lsi = queue.popleft()
-    for buf in lsi.outputs: seen.add(buf)
     if GRAPH:
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
@@ -479,7 +477,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, var_vals
 
-def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
-  schedule, var_vals = create_schedule_with_vars(outs, seen)
+def create_schedule(outs:List[LazyBuffer]) -> List[ScheduleItem]:
+  schedule, var_vals = create_schedule_with_vars(outs)
   assert len(var_vals) == 0
   return schedule
