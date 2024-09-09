@@ -412,11 +412,6 @@ class UOp(MathTrait):
   def vmax(self) -> UOp: return self._min_max[1]
   @functools.cached_property
   def _min_max(self) -> Tuple[UOp, UOp]:
-    from tinygrad.rewrite import graph_rewrite, PatternMatcher, UPat # TODO: this import is terrible
-    # NOTE: this folds everything as pyint
-    simple_constant_folder = PatternMatcher([
-      (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const_like(exec_alu(root.arg, dtypes.pyint, [x.arg for x in root.src]))),
-    ])
     vmin, vmax = self._min_max_unfolded()
     return graph_rewrite(vmin, simple_constant_folder), graph_rewrite(vmax, simple_constant_folder)
   def _min_bound(self) -> UOp: return self.sconst_like(dtypes.min(cast(DType, self.dtype)))
@@ -738,3 +733,9 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
       nodes[replace_source] = replace[n] = found = __inner_rewrite(new_x) if (new_x := pm.rewrite(x)) else x
     return found
   return __inner_rewrite(sink)
+
+# *** pattern used by UOp ***
+
+simple_constant_folder = PatternMatcher([
+  (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const_like(exec_alu(root.arg, dtypes.pyint, [x.arg for x in root.src]))),
+])
