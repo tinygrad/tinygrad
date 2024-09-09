@@ -432,8 +432,7 @@ class UOp(MathTrait):
         return Lmin*Rmin, Lmax*Rmax
       if self.arg is BinaryOps.MOD and s1.vmin.arg > 0: return self.const_like(0), (s1.vmax-1)
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
-        if s1.arg > 0: return self.sconst_like(s0.vmin.arg//s1.arg), self.sconst_like(s0.vmax.arg//s1.arg)
-        if s1.arg < 0: return self.sconst_like(-(s0.vmax.arg//-s1.arg)), self.sconst_like(-(s0.vmin.arg//-s1.arg))
+        return s1.gt(0).where(s0.vmin//s1, -(s0.vmax//(-s1))), s1.gt(0).where(s0.vmax//s1, -(s0.vmin//(-s1)))
       if self.arg is BinaryOps.MAX: return s0.vmin.max(s1.vmin), s0.vmax.max(s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax.lt(s1.vmin), s0.vmin.lt(s1.vmax))
     return self._min_bound(), self._max_bound()
