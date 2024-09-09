@@ -87,7 +87,7 @@ class ShapeTracker:
     idx, valid = self.to_indexed_uops()
     if not valid.vmax: return 0
     assert idx.vmax < 1e12, f"real_size broken for {self}"
-    return idx.vmax+1
+    return int(idx.vmax+1)
 
   def vars(self) -> Set[Variable]: return set().union(*[v.vars() for v in self.views])
 

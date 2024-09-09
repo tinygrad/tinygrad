@@ -409,11 +409,11 @@ class UOp(MathTrait):
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
   @property
-  def vmin(self) -> int: return self._min_max[0]
+  def vmin(self) -> ConstType: return self._min_max[0]
   @property
-  def vmax(self) -> int: return self._min_max[1]
+  def vmax(self) -> ConstType: return self._min_max[1]
   @functools.cached_property
-  def _min_max(self) -> Tuple[int, int]:
+  def _min_max(self) -> Tuple[ConstType, ConstType]:
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg:
       return self.arg[1].arg, self.arg[2].arg if isinstance(self.arg[2].arg, int) else dtypes.max(cast(DType, self.dtype))
