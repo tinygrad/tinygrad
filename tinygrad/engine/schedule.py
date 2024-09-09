@@ -1,11 +1,12 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
-from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
+from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
+from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps
+from tinygrad.ops import PatternMatcher, UPat, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
-                             GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
+                             GlobalCounters, all_same, colored, flatten, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -15,10 +16,6 @@ from tinygrad.shape.view import View, strides_for_shape
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
-
-# optionally log the ops to disk
-logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
-# use graph rewrite for reduceop fusion
 
 # *** ScheduleItem return type ***
 
@@ -82,18 +79,20 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
 
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
-    swizzle_arg = st if not st.contiguous and AST_REWRITE else None
-    rinfo: Optional[Tuple[ShapeTracker, Tuple[int, ...]]] = (ShapeTracker.from_shape(buf.srcs[0].shape), buf.arg) \
-        if AST_REWRITE else reduce_info.get((buf, st))
-    rsrc = _recursive_uop(buf.srcs[0], st:=(rinfo[0] if rinfo else st), outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
     alu_op = REDUCE_ALU[cast(ReduceOps, buf.op)]
-    # if we are merging the reduce, skip it
-    if rinfo is None:
-      assert rsrc.op is UOps.REDUCE_AXIS and rsrc.arg[0] is alu_op, f"can't merge reduceop {buf.op} with {rsrc}\n{st}"
-      return rsrc
-    ret = UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (alu_op, rinfo[1]))
-    if swizzle_arg is not None: ret = UOp(UOps.SWIZZLE, dtype, (ret,), swizzle_arg)
-    return cache.setdefault((buf, st), ret)
+    if not AST_REWRITE:
+      rinfo = reduce_info.get((buf, st))
+      rsrc = _recursive_uop(buf.srcs[0], st:=(rinfo[0] if rinfo else st), outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
+      # if we are merging the reduce, skip it
+      if rinfo is None:
+        assert rsrc.op is UOps.REDUCE_AXIS and rsrc.arg[0] is alu_op, f"can't merge reduceop {buf.op} with {rsrc}\n{st}"
+        return rsrc
+      return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (alu_op, rinfo[1])))
+    # this is the new reduceop swizzler with graph_rewrite
+    input_st = ShapeTracker.from_shape(buf.srcs[0].shape)
+    rsrc = _recursive_uop(buf.srcs[0], input_st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
+    ret = UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (alu_op, buf.arg))
+    return cache.setdefault((buf, st), ret if st.contiguous else UOp(UOps.SWIZZLE, dtype, (ret,), st))
 
   # elementwise ops pass shapetracker
   in_uops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache) for x in buf.srcs)
@@ -200,15 +199,15 @@ reduceop_fusor = PatternMatcher([
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_reduceop_shape),
 ])
 
-def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> LBScheduleItem:
+def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> List[LBScheduleItem]:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
   if (out:=outs[0]).op is MetaOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
     st_uop = ShapeTracker.from_shape(out.arg).to_uop()
     rd = UOp(UOps.LOAD, dtypes.uint8, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.uint8), (), 1), st_uop))
     wr = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(out.dtype), (), 0), st_uop, rd))
-    return LBScheduleItem(UOp(UOps.SINK, None, (wr,)), outs, [x.base for x in out.srcs])
+    return [LBScheduleItem(UOp(UOps.SINK, None, (wr,)), outs, [x.base for x in out.srcs])]
   if out.op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
-    return LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), outs, [x.base for x in out.srcs])
+    return [LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), outs, [x.base for x in out.srcs])]
   reduce_info: Dict[Tuple[LazyBuffer, ShapeTracker], Tuple[ShapeTracker, Tuple[int, ...]]] = {}
   if not AST_REWRITE:
     # push through all movementops between reduceops
@@ -243,7 +242,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
   sink = UOp(UOps.SINK, None, tuple(ast))
   if AST_REWRITE:
     sink = graph_rewrite(sink, reduceop_fusor)
-  return LBScheduleItem(sink, outs, list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))
+  return [LBScheduleItem(sink, outs, list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))]
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -321,7 +320,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def _get_output_groups(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
+def _get_output_groups(outs:List[LazyBuffer]) -> \
   Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # these are the output groups
         Dict[LazyBuffer, None],                     # these are all the realizes in the graph
         Dict[LazyBuffer, LazyBuffer]]:              # these are the buffers we ASSIGN to in this schedule
@@ -400,7 +399,7 @@ def _get_output_groups(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
-    if buf.realized is not None or buf.op is MetaOps.CONST or buf in seen: continue
+    if buf.realized is not None or buf.op is MetaOps.CONST: continue
     output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
 
     # make things that can't be images not images
@@ -416,13 +415,13 @@ def _get_output_groups(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
   return output_groups, realizes, assign_targets
 
 SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
-def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
+def _graph_schedule(outs:List[LazyBuffer]) -> \
   Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
         DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
   """create a graph for realizing the outputs"""
-  output_groups, realizes, assign_targets = _get_output_groups(outs, seen)
+  output_groups, realizes, assign_targets = _get_output_groups(outs)
   # preschedule all buffers in realizes
-  prescheduled = [_lower_lazybuffer(group, realizes) for group in output_groups.values()]
+  prescheduled = flatten([_lower_lazybuffer(group, realizes) for group in output_groups.values()])
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
   graph: DefaultDict[LBScheduleItem, List[LBScheduleItem]] = defaultdict(list)
@@ -450,9 +449,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> \
 
 # *** DAG ordering: breadth first search ***
 
-def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if seen is None: seen = set()
-  graph, in_degree = _graph_schedule(outs, seen)
+def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  graph, in_degree = _graph_schedule(outs)
   if getenv("RUN_PROCESS_REPLAY") and getenv("COMPARE_SCHEDULE", 1):
     # NOTE: process relpay needs PYTHONPATH=., remove this once it just pickles LazyBuffers
     with contextlib.suppress(Exception): importlib.import_module("test.external.process_replay.diff_schedule").process_replay(outs, graph, in_degree)
@@ -463,15 +461,12 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   kernel_number = GlobalCounters.kernel_count
   while queue:
     lsi = queue.popleft()
-    for buf in lsi.outputs: seen.add(buf)
     if GRAPH:
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, lsi.var_vals])
     for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
-    if logops and si.ast.op is UOps.SINK and not any(i.device.startswith("DISK:") for i in si.inputs):
-      logops.write(str(si.ast).replace("\n", "").replace(" ", "")+"\n")
+    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
     for x in graph[lsi]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
@@ -482,7 +477,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, var_vals
 
-def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
-  schedule, var_vals = create_schedule_with_vars(outs, seen)
+def create_schedule(outs:List[LazyBuffer]) -> List[ScheduleItem]:
+  schedule, var_vals = create_schedule_with_vars(outs)
   assert len(var_vals) == 0
   return schedule

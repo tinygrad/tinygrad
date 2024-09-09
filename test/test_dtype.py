@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
+from tinygrad.ops import truncate_fp16
 from hypothesis import given, settings, strategies as strat
 from test.helpers import is_dtype_supported, rand_for_dtype
 
@@ -381,6 +382,12 @@ class TestHelpers(unittest.TestCase):
         assert dt == dtypes.bool, dt
         np.testing.assert_equal(dtypes.min(dt), False)
         np.testing.assert_equal(dtypes.max(dt), True)
+
+  def test_truncate_fp16(self):
+    self.assertEqual(truncate_fp16(1), 1)
+    self.assertEqual(truncate_fp16(65504), 65504)
+    self.assertEqual(truncate_fp16(65519.999), 65504)
+    self.assertEqual(truncate_fp16(65520), math.inf)
 
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):

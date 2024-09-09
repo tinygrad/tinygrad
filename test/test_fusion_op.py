@@ -1,12 +1,12 @@
 import unittest
 import time
 import numpy as np
-from test.helpers import TestUOps
+from test.helpers import assert_equiv_uops
 from tinygrad import Tensor, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item, run_schedule
 
-class TestFusionOp(TestUOps):
+class TestFusionOp(unittest.TestCase):
   def test_contiguous_add(self):
     def test(contig=False):
       bt = Tensor(np.arange(16), dtype=dtypes.float32).reshape(4,4)
@@ -18,7 +18,7 @@ class TestFusionOp(TestUOps):
   def test_expand_fuse(self):
     bt = Tensor(np.ones((10, 1)), dtype=dtypes.float32)
     out = (bt*2).expand(10,10).sum(1)
-    sched = create_schedule([out.lazydata], None)
+    sched = create_schedule([out.lazydata])
     run_schedule(sched)
     outd = out.tolist()
     assert all(x == 20.0 for x in outd)
@@ -27,7 +27,7 @@ class TestFusionOp(TestUOps):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
-    sched = create_schedule([a.lazydata], None)
+    sched = create_schedule([a.lazydata])
     ei = lower_schedule_item(sched[-1])
     self.assertLess(time.perf_counter()-st, 2.0)
     assert len(ei.prg.p.src.splitlines()) < 250
@@ -36,15 +36,15 @@ class TestFusionOp(TestUOps):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
-    sched1 = create_schedule([a.lazydata], None)
+    sched1 = create_schedule([a.lazydata])
     b = Tensor([1,2,3,4])
     for _ in range(24): b = b + b
-    sched2 = create_schedule([b.lazydata], None)
+    sched2 = create_schedule([b.lazydata])
     c = Tensor([1,2,3,4])
     for _ in range(23): c = c + c
-    sched3 = create_schedule([c.lazydata], None)
-    self.assert_equiv_uops(sched1[-1].ast, sched2[-1].ast)
-    with self.assertRaises(AssertionError): self.assert_equiv_uops(sched1[-1].ast, sched3[-1].ast)
+    sched3 = create_schedule([c.lazydata])
+    assert_equiv_uops(sched1[-1].ast, sched2[-1].ast)
+    with self.assertRaises(AssertionError): assert_equiv_uops(sched1[-1].ast, sched3[-1].ast)
     self.assertLess(time.perf_counter()-st, 2.0)
 
 if __name__ == '__main__':

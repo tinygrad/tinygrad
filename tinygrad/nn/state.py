@@ -171,7 +171,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. CLANG to permute {intermediate_shape} with {permute_indexes}")
       assert storage[1] != dtypes.bfloat16, "can't CLANG permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
-      ret = ret.clang().reshape(intermediate_shape).permute(permute_indexes)
+      ret = ret.to(None).reshape(intermediate_shape).permute(permute_indexes)
 
     return ret.reshape(size)
 

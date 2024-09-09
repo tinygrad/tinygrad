@@ -4,7 +4,7 @@ import os, multiprocessing, logging, pickle, sqlite3
 from typing import Callable, List, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, db_connection, getenv, tqdm
 from tinygrad.codegen.kernel import Kernel
-from test.external.process_replay.utils import print_diff
+from test.external.process_replay.helpers import print_diff
 
 # *** process replay settings
 
@@ -14,9 +14,9 @@ REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 RUN_ID = os.getenv("GITHUB_RUN_ID", "HEAD")
 TABLE_NAME = f"process_replay_{RUN_ID}_{getenv('GITHUB_RUN_ATTEMPT')}_{VERSION}"
-early_stop = multiprocessing.Event()
-logging.basicConfig(level=logging.INFO, format='%(message)s')
 os.environ["RUN_PROCESS_REPLAY"] = "0"
+early_stop = multiprocessing.Event()
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 # user config
 ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
