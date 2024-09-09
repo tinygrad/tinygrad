@@ -8,7 +8,7 @@ from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import DType, ImageDType, PtrDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, round_up, all_int, \
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, AMX, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
@@ -304,7 +304,8 @@ class Kernel:
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
-    if use_tensor_cores and self.opts.has_local and self.reduceop is not None and self.reduceop.arg[0] is BinaryOps.ADD:
+    if use_tensor_cores and (self.opts.has_local or (self.opts.device == "CLANG" and AMX)) and self.reduceop is not None \
+      and self.reduceop.arg[0] is BinaryOps.ADD:
       for tc in self.opts.tensor_cores:
         tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
         # can only fuse reduces with the same tc options
@@ -328,6 +329,8 @@ class Kernel:
           for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
             if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
           for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+        elif self.opts.device == "CLANG":
+          for (i, sz) in tc.threads: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], sz), append_opt=False)
         elif self.opts.device in {"CUDA", "NV"}:
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
@@ -364,6 +367,7 @@ class Kernel:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
+          if (self.opts.device == "CLANG" and AMX): return True # skip hand-coded TC opts if CLANG, upcasting will make kernel slower
           # hand-coded TC opts
           def late_upcast_tc(tc_dim: int):
             if tc_opts.axes_exist[tc_dim]:
@@ -657,6 +661,7 @@ class Kernel:
                                          [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
+          threads = prod(t[1] for t in tc.threads)
           if self.opts.device in {"AMD", "HIP"}:
             reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
             # https://gpuopen.com/learn/wmma_on_rdna3/
@@ -666,6 +671,9 @@ class Kernel:
             reduce_axes, upcast_axes = [0], [[(1, 2)], [(1, 2)], [(1, 2)]]
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
+          elif self.opts.device == "CLANG":
+            reduce_axes, upcast_axes = [], [[(1,tc.dims[0])],[(0,tc.dims[1])],[(1, tc.dims[2]), (0, tc.dims[2])]]
+            threads, fix_st1, fix_st2 = threads // tc.dims[2], None, None
           elif self.opts.device in {"CUDA", "NV"}:
             reduce_axes, upcast_axes = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
@@ -681,7 +689,7 @@ class Kernel:
             raise RuntimeError("unsupported device for tensor cores")
 
           assert apply_to_st is None, "double tensor core? not supported"
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(t[1] for t in tc.threads),
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, threads,
                       tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axes),
                       tuple(self.first_upcast+ax for ax in reduce_axes))
           if self.use_tensor_cores >= 2:
@@ -783,7 +791,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
     assert op in {UOps.SHAPETRACKER, UOps.ALU, UOps.CAST, UOps.BITCAST, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
     # movementops are pushed to the edges with SHAPETRACKER
     # elementwise inherits shape
-    st = arg if op is UOps.SHAPETRACKER else sts[src[-1]]
+    st = arg if op is UOps.SHAPETRACKER else sts[src[uop.st_loc if op in BUFFER_UOPS else -1]]
     for x in (src[1:] if op in BUFFER_UOPS else src):
       if sts[x].shape != st.shape:
         if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op} {sts[x].shape} != {st.shape}")

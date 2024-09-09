@@ -1,7 +1,7 @@
 from __future__ import annotations
-import os, time, ctypes, functools, mmap, struct, array, decimal, math
+import os, ctypes, functools, mmap, struct, array, decimal, math
 from types import SimpleNamespace
-from typing import Tuple, List, Dict, Any, cast
+from typing import Tuple, List, Dict, Any
 from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState, hcq_command
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
@@ -36,11 +36,6 @@ class QCOMSignal(HCQSignal):
   def _get_value(self) -> int: return self._signal[0]
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(19.2) # based on the 19.2MHz always-on timer
   def _set_value(self, new_value:int): self._signal[0] = new_value
-  def wait(self, value:int, timeout:int=60000):
-    start_time = time.time() * 1000
-    while time.time() * 1000 - start_time < timeout:
-      if self._signal[0] >= value: return
-    raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
 class QCOMComputeQueue(HWComputeQueue):
   def __init__(self):
@@ -51,11 +46,21 @@ class QCOMComputeQueue(HWComputeQueue):
 
   def reg(self, reg: int, *vals: int): self.q += [pkt4_hdr(reg, len(vals)), *vals]
 
+  def _cache_flush(self, write_back=True, invalidate=False, sync=True, memsync=False):
+    # TODO: 7xx support.
+    if write_back: self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_FLUSH_TS, *data64_le(QCOMDevice.dummy_addr), 0) # dirty cache write-back.
+    if invalidate: self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
+    if memsync: self.cmd(adreno.CP_WAIT_MEM_WRITES)
+    if sync: self.cmd(adreno.CP_WAIT_FOR_IDLE)
+
+  def _memory_barrier(self): self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
+
   def _signal(self, signal, value=0, ts=False):
+    self.cmd(adreno.CP_WAIT_FOR_IDLE)
     if QCOMDevice.gpu_id < 700:
       self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS, timestamp=ts),
-               *data64_le(mv_address(signal._signal) + (0 if not ts else 8)), qreg.cp_event_write_3(value&0xFFFFFFFF))
-      self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_INVALIDATE)
+               *data64_le(mv_address(signal._signal) + (0 if not ts else 8)), qreg.cp_event_write_3(value & 0xFFFFFFFF))
+      self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     else:
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
       raise RuntimeError('CP_EVENT_WRITE7 is not supported')
@@ -67,8 +72,8 @@ class QCOMComputeQueue(HWComputeQueue):
              qreg.cp_wait_reg_mem_3(ref=value&0xFFFFFFFF), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
 
   def _update_signal(self, cmd_idx, signal, value):
-    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(mv_address(signal._signal)))
-    if value is not None: self._patch(cmd_idx, offset=4, data=[value & 0xFFFFFFFF])
+    if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(mv_address(signal._signal)))
+    if value is not None: self._patch(cmd_idx, offset=5, data=[value & 0xFFFFFFFF])
 
   def _update_wait(self, cmd_idx, signal, value):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(mv_address(signal._signal)))
@@ -94,26 +99,23 @@ class QCOMComputeQueue(HWComputeQueue):
 
   @hcq_command
   def setup(self):
-    self.cmd(adreno.CP_WAIT_FOR_IDLE)
     self.cmd(adreno.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=adreno.RM6_COMPUTE))
-    self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, qreg.a6xx_hlsq_invalidate_cmd(cs_state=True, cs_ibo=True))
-    self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, qreg.a6xx_hlsq_invalidate_cmd())
     self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, qreg.a6xx_sp_cs_tex_count(0xff))
     self.reg(adreno.REG_A6XX_SP_CS_IBO_COUNT, qreg.a6xx_sp_cs_ibo_count(0xff))
     self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, qreg.a6xx_sp_mode_control(isammode=adreno.ISAMMODE_CL))
     self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, qreg.a6xx_sp_perfctr_enable(cs=True))
     self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, qreg.a6xx_sp_tp_mode_cntl(isammode=adreno.ISAMMODE_CL, unk3=2))
-    self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, qreg.a6xx_tpl1_dbg_eco_cntl())
+    self.cmd(adreno.CP_WAIT_FOR_IDLE)
 
   def _exec(self, prg, args_state, global_size, local_size):
-    global_size_mp = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size))) if local_size else global_size
-    self.cmd_idx_to_dims[len(self) - 1] = [global_size, local_size]
+    global_size_mp = [int(g*l) for g,l in zip(global_size, local_size)]
+    self.cmd_idx_to_dims[self._cur_cmd_idx()] = [global_size, local_size]
 
-    self.cmd(adreno.CP_WAIT_FOR_IDLE)
     self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
              qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1),
              global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf, 0xfc | qreg.a6xx_hlsq_cs_cntl_1(threadsize=adreno.THREAD64),
              int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2])))
+
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
              qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
              qreg.a6xx_sp_cs_unknown_a9b1(unk5=True, unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
@@ -126,8 +128,10 @@ class QCOMComputeQueue(HWComputeQueue):
     self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_SHADER, state_src=adreno.SS6_INDIRECT,
                                                                state_block=adreno.SB6_CS_SHADER, num_unit=round_up(prg.image_size, 128) // 128),
              *data64_le(prg.lib_gpu.va_addr))
+
     self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc,
              qreg.a6xx_hlsq_cs_cntl(constlen=prg.kernargs_alloc_size // 4, enabled=True))
+
     self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, qreg.a6xx_sp_cs_pvt_mem_hw_stack_offset(prg.hw_stack_offset))
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, qreg.a6xx_sp_cs_instrlen(prg.image_size // 4))
 
@@ -153,21 +157,20 @@ class QCOMComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG,
              qreg.a6xx_sp_cs_config(enabled=True, nsamp=args_state.samplers_cnt, ntex=args_state.descriptors_cnt, nibo=args_state.ibos_cnt))
     self.cmd(adreno.CP_RUN_OPENCL, 0)
+    self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
 
   def _update_exec(self, cmd_idx, global_size, local_size):
     if global_size is not None:
-      self._patch(cmd_idx, offset=11, data=[int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2]))])
+      self._patch(cmd_idx, offset=10, data=[int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2]))])
       self.cmd_idx_to_dims[cmd_idx][0] = global_size
 
     if local_size is not None:
       payload = qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1)
-      self._patch(cmd_idx, offset=2, data=[payload])
+      self._patch(cmd_idx, offset=1, data=[payload])
       self.cmd_idx_to_dims[cmd_idx][1] = local_size
 
-    global_size_mp = self.cmd_idx_to_dims[cmd_idx][0]
-    if self.cmd_idx_to_dims[cmd_idx][1]:
-      global_size_mp = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(self.cmd_idx_to_dims[cmd_idx][0], self.cmd_idx_to_dims[cmd_idx][1])))
-    self._patch(cmd_idx, offset=3, data=[global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0])
+    global_size_mp = [int(g*l) for g,l in zip(self.cmd_idx_to_dims[cmd_idx][0], self.cmd_idx_to_dims[cmd_idx][1])]
+    self._patch(cmd_idx, offset=2, data=[global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0])
 
 class QCOMArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:QCOMProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
@@ -218,7 +221,6 @@ class QCOMProgram(HCQProgram):
     self.device, self.name, self.lib = device, name, lib
     self._parse_lib()
 
-    # reserve some space after for gpu to use
     self.lib_gpu = self.device.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
 
@@ -275,16 +277,17 @@ class QCOMProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
 
 class QCOMAllocator(HCQAllocator):
-  def __init__(self, device:QCOMDevice): super().__init__(device)
-
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.image is not None:
       pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.base.itemsize), 1 << (pitchalign:=6))
       texture = self.device._gpu_alloc(pitch * round_up(options.image.shape[0], 16), kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
 
-      # save it here to load in one command (the same approach as OpenCL and mesa)
+      # Extend HCQBuffer with texture-related info.
       texture.samplers, texture.descriptor, texture.ibo = [0] * 4, [0] * 16, [0] * 16
-      texture.samplers[0:2] = [0x1b60, 0x30] # compiled sampler. always the same in tinygrad.
+
+      # Compiled sampler (always the same in tinygrad).
+      texture.samplers[0] = qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=adreno.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode)
+      texture.samplers[1] = qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True)
 
       tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
       texture.descriptor[0] = qreg.a6xx_tex_const_0(swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt)
@@ -303,6 +306,10 @@ class QCOMAllocator(HCQAllocator):
     self.device.synchronize()
     ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
+  def as_buffer(self, src:HCQBuffer) -> memoryview:
+    self.device.synchronize()
+    return to_mv(src.va_addr, src.size)
+
   def _free(self, opaque, options:BufferOptions):
     self.device.synchronize()
     self.device._gpu_free(opaque)
@@ -312,9 +319,11 @@ class QCOMDevice(HCQCompiled):
   signals_page: Any = None
   signals_pool: List[Any] = []
   gpu_id: int = 0
+  dummy_addr: int = 0
 
   def __init__(self, device:str=""):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
+    QCOMDevice.dummy_addr = self._gpu_alloc(0x1000, map_to_cpu=False).va_addr
     QCOMDevice.signals_page = self._gpu_alloc(16 * 65536, map_to_cpu=True, uncached=True)
     QCOMDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
     info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0

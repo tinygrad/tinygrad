@@ -19,7 +19,7 @@ if __name__ == "__main__":
   no_rewrite: List[float] = []
   for k,v in output_groups.items():
     st = time.perf_counter_ns()
-    lsi = _lower_lazybuffer(v, realizes)
+    lsi = _lower_lazybuffer(v, realizes)[0]
     et = time.perf_counter_ns() - st
     if lsi.ast.op is UOps.EXT: continue
     no_rewrite.append(et*1e-6)
@@ -30,7 +30,7 @@ if __name__ == "__main__":
   with Context(AST_REWRITE=1):
     for k,v in output_groups.items():
       st = time.perf_counter_ns()
-      lsi = _lower_lazybuffer(v, realizes)
+      lsi = _lower_lazybuffer(v, realizes)[0]
       bufs.append(v)
       et = time.perf_counter_ns() - st
       if lsi.ast.op is UOps.EXT: continue

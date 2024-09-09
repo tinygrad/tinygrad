@@ -4,7 +4,7 @@ import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, dtypes, TinyJit
-from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv
+from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv, trange
 from tinygrad.tensor import _from_np_dtype
 import numpy as np
 
@@ -47,9 +47,14 @@ if __name__ == "__main__":
   if getenv("SAVE_OUTPUT"):
     np.save(path, tinygrad_out)
     print(f"saved output to {path}!")
+  elif getenv("FUZZ") and path.exists():
+    known_good_out = np.load(path)
+    for _ in trange(1000):
+      ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
+      np.testing.assert_allclose(known_good_out, ret, atol=1e-2, rtol=1e-2)
+    print(colored("fuzz validated!", "green"))
   elif path.exists():
     known_good_out = np.load(path)
-
     np.testing.assert_allclose(known_good_out, tinygrad_out, atol=1e-2, rtol=1e-2)
     print(colored("outputs validated!", "green"))
   else:
