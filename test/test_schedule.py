@@ -6,7 +6,6 @@ import unittest
 import numpy as np
 from typing import List, Optional, Union, cast
 
-from torch import qr
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.dtype import PtrDType
@@ -1334,7 +1333,6 @@ class TestConvBW(unittest.TestCase):
     np.testing.assert_allclose(c1.weight.grad.numpy(), c1_torch.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(img.grad.numpy(), img_torch.grad.numpy(), atol=5e-4, rtol=1e-5)
 
-  @unittest.skip("TODO: fixup swizzle")
   def test_fold_conv_relu_backward_ast_rewrite(self):
     # shared params
     Tensor.manual_seed(0)
@@ -1665,15 +1663,17 @@ class TestScheduleRewrite(unittest.TestCase):
     rsink = graph_rewrite(sink, reduceop_fusor)
     self.assertEqual(rsink.key, sink.key)
 
-  @unittest.skip("TODO: this r must swizzle")
   def test_simple_store_reshape(self):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
     ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    r = UOp(UOps.SWIZZLE, dtypes.int, (r,), ShapeTracker.from_shape(()))
     r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, reduceop_fusor)
-    with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    # NOTE: this AST always correct in the entire lifecycle of graph_rewrite!
+    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    verify_ast(sink)
     verify_ast(rsink)
 
   def test_no_reshape_reduceop(self):
@@ -1685,15 +1685,17 @@ class TestScheduleRewrite(unittest.TestCase):
     verify_ast(sink)
     self.assertEqual(sink.key, rsink.key)
 
-  @unittest.skip("TODO: this r must swizzle")
   def test_reshape_many(self):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
     ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    r = UOp(UOps.SWIZZLE, dtypes.int, (r,), ShapeTracker.from_shape(()))
     for _ in range(24): r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
-    with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    # NOTE: this AST always correct in the entire lifecycle of graph_rewrite!
+    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    verify_ast(sink)
     verify_ast(rsink)
     self.assertLessEqual(et, 1e3)
 

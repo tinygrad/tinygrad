@@ -185,13 +185,12 @@ def swizzle_elementwise_child(root:UOp) -> Optional[UOp]:
   fixup_cache: Dict[UOp, UOp] = {}
   new_srcs = [x.src[0] if x.op is UOps.SWIZZLE else st_fixup(x, lambda st:st.reshape(sw_input_shape), fixup_cache) for x in root.src]
   ret = UOp(root.op, root.dtype, tuple(new_srcs), root.arg)
-  if ret.op is UOps.STORE: return ret
-  return UOp(UOps.SWIZZLE, None, (ret,), ShapeTracker.from_shape(sw_shape))
+  return ret if ret.op is UOps.STORE else UOp(UOps.SWIZZLE, None, (ret,), ShapeTracker.from_shape(sw_shape))
 
 reduceop_fusor = PatternMatcher([
-  #(UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_through_reduce),
+  (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_through_reduce),
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), swizzle_elementwise_child),
-  #(UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
+  (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> List[LBScheduleItem]:
