@@ -411,9 +411,13 @@ class UOp(MathTrait):
   def vmax(self) -> UOp: return self._min_max[1]
   @functools.cached_property
   def _min_max(self) -> Tuple[UOp, UOp]:
-    from tinygrad.codegen.uopgraph import graph_rewrite, constant_folder # TODO: this import is terrible
+    from tinygrad.rewrite import graph_rewrite, PatternMatcher, UPat # TODO: this import is terrible
+    # NOTE: this folds everything as pyint
+    simple_constant_folder = PatternMatcher([
+      (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const_like(exec_alu(root.arg, dtypes.pyint, [x.arg for x in root.src]))),
+    ])
     vmin, vmax = self._min_max_unfolded()
-    return graph_rewrite(vmin, constant_folder), graph_rewrite(vmax, constant_folder)
+    return graph_rewrite(vmin, simple_constant_folder), graph_rewrite(vmax, simple_constant_folder)
   def _min_bound(self) -> UOp: return self.sconst_like(dtypes.min(cast(DType, self.dtype)))
   def _max_bound(self) -> UOp: return self.sconst_like(dtypes.max(cast(DType, self.dtype)))
   def _min_max_unfolded(self) -> Tuple[UOp, UOp]:
@@ -425,7 +429,7 @@ class UOp(MathTrait):
     if self.op is UOps.CONST: return self, self
     if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
-      if self.arg is BinaryOps.ADD: return self.sconst_like(s0.vmin.arg+s1.vmin.arg), self.sconst_like(s0.vmax.arg+s1.vmax.arg)
+      if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
       if self.arg is BinaryOps.MUL and (s0.vmin.arg >= 0 or s1.vmin.arg >= 0):
         # handle at lease one is non-negative
         Lmin, Lmax = (s0.vmin.arg, s0.vmax.arg) if s1.vmin.arg >= 0 else (s0.vmax.arg, s0.vmin.arg)
