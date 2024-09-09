@@ -415,7 +415,7 @@ class UOp(MathTrait):
   def _min_max(self) -> Tuple[ConstType, ConstType]:
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg:
-      return self.arg[1].arg, self.arg[2].arg if isinstance(self.arg[2].arg, int) else dtypes.max(cast(DType, self.dtype))
+      return self.arg[1].arg, self.arg[2].arg if self.arg[2].op is UOps.CONST else dtypes.max(cast(DType, self.dtype))
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(cast(DType, self.dtype))
