@@ -216,8 +216,8 @@ class TestLinearizerDumb(unittest.TestCase):
     print(prg.src)
     store_idxs = [x.src[1] for x in k.uops if x.op is UOps.STORE]
     for i in range(len(store_idxs) - 1):
-      first_bounds = store_idxs[i].vmin.arg+store_idxs[i].vmax.arg
-      next_bounds = store_idxs[i+1].vmin.arg+store_idxs[i+1].vmax.arg
+      first_bounds = store_idxs[i].vmin+store_idxs[i].vmax
+      next_bounds = store_idxs[i+1].vmin+store_idxs[i+1].vmax
       assert first_bounds < next_bounds, f"first stored (max) idx {first_bounds} then {next_bounds}!"
 
 if __name__ == '__main__':
