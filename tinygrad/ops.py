@@ -409,10 +409,14 @@ class UOp(MathTrait):
   def vmin(self) -> UOp: return self._min_max[0]
   @property
   def vmax(self) -> UOp: return self._min_max[1]
-  def _min_bound(self) -> UOp: return self.sconst_like(dtypes.min(cast(DType, self.dtype)))
-  def _max_bound(self) -> UOp: return self.sconst_like(dtypes.max(cast(DType, self.dtype)))
   @functools.cached_property
   def _min_max(self) -> Tuple[UOp, UOp]:
+    from tinygrad.codegen.uopgraph import graph_rewrite, constant_folder # TODO: this import is terrible
+    vmin, vmax = self._min_max_unfolded()
+    return graph_rewrite(vmin, constant_folder), graph_rewrite(vmax, constant_folder)
+  def _min_bound(self) -> UOp: return self.sconst_like(dtypes.min(cast(DType, self.dtype)))
+  def _max_bound(self) -> UOp: return self.sconst_like(dtypes.max(cast(DType, self.dtype)))
+  def _min_max_unfolded(self) -> Tuple[UOp, UOp]:
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2] if isinstance(self.arg[2].arg, int) else self._max_bound()
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
