@@ -1289,7 +1289,6 @@ class TestSchedule(unittest.TestCase):
 
   def test_conv2d(self): _test_conv2d(8)
   def test_conv2d_fused(self): _test_conv2d(7, FUSE_CONV_BW=1)
-  @unittest.expectedFailure
   def test_conv2d_fused_ast_rewrite(self): _test_conv2d(7, FUSE_CONV_BW=1, AST_REWRITE=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
