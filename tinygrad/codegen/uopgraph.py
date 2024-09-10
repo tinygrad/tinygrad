@@ -51,7 +51,7 @@ def fold_expanded(ex, buf):
             new_load = UOp(UOps.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
             for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), i)
           else:
-            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.STORE, None, tuple(new_src)) if i == 0 else None
+            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.STORE, dtypes.void, tuple(new_src)) if i == 0 else None
           for i in range(fold_length): used.add((rootsrc,o+i))
 
   # dedup expand for LOAD
@@ -441,7 +441,8 @@ def create_gate(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
     if u.op is UOps.BARRIER: return u
-    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER: return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, None, (gate, u.src[-1])),), u.arg)
+    if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
+      return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, dtypes.void, (gate, u.src[-1])),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
@@ -457,7 +458,8 @@ expander = PatternMatcher([
    lambda root: UOp(UOps.SINK, root.dtype, a, root.arg)
     if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
   # BARRIERs aren't actually expanded
-  (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)), lambda ex: UOp(UOps.EXPAND, None, (UOp(UOps.BARRIER, None, ex.src),)*len(ex.src), ex.arg)),
+  (NOp(UOps.BARRIER, src=(NOp(UOps.EXPAND, name="ex"),)),
+   lambda ex: UOp(UOps.EXPAND, dtypes.void, (UOp(UOps.BARRIER, dtypes.void, ex.src),)*len(ex.src), ex.arg)),
   # empty EXPAND is NOOP
   (NOp(UOps.EXPAND, src=(NOp.var('x'),), arg=()), lambda x: x),
   # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU
@@ -576,7 +578,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       if in_degree[u] == 0: push(u)
 
   # end scopes in toposort order
-  for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], None, (u,)))
+  for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], dtypes.void, (u,)))
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check:
