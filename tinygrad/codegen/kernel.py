@@ -105,6 +105,9 @@ class Kernel:
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
+    # extra kernel in case of split
+    self.extra_kernel: Optional[Kernel] = None
+
   def copy(self):
     ret = type(self).__new__(type(self))
 
@@ -387,8 +390,6 @@ class Kernel:
       return False
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    # if kernel was split apply opt to extra kernel
-    #if hasattr(self, "extra_kernel"): self.extra_kernel.apply_opt(opt, append_opt)
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
 
     if opt.op is OptOps.TC:
@@ -782,7 +783,7 @@ class Kernel:
 
   def split_kernel(self) -> List[Kernel]:
     kernels = []
-    if hasattr(self, "extra_kernel"):
+    if self.extra_kernel is not None:
       kernels.append(self.extra_kernel)
     kernels.append(self)
     return kernels
