@@ -779,7 +779,7 @@ class Kernel:
       return UOp(ast.op, ast.dtype, tuple(new_src), ast.arg)
     asts.append(rec(ast))
     return asts
-  
+
   def split_kernel(self) -> List[Kernel]:
     kernels = []
     if hasattr(self, "extra_kernel"):

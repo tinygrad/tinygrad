@@ -28,7 +28,7 @@ class TestFusionOp(unittest.TestCase):
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
     sched = create_schedule([a.lazydata])
-    ei = lower_schedule_item(sched[-1])
+    ei = lower_schedule_item(sched[-1])[-1]
     self.assertLess(time.perf_counter()-st, 2.0)
     assert len(ei.prg.p.src.splitlines()) < 250
 
