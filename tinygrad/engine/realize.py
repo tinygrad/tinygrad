@@ -61,7 +61,7 @@ def get_kernels(renderer:Renderer, ast:UOp) -> List[Kernel]:
                   raise RuntimeError(f"mismatch of {diff_count}/{b.numel()} items with type {b.dtype}, max {(b-bufs[0]).abs().max().item()}")
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
-  return list(k)
+  return k if isinstance(k, list) else [k]
 
 # **************** Runners ****************
 
