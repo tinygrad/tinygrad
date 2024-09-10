@@ -409,8 +409,9 @@ def do_expand(root:UOp):
         new_srcs.append(src)
       else:
         new_srcs.append(UOp(UOps.VECTORIZE, src.dtype.vec(expand_sz), (src,)*expand_sz))
-
-  nsrc = UOp(root.op, root.dtype.vec(expand_sz) if root.dtype else None, tuple(new_srcs), root.arg)
+  # this should be right
+  new_arg = tuple(range(expand_sz*root.arg, expand_sz*(root.arg+1))) if root.op is UOps.GEP else root.arg
+  nsrc = UOp(root.op, root.dtype.vec(expand_sz) if root.dtype else None, tuple(new_srcs), new_arg)
   ret = UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
   #print("***")
   #print(ret)
@@ -455,11 +456,13 @@ def do_contract(con:UOp):
   if ex.op is not UOps.EXPAND: return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from EXPAND
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
-  srcs = []
+  idxs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
-    lsrcs = [ex.src[0].gep(_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})) for lrpk in _choices_from_args(con.arg)]
-    srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(lsrcs)))
-  return srcs[0] if len(srcs) == 1 else UOp(UOps.EXPAND, con.dtype, tuple(srcs), new_ex_args)
+    idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]
+    #srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(lsrcs)))
+  #if len(srcs) == 1: return srcs[0]
+  return UOp(UOps.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)) if idxs != list(range(len(idxs))) else ex.src[0],), new_ex_args)
+  #return UOp(UOps.EXPAND, con.dtype, (UOp(UOps.VECTORIZE, con.dtype.scalar().vec(len(srcs)), tuple(srcs)),), new_ex_args)
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
@@ -479,8 +482,8 @@ expander = PatternMatcher([
   # create gate MUST BE BEFORE expander
   (NOp(UOps.STORE, name="root"), create_gate),
   # do expansion
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
-         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.WMMA, UOps.LOAD, UOps.STORE, UOps.VECTORIZE, UOps.GEP,
+         UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (NOp(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
   (NOp(UOps.SINK, name="root"),
