@@ -95,7 +95,8 @@ class AMDComputeQueue(HWComputeQueue):
   def _exec(self, prg, args_state, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
     self._acquire_mem(gli=0, gl2=0)
 
-    user_regs, cmd_idx = [*data64_le(prg.device.scratch.va_addr), 0xffffffff, 0xc00000] if prg.enable_private_segment_sgpr else [], len(self) - 1
+    cmd_idx = self._cur_cmd_idx()
+    user_regs = [*data64_le(prg.device.scratch.va_addr), 0xffffffff, 0xc00000] if prg.enable_private_segment_sgpr else []
     if prg.enable_dispatch_ptr:
       dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.ptr + prg.kernargs_segment_size)
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
