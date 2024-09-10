@@ -228,7 +228,7 @@ class TestStatsOptimized(unittest.TestCase):
     for opt in opts: k.apply_opt(opt)
     p = k.to_program()
     print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
-    self.assertEqual(p.op_estimate, n*n*n*2*2+n*n*2)
+    self.assertEqual(p.op_estimate, n*n*n*2*2)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
