@@ -210,8 +210,12 @@ def vectorize_const(vec:UOp) -> UOp:
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # SVECTORIZE
+  (UPat(UOps.VECTORIZE, src=UPat(name='x'), name="vec"), lambda x,vec: UOp(UOps.SVECTORIZE, vec.dtype, (x,))),
+
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), vectorize_const),
-  (NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep") + NOp.cvar('c2'), lambda x,c1,gep,c2: x.gep(gep.arg) + (c1.gep(gep.arg) + c2)),
+  (NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
+  #(NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep") + NOp.cvar('c2'), lambda x,c1,gep,c2: x.gep(gep.arg) + (c1.gep(gep.arg) + c2)),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat(UOps.ALU, BinaryOps.ADD, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
   (UPat(UOps.ALU, BinaryOps.MUL, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
