@@ -131,11 +131,11 @@ class LLVMRenderer(Renderer):
           else:
             val = bb[-1].load(bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
           lvars[u] = val
-        elif uop is UOps.PHI:
+        elif uop is UOps.ASSIGN:
           lvars[u] = lvars[src[1]]
-          # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
+          # ASSIGN UOps can link to other ASSIGN Uops, backtrace this to DEFINE_ACC
           backward = src[0]
-          while backward.op is UOps.PHI: backward = backward.src[0]
+          while backward.op is UOps.ASSIGN: backward = backward.src[0]
           lvars[backward] = lvars[u]
         elif uop is UOps.ALU:
           lvars[u] = self.code_for_op[args](bb[-1], *[lvars[x] for x in src], src[0].dtype if args in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype)

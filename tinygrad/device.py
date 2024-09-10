@@ -30,7 +30,7 @@ class _Device:
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
-    for device in ["METAL", "AMD", "NV", "CUDA", "GPU", "CLANG", "LLVM"]:
+    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
       try:
         if self[device]:
           os.environ[device] = "1"   # we set this in environment for spawned children
@@ -224,6 +224,12 @@ class HWCommandQueue:
   def __init__(self): self.q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
   def __len__(self): return len(self.cmds_offset)
   def _patch(self, cmd_idx, offset, data): self.q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
+  def _cur_cmd_idx(self) -> int:
+    """
+    Returns the index of the command currently being enqueued.
+    Should be called only within functions that enqueue commands and are decorated with `@hcq_command`.
+    """
+    return len(self) - 1
 
   @hcq_command
   def signal(self, signal:HCQSignal, value:int):
@@ -411,7 +417,10 @@ class HCQSignal:
       value: The value to wait for.
       timeout: Maximum time to wait in milliseconds. Defaults to 10s.
     """
-    raise NotImplementedError("wait() method must be implemented")
+    start_time = time.time() * 1000
+    while time.time() * 1000 - start_time < timeout:
+      if self.value >= value: return
+    raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 @contextlib.contextmanager
 def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):

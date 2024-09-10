@@ -4,7 +4,7 @@ import os, multiprocessing, logging, pickle, sqlite3
 from typing import Callable, List, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, db_connection, getenv, tqdm
 from tinygrad.codegen.kernel import Kernel
-from test.external.process_replay.utils import print_diff
+from test.external.process_replay.helpers import print_diff
 
 # *** process replay settings
 
@@ -14,9 +14,9 @@ REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 RUN_ID = os.getenv("GITHUB_RUN_ID", "HEAD")
 TABLE_NAME = f"process_replay_{RUN_ID}_{getenv('GITHUB_RUN_ATTEMPT')}_{VERSION}"
-early_stop = multiprocessing.Event()
-logging.basicConfig(level=logging.INFO, format='%(message)s')
 os.environ["RUN_PROCESS_REPLAY"] = "0"
+early_stop = multiprocessing.Event()
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 # user config
 ASSERT_DIFF = getenv("ASSERT_PROCESS_REPLAY", int((k:="[run_process_replay]") in os.getenv("COMMIT_MESSAGE", k) or k in os.getenv("PR_TITLE", k)))
@@ -82,16 +82,18 @@ def diff_kernel(offset:int) -> bool:
   cur.close()
   return bool(changed)
 
-# *** differ runners with multiprocessing
+# *** generic runner for executing fxn across all rows of a table in parallel
 
-def _run_differ(row_count:int, differ:Callable[[int], bool]) -> None:
-  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=16) as pool:
+def _pmap(row_count:int, fxn:Callable[[int], bool], maxtasksperchild:int=16) -> None:
+  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=maxtasksperchild) as pool:
     inputs = list(range(0, row_count, PAGE_SIZE))
-    changed: List[bool] = list(tqdm(pool.imap_unordered(differ, inputs), total=len(inputs)))
+    changed: List[bool] = list(tqdm(pool.imap_unordered(fxn, inputs), total=len(inputs)))
     pool.close()
     pool.join()
     pool.terminate()
     if any(changed) and ASSERT_DIFF: raise AssertionError("process replay detected changes")
+
+# *** process replay parallel differ runners
 
 def process_replay_schedule() -> None:
   conn = db_connection()
@@ -105,7 +107,7 @@ def process_replay_schedule() -> None:
     if row_count != 0: logging.info("***** schedule diff")
     conn.commit()
     cur.close()
-    _run_differ(row_count, diff_schedule)
+    _pmap(row_count, diff_schedule)
 
 def process_replay_kernel() -> None:
   conn = db_connection()
@@ -116,7 +118,7 @@ def process_replay_kernel() -> None:
     return None
   conn.commit()
   cur.close()
-  _run_differ(row_count, diff_kernel)
+  _pmap(row_count, diff_kernel)
 
 # *** main loop
 

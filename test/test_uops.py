@@ -1,17 +1,19 @@
 from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import UOps, NOp, UOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu # noqa F401
+from tinygrad.ops import UOps, UOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu # noqa F401
+from tinygrad.ops import NOp
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
 from tinygrad.shape.symbolic import Variable
-from test.helpers import is_dtype_supported, TestUOps as TestEqUOps
+from test.helpers import is_dtype_supported, assert_equiv_uops
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
@@ -347,8 +349,8 @@ class TestAssembly(unittest.TestCase):
     self.assertEqual(uops[-1].arg, BinaryOps.SHR)
     self.assertEqual(uops[-2].arg, BinaryOps.IDIV)
 
-class TestUOpCompare(unittest.TestCase):
-  def test_alu_same_src_different_arg(self):
+class TestUOpMethod(unittest.TestCase):
+  def test_compare_alu_same_src_different_arg(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0)
     b = UOp(UOps.CONST, dtypes.float, (), 3.0)
 
@@ -356,7 +358,16 @@ class TestUOpCompare(unittest.TestCase):
     mul = UOp(UOps.ALU, dtypes.float, (a, b), BinaryOps.MUL)
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
-class TestUOpStr(TestEqUOps):
+  def test_uop_variables(self):
+    a = Variable("a", 1, 10)
+    uop_var = UOp.const(dtypes.int, a)
+    st_var = UOp(UOps.LOAD, dtypes.float, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0),
+                                           ShapeTracker.from_shape((2, a)).to_uop()))
+    ast_vars = (st_var+uop_var).variables()
+    self.assertEqual(len(ast_vars), 1)
+    self.assertEqual(ast_vars[0], a)
+
+class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
     for _ in range(20): a = a + a
@@ -368,13 +379,14 @@ class TestUOpStr(TestEqUOps):
     # nice big complicated uop
     with Context(NOOPT=1):
       sink = UOp(UOps.SINK, None, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
-    self.assert_equiv_uops(sink, eval(str(sink)))
+    assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
     assert str(eval(str(a))) == str(a)
 
   def test_variable_const(self):
+    # TODO: this is not possible after VALID.
     uop = UOp(UOps.CONST, dtypes.int, (), arg=Variable("a",1,10))
     assert str(eval(str(uop))) == str(uop)
 
