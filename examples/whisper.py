@@ -1,6 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
-import sys, base64, multiprocessing, itertools
+import sys, base64, multiprocessing, itertools, collections
 from typing import Optional, Union, Literal, List
 
 from tinygrad import Tensor, TinyJit, Variable, nn
@@ -101,24 +101,17 @@ class TextDecoder:
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, is_decoder_block=True, max_self_attn_cache_len=self.max_self_attn_cache_len) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
-    self.blocks_start_tok = [TinyJit(block.__call__) for block in self.blocks]
-    self.blocks_after_start_tok = [TinyJit(block.__call__) for block in self.blocks]
-    self.start_output_tok = TinyJit(self.output_tok)
-    self.after_start_output_tok = TinyJit(self.output_tok)
+    self.getjitted = collections.defaultdict(lambda: TinyJit(self.forward))
 
-  # if layernorm supported symbolic shapes, we wouldn't need this hacky 'streaming' param (which should be called something more descriptive like 'x_is_start_toks_only')
-  def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor, streaming=False):
+  def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
+    pos = Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos) if pos else 0
+    return self.getjitted[x.shape](x, pos, encoded_audio)
+
+  def forward(self, x:Tensor, pos:Union[Variable, Literal[0]], encoded_audio:Tensor):
     seqlen = x.shape[-1]
-    x = self.token_embedding(x) + self.positional_embedding[pos:pos+seqlen]
-    if pos == 0:
-      for block in (self.blocks if streaming else self.blocks_start_tok):
-        x = block(x, xa=encoded_audio, mask=self.mask, len=0)  # pass xa for cross attn kv caching
-      return self.output_tok(x) if streaming else self.start_output_tok(x)
-    else:
-      for block in self.blocks_after_start_tok:
-        len_v = Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos)
-        x = block(x, mask=self.mask, len=len_v)
-      return self.after_start_output_tok(x)
+    x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None, None))
+    for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=pos)
+    return self.output_tok(x)
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
@@ -243,7 +236,7 @@ def load_file_waveform(filename):
 def transcribe_file(model, enc, filename):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)])
 
-def transcribe_waveform(model, enc, waveforms, truncate=False):
+def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
@@ -281,7 +274,7 @@ def transcribe_waveform(model, enc, waveforms, truncate=False):
       transcription_start_index = len(curr_segment_tokens[0])
 
     for i in range(model.decoder.max_tokens_to_sample):
-      out = model.decoder(Tensor(curr_segment_tokens if i == 0 else curr_segment_tokens[:, -1:]), pos, encoded_audio, streaming=curr_frame > 0)
+      out = model.decoder.forward(Tensor(curr_segment_tokens if i == 0 else curr_segment_tokens[:, -1:]), pos, None if i else encoded_audio)
       next_tokens = out[:, -1].argmax(axis=-1).numpy().astype(np.int32)
       next_tokens[curr_segment_tokens[:, -1] == eot] = eot
       curr_segment_tokens = np.concatenate((curr_segment_tokens, next_tokens.reshape(-1, 1)), axis=1)

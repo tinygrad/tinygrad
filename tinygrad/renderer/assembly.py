@@ -2,7 +2,7 @@ from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct, math
 from collections import defaultdict
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp
-from tinygrad.rewrite import PatternMatcher, UPat
+from tinygrad.ops import PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer, TensorCore
 
@@ -193,7 +193,8 @@ class PTXRenderer(Renderer):
           kk((f"@{r[src[3]]} " if len(src)>3 else "") + \
               f"st{mem_type}.v{src[2].dtype.count}.{self.mem_types[src[2].dtype.scalar()]} [{r[src[0]]}+{src[1].arg}], {{{', '.join(r[src[2]])}}};")
         else:
-          kk(*self.render_store(r[src[0]], r[src[2]], src[2].dtype, gate=r[src[3]] if len(src)>3 else None, ss=mem_type, offset=src[1].arg))
+          kk(*self.render_store(r[src[0]], r[src[2]], src[2].dtype,
+                                gate=r[src[3]] if len(src)>3 and src[3].op is not UOps.IF else None, ss=mem_type, offset=src[1].arg))
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))

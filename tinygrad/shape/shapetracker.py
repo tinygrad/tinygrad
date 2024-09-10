@@ -2,14 +2,14 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, Iterable, cast, Any
+from typing import Tuple, List, Optional, Dict, Set, Iterable, Any
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps
-from tinygrad.rewrite import graph_rewrite
-from tinygrad.codegen.uopgraph import constant_folder
+from tinygrad.ops import UOp, UOps, BinaryOps
+from tinygrad.ops import graph_rewrite
+from tinygrad.codegen.uopgraph import constant_folder, _get_add_chain
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x.render(render_ops, ctx)
@@ -85,9 +85,9 @@ class ShapeTracker:
   def real_size(self) -> int:
     if 0 in self.shape: return 0
     idx, valid = self.to_indexed_uops()
-    if not valid.vmax.arg: return 0
-    assert idx.vmax.arg < 1e12, f"real_size broken for {self}"
-    return idx.vmax.arg+1
+    if not valid.vmax: return 0
+    assert idx.vmax < 1e12, f"real_size broken for {self}"
+    return int(idx.vmax+1)
 
   def vars(self) -> Set[Variable]: return set().union(*[v.vars() for v in self.views])
 
@@ -101,18 +101,18 @@ class ShapeTracker:
   # NOTE: if a stride is not always valid, it will be None
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
-    idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    idx, valid = self.expr_idxs(idxs)
-    ret: List[Optional[sint]] = [None] * len(self.views[-1].shape)
-    bad_idx_vars: Set[Variable] = set()
-    for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
-      idx_maybe, stride_maybe = (this_dim.a, this_dim.b) if isinstance(this_dim, MulNode) else (this_dim, 1)
-      try: ret[idxs.index(idx_maybe)] = cast(sint, stride_maybe)
-      except ValueError: bad_idx_vars = bad_idx_vars.union(idx_maybe.vars())
-    idx_vars, valid_vars = idx.vars(), valid.vars()
-    for i,tidx in enumerate(idxs):
-      if tidx in bad_idx_vars or (tidx in valid_vars and not ignore_valid): ret[i] = None
-      elif tidx not in idx_vars: ret[i] = 0
+    ret: List[Optional[sint]] = [None] * len(self.shape)
+    idx, valid = self.to_indexed_uops()
+    idx = graph_rewrite(idx, pm=constant_folder)
+    for c in _get_add_chain(idx):
+      if c.op is UOps.RANGE: ret[c.arg] = 1
+      if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[0].op is UOps.RANGE and c.src[1].op is UOps.CONST: ret[c.src[0].arg] = c.src[1].arg
+      if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[1].op is UOps.RANGE and c.src[0].op is UOps.CONST: ret[c.src[1].arg] = c.src[0].arg
+    used_ranges = [x.arg for x in graph_rewrite(idx, pm=constant_folder).sparents if x.op is UOps.RANGE]
+    ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
+    if not ignore_valid:
+      masked_axis = [x.arg for x in graph_rewrite(valid, pm=constant_folder).sparents if x.op is UOps.RANGE]
+      ret = [None if i in masked_axis else x for i,x in enumerate(ret)]
     return tuple(ret)
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
