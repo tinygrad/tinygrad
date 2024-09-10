@@ -210,9 +210,8 @@ def vectorize_const(vec:UOp) -> UOp:
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  # SVECTORIZE
-  (UPat(UOps.VECTORIZE, src=UPat(name='x'), name="vec"), lambda x,vec: UOp(UOps.SVECTORIZE, vec.dtype, (x,))),
-
+  (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
+   lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, x.dtype, (x,y), alu.arg),)*alu.dtype.count)),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), vectorize_const),
   (NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
   #(NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep") + NOp.cvar('c2'), lambda x,c1,gep,c2: x.gep(gep.arg) + (c1.gep(gep.arg) + c2)),

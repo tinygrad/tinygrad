@@ -202,7 +202,6 @@ class UOps(HashEnum):
   - **`arg`**: `None`
   """
   VECTORIZE = auto()
-  SVECTORIZE = auto()
   """
   - **`dtype`**: The upcasted vector DType
   - **`src`**: `Tuple[UOp, ...]`
