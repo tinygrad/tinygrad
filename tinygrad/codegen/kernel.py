@@ -769,7 +769,7 @@ class Kernel:
       return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
     return fixup_ast(self.ast)
 
-  def split(self, ast: UOp) -> List[UOp]:
+  def split_ast(self, ast: UOp) -> List[UOp]:
     asts = []
     def rec(ast: UOp) -> UOp:
       new_src = []
