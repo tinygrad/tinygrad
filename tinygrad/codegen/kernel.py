@@ -504,9 +504,10 @@ class Kernel:
       if divisor: self.apply_opt(Opt(OptOps.SPLIT, 0, self.full_shape[self.first_reduce] // divisor))
 
       asts = self.split_ast(self.get_optimized_ast())
-      k = Kernel(asts[1], opts=self.opts).hand_coded_optimizations(split=True)
-      # create extra kernel and apply optimizations
-      k.extra_kernel = Kernel(asts[0], opts=self.opts).hand_coded_optimizations(split=True)
+      k = Kernel(asts[-1], opts=self.opts).hand_coded_optimizations(split=True)
+      if len(asts) > 1:
+        # create extra kernel and apply optimizations
+        k.extra_kernel = Kernel(asts[0], opts=self.opts).hand_coded_optimizations(split=True)
       return k
 
     self.required_optimizations()
