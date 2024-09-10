@@ -213,7 +213,9 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, x.dtype, (x,y), alu.arg),)*alu.dtype.count)),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), vectorize_const),
-  (NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
+  (UPat(UOps.GEP, name="gep", src=(UPat(UOps.ALU, src=[UPat(name='x'), UPat(UOps.CONST, name='c1')], name='alu'),)),
+    lambda gep,alu,x,c1: UOp(UOps.ALU, gep.dtype, tuple(y.gep(gep.arg) for y in alu.src), alu.arg)),
+  #(NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
   #(NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep") + NOp.cvar('c2'), lambda x,c1,gep,c2: x.gep(gep.arg) + (c1.gep(gep.arg) + c2)),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat(UOps.ALU, BinaryOps.ADD, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
@@ -267,7 +269,7 @@ constant_folder = PatternMatcher([
   # GEP/CAST const rules
   #(NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const_like(c.arg)),
   (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="gep"), lambda gep, c:
-   gep.const_like((tuple(c.arg[x] for x in gep.arg)) if isinstance(gep.arg, tuple) else c.arg[gep.arg]) if isinstance(c.arg, tuple) else c.arg),
+   gep.const_like(((tuple(c.arg[x] for x in gep.arg)) if isinstance(gep.arg, tuple) else c.arg[gep.arg]) if isinstance(c.arg, tuple) else c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const_like(c.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
