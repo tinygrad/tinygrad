@@ -318,26 +318,10 @@ class Kernel:
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
-        if self.opts.device in {"AMD", "HIP"}:
-          # NOTE: AMD requires locals first
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
-            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
-        elif self.opts.device == "METAL" or self.opts.suffix == "INTEL":
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, tc.dims[2]), append_opt=False)
-          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
-            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-        elif self.opts.device == "CLANG":
-          for (i, sz) in tc.threads: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], sz), append_opt=False)
-        elif self.opts.device in {"CUDA", "NV"}:
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
-          self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
-          # NOTE: LOCALS and UPCAST can be swapped here. it doesn't seem faster
-          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
-          self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[0], 2), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+        for r in tc.reduce_axes: self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, r), append_opt=False)
+        for (tc_dim,tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.UPCAST if AMX else OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
+        for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
+          if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
@@ -663,26 +647,26 @@ class Kernel:
 
           threads = prod(t[1] for t in tc.threads)
           if self.opts.device in {"AMD", "HIP"}:
-            reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
+            upcast_axes = [[(0, 16)], [(0, 16)], [(1, 8)]]
             # https://gpuopen.com/learn/wmma_on_rdna3/
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
             fix_st2 = None
           elif self.opts.device == "METAL":
-            reduce_axes, upcast_axes = [0], [[(1, 2)], [(1, 2)], [(1, 2)]]
+            upcast_axes = [[(1, 2)], [(1, 2)], [(1, 2)]]
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device == "CLANG":
-            reduce_axes, upcast_axes = [], [[(1,tc.dims[0])],[(0,tc.dims[1])],[(1, tc.dims[2]), (0, tc.dims[2])]]
+            upcast_axes = [[(1,tc.dims[0])],[(0,tc.dims[1])],[(1, tc.dims[2]), (0, tc.dims[2])]]
             threads, fix_st1, fix_st2 = threads // tc.dims[2], None, None
           elif self.opts.device in {"CUDA", "NV"}:
-            reduce_axes, upcast_axes = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
+            upcast_axes = [[(0, 8)], [(2, 2), (3, 2)], [(3, 2), (2, 2)]]
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
             fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
-              ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
+              ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,5), (1,2), (0,0), (0,1), (1,4)))
             fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
-              ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
+              ((1,1), (1,0), (1,4), (0,0), (0,1)), ((0,4), (0,2), (1,5), (0,3), (1,3), (1,2)))
           elif self.opts.suffix == "INTEL":
-            reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
+            upcast_axes = [[(0, 16)], [(0, 16)], [(1, 8)]]
             fix_st1 = functools.partial(fix_st, (8,), (16,8), (8,2,8), ((1,0),), ((1,2), (1,1), (0,0)))
             fix_st2 = None
           else:
@@ -691,7 +675,7 @@ class Kernel:
           assert apply_to_st is None, "double tensor core? not supported"
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, threads,
                       tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axes),
-                      tuple(self.first_upcast+ax for ax in reduce_axes))
+                      tuple(self.first_upcast+ax for ax, _ in enumerate(tc.reduce_axes)))
           if self.use_tensor_cores >= 2:
             if self.use_tensor_cores == 3:
               # TC=3, emulate the warp addressing with locals
@@ -712,7 +696,7 @@ class Kernel:
             ret = UOp(UOps.REDUCE_AXIS, tc.dtype_out, (srcs[0].alu(BinaryOps.MUL, srcs[1]).cast(tc.dtype_out),), (alu_op, wmma_arg[-1]))
           else:
             ret = UOp(UOps.WMMA, tc.dtype_out, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
-          new_reduce_axes = tuple(i for i in axis if i-self.first_upcast not in reduce_axes)
+          new_reduce_axes = tuple(i for i in axis if i-self.first_upcast not in [ax for ax, _ in enumerate(tc.reduce_axes)])
           return replace(op, src=(ret,), arg=(alu_op, new_reduce_axes)) if new_reduce_axes else ret
         if self.group_for_reduces:
           start = UOp(UOps.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(alu_op, axis))

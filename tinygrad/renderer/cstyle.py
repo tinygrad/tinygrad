@@ -205,7 +205,7 @@ class ClangRenderer(CStyleLanguage):
 
   if AMX:
     tc_types = [(dtype, amx_size//dtype.itemsize) for dtype, amx_size in zip([dtypes.float], [64])]
-    tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], dtype_in=dtype, dtype_out=dtype) for dtype, sz in tc_types]
+    tensor_cores = [TensorCore(dims=(sz,sz,sz), threads=[(0,sz),(1,sz)], dtype_in=dtype, dtype_out=dtype, reduce_axes=()) for dtype, sz in tc_types]
 
   def render_vector_prefix(self, dt:DType) -> str:
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
@@ -246,7 +246,7 @@ class OpenCLRenderer(CStyleLanguage):
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
-  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], dtype_in=di, dtype_out=do) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]]  # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], dtype_in=di, dtype_out=do, reduce_axes=(16,)) for di, do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]]  # noqa: E501
   def render_dtype(self, var_dtype:DType) -> str:
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
   def render_cast(self, x, var_dtype, bitcast=False, from_dtype=None) -> str:
@@ -265,7 +265,7 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=(8,)) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
 
   # language options
@@ -312,7 +312,7 @@ class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=(8,2)) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
   def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
@@ -374,7 +374,7 @@ def _make_hip_code_for_op():
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
-  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=(16,)) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
