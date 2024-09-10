@@ -261,9 +261,6 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
 
   def special(des): return enc._special_tokens[f'<|{des}|>']
   start_tokens = list(map(special, ("startoftranscript "+ "en transcribe " * model.is_multilingual + "notimestamps").split()))
-  start_tokens = ["<|startoftranscript|>", *(["<|en|>", "<|transcribe|>"] if model.is_multilingual else []) , "<|notimestamps|>"]
-  start_tokens = [enc._special_tokens[x] for x in start_tokens]
-
   eot = special("endoftext")
 
   ctx = np.tile(start_tokens, (model.batch_size,1))
