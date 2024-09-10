@@ -1228,7 +1228,7 @@ class TestSchedule(unittest.TestCase):
     c = b[:, None, :]
     d = c.pad(((0, 0), (1, 1), (0, 0))) * 2
     run_schedule(check_schedule(d, 2))
-    np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, dtypes.void, :], ((0, 0), (1, 1), (0, 0)))*2)
+    np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
 
   # TODO like openpilot with imagef
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")

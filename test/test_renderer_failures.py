@@ -44,8 +44,8 @@ class TestPTXFailures(unittest.TestCase):
   def test_gated_store_with_alu(self):
     a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     gate_alu = (lidx0:=UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
-    gated_alu_store = UOp(UOps.STORE, None, (a, lidx0, UOp.const(dtypes.int, 1), gate_alu))
-    sink = UOp(UOps.SINK, None, (gated_alu_store,))
+    gated_alu_store = UOp(UOps.STORE, dtypes.void, (a, lidx0, UOp.const(dtypes.int, 1), gate_alu))
+    sink = UOp(UOps.SINK, dtypes.void, (gated_alu_store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
@@ -54,9 +54,9 @@ class TestPTXFailures(unittest.TestCase):
     a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     gate_alu = (lidx0:=UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
     val = UOp.const(dtypes.int, 1)
-    if_uop = UOp(UOps.IF, None, (gate_alu, val))
-    gated_alu_store = UOp(UOps.STORE, None, (a, lidx0, val, if_uop))
-    sink = UOp(UOps.SINK, None, (gated_alu_store,))
+    if_uop = UOp(UOps.IF, dtypes.void, (gate_alu, val))
+    gated_alu_store = UOp(UOps.STORE, dtypes.void, (a, lidx0, val, if_uop))
+    sink = UOp(UOps.SINK, dtypes.void, (gated_alu_store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
 
