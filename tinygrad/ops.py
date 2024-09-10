@@ -345,7 +345,7 @@ class UOp(MathTrait):
     from tinygrad.shape.shapetracker import ShapeTracker
     if self.op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return None
     if self.op in BUFFER_UOPS: return self.st_arg
-    if self.op is UOps.SHAPETRACKER: return self.arg
+    if self.op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: return self.arg
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
     return ShapeTracker.from_shape(src_sts[0].reduce(self.arg[1])) if self.op is UOps.REDUCE_AXIS else src_sts[0]
