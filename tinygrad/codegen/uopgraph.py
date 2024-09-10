@@ -512,12 +512,21 @@ def no_vectorized_load_store(ls:UOp):
   tv = [UOp(ls.op, ls.dtype.scalar() if ls.dtype else None, (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
   return UOp(UOps.VECTORIZE if ls.dtype is not None else UOps.SINK, ls.dtype, tuple(tv))
 
+def no_vectorized_acc(acc:UOp):
+  if acc.dtype.count == 1: return None
+  alus = tuple(UOp(acc.op, acc.dtype.scalar(),
+    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
+  return UOp(UOps.VECTORIZE, acc.dtype, alus)
+
 reducer = PatternMatcher([
-  #(NOp(UOps.REDUCE, name="root"), do_reduce),
+  # do reduce
+  (NOp(UOps.REDUCE, name="root"), do_reduce),
   # expand loads
-  #(NOp({UOps.LOAD, UOps.STORE}, name="ls"), no_vectorized_load_store),
+  (NOp({UOps.LOAD, UOps.STORE}, name="ls"), no_vectorized_load_store),
+  # devectorize ACC
+  (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   # no ALU on vectorized dtypes
-  #(UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
   #(NOp(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
