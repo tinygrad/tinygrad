@@ -492,9 +492,9 @@ class Kernel:
         self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
     return self
 
-  def hand_coded_optimizations(self) -> List[Kernel]:
+  def hand_coded_optimizations(self, split: bool = False) -> List[Kernel]:
     # split kernel if necessary before applying optimizations
-    if all_int(self.full_shape) and 0 not in self.full_shape and prod(self.full_shape) // prod(self.output_shape) >= getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):  # noqa: E501
+    if not split and all_int(self.full_shape) and 0 not in self.full_shape and prod(self.full_shape) // prod(self.output_shape) >= getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):  # noqa: E501
       self_real_strides = self.sts[self.full_buf_index].real_strides(ignore_valid=True)
       divisor = next((x for x in range(min(256, 2**getenv("REDUCEOP_SPLIT_SIZE", 22) // prod(self.output_shape)), 8-1, -1)
                       if self.full_shape[self.first_reduce] % x == 0 and self_real_strides[self.first_reduce] != 0), None)
@@ -502,7 +502,7 @@ class Kernel:
 
       asts = self.split(self.get_optimized_ast())
       kernels = [Kernel(a, opts=self.opts) for a in asts]
-      return [opt for k in kernels for opt in k.hand_coded_optimizations()]
+      return [opt for k in kernels for opt in k.hand_coded_optimizations(split=True)]
 
     self.required_optimizations()
 
@@ -660,7 +660,7 @@ class Kernel:
         return replace(op, src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is UOps.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
-        last_reduce = self.reduce_split if self.reduce_split else self.group_for_reduces
+        last_reduce = self.reduce_split or self.group_for_reduces
         alu_op: BinaryOps = op.arg[0]
         axis = tuple(i for i in range(self.first_reduce+last_reduce, self.shape_len)
                     if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
