@@ -97,7 +97,7 @@ def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], cache:Di
   if (n:=cache.get(u)): return n
   if u.op is UOps.SHAPETRACKER:
     new_st = apply_to_st(u.arg)
-    return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, None, (), new_st)
+    return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, dtypes.void, (), new_st)
   if len(u.src) == 0 or (u.st is not None and u.st == apply_to_st(u.st)): return u
   new_srcs = tuple(st_fixup(x, apply_to_st, cache) for x in u.src)
   cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
@@ -152,7 +152,7 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   fixup_cache: Dict[UOp, UOp] = {}
   new_srcs = [x.src[0] if x.op is UOps.SWIZZLE else st_fixup(x, lambda st:st.reshape(sw_input_shape), fixup_cache) for x in root.src]
   ret = UOp(root.op, root.dtype, tuple(new_srcs), root.arg)
-  return ret if ret.op is UOps.STORE else UOp(UOps.SWIZZLE, None, (ret,), ShapeTracker.from_shape(sw_shape))
+  return ret if ret.op is UOps.STORE else UOp(UOps.SWIZZLE, dtypes.void, (ret,), ShapeTracker.from_shape(sw_shape))
 
 reduceop_fusor = PatternMatcher([
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
