@@ -2076,7 +2076,7 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.exp().sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
-    b = a < -1
+    b = a < 1
     # lt is not safe to pad
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
