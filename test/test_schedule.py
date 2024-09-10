@@ -1723,7 +1723,6 @@ class TestScheduleRewrite(unittest.TestCase):
     change = tms[-1] / tms[0]
     assert change <= SZ, f"bad complexity, time increased by {change:4.2f}x while input only grew {SZ}x"
 
-  @unittest.skip("TODO: this can swizzle twice, once up to LOAD and then down to the STORE")
   def test_swizzle_rewrite(self):
     # graph rewrite
     sink = UOp(UOps.SINK, None, arg=None, src=(
