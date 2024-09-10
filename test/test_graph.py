@@ -22,10 +22,10 @@ def helper_exec_op(device, outbuf, inbufs):
       for i in range(1, len(inbufs)): s = s.xor(fst[i])
 
       si = create_schedule([s.lazydata])[-1]
-      prgs = get_runners(device, si.ast)
-    cached_prgs[(device, len(inbufs))] = prgs
+      prg = get_runners(device, si.ast)[-1]
+    cached_prgs[(device, len(inbufs))] = prg
 
-  return [ExecItem(p, [outbuf] + inbufs) for p in cached_prgs[(device, len(inbufs))]]
+  return ExecItem(cached_prgs[(device, len(inbufs))], [outbuf] + inbufs)
 
 def helper_copy_op(device, dest, src):
   prg = BufferXfer(dest.nbytes, device, src.device)

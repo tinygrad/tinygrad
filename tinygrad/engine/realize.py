@@ -154,7 +154,7 @@ def get_runners(dname:str, ast:UOp) -> List[CompiledRunner]:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = [CompiledRunner(replace(runner.p, dname=dname), runner.lib) for runner in bret]
   else:
-    prgs: List[Program] = get_kernel(Device[dname].renderer, ast).to_program()
+    prgs: List[Program] = [k.to_program() for k in get_kernel(Device[dname].renderer, ast).split_kernel()]
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return [UOpsFuzzerRunner(replace(p, dname=dname)) for p in prgs]

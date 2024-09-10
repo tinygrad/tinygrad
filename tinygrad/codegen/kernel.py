@@ -779,6 +779,13 @@ class Kernel:
       return UOp(ast.op, ast.dtype, tuple(new_src), ast.arg)
     asts.append(rec(ast))
     return asts
+  
+  def split_kernel(self) -> List[Kernel]:
+    kernels = []
+    if hasattr(self, "extra_kernel"):
+      kernels.append(self.extra_kernel)
+    kernels.append(self)
+    return kernels
 
   # **** this is the lowerer ****
 
@@ -798,34 +805,23 @@ class Kernel:
       from tinygrad.engine.graph import graph_uops
       graph_uops(self.uops)
     return self
-  
-  def split_kernels(self) -> List[Kernel]:
-    kernels = []
-    if hasattr(self, "extra_kernel"):
-      kernels.append(self.extra_kernel)
-    kernels.append(self)
-    return kernels
 
-  def to_program(self, name_override:Optional[str]=None) -> List[Program]:
-    kernels = self.split_kernels()
-    for k in kernels: print("-----"); print(k.ast)
-    prgs: List[Program] = []
-    for k in kernels:
-      k.linearize()
-      src = k.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else k.name)), k.uops)
+  def to_program(self, name_override:Optional[str]=None) -> Program:
+    self.linearize()
+    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
-      if getenv("RUN_PROCESS_REPLAY"):
-        table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{getenv('GITHUB_RUN_ATTEMPT')}"
-        diskcache_put(table_name, str(id(k)), (k.ast, k.opts, k.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+    if getenv("RUN_PROCESS_REPLAY"):
+      table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{getenv('GITHUB_RUN_ATTEMPT')}"
+      diskcache_put(table_name, str(id(self)), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
 
-      # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
-      # TODO: these max and min don't work on symbolic, and results are very wrong.
-      mem_bytes = sum(max(cast(DType, x.src[0].dtype).itemsize * x.st_arg.real_size() for x in group)
-        for _, group in itertools.groupby([x for x in k.ast.parents if x.op in BUFFER_UOPS and x.src[0].op is UOps.DEFINE_GLOBAL],
-                          key=lambda x: (x.op, x.src[0].arg)))
-      prgs.append(Program(ansiname, src, k.opts.device, k.uops, mem_estimate=mem_bytes,
-                     global_size=[1,1,1] if k.opts.has_local else None, local_size=[1,1,1] if k.opts.has_local else None))
-    return prgs
+    # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
+    # TODO: these max and min don't work on symbolic, and results are very wrong.
+    mem_bytes = sum(max(cast(DType, x.src[0].dtype).itemsize * x.st_arg.real_size() for x in group)
+      for _, group in itertools.groupby([x for x in self.ast.parents if x.op in BUFFER_UOPS and x.src[0].op is UOps.DEFINE_GLOBAL],
+                        key=lambda x: (x.op, x.src[0].arg)))
+    return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
+                   global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
+
 # the living definition of intermediate UOps
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
