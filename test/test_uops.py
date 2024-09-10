@@ -9,7 +9,7 @@ from tinygrad.ops import UOps, UOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, 
 from tinygrad.rewrite import NOp
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernels
+from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
 from tinygrad.shape.symbolic import Variable
 from test.helpers import is_dtype_supported, assert_equiv_uops
@@ -368,9 +368,8 @@ class TestUOpStr(unittest.TestCase):
     t = t + t * Tensor.rand(10)
     # nice big complicated uop
     with Context(NOOPT=1):
-      for k in get_kernels(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast):
-        sink = UOp(UOps.SINK, None, (k.linearize().uops[-1],))
-        assert_equiv_uops(sink, eval(str(sink)))
+      sink = UOp(UOps.SINK, None, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
+    assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
     a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
