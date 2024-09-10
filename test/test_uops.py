@@ -35,7 +35,7 @@ def _test_single_value(vals, op, dts):
   buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
-  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, UOps.STORE, dtypes.void, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg([out])
@@ -50,7 +50,7 @@ def _test_single_value_const(vals, op, dts):
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
-  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, UOps.STORE, dtypes.void, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -62,7 +62,7 @@ def _test_uops_result(output_dtype, uops, res):
   # uops = []
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
   # res = output_fn(uops)
-  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
+  out = uop(uops, UOps.STORE, dtypes.void, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -252,7 +252,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     idx = gidx0 * UOp.const(dtypes.int, 2)
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
-    store = UOp(UOps.STORE, None, (gmem, idx, val, gate))
+    store = UOp(UOps.STORE, dtypes.void, (gmem, idx, val, gate))
     uops = to_uops_list([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
@@ -307,8 +307,8 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_basic(self):
     uops = []
     smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ('smem', 16))
-    st = uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42.0)))
-    barr = uop(uops, UOps.BARRIER, None, (st,))
+    st = uop(uops, UOps.STORE, dtypes.void, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42.0)))
+    barr = uop(uops, UOps.BARRIER, dtypes.void, (st,))
     sres = uop(uops, UOps.LOAD, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 
@@ -316,9 +316,9 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_indirect(self):
     uops = []
     smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.int32), (), ('smem', 16))
-    st1 = uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), uop(uops, UOps.CONST, dtypes.int32, (), 2)))
-    st2 = uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 2), uop(uops, UOps.CONST, dtypes.int32, (), 42)))
-    barr = uop(uops, UOps.BARRIER, None, (st1,st2))
+    st1 = uop(uops, UOps.STORE, dtypes.void, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), uop(uops, UOps.CONST, dtypes.int32, (), 2)))
+    st2 = uop(uops, UOps.STORE, dtypes.void, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 2), uop(uops, UOps.CONST, dtypes.int32, (), 42)))
+    barr = uop(uops, UOps.BARRIER, dtypes.void, (st1,st2))
     ofs = uop(uops, UOps.LOAD, dtypes.int32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), barr))
     sres = uop(uops, UOps.LOAD, dtypes.int32, (smem, ofs))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
@@ -386,7 +386,7 @@ class TestUOpStr(unittest.TestCase):
     t = t + t * Tensor.rand(10)
     # nice big complicated uop
     with Context(NOOPT=1):
-      sink = UOp(UOps.SINK, None, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
+      sink = UOp(UOps.SINK, dtypes.void, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
     assert_equiv_uops(sink, eval(str(sink)))
 
   def test_nop_str(self):
