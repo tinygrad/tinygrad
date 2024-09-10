@@ -54,6 +54,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   if (buf, st) in cache: return cache[(buf, st)]
   assert buf.op is not None, "base must be a base itself"
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
+  assert dtype != dtypes.void
 
   # buffer ops define ShapeTracker
   if buf.realized is not None or (buf in realizes and buf not in outputs):
