@@ -502,11 +502,11 @@ class Kernel:
                       if self.full_shape[self.first_reduce] % x == 0 and self_real_strides[self.first_reduce] != 0), None)
       if divisor: self.apply_opt(Opt(OptOps.SPLIT, 0, self.full_shape[self.first_reduce] // divisor))
 
-      asts = self.split(self.get_optimized_ast())
-      self = Kernel(asts[1], opts=self.opts).hand_coded_optimizations(split=True)
+      asts = self.split_ast(self.get_optimized_ast())
+      k = Kernel(asts[1], opts=self.opts).hand_coded_optimizations(split=True)
       # create extra kernel and apply optimizations
-      self.extra_kernel = Kernel(asts[0], opts=self.opts).hand_coded_optimizations(split=True)
-      return self
+      k.extra_kernel = Kernel(asts[0], opts=self.opts).hand_coded_optimizations(split=True)
+      return k
 
     self.required_optimizations()
 
