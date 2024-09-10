@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
 import functools
@@ -16,7 +17,7 @@ class DType:
   def vec(self, sz:int):
     assert sz > 1 and self.count == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
+  def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
 # dependent typing?
 @dataclass(frozen=True, repr=False)

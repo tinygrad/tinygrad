@@ -340,6 +340,10 @@ class UOp(MathTrait):
   dtype: DType = dtypes.void
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  @classmethod
+  def unwrap_dtype(cls, dtype:Optional[DType]) -> Any:
+    if isinstance(cls, UOp): assert dtype is not None
+    return dtype
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     from tinygrad.shape.shapetracker import ShapeTracker
@@ -376,9 +380,9 @@ class UOp(MathTrait):
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
-  def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
-  def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
-  def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
+  def cast(self, dtype=None): return type(self)(UOps.CAST, self.unwrap_dtype(dtype), (self,))
+  def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, self.unwrap_dtype(dtype), (self,))
+  def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar(), (self,), i)
   def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
   @classmethod
   @functools.lru_cache(None)
@@ -386,14 +390,15 @@ class UOp(MathTrait):
   @classmethod
   def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, cls.unwrap_dtype(dtype),
+                                           arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
     if dtype is not None and dtype != (sdtype := dtype.scalar()):
       return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
-    return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+    return cls(UOps.CONST, cls.unwrap_dtype(dtype), arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
   @classmethod
-  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
+  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, cls.unwrap_dtype(dtype), src)
   @classmethod
   def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
   @functools.cached_property
@@ -439,7 +444,7 @@ class UOp(MathTrait):
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
-    if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
+    if self.op is UOps.ALU and self.dtype.count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
       if self.arg is BinaryOps.MUL:
@@ -500,7 +505,7 @@ def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x:
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
   if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1].arg, u.arg[2].arg)
-  if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
+  if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
 # ***** uop type spec *****
