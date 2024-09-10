@@ -124,6 +124,7 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
     if u.op is UOps.CONST:
       # add all const together first
       if rem_const != 0: something_changed = True
+      if isinstance(u.arg, tuple): return None
       rem_const += u.arg
     elif (factor:=u.const_factor())%c == 0:
       if factor: quotient.append(u.divides(c))
@@ -567,7 +568,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   linearize_cnt += 1
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
     sink = graph_rewrite(sink, folder+(expander+float4_folding if opts is not None and opts.supports_float4 else expander))
-    sink = graph_rewrite(sink, folder+reducer)
+    if getenv("DO_REDUCE", 1): sink = graph_rewrite(sink, folder+reducer)
 
   # for PTX only
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
