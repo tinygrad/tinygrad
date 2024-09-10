@@ -323,7 +323,7 @@ BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
-@dataclass(eq=False)
+@dataclass(frozen=True, eq=False)
 class UOp(MathTrait):
   op: UOps
   dtype: Optional[DType] = None

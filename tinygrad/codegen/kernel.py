@@ -741,10 +741,11 @@ class Kernel:
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
               for i in range(self.first_reduce, self.first_reduce+last_reduce)]) + \
             (1,) * (self.shape_len - self.upcasted - last_reduce - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
-          local_shape = (self.full_shape[0],) + local_shape[1:]
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           #TODO: local_shape is wrong for reduce split
           if self.reduce_split:
+            local_shape = (self.full_shape[0],) + local_shape[1:]
+            st_uop = ShapeTracker.from_shape(local_shape).to_uop()
             # insert sink into UOp to later split into separate kernel
             global_buffer = UOp(UOps.DEFINE_GLOBAL, PtrDType(cast(DType, op.dtype)), (), 0)
             sink = UOp(UOps.SINK, None, (UOp.store(global_buffer, st_uop, start),))
@@ -764,16 +765,15 @@ class Kernel:
       return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
     return fixup_ast(self.ast)
 
-  # TODO: clean this
   def split(self, ast: UOp) -> List[UOp]:
-    parent, op = ast, ast.src[0]
-    asts = [ast]
-    while op.src:
-      if op.op is UOps.SINK:
-        parent.src = parent.src[:-1]
-        asts.insert(0, op)
-      parent = op
-      op = op.src[-1]
+    asts = []
+    def rec(ast: UOp) -> UOp:
+      new_src = []
+      for src in ast.src:
+        if src.op is UOps.SINK: asts.append(src)
+        else: new_src.append(rec(src))
+      return UOp(ast.op, ast.dtype, tuple(new_src), ast.arg)
+    asts.append(rec(ast))
     return asts
 
   # **** this is the lowerer ****
