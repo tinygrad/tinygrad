@@ -221,14 +221,32 @@ class TestStatsOptimized(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
   def test_gated_store(self):
-    n = 64
+    n = 16
     ast = (Tensor.empty(n, n) @ Tensor.empty(n, n)).schedule()[-1].ast
     k = Kernel(ast)
-    opts = [Opt(op=OptOps.LOCAL, axis=1, amt=16), Opt(op=OptOps.PADTO, axis=2, amt=32)]
+    opts = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.PADTO, axis=2, amt=8)]
     for opt in opts: k.apply_opt(opt)
     p = k.to_program()
     print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
     self.assertEqual(p.op_estimate, n*n*n*2*2)
+    expected_res = flops_mem(k.uops, ignore_indexing=True)
+    self.assertEqual(expected_res[0], n*n*n*2*2)
+
+    # Update the single store to have an IF as the gate
+    adj_uops = k.uops
+    self.assertEqual(len([x for x in adj_uops if x.op is UOps.STORE]), 1)
+    store = adj_uops.pop()
+    self.assertEqual(store.op, UOps.STORE)
+    if_uop = UOp(UOps.IF, None, (store.src[3], store.src[2]), None)
+
+    adj_uops.append(if_uop)
+    adj_uops.append(UOp(UOps.STORE, None, (store.src[0], store.src[1], store.src[2], if_uop), store.arg))
+    adj_uops.append(UOp(UOps.ENDIF, None, (if_uop,)))
+
+    incorrect_res = flops_mem(adj_uops, ignore_indexing=True)
+    with self.assertRaises(AssertionError):
+      self.assertEqual(incorrect_res[0], n*n*n*2*2)
+    self.assertEqual(incorrect_res[0], 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
