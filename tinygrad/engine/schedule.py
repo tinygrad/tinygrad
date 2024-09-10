@@ -2,7 +2,7 @@ import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
-from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps
+from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps
 from tinygrad.ops import PatternMatcher, UPat, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
@@ -92,7 +92,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
     input_st = ShapeTracker.from_shape(buf.srcs[0].shape)
     rsrc = _recursive_uop(buf.srcs[0], input_st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache)
     ret = UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (alu_op, buf.arg))
-    return cache.setdefault((buf, st), ret if st.contiguous else UOp(UOps.SWIZZLE, dtype, (ret,), st))
+    return cache.setdefault((buf, st), UOp(UOps.SWIZZLE, dtype, (ret,), st))
 
   # elementwise ops pass shapetracker
   in_uops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, realizes, assign_targets, reduce_info, cache) for x in buf.srcs)
@@ -133,21 +133,13 @@ def _recurse_reduceops(buf:LazyBuffer, st:ShapeTracker, realizes:Dict[LazyBuffer
 
 # ***** helpers for doing movementops on uops *****
 
-def get_output_st(uop:UOp, uop_sts:Dict[UOp, ShapeTracker]) -> Optional[ShapeTracker]:
-  if (st:=uop_sts.get(uop)): return st
-  if uop.op in BUFFER_UOPS: return uop.st_arg
-  src_sts = [xst for x in uop.src if (xst:=get_output_st(x, uop_sts)) is not None]
-  if len(src_sts) != len(uop.src) or not all_same([x.shape for x in src_sts]): return None
-  uop_sts[uop] = st = ShapeTracker.from_shape(src_sts[0].reduce(uop.arg[1])) if uop.op is UOps.REDUCE_AXIS else src_sts[0]
-  return st
-
-def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], uop_sts:Dict[UOp, ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
+def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
   if (n:=cache.get(u)): return n
-  if (st:=uop_sts.get(u)) and st == apply_to_st(st): return u
   if u.op is UOps.SHAPETRACKER:
     new_st = apply_to_st(u.arg)
     return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, None, (), new_st)
-  new_srcs = tuple(st_fixup(x, apply_to_st, uop_sts, cache) for x in u.src)
+  if len(u.src) == 0 or (u.st is not None and u.st == apply_to_st(u.st)): return u
+  new_srcs = tuple(st_fixup(x, apply_to_st, cache) for x in u.src)
   cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
   return ret
 
@@ -173,11 +165,18 @@ def swizzle_reduceop(input_st:ShapeTracker, swizzle:ShapeTracker, axis:Tuple[int
 
 # ***** reduceop fusor *****
 
-def push_swizzle_through_reduce(swizzle:UOp, reduceop:UOp) -> UOp:
-  uop_sts: Dict[UOp, ShapeTracker] = {}
+def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
+  if swizzle.arg.contiguous: return None
   rsrc = reduceop.src[0]
-  new_input_st, new_axis = swizzle_reduceop(unwrap(get_output_st(rsrc, uop_sts)), swizzle.arg, reduceop.arg[1])
-  return UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda _:new_input_st, uop_sts, {}),), (reduceop.arg[0], new_axis))
+  new_input_st, new_axis = swizzle_reduceop(unwrap(rsrc.st), swizzle.arg, reduceop.arg[1])
+  return UOp(UOps.SWIZZLE, reduceop.dtype, (UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda _:new_input_st, {}),),
+                                                (reduceop.arg[0], new_axis)),), ShapeTracker.from_shape(swizzle.arg.shape))
+
+def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
+  assert swizzle.arg.contiguous, "can't push a non contiguous SWIZZLE down to STORE"
+  assert prod(swizzle.arg.shape) == prod(unwrap(swizzle.src[0].st).shape), "can't push expands down to STORE"
+  return UOp(UOps.SWIZZLE, root.dtype, (UOp(UOps.REDUCE_AXIS, root.dtype, swizzle.src, root.arg),),
+             ShapeTracker.from_shape(unwrap(swizzle.st).reduce(root.arg[1])))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
@@ -185,18 +184,24 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   new_axis: Tuple[int, ...] = root.arg[1]+first_reduce.arg[1]
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], new_axis))
 
-def push_reduceop_shape(root:UOp) -> Optional[UOp]:
-  reduceops = [x for x in root.parents if x.op is UOps.REDUCE_AXIS]
-  if len(reduceops) == 0: return None
-  uop_sts: Dict[UOp, ShapeTracker] = {}
-  rshape = unwrap(get_output_st(reduceops[0], uop_sts)).shape
-  if (root_st:=get_output_st(root, uop_sts)) is not None and rshape == root_st.shape: return None
-  return st_fixup(root, lambda st:st.reshape(rshape), uop_sts, {})
+def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
+  swizzles = [x for x in root.src if x.op is UOps.SWIZZLE]
+  if len(swizzles) == 0: return None
+  assert all_same([(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles])
+  sw_shape, sw_input_shape = unwrap(swizzles[0].st).shape, unwrap(swizzles[0].src[0].st).shape
+  fixup_cache: Dict[UOp, UOp] = {}
+  new_srcs = [x.src[0] if x.op is UOps.SWIZZLE else st_fixup(x, lambda st:st.reshape(sw_input_shape), fixup_cache) for x in root.src]
+  ret = UOp(root.op, root.dtype, tuple(new_srcs), root.arg)
+  return ret if ret.op is UOps.STORE else UOp(UOps.SWIZZLE, None, (ret,), ShapeTracker.from_shape(sw_shape))
 
 reduceop_fusor = PatternMatcher([
-  (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_through_reduce),
+  # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
+  (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
+  # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
+  (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.SWIZZLE, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
+  # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_swizzle_down_through_elementwise),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_reduceop_shape),
 ])
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> List[LBScheduleItem]:

@@ -5,6 +5,7 @@
 import unittest
 import numpy as np
 from typing import List, Optional, Union, cast
+
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.dtype import PtrDType
@@ -13,9 +14,9 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
 from tinygrad.ops import graph_rewrite
-from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, FUSE_CONV_BW, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import create_schedule, get_output_st, reduceop_fusor, st_fixup, ScheduleItem
+from tinygrad.engine.schedule import create_schedule, reduceop_fusor, st_fixup, ScheduleItem
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 from test.helpers import assert_equiv_uops, ast_const, is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
@@ -1650,8 +1651,8 @@ class TestScheduleRewrite(unittest.TestCase):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     ast = a.schedule()[0].ast
-    new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {}, {})
-    self.assertEqual(get_output_st(new_uop, {}), ShapeTracker.from_shape((4,)).reshape((4, 1)))
+    new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {})
+    self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertLess(et, 1e3)
 
   def test_no_rewrite_elementwise(self):
@@ -1666,10 +1667,13 @@ class TestScheduleRewrite(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
     ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    r = UOp(UOps.SWIZZLE, dtypes.int, (r,), ShapeTracker.from_shape(()))
     r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, reduceop_fusor)
-    with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
+    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    verify_ast(sink)
     verify_ast(rsink)
 
   def test_no_reshape_reduceop(self):
@@ -1685,10 +1689,13 @@ class TestScheduleRewrite(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
     ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    r = UOp(UOps.SWIZZLE, dtypes.int, (r,), ShapeTracker.from_shape(()))
     for _ in range(24): r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
-    with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
+    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
+    verify_ast(sink)
     verify_ast(rsink)
     self.assertLessEqual(et, 1e3)
 
@@ -1741,6 +1748,50 @@ class TestScheduleRewrite(unittest.TestCase):
     CompiledRunner(p).exec([b.lazydata.buffer, a.lazydata.buffer])
     expected_out = (a.numpy() + a.numpy().sum()).sum()
     np.testing.assert_equal(b.numpy(), expected_out)
+
+  def test_single_swizzle(self):
+    # ast in tensor style
+    a = Tensor.randint(4,).realize()
+    expected_out = a.numpy().sum(0)+1
+    # LazyBuffer to pre-rewrite AST
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
+    ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((4,)).to_uop()))
+    r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0,)))
+    swizzle_r = UOp(UOps.SWIZZLE, dtypes.int, (r,), unwrap(r.st).reshape(()))
+    const = ast_const(dtypes.int, 1, ())
+    alu = swizzle_r+const
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu,),),))
+    # graph rewrite
+    sink = graph_rewrite(sink, reduceop_fusor)
+    # verify output
+    k = Kernel(sink)
+    p = k.to_program()
+    b = Tensor.empty((1,), dtype=dtypes.int).realize()
+    CompiledRunner(p).exec([b.lazydata.buffer, a.lazydata.buffer])
+    np.testing.assert_equal(b.numpy(), expected_out)
+
+  def test_double_swizzle_possible(self):
+    # ast in tensor style
+    Tensor.manual_seed(0)
+    a = Tensor.randint(4,).realize()
+    b = Tensor.randint(4,).realize()
+    expected_out = a.numpy().sum(0)+b.numpy().sum(0)+2
+    # LazyBuffer to pre-rewrite AST
+    bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(3)]
+    ld1 = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((4,)).to_uop()))
+    r1 = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld1,), (BinaryOps.ADD, (0,)))
+    ld2 = UOp(UOps.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((4,)).to_uop()))
+    r2 = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld2,), (BinaryOps.ADD, (0,)))
+    alu = UOp(UOps.SWIZZLE, r1.dtype, (r1,), ShapeTracker.from_shape(()))+UOp(UOps.SWIZZLE, r2.dtype, (r2,), ShapeTracker.from_shape(()))
+    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu+ast_const(dtypes.int, 2, ()),),),))
+    # graph rewrite
+    sink = graph_rewrite(sink, reduceop_fusor)
+    # verify output
+    k = Kernel(sink)
+    p = k.to_program()
+    c = Tensor.empty((1,), dtype=dtypes.int).realize()
+    CompiledRunner(p).exec([c.lazydata.buffer, a.lazydata.buffer, b.lazydata.buffer])
+    np.testing.assert_equal(c.numpy(), expected_out)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
