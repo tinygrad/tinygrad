@@ -422,7 +422,7 @@ def do_expand(root:UOp):
         dt_sz = 1
         if root.dtype is not None and root.dtype.count > 1:
           # this is probably wrong
-          lst = tuple(flatten([[i*root.dtype.count+j for j in range(root.dtype.count)] for i in lst]))
+          lst = flatten([[i*root.dtype.count+j for j in range(root.dtype.count)] for i in lst])
           dt_sz = root.dtype.count
         new_srcs.append(UOp(UOps.GEP, src.src[0].dtype.scalar().vec(expand_sz*dt_sz), (src.src[0],), tuple(lst)))
     else:
