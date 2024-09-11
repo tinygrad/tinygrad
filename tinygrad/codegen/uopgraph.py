@@ -240,13 +240,20 @@ def vectorize_const(vec:UOp) -> UOp:
   if all_same(ct:=tuple(x.arg for x in vec.src)): return UOp(UOps.CONST, vec.dtype, (), vec.src[0].arg)
   return UOp(UOps.CONST, vec.dtype, (), ct)
 
+def combine_gep(g1, g2):
+  # TODO: should all be tuples?
+  ag1 = g1.arg if isinstance(g1.arg, tuple) else (g1.arg,)
+  ag2 = g2.arg if isinstance(g2.arg, tuple) else (g2.arg,)
+  new_arg = [ag2[ag1[i]] for i in range(g1.dtype.count)]
+  return UOp(UOps.GEP, g1.dtype, g2.src, new_arg[0] if g1.dtype.count == 1 else tuple(new_arg))
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # push
   (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, x.dtype, (x,y), alu.arg),)*alu.dtype.count)),
   (NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
-
+  (UPat(UOps.GEP, src=(UPat(UOps.GEP, name='g2'),), name='g1'), combine_gep),
   (UPat(UOps.GEP, src=(UPat(UOps.IF, name='uif'),)), lambda uif: uif),
   (UPat(UOps.BARRIER, src=(UPat(UOps.SINK, name='sink'),)), lambda sink: UOp(UOps.BARRIER, None, sink.src)),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
