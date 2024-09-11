@@ -175,9 +175,8 @@ class PTXRenderer(Renderer):
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.IF:
-        kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
-        kk(*self.render_bra(f"ENDIF_{r[src[0]][1:]}_{uops.index(u)}"))
-        kk(f"IF_{r[src[0]][1:]}_{uops.index(u)}:")
+        # NOTE: we invert the condition, so if it's true, we skip the IF block and jump to the ENDIF
+        kk(*self.render_bra(f"ENDIF_{r[src[0]][1:]}_{uops.index(u)}", f"!{_cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)}"))
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
         kk(self.code_for_op[BinaryOps.ADD](r[src[0]], r[src[0]], "1", dtypes.int, self.types[dtypes.int]),
