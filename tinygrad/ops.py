@@ -52,7 +52,7 @@ class MathTrait:
   def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
   def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
   def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
-  def eq(self, x): return -self.ne(x)
+  def eq(self, x): return self.ne(x).ne(True)
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
   def ge(self, x): return (-self).lt(-x+1)
