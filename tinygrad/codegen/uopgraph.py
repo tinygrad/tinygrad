@@ -299,16 +299,19 @@ constant_folder = PatternMatcher([
   # ** lt **
   # c0*x<c1 for positive int c0,c1
   ((NOp.cvar('c0')*NOp.var('x')).lt(NOp.cvar('c1')),
-   lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if dtypes.is_int(x.dtype) and c0.arg > 0 and c1.arg > 0 else None),
+   lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if dtypes.is_int(x.dtype) and not isinstance(c0.arg, tuple) \
+    and not isinstance(c1.arg, tuple) and c0.arg > 0 and c1.arg > 0 else None),
   # c0*x<c1 for negative int c0 and non-positive c1
   ((NOp.cvar('c0')*NOp.var('x')).lt(NOp.cvar('c1')),
-   lambda x,c0,c1: (-x).lt(-(math.floor(-c1.arg/-c0.arg))) if dtypes.is_int(x.dtype) and c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
+   lambda x,c0,c1: (-x).lt(-(math.floor(-c1.arg/-c0.arg))) if dtypes.is_int(x.dtype) and not isinstance(c0.arg, tuple) \
+    and not isinstance(c1.arg, tuple) and c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
   # mul add lt
   (((NOp.cvar('c0')*NOp.var('x'))+NOp.var('x2')).lt(NOp.cvar('c1')),
-   lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
+   lambda x,x2,c0,c1: x.lt(c1//c0) if not isinstance(c0.arg, tuple) and not isinstance(c1.arg, tuple) \
+    and c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
   # generic lt folding (using div)
-  (NOp.var('x').lt(NOp.cvar('c')),
-    lambda x,c: lt_folding(x, c.arg) if 0 < c.arg and dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
+  (NOp.var('x').lt(NOp.cvar('c')), lambda x,c:
+   lt_folding(x, c.arg) if not isinstance(c.arg, tuple) and 0 < c.arg and dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
   # ** div **
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
@@ -318,7 +321,8 @@ constant_folder = PatternMatcher([
   (NOp.var('x') % NOp.cvar('c'), lambda x,c:
    newx if not isinstance(c.arg, tuple) and 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # mul mod
-  ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1: (x%(c1//c0))*c0 if c1.arg%c0.arg == 0 else None),
+  ((NOp.cvar('c0')*NOp.var('x')) % NOp.cvar('c1'), lambda x,c0,c1:
+   (x%(c1//c0))*c0 if not isinstance(c0.arg, tuple) and not isinstance(c1.arg, tuple) and c1.arg%c0.arg == 0 else None),
   # ** combine terms **
   (NOp.var('x')%NOp.cvar('c')+(NOp.var('x')//NOp.cvar('c'))*NOp.cvar('c'), lambda x,c: x), # (x%c)+(x//c)*c = x
   (NOp.var("x") * NOp.cvar("c0") + NOp.var("x") * NOp.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
