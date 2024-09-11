@@ -1560,7 +1560,7 @@ class TestScheduleRewrite(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(3)]
     ld1 = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     ld2 = UOp(UOps.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((32, 32)).to_uop()))
-    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape((32, 32)).to_uop(), ld1+ld2)),))
+    sink = UOp(UOps.SINK, dtypes.void, (UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((32, 32)).to_uop(), ld1+ld2)),))
     rsink = graph_rewrite(sink, reduceop_fusor)
     self.assertEqual(rsink.key, sink.key)
 
@@ -1570,7 +1570,7 @@ class TestScheduleRewrite(unittest.TestCase):
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
     r = UOp(UOps.SWIZZLE, dtypes.int, (r,), ShapeTracker.from_shape(()))
     r = r + ast_const(dtypes.int, 2, ())
-    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
+    sink = UOp(UOps.SINK, dtypes.void, (UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, reduceop_fusor)
     # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
     # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
@@ -1581,7 +1581,7 @@ class TestScheduleRewrite(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(2)]
     ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
-    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape((1, 1)).to_uop(), r)),))
+    sink = UOp(UOps.SINK, dtypes.void, (UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((1, 1)).to_uop(), r)),))
     rsink = graph_rewrite(sink, reduceop_fusor)
     verify_ast(sink)
     self.assertEqual(sink.key, rsink.key)
@@ -1592,7 +1592,7 @@ class TestScheduleRewrite(unittest.TestCase):
     r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
     r = UOp(UOps.SWIZZLE, dtypes.int, (r,), ShapeTracker.from_shape(()))
     for _ in range(24): r = r + ast_const(dtypes.int, 2, ())
-    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
+    sink = UOp(UOps.SINK, dtypes.void, (UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
     # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
     # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
@@ -1610,7 +1610,7 @@ class TestScheduleRewrite(unittest.TestCase):
       ld = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
       r = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
       for _ in range(sz): r = r + ast_const(dtypes.int, 2, ())
-      sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
+      sink = UOp(UOps.SINK, dtypes.void, (UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
       rsink, et = timeit(graph_rewrite, sink, reduceop_fusor)
       with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
       verify_ast(rsink)
@@ -1626,20 +1626,20 @@ class TestScheduleRewrite(unittest.TestCase):
 
   def test_swizzle_rewrite(self):
     # graph rewrite
-    sink = UOp(UOps.SINK, None, arg=None, src=(
-      UOp(UOps.STORE, None, arg=None, src=(
+    sink = UOp(UOps.SINK, dtypes.void, arg=None, src=(
+      UOp(UOps.STORE, dtypes.void, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0, src=()),
-        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
         UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
           UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
             UOp(UOps.SWIZZLE, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=( # noqa E501
               UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
                 UOp(UOps.LOAD, dtypes.int, arg=None, src=(
                   x8:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1, src=()),
-                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)), # noqa E501
+                  UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)), # noqa E501
             UOp(UOps.LOAD, dtypes.int, arg=None, src=(
                x8,
-              UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),)),)) # noqa E501
+              UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),)),)) # noqa E501
     sink = graph_rewrite(sink, reduceop_fusor)
     # verify output
     k = Kernel(sink)
@@ -1661,7 +1661,7 @@ class TestScheduleRewrite(unittest.TestCase):
     swizzle_r = UOp(UOps.SWIZZLE, dtypes.int, (r,), unwrap(r.st).reshape(()))
     const = ast_const(dtypes.int, 1, ())
     alu = swizzle_r+const
-    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu,),),))
+    sink = UOp(UOps.SINK, dtypes.void, (UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu,),),))
     # graph rewrite
     sink = graph_rewrite(sink, reduceop_fusor)
     # verify output
@@ -1684,7 +1684,7 @@ class TestScheduleRewrite(unittest.TestCase):
     ld2 = UOp(UOps.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((4,)).to_uop()))
     r2 = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld2,), (BinaryOps.ADD, (0,)))
     alu = UOp(UOps.SWIZZLE, r1.dtype, (r1,), ShapeTracker.from_shape(()))+UOp(UOps.SWIZZLE, r2.dtype, (r2,), ShapeTracker.from_shape(()))
-    sink = UOp(UOps.SINK, None, (UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu+ast_const(dtypes.int, 2, ()),),),))
+    sink = UOp(UOps.SINK, dtypes.void, (UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu+ast_const(dtypes.int, 2, ()),),),)) # noqa: E501
     # graph rewrite
     sink = graph_rewrite(sink, reduceop_fusor)
     # verify output
@@ -1699,7 +1699,7 @@ class TestScheduleRewrite(unittest.TestCase):
   UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (3,)), src=(
     UOp(UOps.LOAD, dtypes.float, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
-        UOp(UOps.SHAPETRACKER, None, arg=(ld_st:=ShapeTracker(views=(View(shape=(2, 1, 3, 16, 62, 62, 3, 3), strides=(0, 0, 9, 27, 0, 0, 3, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)) # noqa: E501
+        UOp(UOps.SHAPETRACKER, dtypes.void, arg=(ld_st:=ShapeTracker(views=(View(shape=(2, 1, 3, 16, 62, 62, 3, 3), strides=(0, 0, 9, 27, 0, 0, 3, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)) # noqa: E501
     # there's an EXPAND pushing through the REDUCE_AXIS
     self.assertGreater(prod(swizzle.st.shape), prod(swizzle.src[0].st.shape))
     ret = graph_rewrite(swizzle, reduceop_fusor)

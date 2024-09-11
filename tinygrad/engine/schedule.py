@@ -96,7 +96,7 @@ def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], cache:Di
   if (n:=cache.get(u)): return n
   if u.op is UOps.SHAPETRACKER:
     new_st = apply_to_st(u.arg)
-    return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, None, (), new_st)
+    return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, dtypes.void, (), new_st)
   if len(u.src) == 0 or (u.st is not None and u.st == apply_to_st(u.st)): return u
   new_srcs = tuple(st_fixup(x, apply_to_st, cache) for x in u.src)
   cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
@@ -162,8 +162,8 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
   if (out:=outs[0]).op is MetaOps.COPY and getenv("USE_COPY_KERNEL") and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
     st_uop = ShapeTracker.from_shape(out.arg).to_uop()
     rd = UOp(UOps.LOAD, dtypes.uint8, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.uint8), (), 1), st_uop))
-    wr = UOp(UOps.STORE, None, (UOp(UOps.DEFINE_GLOBAL, PtrDType(out.dtype), (), 0), st_uop, rd))
-    return [LBScheduleItem(UOp(UOps.SINK, None, (wr,)), outs, [x.base for x in out.srcs])]
+    wr = UOp(UOps.STORE, dtypes.void, (UOp(UOps.DEFINE_GLOBAL, PtrDType(out.dtype), (), 0), st_uop, rd))
+    return [LBScheduleItem(UOp(UOps.SINK, dtypes.void, (wr,)), outs, [x.base for x in out.srcs])]
   if out.op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
     return [LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), outs, [x.base for x in out.srcs])]
   # create the stores
@@ -181,8 +181,8 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     output_st, vv = output_st.simplify().unbind()
     if vv: var_vals.update(vv)
     ubuf = UOp(UOps.DEFINE_GLOBAL, out.dtype if isinstance(out.dtype, ImageDType) else PtrDType(out.dtype), (), i)
-    ast.append(UOp(UOps.STORE, None, (ubuf, output_st.to_uop(), src)))
-  sink = UOp(UOps.SINK, None, tuple(ast))
+    ast.append(UOp(UOps.STORE, dtypes.void, (ubuf, output_st.to_uop(), src)))
+  sink = UOp(UOps.SINK, dtypes.void, tuple(ast))
   if AST_REWRITE: sink = graph_rewrite(sink, reduceop_fusor)
   return [LBScheduleItem(sink, outs, list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))]
 

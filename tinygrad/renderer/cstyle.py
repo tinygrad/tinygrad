@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Union, DefaultDict, cast, Literal, Callable
+from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp
@@ -136,7 +136,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.ALU:
           # remove parens if ALU types are the same. TODO: can do more here
           if args in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == args else r[v]for v in src]
-          elif args is BinaryOps.MAX: operands = [self.render_cast(r[v], cast(DType, v.dtype)) if v.op is UOps.CONST else r[v] for v in src]
+          elif args is BinaryOps.MAX: operands = [self.render_cast(r[v], v.dtype) if v.op is UOps.CONST else r[v] for v in src]
           else: operands = [r[v] for v in src]
           val = self.code_for_op[args](*operands, dtype)
           assert child_count[u] != 0, f"childless ALU op found {u}"
@@ -163,7 +163,7 @@ class CStyleLanguage(Renderer):
           assert len(src) == 1 or (uop is UOps.VECTORIZE and len(src) > 1), "Invalid source length for operation"
           if uop is UOps.BITCAST:
             precast = ssa('precast')
-            kk(f"{self.render_dtype(cast(DType, src[0].dtype))} {precast} = {r[src[0]]};")
+            kk(f"{self.render_dtype(src[0].dtype)} {precast} = {r[src[0]]};")
             val = self.render_cast(precast, dtype, bitcast=True)
           elif uop is UOps.CAST: val = self.render_cast(r[src[0]], dtype, bitcast=False)
           else: val = self.render_vectorize([r[x] for x in src], dtype)

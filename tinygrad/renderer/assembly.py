@@ -154,7 +154,7 @@ class PTXRenderer(Renderer):
     r: Dict[UOp, Union[List[str], str]] = {}
     def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[str]=None) -> str:
       nonlocal c, r
-      prefix += f"_{dtype if dtype is not None else self.types[cast(DType, cast(UOp, u).dtype)]}_"
+      prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype]}_"
       c[prefix] += 1
       if u is not None: r[u] = f"%{prefix}{c[prefix]-1}"
       return f"%{prefix}{c[prefix]-1}"
