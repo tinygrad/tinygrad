@@ -154,7 +154,7 @@ class PTXRenderer(Renderer):
     r: Dict[UOp, Union[List[str], str]] = {}
     def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[str]=None) -> str:
       nonlocal c, r
-      prefix += f"_{dtype if dtype is not None else self.types[cast(DType, cast(UOp, u).dtype)]}_"
+      prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype]}_"
       c[prefix] += 1
       if u is not None: r[u] = f"%{prefix}{c[prefix]-1}"
       return f"%{prefix}{c[prefix]-1}"
@@ -175,7 +175,6 @@ class PTXRenderer(Renderer):
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.IF:
-        assert src[0].dtype is not None
         kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
@@ -185,7 +184,6 @@ class PTXRenderer(Renderer):
       elif uop is UOps.ENDIF:
         kk(f"IF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
       elif uop is UOps.STORE:
-        assert src[0].dtype is not None and src[2].dtype is not None
         assert src[0].dtype == dtypes.int64, "store isn't int64"
         assert src[1].op is UOps.CONST, f"store isn't const {u}"
         mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
@@ -196,10 +194,8 @@ class PTXRenderer(Renderer):
           kk(*self.render_store(r[src[0]], r[src[2]], src[2].dtype,
                                 gate=r[src[3]] if len(src)>3 and src[3].op is not UOps.IF else None, ss=mem_type, offset=src[1].arg))
       else:
-        assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
         elif uop is UOps.ALU:
-          assert src[0].dtype is not None
           src_dtype = src[0].dtype if args in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype
           kk(self.code_for_op[args](ssa("alu", u), *[r[x] for x in src], src_dtype, self.types[src_dtype]))
         elif uop is UOps.DEFINE_ACC:
@@ -240,7 +236,6 @@ class PTXRenderer(Renderer):
         # NOTE: casting to str is fine because you can't vectorize a vectorize
         elif uop is UOps.VECTORIZE: r[u] = [cast(str,r[x]) for x in src]
         elif uop in {UOps.CAST, UOps.BITCAST}:
-          assert src[0].dtype is not None and dtype.count == 1
           _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
         elif uop is UOps.DEFINE_LOCAL:
           # TODO: we should sum these, and fetch 0xC000 from somewhere
