@@ -241,6 +241,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
   """
+
   log_spec = prep_audio(waveforms, model.batch_size, truncate)
   nsample = model.decoder.max_tokens_to_sample
 
@@ -254,14 +255,19 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
       if (next_tokens == eot).all(): break
     return ctx
 
-  def gettexttoks(line): return [tok for tok in line if tok < eot or tok > special('notimestamps')][-nsample+len(start_tokens):]
+  def gettexttoks(line): return [tok for tok in line if tok < eot or tok > enc._special_tokens["<|notimestamps|>"]][-nsample+len(start_tokens):]
+  start_tokens = [enc._special_tokens["<|startoftranscript|>"]]
+  if model.is_multilingual:
+    # TODO detect language
+    language_token = enc._special_tokens["<|startoftranscript|>"] + 1 + tuple(LANGUAGES.keys()).index("en")
+    start_tokens.append(language_token)
+    start_tokens.append(enc._special_tokens["<|transcribe|>"])
+  start_tokens.append(enc._special_tokens["<|notimestamps|>"])
 
-  def special(des): return enc._special_tokens[f'<|{des}|>']
-  start_tokens = list(map(special, ("startoftranscript "+ "en transcribe " * model.is_multilingual + "notimestamps").split()))
-  eot = special("endoftext")
+  eot = enc._special_tokens["<|endoftext|>"]
 
   ctx = np.tile(start_tokens, (model.batch_size,1))
-  transcriptions = [[] for _ in range(len(waveforms))]
+  transcriptions = [[] for _ in waveforms]
 
   for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
     encoded_audio = model.encoder.encode(Tensor(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
@@ -271,7 +277,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
 
     for i, (res, arr) in enumerate(zip(transcriptions, ctx)):
       if curr_frame*HOP_LENGTH <= len(waveforms[i]):res.extend(arr[np.where(arr == start_tokens[-1])[0][0]+1:eoti[0] if len (eoti:=np.where(arr == eot)[0]) else None])
-    ctx = [[special('startofprev')]+gettexttoks(cs)+start_tokens for cs in ctx]
+    ctx = [[enc._special_tokens['<|startofprev|>']]+gettexttoks(cs)+start_tokens for cs in ctx]
 
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip(), transcriptions))
   return transcriptions if len(transcriptions) > 1 else transcriptions[0]
