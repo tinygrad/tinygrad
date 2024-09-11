@@ -169,7 +169,7 @@ def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
   if swizzle.arg.contiguous: return None
   rsrc = reduceop.src[0]
   new_input_st, new_axis = swizzle_reduceop(unwrap(rsrc.st), swizzle.arg, reduceop.arg[1])
-  return UOp(UOps.SWIZZLE, reduceop.dtype, (UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda _:new_input_st, {}),),
+  return UOp(UOps.SWIZZLE, reduceop.dtype, (UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda st:st+new_input_st, {}),),
                                                 (reduceop.arg[0], new_axis)),), ShapeTracker.from_shape(swizzle.arg.shape))
 
 def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:

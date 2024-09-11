@@ -14,7 +14,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
 from tinygrad.ops import graph_rewrite
-from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, flatten, getenv, SPLIT_REDUCEOP, unwrap
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -1691,6 +1691,22 @@ class TestScheduleRewrite(unittest.TestCase):
     c = Tensor.empty((1,), dtype=dtypes.int).realize()
     CompiledRunner(p).exec([c.lazydata.buffer, a.lazydata.buffer, b.lazydata.buffer])
     np.testing.assert_equal(c.numpy(), expected_out)
+
+  def test_swizzle_rewrite_alt(self):
+    swizzle = UOp(UOps.SWIZZLE, dtypes.float, arg=ShapeTracker(views=(View(shape=(2, 3, 3, 65, 3, 65), strides=(103788, 34596, 3, 558, 1, 9), offset=0, mask=((0, 2), (0, 3), (0, 3), (0, 62), (0, 3), (0, 62)), contiguous=False), View(shape=(2, 3, 256, 256), strides=(114075, 38025, 195, 1), offset=0, mask=((0, 2), (0, 3), (0, 195), (0, 195)), contiguous=False), View(shape=(1, 2, 1, 3, 4, 64, 4, 64), strides=(0, 196608, 0, 65536, 16384, 256, 64, 1), offset=0, mask=None, contiguous=True))), src=( # noqa: E501
+  UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (3,)), src=(
+    UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
+        UOp(UOps.SHAPETRACKER, None, arg=(ld_st:=ShapeTracker(views=(View(shape=(2, 1, 3, 16, 62, 62, 3, 3), strides=(0, 0, 9, 27, 0, 0, 3, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)) # noqa: E501
+    # there's an EXPAND pushing through the REDUCE_AXIS
+    self.assertGreater(prod(swizzle.st.shape), prod(swizzle.src[0].st.shape))
+    ret = graph_rewrite(swizzle, reduceop_fusor)
+    # EXPAND is rewritten
+    self.assertEqual(prod(ret.st.shape), prod(ret.src[0].st.shape))
+    # and pushed to the LOAD
+    new_load_st = unwrap([x for x in ret.parents if x.op is UOps.SHAPETRACKER][0].st)
+    self.assertGreater(prod(new_load_st.shape), prod(ld_st.shape))
+    self.assertEqual(new_load_st.views[0].strides, (0, 0, 3, 0, 1, 0, 0))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
