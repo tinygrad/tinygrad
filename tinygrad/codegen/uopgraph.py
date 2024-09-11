@@ -217,7 +217,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.MUL, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
   # VECTORIZE/GEP
   (NOp(UOps.GEP, src=(NOp(UOps.VECTORIZE, name="cast"),), name="gep"),
-    lambda gep, cast: UOp(UOps.VECTORIZE, gep.dtype, (cast.src[i] for i in gep.arg)) if isinstance(gep.arg, tuple) else cast.src[gep.arg]),
+    lambda gep, cast: UOp(UOps.VECTORIZE, gep.dtype, tuple(cast.src[i] for i in gep.arg)) if isinstance(gep.arg, tuple) else cast.src[gep.arg]),
   *[(NOp(UOps.VECTORIZE, dtypes.float.vec(i), tuple(NOp(UOps.GEP, dtypes.float,
     src=(NOp.var('x', dtype=dtypes.float.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in ([2, 4, 8, 16] + ([256] if AMX else []))],
   *[(NOp(UOps.VECTORIZE, dtypes.half.vec(i), tuple(NOp(UOps.GEP, dtypes.half,
@@ -350,6 +350,10 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (NOp(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
+  # remove EXPANDs from SINK
+  (NOp(UOps.SINK, name="root"),
+   lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND} else (x,) for x in root.src)), root.arg)
+    if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(UOps.CONST, name='c1'), UPat(name='x'))), lambda c1,x: x+c1 if x.op is not UOps.CONST else None),
   (UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name='x'), UPat(UOps.CONST, name='c1'))), UPat(name='y')]),
