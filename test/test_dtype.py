@@ -13,7 +13,7 @@ from test.helpers import is_dtype_supported, rand_for_dtype
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
-core_dtypes = list(DTYPES_DICT.values())
+core_dtypes = list([v for k,v in DTYPES_DICT.items() if k != 'pyint'])
 if Device.DEFAULT == "CPU": core_dtypes.remove(dtypes.bfloat16)  # NOTE: this is for teenygrad, don't remove
 dtype_ints = [dt for dt in core_dtypes if dtypes.is_int(dt) and is_dtype_supported(dt)]
 dtype_floats = [dt for dt in core_dtypes if dtypes.is_float(dt) and is_dtype_supported(dt)]

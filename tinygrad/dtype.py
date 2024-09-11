@@ -125,9 +125,8 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default', 'pyint', 'void')) or v.__class__ is staticmethod)}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default', 'void')) or v.__class__ is staticmethod)}
 INVERSE_DTYPES_DICT = {v.name:k for k,v in DTYPES_DICT.items()}
-INVERSE_DTYPES_DICT['pyint'] = 'pyint'
 INVERSE_DTYPES_DICT['void'] = 'void'
 
 def sum_acc_dtype(dt:DType):
