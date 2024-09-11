@@ -543,7 +543,7 @@ def no_vectorized_wmma(wmma:UOp):
     ssz = prod(x[1] for x in sz)
     tsrcs.append([s.gep(tuple(range(grp, grp+ssz))) for grp in range(0, s.dtype.count, ssz)])
   wmmas = [UOp(UOps.WMMA, wmma.dtype.scalar().vec(out_sz), tsrc, wmma.arg) for tsrc in zip(*tsrcs)]
-  wmma_ex = flatten([[e.gep(i) for i in range(e.dtype.count)] for e in wmmas])
+  wmma_ex = flatten([[e.gep(i) for e in wmmas] for i in range(out_sz)])
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 reducer = PatternMatcher([
