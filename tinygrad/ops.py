@@ -337,7 +337,7 @@ END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.E
 @dataclass(frozen=True, eq=False)
 class UOp(MathTrait):
   op: UOps
-  dtype: Optional[DType] = None
+  dtype: DType = dtypes.void
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
   @functools.cached_property
@@ -529,7 +529,7 @@ def type_verify(uops):
     if uop is UOps.IF: assert dtype is None and len(src) == 2 and src[0].dtype == dtypes.bool
     if uop is UOps.VALID: assert dtype == dtypes.bool and len(src) == 1 and src[0].op is UOps.SHAPETRACKER and arg is None
     if uop is UOps.STORE:
-      assert dtype is None, f"{uop} dtype must be None, got {dtype}"
+      assert dtype == dtypes.void, f"{uop} dtype must be void, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool or src[3].op is UOps.IF, f"bad gate {src[3]}"
     if uop is UOps.ALU:
       if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
@@ -607,6 +607,7 @@ def lines(fn) -> List[str]: return open(fn).readlines()
 @dataclass(frozen=True, eq=False, repr=False)  # reuse repr from UOp
 class NOp(UOp):
   name: Optional[str] = None
+  dtype: Optional[DType] = None
   src: Tuple[NOp, ...] = tuple()
   allow_any_len: bool = False
   location: Tuple[str, int] = field(default_factory=get_location)

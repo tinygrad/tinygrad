@@ -107,7 +107,7 @@ class IndependentLowerer:
         for oidx, ridx in zip(self.idxs, self.ridxs):
           if oidx != ridx: valid = valid * oidx.eq(0)
         has_valid = valid.op is not UOps.CONST or valid.arg is not True
-      return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[2])) + ((valid,) if has_valid else ()))
+      return UOp(UOps.STORE, dtypes.void, (buf, idx, self.to_uop(x.src[2])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
     if x.op is UOps.WMMA:
