@@ -318,7 +318,6 @@ constant_folder = PatternMatcher([
   # generic lt folding
   (NOp.var('x').lt(NOp.cvar('c')),
     lambda x,c: lt_folding(x, c.arg) if 0 < c.arg and dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
-  ((NOp.var('x') + NOp.cvar('c1')).lt(NOp.cvar('c2')), lambda x,c1,c2: x.lt(c2-c1)),
   # ** div **
   # # div folding
   (NOp.var('x') // NOp.cvar('c'), lambda x,c:
