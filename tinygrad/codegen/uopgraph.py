@@ -409,6 +409,7 @@ def do_expand(root:UOp):
 
   new_arg = root.arg #tuple(range(expand_sz*root.arg, expand_sz*(root.arg+1))) if root.op is UOps.GEP else root.arg
   if root.op is UOps.GEP:
+    assert root.dtype.count == 1
     # is this right?
     new_arg = tuple(range(root.arg, new_srcs[0].dtype.count, new_srcs[0].dtype.count // expand_sz))
   nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz) if root.dtype else None, tuple(new_srcs), new_arg)
