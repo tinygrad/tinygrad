@@ -224,6 +224,12 @@ class HWCommandQueue:
   def __init__(self): self.q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
   def __len__(self): return len(self.cmds_offset)
   def _patch(self, cmd_idx, offset, data): self.q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
+  def _cur_cmd_idx(self) -> int:
+    """
+    Returns the index of the command currently being enqueued.
+    Should be called only within functions that enqueue commands and are decorated with `@hcq_command`.
+    """
+    return len(self) - 1
 
   @hcq_command
   def signal(self, signal:HCQSignal, value:int):
@@ -309,7 +315,7 @@ class HWCommandQueue:
     Args:
       device: The device to submit the queue to
     """
-    self._submit(device)
+    if self.q: self._submit(device)
     return self
   def _submit(self, device:HCQCompiled): raise NotImplementedError("backend should overload this function")
 
