@@ -11,7 +11,7 @@ if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
 
-def fold_expanded(ex, buf):
+def load_store_fold(ex, buf):
   if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   new_srcs = dedup(list(ex.src))
   old_new_srcs = new_srcs[:]
@@ -59,6 +59,7 @@ def fold_expanded(ex, buf):
   # remove Nones for STORE
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
+"""
 def vectorize_reduce(vec:UOp):
   if all_same(vec.src): return None  # don't REDUCE the same thing multiple times
   if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None    # must have the same reduce ranges
@@ -69,6 +70,7 @@ def vectorize_alu(vec:UOp):
   if not all_same([x.arg for x in vec.src]): return None
   return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
                                              tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
+"""
 
 def fix_unfoldable_image_load(load:UOp, buf:UOp):
   if not isinstance(buf.dtype, ImageDType) or cast(DType, load.src[1].dtype).count == 2: return None
@@ -81,11 +83,25 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   vec_load = UOp(UOps.LOAD, cast(DType, load.dtype).vec(4), tuple(new_src))
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const_like(float('nan')))
 
+def load_store_can_group(ls:UOp, c:UOp, x:UOp, buf:UOp):
+  return None
+  # TODO: group here
+  """
+  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
+  assert len(c.arg) == ls.dtype.count
+  is_load, is_image = ls.op is UOps.LOAD, isinstance(buf.dtype, ImageDType)
+  used = set()
+  return None
+  """
+
 float4_folding = PatternMatcher([
   #(UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   #(UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   #(UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   #(UPat(UOps.VECTORIZE, src=UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}), name="vec"), vectorize_alu),
+  # group the loads and stores
+  #(UPat({UOps.LOAD, UOps.STORE}, src=(UPat(name='buf'), UPat(UOps.ALU, src=[UPat(UOps.CONST, name='c'), UPat(UOps.VECTORIZE, src=UPat(name='x'))],
+  #                                                           arg=BinaryOps.ADD),), name="ls", allow_any_len=True), load_store_can_group),
 ])
 
 # ***** mod *****
@@ -547,8 +563,10 @@ def no_vectorized_wmma(wmma:UOp):
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
   (UPat(UOps.CONST, name='c'), devectorize_const),
-  # expand loads (TODO: copy the grouping logic here)
+  # expand loads
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), no_vectorized_load_store),
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), load_store_fold),
+  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), load_store_fold),
   # devectorize ACC
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   # devectorize WMMA
