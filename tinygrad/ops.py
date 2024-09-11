@@ -352,8 +352,10 @@ class UOp(MathTrait):
   @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg[0]) if self.op is not UOps.ALU else \
-            self.arg.value, self.dtype, self.src)
+    if self.op is UOps.DEFINE_VAR: arg = self.arg[0]
+    elif self.op is UOps.ALU: arg = self.arg.value
+    else: arg = self.arg
+    return (self.op.value, arg, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   @functools.cached_property
   def key(self) -> bytes:
