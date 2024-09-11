@@ -392,7 +392,10 @@ class UOp(MathTrait):
       return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
     return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
-    return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
+    out_dtype = (self, *src)[-1].dtype
+    if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
+      out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
+    return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
   @classmethod
   def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
   @classmethod
