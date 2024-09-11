@@ -5,7 +5,7 @@ from enum import auto
 from collections import defaultdict
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import pretty_print, prod, getenv, all_same, HashEnum
+from tinygrad.helpers import pretty_print, prod, getenv, all_same, FastEnum
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -13,20 +13,20 @@ if TYPE_CHECKING:
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
-class UnaryOps(HashEnum):
+class UnaryOps(FastEnum):
   """A -> A (elementwise)"""
   EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto() # noqa: E702
-class BinaryOps(HashEnum):
+class BinaryOps(FastEnum):
   """A + A -> A (elementwise)"""
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto() # noqa: E702
-class TernaryOps(HashEnum):
+class TernaryOps(FastEnum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
-class ReduceOps(HashEnum):
+class ReduceOps(FastEnum):
   """A -> B (reduce)"""
   SUM = auto(); PROD = auto(); MAX = auto() # noqa: E702
-class MetaOps(HashEnum):
+class MetaOps(FastEnum):
   EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
@@ -78,7 +78,7 @@ REDUCE_ALU: Dict[ReduceOps, BinaryOps] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps
 def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
 
 # the order of these UOps controls the order of the toposort
-class UOps(HashEnum):
+class UOps(FastEnum):
   # uops that aren't rendered
   SINK = auto()
   """
