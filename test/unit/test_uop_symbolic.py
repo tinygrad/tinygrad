@@ -431,6 +431,18 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
     self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
 
+  def test_arange_unrolled4(self):
+    gidx = Variable("gidx", 0, 2559)
+    alu0 = -gidx
+    unrolled_div = (alu0+2561)//-4+(alu0+2562)//-4+(alu0+2560)//-4+(alu0+2559)//-4+2559
+    self.helper_test_variable(unrolled_div, 0, 2559, "gidx")
+
+  def test_arange_unrolled2(self):
+    gidx = Variable("gidx", 0, 2559)
+    alu0 = -gidx
+    unrolled_div = (alu0+2559)//-2+(alu0+2560)//-2+2559
+    self.helper_test_variable(unrolled_div, 0, 2559, "gidx")
+
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):

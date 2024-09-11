@@ -153,6 +153,20 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
 def lt_folding(x:UOp, c:int) -> Optional[UOp]:
   return newx.src[0].lt(newx.src[1]) if (newx:=div_folding(x,c)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV else None
 
+def fold_unrolled_divs(divs:UOp, c:UOp):
+  # div pattern in unrolled arange
+  # example: (-x+2561)//-4+(-x+2562)//-4+(-x+2560)//-4+(-x+2559)//-4+2559 -> x
+  add_chain, seen_const, ans = list(_get_add_chain(divs)), [], None
+  for u in add_chain:
+    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==-len(add_chain)): return None
+    # assumed CONST is the last of an ADD
+    if not ((s0:=u.src[0]).op is UOps.ALU and s0.arg is BinaryOps.ADD and s0.src[1].op is UOps.CONST and s0.src[1].op is UOps.CONST): return None
+    if not ((neg:=s0.src[0]).op is UOps.ALU and neg.arg is BinaryOps.MUL and neg.src[1].op is UOps.CONST and neg.src[1].arg==-1): return None
+    if ans is None: ans = neg.src[0]
+    if ans != neg.src[0]: return None
+    seen_const.append(s0.src[1].arg)
+  return ans if sorted(seen_const)==list(range(c.arg, c.arg+len(add_chain))) and ans is not None and (ans.vmin, ans.vmax)==(0, c.arg) else None
+
 # ***** transcendental *****
 
 @functools.lru_cache(None)
@@ -241,6 +255,8 @@ constant_folder = PatternMatcher([
   (NOp(UOps.REDUCE, src=((NOp.var("idx") + NOp.cvar("mval") * NOp(UOps.RANGE, src=(NOp.var("loop_start"), NOp.var("loop_end")), name="rng"))
    .lt(NOp.cvar("compval")).where(NOp.cvar("multconst"), NOp.const(None, 0)) + NOp.var("extra"),),
    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+  # unrolled arange div folding
+  (NOp.var('divs') + NOp.cvar('c'), fold_unrolled_divs),
   # indexing (with a multiply offset)!
   (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).cast()*
     NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"),),
