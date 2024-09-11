@@ -396,7 +396,8 @@ def do_expand(root:UOp):
       if list(range(len(lst))) == lst:
         new_srcs.append(src.src[0])
       else:
-        new_srcs.append(UOp(UOps.GEP, src.src[0].dtype.scalar().vec(expand_sz), (src.src[0],), tuple(lst)))
+        if root.dtype.count > 1: lst = tuple(flatten([[i*root.dtype.count+j for j in range(root.dtype.count)] for i in lst]))
+        new_srcs.append(UOp(UOps.GEP, src.src[0].dtype.scalar().vec(expand_sz*root.dtype.count), (src.src[0],), tuple(lst)))
     else:
       if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
         new_srcs.append(src)

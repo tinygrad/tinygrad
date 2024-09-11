@@ -379,7 +379,9 @@ class UOp(MathTrait):
   def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
-  def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
+  def gep(self, i:Union[Tuple[int, ...], int]):
+    return type(self)(UOps.GEP,
+      (self.dtype.scalar().vec(len(i)) if isinstance(i, tuple) else self.dtype.scalar()) if self.dtype is not None else None, (self,), i)
   def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
   @classmethod
   @functools.lru_cache(None)
