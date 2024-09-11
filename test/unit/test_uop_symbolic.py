@@ -441,6 +441,13 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = (alu0+2559)//-2+(alu0+2560)//-2+2559
     self.helper_test_variable(unrolled_div, 0, 2559, "gidx")
 
+  def test_idiv_lt(self):
+    gidx = Variable("gidx", 0, 1000)
+    self.helper_test_variable((gidx//5).lt(20), 0, 1, "(gidx<100)")
+    # negatives are not simplified
+    self.helper_test_variable((gidx//-5).lt(-20), 0, 1, "((gidx//(-5))<(-20))")
+    self.helper_test_variable((-gidx//5).lt(-5), 0, 1, "(((gidx*(-1))//5)<(-5))")
+
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
