@@ -756,7 +756,7 @@ class Kernel:
             st_uop = ShapeTracker.from_shape(global_shape).to_uop()
             # insert sink into UOp to later split into separate kernel
             global_buffer = UOp(UOps.DEFINE_GLOBAL, PtrDType(op.dtype), (), 0)
-            sink = UOp(UOps.SINK, None, (UOp.store(global_buffer, st_uop, start),))
+            sink = UOp(UOps.SINK, src=(UOp.store(global_buffer, st_uop, start),))
             global_load = UOp(UOps.LOAD, op.dtype, (global_buffer, st_uop, sink))
             reduce2 = UOp(UOps.REDUCE_AXIS, op.dtype, (global_load,), (op.arg[0], second_axis))
             return reduce2
