@@ -409,10 +409,11 @@ class UOp(MathTrait):
     return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1].arg, x.arg[2].arg) for x in self.vars()]), key=lambda v: v.expr)
   def const_factor(self) -> int:
     """largest known int that divides self"""
-    if self.op is UOps.CONST: return self.arg
+    if self.op is UOps.CONST: return abs(self.arg)
     if self.op is UOps.ALU:
       if self.arg is BinaryOps.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
-      if self.arg is BinaryOps.MUL: return self.src[0].arg if self.src[0].op is UOps.CONST else self.src[1].arg if self.src[1].op is UOps.CONST else 1
+      if self.arg is BinaryOps.MUL:
+        return self.src[0].const_factor() if self.src[0].op is UOps.CONST else self.src[1].const_factor() if self.src[1].op is UOps.CONST else 1
     return 1
   def divides(self, v) -> Optional[UOp]:
     if v==1: return self

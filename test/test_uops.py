@@ -370,9 +370,13 @@ class TestUOpMethod(unittest.TestCase):
   def test_const_factor(self):
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 8))
     self.assertEqual(UOp(UOps.CONST, dtypes.int, (), 17).const_factor(), 17)
+    self.assertEqual(UOp(UOps.CONST, dtypes.int, (), -17).const_factor(), 17)
     self.assertEqual(gidx0.const_factor(), 1)
     self.assertEqual((gidx0*3).const_factor(), 3)
+    self.assertEqual((3*gidx0).const_factor(), 3)
+    self.assertEqual((gidx0*-3).const_factor(), 3)
     self.assertEqual((gidx0*3+6).const_factor(), 3)
+    self.assertEqual((gidx0*-3-6).const_factor(), 3)
     self.assertEqual((gidx0*3+1).const_factor(), 1)
 
 class TestUOpStr(unittest.TestCase):
