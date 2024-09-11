@@ -501,14 +501,16 @@ class Kernel:
       self_real_strides = self.sts[self.full_buf_index].real_strides(ignore_valid=True)
       divisor = next((x for x in range(min(256, 2**getenv("REDUCEOP_SPLIT_SIZE", 22) // prod(self.output_shape)), 8-1, -1)
                       if self.full_shape[self.first_reduce] % x == 0 and self_real_strides[self.first_reduce] != 0), None)
-      if divisor: self.apply_opt(Opt(OptOps.SPLIT, 0, self.full_shape[self.first_reduce] // divisor))
+      if divisor:
+        # don't append opt because of get_action_space.py
+        self.apply_opt(Opt(OptOps.SPLIT, 0, divisor), append_opt=False)
 
-      asts = self.split_ast(self.get_optimized_ast())
-      k = Kernel(asts[-1], opts=self.opts).hand_coded_optimizations(split=True)
-      if len(asts) > 1:
+        asts = self.split_ast(self.get_optimized_ast())
+        assert len(asts) == 2
+        k = Kernel(asts[-1], opts=self.opts).hand_coded_optimizations(split=True)
         # create extra kernel and apply optimizations
         k.extra_kernel = Kernel(asts[0], opts=self.opts).hand_coded_optimizations(split=True)
-      return k
+        return k
 
     self.required_optimizations()
 
@@ -747,11 +749,11 @@ class Kernel:
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
               for i in range(self.first_reduce, self.first_reduce+last_reduce)]) + \
             (1,) * (self.shape_len - self.upcasted - last_reduce - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
-          st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           #TODO: local_shape is wrong for reduce split
           if self.reduce_split:
-            local_shape = (self.full_shape[0],) + local_shape[1:]
-            st_uop = ShapeTracker.from_shape(local_shape).to_uop()
+            assert len(self.full_shape) == len(local_shape)
+            global_shape = self.full_shape[:self.first_reduce] + local_shape[self.first_reduce:]
+            st_uop = ShapeTracker.from_shape(global_shape).to_uop()
             # insert sink into UOp to later split into separate kernel
             global_buffer = UOp(UOps.DEFINE_GLOBAL, PtrDType(cast(DType, op.dtype)), (), 0)
             sink = UOp(UOps.SINK, None, (UOp.store(global_buffer, st_uop, start),))
@@ -759,6 +761,7 @@ class Kernel:
             reduce2 = UOp(UOps.REDUCE_AXIS, op.dtype, (global_load,), (op.arg[0], second_axis))
             return reduce2
 
+          st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(cast(DType, op.dtype)), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
           local_load = UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, start)))
           grouped_reduce = UOp(UOps.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
