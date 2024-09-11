@@ -525,8 +525,8 @@ def type_verify(uops):
         assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
         # TODO: intermediate CONST of Variable is DEFINE_VAR
         assert (isinstance(arg, Variable) and u.src) or (type(arg) is type(dtypes.as_const(arg, dtype))), f"type of {arg=} does not match {dtype}"
-      if uop is UOps.DEFINE_ACC: assert dtype is not None and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
-    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
+      if uop is UOps.DEFINE_ACC: assert dtype != dtypes.void and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
+    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype != dtypes.void # type is the output type, not an arg
     if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
     if uop is UOps.VECTORIZE:
       assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
@@ -561,7 +561,7 @@ def type_verify(uops):
 def print_uops(uops:List[UOp]):
   for i,u in enumerate(uops):
     formatted_parents = [uops.index(x) if x.op is not UOps.CONST else f"{x.arg}" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str(formatted_parents):32s} {u.arg}")
+    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):25s} " f"{str(formatted_parents):32s} {u.arg}")
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   flops: sint = 0
@@ -588,16 +588,12 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     elif u.op is UOps.SPECIAL:
       mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
     elif u.op is UOps.LOAD:
-      assert u.dtype is not None
       mem += u.dtype.itemsize * mults
     elif u.op is UOps.STORE:
-      assert u.src[2].dtype is not None
       mem += u.src[2].dtype.itemsize * mults
     elif u.op is UOps.ALU and u not in dont_count:
-      assert u.dtype is not None
       flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
-      assert u.arg[1] is not None
       flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
   return flops, mem
 

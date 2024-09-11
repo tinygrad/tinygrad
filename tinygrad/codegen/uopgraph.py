@@ -20,7 +20,7 @@ def fold_expanded(ex, buf):
   # first, extract all the relevant offsets
   offsets_rootsrc: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
-    if (s.dtype is not None and s.dtype.count != 1) or (is_image and s.src[1].dtype.count == 2): continue
+    if s.dtype.count != 1 or (is_image and s.src[1].dtype.count == 2): continue
     idx = s.src[1]
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
@@ -408,7 +408,6 @@ def do_reduce(root:UOp):
   reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].sparents)
   ret = root.src[0]
   if len(reduce_parented):
-    assert root.dtype is not None
     acc = UOp(UOps.DEFINE_ACC, root.dtype,
               (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (acc_number,))
     acc_number += 1
@@ -420,7 +419,6 @@ def do_reduce(root:UOp):
 
 def do_contract(con:UOp):
   ex = con.src[0]
-  assert con.dtype is not None
   # CONTRACT without EXPAND repeats the element VECTORIZED
   if ex.op is not UOps.EXPAND: return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from EXPAND
@@ -487,7 +485,7 @@ reducer = PatternMatcher([
 
 no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE}, name="x"),
   lambda x: UOp(x.op, dtypes.int32.vec(x.dtype.count) if x.dtype.count > 1 else dtypes.int32, x.src, x.arg) \
-    if x.dtype is not None and x.dtype.scalar() == dtypes.pyint else None)])
+    if x.dtype.scalar() == dtypes.pyint else None)])
 
 # *** uop graph ***
 
