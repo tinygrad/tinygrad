@@ -79,8 +79,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
     rsrc = _recursive_uop(buf.srcs[0], ShapeTracker.from_shape(buf.srcs[0].shape), outputs, var_vals, inputs, realizes, assign_targets, cache)
-    ret = UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (REDUCE_ALU[cast(ReduceOps, buf.op)], buf.arg))
-    return cache.setdefault((buf, st), UOp(UOps.SWIZZLE, dtype, (ret,), st))
+    return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (REDUCE_ALU[cast(ReduceOps, buf.op)], buf.arg)).swizzle(st))
 
   # elementwise ops pass shapetracker
   in_uops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, realizes, assign_targets, cache) for x in buf.srcs)
@@ -108,35 +107,29 @@ def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTr
   tmp = input_st.permute(permute_axis)
   return tmp, tmp.shape[-len(axis):]
 
-def swizzle_reduceop(input_st:ShapeTracker, swizzle:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[int, ...]]:
-  # push the movementop to the buffer uop
-  tmp, rshape = permute_reduce(input_st, axis)
-  prshape = prod(rshape)
-  strides = strides_for_shape(rshape)
-  nv: List[View] = []
-  for v in swizzle.views:
-    nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
-                          v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
-  # update input_st and axis
-  new_input_st = tmp + ShapeTracker(tuple(nv))
-  _, new_rshape = permute_reduce(new_input_st, axis)
-  new_axis = tuple(range(len(new_input_st.shape)-len(new_rshape), len(new_input_st.shape)))
-  return new_input_st, new_axis
-
 # ***** reduceop fusor *****
 
 def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
   if swizzle.arg.contiguous: return None
   rsrc = reduceop.src[0]
-  new_input_st, new_axis = swizzle_reduceop(ShapeTracker.from_shape(unwrap(rsrc.st).shape), swizzle.arg, reduceop.arg[1])
-  return UOp(UOps.SWIZZLE, reduceop.dtype, (UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda st:st+new_input_st, {}),),
-                                                (reduceop.arg[0], new_axis)),), ShapeTracker.from_shape(swizzle.arg.shape))
+  tmp, rshape = permute_reduce(ShapeTracker.from_shape(unwrap(rsrc.st).shape), reduceop.arg[1])
+  prshape = prod(rshape)
+  strides = strides_for_shape(rshape)
+  nv: List[View] = []
+  for v in swizzle.arg.views:
+    nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
+                          v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
+  # update input_st and axis
+  new_input_st = tmp + ShapeTracker(tuple(nv))
+  _, new_rshape = permute_reduce(new_input_st, reduceop.arg[1])
+  new_axis = tuple(range(len(new_input_st.shape)-len(new_rshape), len(new_input_st.shape)))
+  return UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda st:st+new_input_st, {}),),
+             (reduceop.arg[0], new_axis)).swizzle(ShapeTracker.from_shape(swizzle.arg.shape))
 
 def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
   assert swizzle.arg.contiguous, "can't push a non contiguous SWIZZLE down to STORE"
   assert prod(swizzle.arg.shape) == prod(unwrap(swizzle.src[0].st).shape), "can't push expands down to STORE"
-  return UOp(UOps.SWIZZLE, root.dtype, (UOp(UOps.REDUCE_AXIS, root.dtype, swizzle.src, root.arg),),
-             ShapeTracker.from_shape(unwrap(swizzle.st).reduce(root.arg[1])))
+  return UOp(UOps.REDUCE_AXIS, root.dtype, swizzle.src, root.arg).swizzle(ShapeTracker.from_shape(unwrap(swizzle.st).reduce(root.arg[1])))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
@@ -152,7 +145,7 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   fixup_cache: Dict[UOp, UOp] = {}
   new_srcs = [x.src[0] if x.op is UOps.SWIZZLE else st_fixup(x, lambda st:st.reshape(sw_input_shape), fixup_cache) for x in root.src]
   ret = UOp(root.op, root.dtype, tuple(new_srcs), root.arg)
-  return ret if ret.op is UOps.STORE else UOp(UOps.SWIZZLE, None, (ret,), ShapeTracker.from_shape(sw_shape))
+  return ret if ret.op is UOps.STORE else ret.swizzle(ShapeTracker.from_shape(sw_shape))
 
 reduceop_fusor = PatternMatcher([
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)

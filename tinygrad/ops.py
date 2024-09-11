@@ -38,7 +38,10 @@ class MathTrait:
 
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
-  def __neg__(self): return self.ne(True) if getattr(self, 'dtype', None) == dtypes.bool else self*(-1)
+  def __neg__(self):
+    dtype = getattr(self, 'dtype', None)
+    assert dtype is not None, "MathTraits __neg__ requires a dtype"
+    return self.ne(True) if dtype.scalar() == dtypes.bool else self*(-1)
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __radd__(self, x): return self.ufix(x).alu(BinaryOps.ADD, self)
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
@@ -52,7 +55,7 @@ class MathTrait:
   def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
   def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
   def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
-  def eq(self, x): return -self.ne(x)
+  def eq(self, x): return self.ne(x).ne(True)
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
   def ge(self, x): return (-self).lt(-x+1)
@@ -377,6 +380,7 @@ class UOp(MathTrait):
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
+  def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):
