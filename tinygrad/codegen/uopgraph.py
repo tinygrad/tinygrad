@@ -514,11 +514,11 @@ def no_vectorized_acc(acc:UOp):
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
   # expand loads (TODO: copy the grouping logic here)
-  (NOp({UOps.LOAD, UOps.STORE}, name="ls"), no_vectorized_load_store),
+  (UPat({UOps.LOAD, UOps.STORE}, name="ls"), no_vectorized_load_store),
   # devectorize ACC
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   # no ALU on vectorized dtypes
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
+  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
   (NOp(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
