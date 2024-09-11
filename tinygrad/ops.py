@@ -274,7 +274,7 @@ class UOps(HashEnum):
 
     - Normal STORE: `Tuple[UOp, UOp, UOp]`
       - Buffer UOp `UOps.DEFINE_GLOBAL` or `UOps.DEFINE_LOCAL`.
-      - Indexing Op, can only return `dtypes.int32`.
+      - Indexing UOp, can only return `dtypes.int32`.
       - Value to store.
     - Gated STORE: `Tuple[UOp, UOp, UOp, UOp]`
       - Buffer UOp `UOps.DEFINE_GLOBAL` or `UOps.DEFINE_LOCAL`.
@@ -738,6 +738,7 @@ if TRACK_MATCH_STATS:
     ret = [0,0,0.0,0.0]
     for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
       loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
+      if getenv("UPAT_FILE", loc_str) not in loc_str: continue
       print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
       ret = [x+y for x,y in zip(ret, v)]
     print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
