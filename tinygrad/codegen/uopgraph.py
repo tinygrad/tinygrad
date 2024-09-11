@@ -407,7 +407,7 @@ def do_expand(root:UOp):
       else:
         new_srcs.append(UOp(UOps.VECTORIZE, src.dtype.vec(expand_sz), (src,)*expand_sz))
 
-  new_arg = root.arg #tuple(range(expand_sz*root.arg, expand_sz*(root.arg+1))) if root.op is UOps.GEP else root.arg
+  new_arg = root.arg
   if root.op is UOps.GEP:
     assert root.dtype.count == 1
     # is this right?
@@ -487,9 +487,12 @@ expander = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), vectorize_const),
   # create gate MUST BE BEFORE expander
   (NOp(UOps.STORE, name="root"), create_gate),
+  # double expand
+  (UPat(UOps.EXPAND, name="e1", src=(UPat(UOps.EXPAND, name="e2"),)),
+   lambda e1,e2: UOp(UOps.EXPAND, e1.dtype, (e2.src[0],), tuple(sorted(e1.arg+e2.arg)))),
   # do expansion
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
-         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
+         UOps.VECTORIZE, UOps.REDUCE, UOps.IF}, name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (NOp(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
   (NOp(UOps.SINK, name="root"),
