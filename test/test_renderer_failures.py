@@ -3,7 +3,7 @@ from typing import List, cast
 import numpy as np
 from tinygrad.codegen.uopgraph import full_graph_rewrite, linearize_uop
 from tinygrad.device import Buffer, Device
-from tinygrad.dtype import PtrDType, DType, dtypes
+from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, flatten, getenv, prod
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -18,7 +18,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   uops: List[UOp] = []
   def _recursive_add(uop:UOp) -> List[UOp]: return flatten([_recursive_add(x) for x in uop.src])+[uop]
   uops = dedup(flatten(_recursive_add(st) for st in stores))
-  outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=cast(DType,u.src[2].dtype)), \
+  outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[2].dtype), \
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is UOps.STORE]
   inbufs = [cast(LazyBuffer,x.lazydata).base.buffer for x in inputs]
   src = Device[Device.DEFAULT].renderer.render("test", uops)

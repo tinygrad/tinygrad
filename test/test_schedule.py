@@ -1629,7 +1629,7 @@ class TestScheduleRewrite(unittest.TestCase):
     sink = UOp(UOps.SINK, dtypes.void, arg=None, src=(
       UOp(UOps.STORE, dtypes.void, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0, src=()),
-        UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
         UOp(UOps.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
           UOp(UOps.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
             UOp(UOps.SWIZZLE, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=( # noqa E501
@@ -1684,7 +1684,7 @@ class TestScheduleRewrite(unittest.TestCase):
     ld2 = UOp(UOps.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((4,)).to_uop()))
     r2 = UOp(UOps.REDUCE_AXIS, dtypes.int, (ld2,), (BinaryOps.ADD, (0,)))
     alu = UOp(UOps.SWIZZLE, r1.dtype, (r1,), ShapeTracker.from_shape(()))+UOp(UOps.SWIZZLE, r2.dtype, (r2,), ShapeTracker.from_shape(()))
-    sink = UOp(UOps.SINK, dtypes.void, (UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu+ast_const(dtypes.int, 2, ()),),),))
+    sink = UOp(UOps.SINK, dtypes.void, (UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu+ast_const(dtypes.int, 2, ()),),),)) # noqa: E501
     # graph rewrite
     sink = graph_rewrite(sink, reduceop_fusor)
     # verify output

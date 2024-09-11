@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, cast
+from typing import List, Tuple, Union
 import numpy as np
 import unittest
 from dataclasses import replace
@@ -1756,7 +1756,7 @@ class TestHandCodedOpts(unittest.TestCase):
 def helper_linearizer_ast(ast:UOp, inputs:List[Tensor], *args, **kwargs):
   assert isinstance(ast, UOp), "ast must be UOp"
   inbufs = [x.lazydata.base.buffer for x in inputs]
-  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.st_arg.size, cast(DType,out.src[2].dtype)).allocate() \
+  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.st_arg.size, out.src[2].dtype).allocate() \
       for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
