@@ -262,7 +262,7 @@ constant_folder = PatternMatcher([
   (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).cast()*
     NOp(UOps.LOAD, src=(NOp.var("buf"), NOp.var('add')+NOp.var('mul')*NOp(UOps.RANGE, name="rng")), name="ld"),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
-  (NOp(UOps.REDUCE, src=(NOp.var('idx').ne(NOp(UOps.RANGE, name="rng")).__neg__().cast()*
+  (NOp(UOps.REDUCE, src=(NOp.var('idx').eq(NOp(UOps.RANGE, name="rng")).cast()*
     NOp(UOps.LOAD, src=(NOp.var("buf"), NOp(UOps.RANGE, name="rng")), name="ld"),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
     lambda **kwargs: index_collapse(add=UOp.const(dtypes.int, 0), mul=UOp.const(dtypes.int, 1), **kwargs)),
@@ -334,7 +334,7 @@ constant_folder = PatternMatcher([
   (NOp.var("x") + NOp.var("x"), lambda x: x*2), # (x+x)-> x*2
   ((NOp.var("x") // NOp.cvar("c0")) // NOp.cvar("c1"), lambda x,c0,c1: x//(c0*c1)), # (x//c0)//c1 -> x//(c0*c1)
   ((NOp.var("x") / NOp.var("x2")) / NOp.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
-  (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  (-1 * (NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   ((NOp.cvar("c0") + NOp.var("x")).lt(NOp.cvar("c1")), lambda x,c0,c1: UOp.lt(x, c1-c0)),  # c0 + x < c1 -> x < c1 - c0
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((NOp.var("x") + NOp.var("y")) * NOp.cvar("c"), lambda x,y,c: x*c+y*c if dtypes.is_int(x.dtype) else None),
