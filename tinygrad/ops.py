@@ -386,12 +386,12 @@ class UOp(MathTrait):
   def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(dtype, b)
   @classmethod
   def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
+    assert dtype is not None, "UOp const must define a DType"
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype,
-                                           arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
-    if dtype is not None and dtype != (sdtype := dtype.scalar()):
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
+    if dtype != (sdtype := dtype.scalar()):
       return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
-    return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+    return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype))
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
   @classmethod
@@ -626,6 +626,11 @@ class NOp(UOp):
   @classmethod
   @functools.lru_cache(None)
   def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(dtype, b)
+  # this is needed so NOp can use None dtype
+  @classmethod
+  def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
+    return cls(UOps.CONST, dtype, (), b)
 
   @functools.cached_property
   def upat(self:NOp) -> UPat:
