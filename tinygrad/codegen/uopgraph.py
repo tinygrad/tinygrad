@@ -211,7 +211,6 @@ def vectorize_const(vec:UOp) -> UOp:
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), vectorize_const),
   (UPat(UOps.GEP, src=(UPat(UOps.IF, name='uif'),)), lambda uif: uif),
   (UPat(UOps.BARRIER, src=(UPat(UOps.SINK, name='sink'),)), lambda sink: UOp(UOps.BARRIER, None, sink.src)),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
@@ -399,9 +398,12 @@ def do_expand(root:UOp):
       else:
         new_srcs.append(UOp(UOps.GEP, src.src[0].dtype.scalar().vec(expand_sz), (src.src[0],), tuple(lst)))
     else:
-      assert src.dtype.count == 1, f"this should be an expand {src.dtype}"
       if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
         new_srcs.append(src)
+      elif src.dtype.count > 1:
+        # put it at the end?
+        new_srcs.append(UOp(UOps.VECTORIZE,
+                            src.dtype.scalar().vec(expand_sz*src.dtype.count), tuple(src.gep(i) for i in range(src.dtype.count))*expand_sz))
       else:
         new_srcs.append(UOp(UOps.VECTORIZE, src.dtype.vec(expand_sz), (src,)*expand_sz))
 
@@ -409,7 +411,7 @@ def do_expand(root:UOp):
   if root.op is UOps.GEP:
     # is this right?
     new_arg = tuple(range(root.arg, new_srcs[0].dtype.count, new_srcs[0].dtype.count // expand_sz))
-  nsrc = UOp(root.op, root.dtype.vec(expand_sz) if root.dtype else None, tuple(new_srcs), new_arg)
+  nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz) if root.dtype else None, tuple(new_srcs), new_arg)
   return UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
 
   """
@@ -481,6 +483,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
 expander = PatternMatcher([
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), vectorize_const),
   # create gate MUST BE BEFORE expander
   (NOp(UOps.STORE, name="root"), create_gate),
   # do expansion
@@ -520,8 +523,16 @@ def no_vectorized_acc(acc:UOp):
     tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
 
+def devectorize_const(c:UOp):
+  if c.dtype.count == 1: return None
+  if isinstance(c.arg, tuple):
+    return UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))
+  else:
+    return UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), c.arg) for _ in range(c.dtype.count)))
+
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
+  (UPat(UOps.CONST, name='c'), devectorize_const),
   # expand loads (TODO: copy the grouping logic here)
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), no_vectorized_load_store),
   # devectorize ACC
