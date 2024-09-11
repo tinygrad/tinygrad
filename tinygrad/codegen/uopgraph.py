@@ -535,6 +535,17 @@ def devectorize_const(c:UOp):
   else:
     return UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), c.arg) for _ in range(c.dtype.count)))
 
+def no_vectorized_wmma(wmma:UOp):
+  out_sz = prod(x[1] for x in wmma.arg[6][-1])
+  if wmma.dtype.count == out_sz: return None
+  tsrcs = []
+  for s,sz in zip(wmma.src, wmma.arg[6]):
+    ssz = prod(x[1] for x in sz)
+    tsrcs.append([s.gep(tuple(range(grp, grp+ssz))) for grp in range(0, s.dtype.count, ssz)])
+  wmmas = [UOp(UOps.WMMA, wmma.dtype.scalar().vec(out_sz), tsrc, wmma.arg) for tsrc in zip(*tsrcs)]
+  wmma_ex = flatten([[e.gep(i) for i in range(e.dtype.count)] for e in wmmas])
+  return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
+
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
   (UPat(UOps.CONST, name='c'), devectorize_const),
@@ -542,6 +553,8 @@ reducer = PatternMatcher([
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), no_vectorized_load_store),
   # devectorize ACC
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
+  # devectorize WMMA
+  (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   # no ALU on vectorized dtypes
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
