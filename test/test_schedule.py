@@ -1289,7 +1289,6 @@ class TestSchedule(unittest.TestCase):
 
   def test_conv2d(self): _test_conv2d(8)
   def test_conv2d_fused(self): _test_conv2d(7, FUSE_CONV_BW=1)
-  @unittest.expectedFailure
   def test_conv2d_fused_ast_rewrite(self): _test_conv2d(7, FUSE_CONV_BW=1, AST_REWRITE=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
@@ -1299,7 +1298,7 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d_fused_half(self): _test_conv2d(7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.expectedFailure
-  def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(7, FUSE_CONV_BW=1, AST_REWRITE=1)
+  def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(7, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
@@ -1706,7 +1705,7 @@ class TestScheduleRewrite(unittest.TestCase):
     # and pushed to the LOAD
     new_load_st = unwrap([x for x in ret.parents if x.op is UOps.SHAPETRACKER][0].st)
     self.assertGreater(prod(new_load_st.shape), prod(ld_st.shape))
-    self.assertEqual(new_load_st.views[0].strides, (0, 0, 3, 0, 1, 0, 0))
+    self.assertEqual(new_load_st.views[0].strides, (0, 9, 3, 0, 1, 0, 27))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
