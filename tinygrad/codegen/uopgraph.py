@@ -211,6 +211,9 @@ def vectorize_const(vec:UOp) -> UOp:
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # push
+  (NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
+
   (UPat(UOps.GEP, src=(UPat(UOps.IF, name='uif'),)), lambda uif: uif),
   (UPat(UOps.BARRIER, src=(UPat(UOps.SINK, name='sink'),)), lambda sink: UOp(UOps.BARRIER, None, sink.src)),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
