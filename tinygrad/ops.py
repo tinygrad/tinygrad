@@ -38,7 +38,10 @@ class MathTrait:
 
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
-  def __neg__(self): return self.ne(True) if getattr(self, 'dtype', None) == dtypes.bool else self*(-1)
+  def __neg__(self):
+    dtype = getattr(self, 'dtype', None)
+    assert dtype is not None, "MathTraits __neg__ requires a dtype"
+    return self.ne(True) if dtype.scalar() == dtypes.bool else self*(-1)
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __radd__(self, x): return self.ufix(x).alu(BinaryOps.ADD, self)
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
