@@ -212,6 +212,8 @@ def vectorize_const(vec:UOp) -> UOp:
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # push
+  (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
+   lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, x.dtype, (x,y), alu.arg),)*alu.dtype.count)),
   (NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
 
   (UPat(UOps.GEP, src=(UPat(UOps.IF, name='uif'),)), lambda uif: uif),
@@ -533,10 +535,8 @@ def no_vectorized_acc(acc:UOp):
 
 def devectorize_const(c:UOp):
   if c.dtype.count == 1: return None
-  if isinstance(c.arg, tuple):
-    return UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))
-  else:
-    return UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), c.arg) for _ in range(c.dtype.count)))
+  return UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg) if isinstance(c.arg, tuple) else \
+             tuple(UOp.const(c.dtype.scalar(), c.arg) for _ in range(c.dtype.count)))
 
 def no_vectorized_wmma(wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
