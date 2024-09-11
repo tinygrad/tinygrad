@@ -154,25 +154,28 @@ def fold_unrolled_divs(divs:UOp, c:UOp):
     if ans != neg.src[0]: return None
     seen_const.append(s0.src[1].arg)
   return ans if sorted(seen_const)==list(range(c.arg, c.arg+len(add_chain))) and ans is not None and (ans.vmin, ans.vmax)==(0, c.arg) else None
+
 # ***** image load valid removal *****
 
 def fold_valid_image_load(load:UOp, buf:UOp):
   if not isinstance(buf.dtype, ImageDType) or len(load.src) < 4: return None
-  buf, idx, _, valid = load.src
-  for i in range(2):
-    if idx.src[i].op is not UOps.SPECIAL or not idx.src[i].arg[0].endswith(str(i)): return None
-  # if valid.op is UOps.ALU and valid.arg is BinaryOps.AND: return None
+  return UOp(UOps.LOAD, dtype=load.dtype, src=(load.src[0], load.src[1]))
 
-  if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT:
-    if valid.src[0].op is not UOps.SPECIAL or not valid.src[0].arg[0].endswith("idx1") or valid.src[1].op is not UOps.CONST: return None
-    if valid.src[1].arg == cast(ImageDType, buf.dtype).shape[0]:
-      # making sure it's an out of bound read
-      return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
-      # print(f"{load=}")
-      # print(f"{valid=}")
-      # print(f"{idx=}")
-      # raise
-  return None
+  # buf, idx, _, valid = load.src
+  # for i in range(2):
+  #   if idx.src[i].op is not UOps.SPECIAL or not idx.src[i].arg[0].endswith(str(i)): return None
+  # # if valid.op is UOps.ALU and valid.arg is BinaryOps.AND: return None
+
+  # if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT:
+  #   if valid.src[0].op is not UOps.SPECIAL or not valid.src[0].arg[0].endswith("idx1") or valid.src[1].op is not UOps.CONST: return None
+  #   if valid.src[1].arg == cast(ImageDType, buf.dtype).shape[0]:
+  #     # making sure it's an out of bound read
+  #     return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
+  #     # print(f"{load=}")
+  #     # print(f"{valid=}")
+  #     # print(f"{idx=}")
+  #     # raise
+  # return None
 
 # ***** transcendental *****
 
