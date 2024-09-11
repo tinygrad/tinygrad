@@ -375,7 +375,7 @@ class UOp(MathTrait):
     ret = self.src[self.st_loc]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
-  def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
+  def sink(self, *srcs): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
@@ -395,7 +395,7 @@ class UOp(MathTrait):
   @classmethod
   def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
   @classmethod
-  def store(cls, *src:UOp): return cls(UOps.STORE, None, src)
+  def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
@@ -433,11 +433,11 @@ class UOp(MathTrait):
   def _min_max(self) -> Tuple[ConstType, ConstType]:
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg:
-      return self.arg[1].arg, self.arg[2].arg if self.arg[2].op is UOps.CONST else dtypes.max(cast(DType, self.dtype))
+      return self.arg[1].arg, self.arg[2].arg if self.arg[2].op is UOps.CONST else dtypes.max(self.dtype)
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
-    if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(cast(DType, self.dtype))
+    if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
     if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
@@ -457,7 +457,7 @@ class UOp(MathTrait):
         if s1.arg < 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
       if self.arg is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
-    return dtypes.min(cast(DType, self.dtype)), dtypes.max(cast(DType, self.dtype))
+    return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
 @dataclass(frozen=True)
 class KernelInfo:

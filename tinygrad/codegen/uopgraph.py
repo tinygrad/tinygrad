@@ -67,18 +67,18 @@ def vectorize_reduce(vec:UOp):
 
 def vectorize_alu(vec:UOp):
   if not all_same([x.arg for x in vec.src]): return None
-  return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, cast(DType, vec.src[0].src[i].dtype).vec(cast(DType, vec.dtype).count),
+  return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, vec.src[0].src[i].dtype.vec(vec.dtype.count),
                                              tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
 
 def fix_unfoldable_image_load(load:UOp, buf:UOp):
-  if not isinstance(buf.dtype, ImageDType) or cast(DType, load.src[1].dtype).count == 2: return None
+  if not isinstance(buf.dtype, ImageDType) or load.src[1].dtype.count == 2: return None
   id4 = load.src[1] % 4
   new_src = list(load.src)
   # TODO: copied logic from above
   new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((load.src[1] // 4) % buf.dtype.shape[1], (load.src[1] // (4 * buf.dtype.shape[1]))))
   if len(new_src) >= 4:
-    new_src[2] = UOp(UOps.VECTORIZE, cast(DType, new_src[2].dtype).vec(4), tuple(new_src[2] for _ in range(4)))
-  vec_load = UOp(UOps.LOAD, cast(DType, load.dtype).vec(4), tuple(new_src))
+    new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(4), tuple(new_src[2] for _ in range(4)))
+  vec_load = UOp(UOps.LOAD, load.dtype.vec(4), tuple(new_src))
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const_like(float('nan')))
 
 float4_folding = PatternMatcher([

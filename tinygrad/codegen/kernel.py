@@ -407,7 +407,7 @@ class Kernel:
     else: amt = -1
 
     if self.reduceop and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
-      acc_sz = cast(DType, self.reduceop.dtype).itemsize
+      acc_sz = self.reduceop.dtype.itemsize
       upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
       local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
       smem_sz = amt*acc_sz*upcast_sz*local_sz
@@ -442,7 +442,7 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCASTMID:                  # white
-      check(cast(DType, self.bufs[0].src[0].dtype).name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces != 0 and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce")  # noqa: E501
+      check(self.bufs[0].src[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces != 0 and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce")  # noqa: E501
       axes = self.sts[0].unit_stride_axes()
       check(len(axes) == 1, f"wrong number of stride 1 axis : {axes}")
       check(axes[0] == axis, "wrong axis")
@@ -520,7 +520,7 @@ class Kernel:
             except KernelOptError: pass
 
       # are we upcasting in mid reduce? (only for images)
-      if cast(DType, self.bufs[0].src[0].dtype).name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:  # noqa: E501
+      if self.bufs[0].src[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:  # noqa: E501
         axes = self.sts[0].unit_stride_axes()
         assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
         if self.sts[0].shape[axes[0]]%4 == 0:
