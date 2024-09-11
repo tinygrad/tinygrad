@@ -340,10 +340,6 @@ class UOp(MathTrait):
   dtype: DType = dtypes.void
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
-  @classmethod
-  def unwrap_dtype(cls, dtype:Optional[DType]) -> Any:
-    if isinstance(cls, UOp): assert dtype is not None
-    return dtype
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     from tinygrad.shape.shapetracker import ShapeTracker
@@ -380,8 +376,8 @@ class UOp(MathTrait):
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
-  def cast(self, dtype=None): return type(self)(UOps.CAST, self.unwrap_dtype(dtype), (self,))
-  def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, self.unwrap_dtype(dtype), (self,))
+  def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
+  def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
   def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
   @classmethod
@@ -390,15 +386,15 @@ class UOp(MathTrait):
   @classmethod
   def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, cls.unwrap_dtype(dtype),
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype,
                                            arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
     if dtype is not None and dtype != (sdtype := dtype.scalar()):
       return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
-    return cls(UOps.CONST, cls.unwrap_dtype(dtype), arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+    return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
   @classmethod
-  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, cls.unwrap_dtype(dtype), src)
+  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
   @classmethod
   def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
   @functools.cached_property
@@ -612,7 +608,8 @@ def lines(fn) -> List[str]: return open(fn).readlines()
 @dataclass(frozen=True, eq=False, repr=False)  # reuse repr from UOp
 class NOp(UOp):
   name: Optional[str] = None
-  dtype: Optional[DType] = None
+  # NOTE: this is fine because None dtype in NOp means any dtype is valid.
+  dtype: Optional[DType] = None # type: ignore
   src: Tuple[NOp, ...] = tuple()
   allow_any_len: bool = False
   location: Tuple[str, int] = field(default_factory=get_location)
