@@ -395,7 +395,7 @@ class UOp(MathTrait):
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)
   @classmethod
-  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
+  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src) # type: ignore
   @classmethod
   def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
   @functools.cached_property
