@@ -354,6 +354,7 @@ class UOp(MathTrait):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     if self.op is UOps.DEFINE_VAR: arg = self.arg[0]
     elif self.op is UOps.ALU: arg = self.arg.value
+    elif self.op is UOps.CONST: arg = (self.arg,) if not isinstance(self.arg, tuple) else self.arg
     else: arg = self.arg
     return (self.op.value, arg, self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
@@ -387,8 +388,6 @@ class UOp(MathTrait):
   def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
     if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
-    if dtype is not None and dtype != (sdtype := dtype.scalar()):
-      return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
     return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   def alu(self, arg, *src:UOp):
     return type(self)(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype, (self,)+src, arg)

@@ -262,7 +262,8 @@ constant_folder = PatternMatcher([
   # max folding
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # GEP/CAST const rules
-  (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const_like(c.arg)),
+  (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="gep"), lambda gep, c:
+   gep.const_like(((tuple(c.arg[x] for x in gep.arg)) if isinstance(gep.arg, tuple) else c.arg[gep.arg]) if isinstance(c.arg, tuple) else c.arg)),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const_like(c.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
