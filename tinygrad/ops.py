@@ -393,9 +393,9 @@ class UOp(MathTrait):
     return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
   @classmethod
   @functools.lru_cache(None)
-  def const(cls, dtype:Optional[DType], b:Tuple[ConstType, ...]|ConstType|Variable): return cls._const(dtype, b)
+  def const(cls, dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return cls._const(dtype, b)
   @classmethod
-  def _const(cls, dtype:Optional[DType], b:Tuple[ConstType, ...]|ConstType|Variable):
+  def _const(cls, dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
     if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max)))) # type: ignore
     return cls(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
