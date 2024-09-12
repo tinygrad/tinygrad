@@ -606,13 +606,13 @@ def get_location() -> Tuple[str, int]:
 def lines(fn) -> List[str]: return open(fn).readlines()
 
 class UPat(MathTrait):
-  def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, dtype:Optional[Union[DType, Set[DType]]]=None,
+  def __init__(self, op:Optional[Union[UOps, Tuple[UOps, ...]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
                src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None,
                custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None):
     assert dtype is None or isinstance(dtype, DType)
-    self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
-    self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
+    self.op: Optional[Tuple[UOps, ...]] = (op,) if isinstance(op, UOps) else op
+    self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name = arg, name
     self.in_src = src
     self.src: Any = None
@@ -654,7 +654,7 @@ class UPat(MathTrait):
   def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
   def alu(self, arg, *src:UPat):
     asrc = (self,)+src
-    return type(self)(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else (self, *src)[-1].dtype,
+    return type(self)(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype,
                       list(asrc) if arg in COMMUTATIVE else asrc, arg)
 
   def printable(self:UPat) -> str:

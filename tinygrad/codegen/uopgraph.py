@@ -83,9 +83,9 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
 
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
-  (UPat(UOps.VECTORIZE, src=UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}), name="vec"), vectorize_alu),
+  (UPat(UOps.VECTORIZE, src=UPat((UOps.ALU, UOps.CAST, UOps.BITCAST)), name="vec"), vectorize_alu),
 ])
 
 # ***** mod *****
@@ -299,7 +299,7 @@ constant_folder = PatternMatcher([
   # NOTE: this can be wrong for loaded NaN
   (UPat.var('x') * 0, lambda x: x.const_like(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # min==max -> CONST (slow!)
-  (UPat({UOps.ALU, UOps.DEFINE_VAR}, name='x'), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
+  (UPat((UOps.ALU, UOps.DEFINE_VAR), name='x'), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # ** load/store folding **
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.load(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
@@ -450,8 +450,8 @@ expander = PatternMatcher([
   # create gate MUST BE BEFORE expander
   (UPat(UOps.STORE, name="root"), create_gate),
   # do expansion
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
-         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF}, name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
+         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF), name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (UPat(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
   (UPat(UOps.SINK, name="root"),
@@ -478,14 +478,14 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), do_reduce),
   # no ALU on vectorized dtypes
-  (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
   (UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
-no_pyint = PatternMatcher([(UPat({UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE}, name="x"),
+no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE), name="x"),
   lambda x: UOp(x.op, dtypes.int32.vec(x.dtype.count) if x.dtype.count > 1 else dtypes.int32, x.src, x.arg) \
     if x.dtype.scalar() == dtypes.pyint else None)])
 
