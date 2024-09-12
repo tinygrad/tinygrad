@@ -245,34 +245,34 @@ class TestUOpGraph(unittest.TestCase):
 
     # possible
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
-    xyzw = tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(4))
+    xyzw = tuple(UOp(UOps.GEP, dtypes.float, (val,), (i,)) for i in range(4))
     assert_equiv_uops(_test_vec(xyzw), val)
 
     # unaligned
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
-    wzyx = tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in reversed(range(4)))
+    wzyx = tuple(UOp(UOps.GEP, dtypes.float, (val,), (i,)) for i in reversed(range(4)))
     self.assertIs(_test_vec(wzyx).op, UOps.VECTORIZE)
 
     # different_size
     val = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
-    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), i) for i in range(2))
+    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), (i,)) for i in range(2))
     self.assertIs(_test_vec(xy+xy).op, UOps.VECTORIZE)
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
-    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), i) for i in range(2))
+    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), (i,)) for i in range(2))
     self.assertIs(_test_vec(xy, count=2).op, UOps.VECTORIZE)
 
     # different vals
     val1 = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
     val2 = UOp(UOps.LOAD, dtypes.float.vec(2), (d2, idx))
-    xy1 = tuple(UOp(UOps.GEP, dtypes.float, (val1, ), i) for i in range(2))
-    xy2 = tuple(UOp(UOps.GEP, dtypes.float, (val2, ), i) for i in range(2))
+    xy1 = tuple(UOp(UOps.GEP, dtypes.float, (val1, ), (i,)) for i in range(2))
+    xy2 = tuple(UOp(UOps.GEP, dtypes.float, (val2, ), (i,)) for i in range(2))
     self.assertIs(_test_vec(xy1+xy2).op, UOps.VECTORIZE)
 
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
       vec = UOp(UOps.VECTORIZE, dtypes.float.vec(vec_size), tuple(consts))
-      uops = to_uops_list([UOp(UOps.GEP, dtypes.float, (vec,), i) for i in range(vec_size)])
+      uops = to_uops_list([UOp(UOps.GEP, dtypes.float, (vec,), (i,)) for i in range(vec_size)])
       for uop, const in zip(uops, consts):
         assert_equiv_uops(uop, const)
 

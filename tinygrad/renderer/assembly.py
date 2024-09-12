@@ -213,7 +213,9 @@ class PTXRenderer(Renderer):
           r[u] = f"%{args[0]}"
           kk(*self.render_load(args[0], ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.CONST: r[u] = const(args, dtype, mov=True)
-        elif uop is UOps.GEP: r[u] = r[src[0]][u.arg]
+        elif uop is UOps.GEP:
+          assert len(u.arg) == 1
+          r[u] = r[src[0]][u.arg[0]]
         elif uop is UOps.LOAD:
           assert src[0].dtype == dtypes.int64, "load isn't int64"
           assert src[1].op is UOps.CONST, f"load isn't const {u}"

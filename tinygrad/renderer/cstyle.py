@@ -177,9 +177,11 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {r[src[0]]};")
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
+          assert len(args) == 1
           from_ssa = src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
           r[u] = (r[src[0]] if from_ssa else f"{(r[src[0]])}") + \
-            (f"[{args}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) or self.device == 'CLANG' else f".{'xyzwabcd'[args]}")
+            (f"[{args[0]}]" if src[0].dtype.count > (8 if self.device in {"CUDA", "NV"} else 4) \
+             or self.device == 'CLANG' else f".{'xyzwabcd'[args[0]]}")
         else: raise RuntimeError(f"failed to render {u}")
 
     # NOTE: this relies on bufs dict preserving order
