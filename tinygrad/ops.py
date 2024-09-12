@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class FastEnum(IntEnum):
   def __str__(self): return Enum.__str__(self)
   @staticmethod
-  def _generate_next_value_(_, __, count, ___): return sum(map(len, FastEnum.__subclasses__())) + count
+  def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
