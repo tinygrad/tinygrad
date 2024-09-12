@@ -634,7 +634,7 @@ class UPat(MathTrait):
 
   @staticmethod
   @functools.lru_cache(None)
-  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return UPat(UOps.NOOP, dtype=dtype, name=name)
+  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.lru_cache(None)
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return UPat(UOps.CONST, dtype=dtype, name=name)
