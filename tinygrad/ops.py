@@ -187,7 +187,7 @@ class UOps(HashEnum):
   - **`src`**:
     `Tuple[UOp]`
       - UOps.SHAPETRACKER
-  - **`arg`**: `dtypes.void`
+  - **`arg`**: `None`
 
   A masked CONST is defined as `valid.where(value, 0)`.
   """
@@ -199,19 +199,19 @@ class UOps(HashEnum):
   """
   - **`dtype`**: The casted scalar DType
   - **`src`**: `Tuple[UOp]`
-  - **`arg`**: `dtypes.void`
+  - **`arg`**: `None`
   """
   BITCAST = auto()
   """
   - **`dtype`**: The bitcasted scalar DType
   - **`src`**: `Tuple[UOp]`
-  - **`arg`**: None
+  - **`arg`**: `None`
   """
   VECTORIZE = auto()
   """
   - **`dtype`**: The upcasted vector DType
   - **`src`**: `Tuple[UOp, ...]`
-  - **`arg`**: None
+  - **`arg`**: `None`
 
   NOTE: Length of sources must match `dtype.count`
   """
