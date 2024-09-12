@@ -430,7 +430,9 @@ class TestUOpGraph(unittest.TestCase):
     # ranges are closed in the right order
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
-def expander_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + reducer)
+def expander_rewrite(sink):
+  sink = graph_rewrite(sink, constant_folder + expander)
+  return graph_rewrite(sink, constant_folder + reducer)
 def float4_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + float4_folding)
 
 class TestExpander(unittest.TestCase):
@@ -602,7 +604,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     sink = float4_rewrite(sink)
     assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 1
     single_load = [x for x in sink.sparents if x.op is UOps.LOAD][0]
-    self.assertListEqual([src.arg for src in single_load.src[2].src], [0.0, 1.0, 2.0, 3.0])
+    self.assertListEqual(list(single_load.src[2].arg), [0.0, 1.0, 2.0, 3.0])
 
   def test_simple_load_dont_fold_different_gated(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
