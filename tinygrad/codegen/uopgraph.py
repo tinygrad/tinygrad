@@ -279,7 +279,8 @@ constant_folder = PatternMatcher([
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
   (NOp.cvar('gate').where(NOp.var('c0'), NOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
-  (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
+  (UPat(UOps.ALU, name="root", src=UPat({UOps.VCONST, UOps.CONST})),
+   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (NOp(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
