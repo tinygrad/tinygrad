@@ -82,8 +82,8 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const_like(float('nan')))
 
 float4_folding = PatternMatcher([
-  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   (UPat(UOps.VECTORIZE, src=UPat((UOps.ALU, UOps.CAST, UOps.BITCAST)), name="vec"), vectorize_alu),
 ])
@@ -172,7 +172,7 @@ def fold_unrolled_divs(divs:UOp, c:UOp):
 
 @functools.lru_cache(None)
 def transcendental_folding(ops):
-  return PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=k), cast(Callable, v))
+  return PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),), arg=k), cast(Callable, v))
                          for k,v in ((UnaryOps.EXP2, xexp2), (UnaryOps.LOG2, xlog2), (UnaryOps.SIN, xsin)) if k not in ops])
 
 # ***** threefry *****
@@ -227,16 +227,16 @@ constant_folder = PatternMatcher([
   # VECTORIZE/GEP
   (UPat(UOps.GEP, src=(UPat(UOps.VECTORIZE, name="cast"),), name="gep"), lambda gep, cast: cast.src[gep.arg]),
   *[(UPat(UOps.VECTORIZE, dtypes.float.vec(i), tuple(UPat(UOps.GEP, dtypes.float,
-    src=(UPat.var('x', dtype=dtypes.float.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in ([2, 4, 8, 16] + ([256] if AMX else []))],
+    src=(UPat.var("x", dtype=dtypes.float.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in ([2, 4, 8, 16] + ([256] if AMX else []))],
   *[(UPat(UOps.VECTORIZE, dtypes.half.vec(i), tuple(UPat(UOps.GEP, dtypes.half,
-                         src=(UPat.var('x', dtype=dtypes.half.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
+                         src=(UPat.var("x", dtype=dtypes.half.vec(i)),), arg=j) for j in range(i))), lambda x: x) for i in [2, 4, 8, 16]],
   # tensor core with a 0 input is acc
-  *[(UPat(UOps.WMMA, src=(UPat(UOps.VECTORIZE, src=tuple(UPat.const(None, 0.0) for _ in range(i))), UPat.var(), UPat.var('acc'))),
+  *[(UPat(UOps.WMMA, src=(UPat(UOps.VECTORIZE, src=tuple(UPat.const(None, 0.0) for _ in range(i))), UPat.var(), UPat.var("acc"))),
      lambda acc: acc) for i in [2, 4, 8]],
-  *[(UPat(UOps.WMMA, src=(UPat.var(), UPat(UOps.VECTORIZE, src=tuple(UPat.const(None, 0.0) for _ in range(i))), UPat.var('acc'))),
+  *[(UPat(UOps.WMMA, src=(UPat.var(), UPat(UOps.VECTORIZE, src=tuple(UPat.const(None, 0.0) for _ in range(i))), UPat.var("acc"))),
      lambda acc: acc) for i in [2, 4, 8]],
   # tensor core cleanups
-  *[(UPat(UOps.REDUCE, src=(UPat(UOps.EXPAND, src=tuple(UPat(UOps.GEP, dtypes.float, src=(UPat.var('x'),), arg=i) for i in range(j)), name="expand"),)
+  *[(UPat(UOps.REDUCE, src=(UPat(UOps.EXPAND, src=tuple(UPat(UOps.GEP, dtypes.float, src=(UPat.var("x"),), arg=i) for i in range(j)), name="expand"),)
     ,name="reduce", allow_any_len=True), reduce_before_expand) for j in ([2,4,8] + ([16,256] if AMX else []))],
   (UPat.var("add") + UPat(UOps.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
@@ -258,80 +258,80 @@ constant_folder = PatternMatcher([
    .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)) + UPat.var("extra"),),
    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   # unrolled arange div folding
-  (UPat.var('divs') + UPat.cvar('c'), fold_unrolled_divs),
+  (UPat.var("divs") + UPat.cvar("c"), fold_unrolled_divs),
   # indexing (with a multiply offset)!
-  (UPat(UOps.REDUCE, src=(UPat.var('idx').eq(UPat(UOps.RANGE, name="rng")).cast()*
-    UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('add')+UPat.var('mul')*UPat(UOps.RANGE, name="rng")), name="ld"),),
+  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*
+    UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng")), name="ld"),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
-  (UPat(UOps.REDUCE, src=(UPat.var('idx').eq(UPat(UOps.RANGE, name="rng")).cast()*
+  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*
     UPat(UOps.LOAD, src=(UPat.var("buf"), UPat(UOps.RANGE, name="rng")), name="ld"),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
     lambda **kwargs: index_collapse(add=UOp.const(dtypes.int, 0), mul=UOp.const(dtypes.int, 1), **kwargs)),
-  (UPat(UOps.REDUCE, src=(UPat.var('idx').eq(UPat(UOps.RANGE, name="rng")).where(
-    UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('add')+UPat.var('mul')*UPat(UOps.RANGE, name="rng")), name="ld"), UPat.const(None, 0.0)),),
+  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(
+    UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng")), name="ld"), UPat.const(None, 0.0)),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
   # max folding
-  (UPat.max(UPat.var('x'), UPat.var('y')), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
+  (UPat.max(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # GEP/CAST const rules
   (UPat(UOps.GEP, src=(UPat.cvar("c"),), name="root"), lambda root, c: root.const_like(c.arg)),
   (UPat(UOps.GEP, src=(UPat(UOps.VCONST, name="c"),), name="root"), lambda root, c: root.const_like(c.arg[root.arg])),
-  (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const_like(c.arg)),
+  (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
-  (UPat.cvar('gate').where(UPat.var('c0'), UPat.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UPat.cvar("gate").where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
    lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
-  (UPat(UOps.REDUCE, src=(UPat.var('x'),)), lambda x: x),  # a REDUCE without ranges is a NOOP
-  (UPat.var('x') + 0, lambda x: x),    # x+0 -> x
-  (UPat.var('x') * 1, lambda x: x),    # x*1 -> x
-  (UPat.var('x') // UPat.var('x'), lambda x: x.const_like(1)), # x//x -> 1
-  (UPat.var('x') // 1, lambda x: x),   # x//1 -> x
-  (UPat.var('x') // -1, lambda x: -x), # x//-1 -> -x
-  (UPat.var('x') / UPat.var('x'), lambda x: x.const_like(1)), # x/x -> 1
+  (UPat(UOps.REDUCE, src=(UPat.var("x"),)), lambda x: x),  # a REDUCE without ranges is a NOOP
+  (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
+  (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
+  (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
+  (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
+  (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
+  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
-  (UPat.var('x', dtype=dtypes.bool) & UPat.cvar('c'), lambda x,c: x if c.arg else c),
-  (UPat.var('x', dtype=dtypes.bool) | UPat.cvar('c'), lambda x,c: c if c.arg else x),
+  (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c"), lambda x,c: x if c.arg else c),
+  (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c"), lambda x,c: c if c.arg else x),
   # ** zero folding **
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
-  (UPat.var('x') * 0, lambda x: x.const_like(float('nan') if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
+  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # min==max -> CONST (slow!)
-  (UPat((UOps.ALU, UOps.DEFINE_VAR), name='x'), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
+  (UPat((UOps.ALU, UOps.DEFINE_VAR), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # ** load/store folding **
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.load(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
-  ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x+(c1+c2)),
+  ((UPat.var("x") + UPat.cvar("c1")) + UPat.cvar("c2"), lambda x,c1,c2: x+(c1+c2)),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.cvar("c2"), lambda x,c1,c2: x*(c1*c2)),
   # *** rules from symbolic ***
   # ** lt **
   # c0*x<c1 for positive int c0,c1
-  ((UPat.cvar('c0')*UPat.var('x')).lt(UPat.cvar('c1')),
+  ((UPat.cvar("c0")*UPat.var("x")).lt(UPat.cvar("c1")),
    lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if dtypes.is_int(x.dtype) and c0.arg > 0 and c1.arg > 0 else None),
   # c0*x<c1 for negative int c0 and non-positive c1
-  ((UPat.cvar('c0')*UPat.var('x')).lt(UPat.cvar('c1')),
+  ((UPat.cvar("c0")*UPat.var("x")).lt(UPat.cvar("c1")),
    lambda x,c0,c1: (-x).lt(-(math.floor(-c1.arg/-c0.arg))) if dtypes.is_int(x.dtype) and c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
   # mul add lt
-  (((UPat.cvar('c0')*UPat.var('x'))+UPat.var('x2')).lt(UPat.cvar('c1')),
+  (((UPat.cvar("c0")*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1")),
    lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
   # generic lt folding
-  (UPat.var('x').lt(UPat.cvar('c')),
+  (UPat.var("x").lt(UPat.cvar("c")),
     lambda x,c: lt_folding(x, c.arg) if 0 < c.arg and dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
   # ** div **
   # # div folding
-  (UPat.var('x') // UPat.cvar('c'), lambda x,c:
+  (UPat.var("x") // UPat.cvar("c"), lambda x,c:
    newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
   # ** mod **
   # mod folding
-  (UPat.var('x') % UPat.cvar('c'), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  (UPat.var("x") % UPat.cvar("c"), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
   # mul mod
-  ((UPat.cvar('c0')*UPat.var('x')) % UPat.cvar('c1'), lambda x,c0,c1: (x%(c1//c0))*c0 if c1.arg%c0.arg == 0 else None),
+  ((UPat.cvar("c0")*UPat.var("x")) % UPat.cvar("c1"), lambda x,c0,c1: (x%(c1//c0))*c0 if c1.arg%c0.arg == 0 else None),
   # ** combine terms **
-  (UPat.var('x')%UPat.cvar('c')+(UPat.var('x')//UPat.cvar('c'))*UPat.cvar('c'), lambda x,c: x), # (x%c)+(x//c)*c = x
+  (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
@@ -363,8 +363,8 @@ constant_folder = PatternMatcher([
   (UPat(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar('c1'), UPat.var('x'))), lambda c1,x: x+c1 if x.op is not UOps.CONST else None),
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var('x'), UPat.cvar('c1'))), UPat.var('y')]),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op is not UOps.CONST else None),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),
     lambda x,c1,y: (x+y)+c1),
 ])
 
@@ -487,7 +487,7 @@ reducer = PatternMatcher([
   # delete_redundant_gates (after expand, is this still needed?)
   (UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
-  (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
+  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
 no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE), name="x"),
