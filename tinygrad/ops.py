@@ -205,13 +205,13 @@ class UOps(HashEnum):
   """
   - **`dtype`**: The bitcasted scalar DType
   - **`src`**: `Tuple[UOp]`
-  - **`arg`**: `dtypes.void`
+  - **`arg`**: None
   """
   VECTORIZE = auto()
   """
   - **`dtype`**: The upcasted vector DType
   - **`src`**: `Tuple[UOp, ...]`
-  - **`arg`**: `dtypes.void`
+  - **`arg`**: None
 
   NOTE: Length of sources must match `dtype.count`
   """
@@ -261,7 +261,7 @@ class UOps(HashEnum):
       - Indexing UOp, can only return `dtypes.int32`.
       - Gate UOp, can only return `dtypes.bool`.
       - Barrier UOp `UOps.BARRIER`.
-  - **`arg`**: `dtypes.void`
+  - **`arg`**: `None`
   """
   STORE = auto()
   """
@@ -285,7 +285,7 @@ class UOps(HashEnum):
       - Indexing UOp, can only return `dtypes.int32`.
       - Value to store.
       - Gate UOp, can only return `dtypes.bool`. We rewrite this to an IF block in the end.
-  - **`arg`**: `dtypes.void`
+  - **`arg`**: `None`
   """
   ASSIGN = auto()
   # control flow ops
@@ -295,7 +295,7 @@ class UOps(HashEnum):
 
   - **`dtype`**: `dtypes.void`
   - **`src`**: `Tuple[UOp, ...]`, Only local STOREs are allowed.
-  - **`arg`**: `dtypes.void`
+  - **`arg`**: `None`
   """
   IF = auto()
   """
@@ -306,7 +306,7 @@ class UOps(HashEnum):
     `Tuple[UOp, UOp]`
       - Gate UOp, can only return `dtypes.bool`
       - The second UOp starts the gate block; All of its children are gated until the final STORE.
-  - **`arg`**: `dtypes.void`
+  - **`arg`**: `None`
 
   For example, a local reduce must only run on one thread.
 
