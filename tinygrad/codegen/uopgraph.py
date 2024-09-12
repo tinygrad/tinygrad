@@ -363,6 +363,10 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (UPat(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
+  # remove EXPANDs from SINK
+  (UPat(UOps.SINK, name="root"),
+   lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND} else (x,) for x in root.src)), root.arg)
+    if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op is not UOps.CONST else None),
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),
@@ -391,21 +395,37 @@ def do_expand(root:UOp):
   # NOTE: we 0 out the reduce axis for WMMA. in theory they should all be the same, but is this always correct?
   exclude_args = tuple(dedup(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2])))) if root.op is UOps.WMMA else ()
   expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x[0] not in exclude_args)
-  esrcs = [[src.src[x] for x in _swizzle_args(expand_args, src.arg, exclude_args)] \
-           if src.op is UOps.EXPAND else itertools.repeat(src) for src in root.src]
-  new_srcs = [UOp(root.op, root.dtype, new_src, root.arg) for new_src in zip(*esrcs)]
-  if root.op is UOps.EXPAND:
-    # merge two expands
-    expand_args, old_args = tuple(sorted(root.arg+expand_args)), expand_args
-    assert len(expand_args) == (len(old_args) + len(root.arg))
-    new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _choices_from_args(expand_args)]
-  if root.op is UOps.IF:
-    # merge ifs into an or
-    conditions = functools.reduce(lambda x,y: x|y, dedup(x.src[0] for x in new_srcs if x.src[0].op is not UOps.CONST))
-    barriers = tuple(set(x.src[1] for x in new_srcs))
-    new_srcs = [UOp(UOps.IF, src=(conditions,)+barriers) for _ in new_srcs]
-  assert prod([x[1] for x in expand_args]) == len(new_srcs)
-  return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
+  expand_sz = prod([x[1] for x in expand_args])
+  new_srcs = []
+  for i,src in enumerate(root.src):
+    if src.op is UOps.EXPAND:
+      lst = _swizzle_args(expand_args, src.arg, exclude_args)
+      if list(range(len(lst))) == lst:
+        new_srcs.append(src.src[0])
+      else:
+        dt_sz = 1
+        if root.dtype is not None and root.dtype.count > 1:
+          # this is probably wrong
+          lst = flatten([[i*root.dtype.count+j for j in range(root.dtype.count)] for i in lst])
+          dt_sz = root.dtype.count
+        new_srcs.append(UOp(UOps.GEP, src.src[0].dtype.scalar().vec(expand_sz*dt_sz), (src.src[0],), tuple(lst)))
+    else:
+      if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
+        new_srcs.append(src)
+      elif src.dtype.count > 1:
+        # put it at the end?
+        new_srcs.append(UOp(UOps.VECTORIZE,
+                            src.dtype.scalar().vec(expand_sz*src.dtype.count), tuple(src.gep(i) for i in range(src.dtype.count))*expand_sz))
+      else:
+        new_srcs.append(UOp(UOps.VECTORIZE, src.dtype.vec(expand_sz), (src,)*expand_sz))
+
+  new_arg = root.arg
+  if root.op is UOps.GEP:
+    assert root.dtype.count == 1
+    # is this right?
+    new_arg = tuple(range(root.arg[0], new_srcs[0].dtype.count, new_srcs[0].dtype.count // expand_sz))
+  nsrc = UOp(root.op, root.dtype.scalar().vec(expand_sz), tuple(new_srcs), new_arg)
+  return UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
 
 acc_number = 0
 def do_reduce(root:UOp):
@@ -428,11 +448,10 @@ def do_contract(con:UOp):
   if ex.op is not UOps.EXPAND: return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from EXPAND
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
-  srcs = []
+  idxs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
-    lsrcs = [ex.src[_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})] for lrpk in _choices_from_args(con.arg)]
-    srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(lsrcs)))
-  return srcs[0] if len(srcs) == 1 else UOp(UOps.EXPAND, con.dtype, tuple(srcs), new_ex_args)
+    idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]
+  return UOp(UOps.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)) if idxs != list(range(len(idxs))) else ex.src[0],), new_ex_args)
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
@@ -480,8 +499,16 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
+def no_vectorized_load_store(ls:UOp):
+  idx = ls.src[1]
+  if idx.dtype.count == 1: return None
+  tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
+  return UOp(UOps.VECTORIZE if ls.dtype != dtypes.void else UOps.SINK, ls.dtype, tuple(tv))
+
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), do_reduce),
+  # expand loads
+  (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
   (UPat(UOps.CONST, name='c'),
    lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.count) if c.dtype.count > 1 else None),
   (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
