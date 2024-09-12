@@ -393,14 +393,12 @@ class UOp(MathTrait):
     return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
   @classmethod
   @functools.lru_cache(None)
-  def const(cls, dtype:DType, b:ConstType|Variable): return cls._const(dtype, b)
+  def const(cls, dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return cls._const(dtype, b)
   @classmethod
-  def _const(cls, dtype:DType, b:ConstType|Variable):
+  def _const(cls, dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
-    if dtype is not None and dtype != (sdtype := dtype.scalar()):
-      return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
-    return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max)))) # type: ignore
+    return cls(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
@@ -417,6 +415,7 @@ class UOp(MathTrait):
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
+    if self.op is UOps.VCONST: return math.gcd(*self.arg)
     if self.op is UOps.ALU:
       if self.arg is BinaryOps.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
       if self.arg is BinaryOps.MUL: return self.src[0].arg if self.src[0].op is UOps.CONST else self.src[1].arg if self.src[1].op is UOps.CONST else 1
@@ -444,6 +443,7 @@ class UOp(MathTrait):
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
+    if self.op is UOps.VCONST: return (min(self.arg), max(self.arg))
     if self.op is UOps.ALU and self.dtype.count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
@@ -500,7 +500,10 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
       if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
 
-def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+def exec_alu(op:Op, dtype:DType, operands):
+  if dtype.count > 1:
+    return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
+  return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
