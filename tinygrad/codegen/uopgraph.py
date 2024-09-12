@@ -82,8 +82,8 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const_like(float('nan')))
 
 float4_folding = PatternMatcher([
-  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   (UPat(UOps.VECTORIZE, src=UPat((UOps.ALU, UOps.CAST, UOps.BITCAST)), name="vec"), vectorize_alu),
 ])
@@ -172,7 +172,7 @@ def fold_unrolled_divs(divs:UOp, c:UOp):
 
 @functools.lru_cache(None)
 def transcendental_folding(ops):
-  return PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat(name="d"),), arg=k), cast(Callable, v))
+  return PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),), arg=k), cast(Callable, v))
                          for k,v in ((UnaryOps.EXP2, xexp2), (UnaryOps.LOG2, xlog2), (UnaryOps.SIN, xsin)) if k not in ops])
 
 # ***** threefry *****
@@ -274,12 +274,12 @@ constant_folder = PatternMatcher([
   (UPat.max(UPat.var('x'), UPat.var('y')), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # GEP/CAST const rules
   (UPat(UOps.GEP, src=(UPat.cvar("c"),), name="root"), lambda root, c: root.const_like(c.arg)),
-  (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const_like(c.arg)),
+  (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar('gate').where(UPat.var('c0'), UPat.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
-  (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
+  (UPat(UOps.ALU, name="root", src=UPat.cvar()), lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
@@ -482,7 +482,7 @@ reducer = PatternMatcher([
   # delete_redundant_gates (after expand, is this still needed?)
   (UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
-  (UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
+  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
 no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE), name="x"),
