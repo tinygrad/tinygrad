@@ -149,6 +149,24 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   new_axis: Tuple[int, ...] = root.arg[1]+first_reduce.arg[1]
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], new_axis))
 
+def pad_uop(uop:UOp, to_fixup:List[Tuple[int, List[sint]]]) -> UOp:
+  if uop.op is UOps.SHAPETRACKER:
+    new_shape = list((curr_st:=unwrap(uop.st)).shape)
+    for i,x in to_fixup:
+      if curr_st.shape[i] in x[:-1]: new_shape[i] = x[-1]
+    if tuple(new_shape) == curr_st.shape: return uop
+    new_st = curr_st.pad(tuple((0, 0 if ns == cs else cast(sint,ns-cs)) for ns,cs in zip(new_shape, curr_st.shape)))
+    return UOp(UOps.SHAPETRACKER, dtypes.void, (), new_st)
+  new_srcs = tuple(pad_uop(x, to_fixup) for x in uop.src)
+  return uop if new_srcs == uop.src else UOp(uop.op, uop.dtype, new_srcs, uop.arg)
+
+def fixup_dims(sink:UOp) -> Optional[UOp]:
+  to_fixup: List[Tuple[int, List[sint]]] = []
+  for i,dims in enumerate(zip(*[x.st.shape for x in sink.parents if x.st is not None])):
+    n = [x for x in sorted(dedup(dims)) if x != 1]
+    if len(n) > 1: to_fixup.append((i, n))
+  return None if len(to_fixup) == 0 else pad_uop(sink, to_fixup)
+
 reduceop_fusor = PatternMatcher([
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
   (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
@@ -157,6 +175,7 @@ reduceop_fusor = PatternMatcher([
   # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.STORE}, name="root"), push_swizzle_down_through_elementwise),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
+  (UPat(UOps.SINK, name="sink"), fixup_dims),
 ])
 
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> LBScheduleItem:
