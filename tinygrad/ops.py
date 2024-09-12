@@ -344,12 +344,12 @@ BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
-@dataclass(frozen=True, eq=False)
 class UOp(MathTrait):
-  op: UOps
-  dtype: DType = dtypes.void
-  src: Tuple[UOp, ...] = tuple()
-  arg: Any = None
+  __slots__ = ["op", "dtype", "src", "arg"]
+  def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
+    self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
+  def replace(self, op: Optional[UOps]=None, dtype:Optional[DType]=None, src: Optional[Tuple[UOp,...]]=None, arg:Any=None):
+    return UOp(op or self.op, dtype or self.dtype, self.src if src is None else src, self.arg if arg is None else arg)
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     from tinygrad.shape.shapetracker import ShapeTracker
