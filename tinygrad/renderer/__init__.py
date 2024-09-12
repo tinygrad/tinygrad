@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Dict, Callable, Any, Union
+from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup
@@ -12,7 +12,11 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
   threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
-  reduce_axes:  Union[Tuple[()], Tuple[int, ...]]
+  reduce_axes: List[Tuple[int,int]]
+  upcast_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]]
+  st1_pattern: Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = None
+  st2_pattern: Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = None
+  expanded_shape: Optional[Tuple[int, ...]] = None
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
 
 @dataclass
