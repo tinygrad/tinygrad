@@ -709,8 +709,8 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
-    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+    ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
+    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + self.pdict[(uop.op, None)]:
       if not early_reject.issubset(ler): continue
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
@@ -727,8 +727,8 @@ class TrackedPattenMatcher(PatternMatcher):
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     ret = None
-    ler = set([(u.op, u.arg) for u in uop.src] + [(u.op, None) for u in uop.src])
-    for p,fxn,early_reject in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+    ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
+    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + self.pdict[(uop.op, None)]:
       st = time.perf_counter()
       if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
@@ -765,7 +765,7 @@ class RewriteContext:
     self.replace: Dict[UOp, UOp] = {}
   def rewrite(self, n:UOp) -> UOp:
     if rn := self.replace.get(n): return rn
-    replace_source = (n.op, n.dtype, new_src:=tuple(self.rewrite(y) for y in n.src), n.arg)
+    replace_source = (n.op, n.dtype, new_src:=tuple(map(self.rewrite, n.src)), n.arg)
     if found := self.nodes.get(replace_source): self.replace[n] = found
     else:
       x = UOp(*replace_source) if new_src != n.src else n
