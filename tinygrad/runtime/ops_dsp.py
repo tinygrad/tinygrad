@@ -72,25 +72,26 @@ class DSPAllocator(Allocator):
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
     self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
-    self.rpc_fd = os.open('/dev/adsprpc-smd', os.O_RDONLY | os.O_NONBLOCK)
+    self.count = 0
 
-    qcom_dsp.FASTRPC_IOCTL_GETINFO(self.rpc_fd, 3)
+    sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
+    sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
+    with tempfile.NamedTemporaryFile(delete=False) as output_file:
+      output_file.write(f"SECTIONS {{ . = 0x10000; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
+      output_file.flush()
+    self.linker_script = output_file.name
 
     fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
-    shell_mem = qcom_dsp.ION_IOC_ALLOC(self.ion_fd, len=round_up(fastrpc_shell.nbytes, 0x1000), align=0x1000, heap_id_mask=0x2000000, flags=0x1)
-    shell_mapped = qcom_dsp.ION_IOC_MAP(self.ion_fd, handle=shell_mem.handle)
-    fastrpc_shell_addr = libc.mmap(0, shell_mem.len, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, shell_mapped.fd, 0)
-    ctypes.memmove(fastrpc_shell_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
-
-    qcom_dsp.FASTRPC_IOCTL_CONTROL(self.rpc_fd, req=0x3)
-    qcom_dsp.FASTRPC_IOCTL_INIT(self.rpc_fd, flags=0x1, file=fastrpc_shell_addr, filelen=fastrpc_shell.nbytes, filefd=shell_mapped.fd)
-
-    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0x3, sc=(0x3 << 24))
+    self.shell_mem = qcom_dsp.ION_IOC_ALLOC(self.ion_fd, len=round_up(fastrpc_shell.nbytes, 0x1000), align=0x1000, heap_id_mask=0x2000000, flags=0x1)
+    self.shell_mapped = qcom_dsp.ION_IOC_MAP(self.ion_fd, handle=self.shell_mem.handle)
+    self.fastrpc_shell_addr = libc.mmap(0, self.shell_mem.len, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, self.shell_mapped.fd, 0)
+    ctypes.memmove(self.fastrpc_shell_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
+    self.init_dsp()
 
     self.listener = RPCListner(self)
     self.listener.start()
 
-    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128B"]
+    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.linker_script}"]
     super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp", args=compiler_args), functools.partial(DSPProgram, self))
 
   def open_lib(self, filepath):
@@ -104,6 +105,20 @@ class DSPDevice(Compiled):
     pra, _, _ = qcom_build_pra(ins=[a1:=memoryview(array.array('I', [handle, 0xff]))],
                                outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=qcom_sc(method=1, ins=1, outs=2), pra=pra)
+
+    self.count += 1
+    if self.count % 512 == 0: self.init_dsp()
+
+  def init_dsp(self):
+    if hasattr(self, 'rpc_fd'):
+      qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=4, sc=qcom_sc(method=2, ins=0, outs=0))
+      os.close(self.rpc_fd)
+
+    self.rpc_fd = os.open('/dev/adsprpc-smd', os.O_RDONLY | os.O_NONBLOCK)
+    qcom_dsp.FASTRPC_IOCTL_GETINFO(self.rpc_fd, 3)
+    qcom_dsp.FASTRPC_IOCTL_CONTROL(self.rpc_fd, req=0x3)
+    qcom_dsp.FASTRPC_IOCTL_INIT(self.rpc_fd, flags=0x1, file=self.fastrpc_shell_addr, filelen=self.shell_mem.len, filefd=self.shell_mapped.fd)
+    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=3, sc=qcom_sc(method=3, ins=0, outs=0))
 
 class RPCListner(threading.Thread):
   def __init__(self, device:DSPDevice):
@@ -120,7 +135,9 @@ class RPCListner(threading.Thread):
     while True:
       # Update message request and send it.
       msg_send[:] = array.array('I', [context, status, req_args[1].buf.len, in_buf.nbytes])
-      qcom_dsp.FASTRPC_IOCTL_INVOKE(self.device.rpc_fd, handle=0x3, sc=0x04020200, pra=req_args)
+
+      try: qcom_dsp.FASTRPC_IOCTL_INVOKE(self.device.rpc_fd, handle=0x3, sc=0x04020200, pra=req_args)
+      except: continue
 
       context, inbufs, outbufs = msg_recv[0], ((sc:=msg_recv[2]) >> 16) & 0xff, (msg_recv[2] >> 8) & 0xff
 
