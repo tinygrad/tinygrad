@@ -386,6 +386,11 @@ class UOp(MathTrait):
   def load(cls, *src:UOp, dtype:DType): return cls(UOps.LOAD, dtype, src)
   @classmethod
   def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
+  def alu(self, arg, *src:UOp):
+    out_dtype = (self, *src)[-1].dtype
+    if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
+      out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
+    return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
   @classmethod
   @functools.lru_cache(None)
   def const(cls, dtype:Optional[DType], b:Tuple[ConstType, ...]|ConstType|Variable): return cls._const(dtype, b)
@@ -394,11 +399,6 @@ class UOp(MathTrait):
     # TODO: fix dtype of b.max after Variable is just an UOp
     if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max)))) # type: ignore
     return cls(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
-  def alu(self, arg, *src:UOp):
-    out_dtype = (self, *src)[-1].dtype
-    if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
-      out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
-    return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
