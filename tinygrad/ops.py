@@ -619,6 +619,7 @@ def get_location() -> Tuple[str, int]:
 def lines(fn) -> List[str]: return open(fn).readlines()
 
 class UPat(MathTrait):
+  __slots__ = ["op", "dtype", "arg", "name", "src"]
   def __init__(self, op:Optional[Union[UOps, Tuple[UOps, ...]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
                src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None,
@@ -626,7 +627,6 @@ class UPat(MathTrait):
     self.op: Optional[Tuple[UOps, ...]] = (op,) if isinstance(op, UOps) else op
     self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name = arg, name
-    self.in_src = src
     self.src: Any = None
 
     # try all permutations if it's a list
@@ -641,7 +641,7 @@ class UPat(MathTrait):
 
     if custom_early_reject is not None: self.early_reject = custom_early_reject
     else:
-      upat_match = [self.in_src] if isinstance(self.in_src, UPat) else ([] if self.in_src is None else self.src[0])
+      upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
       self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
   @staticmethod
