@@ -610,7 +610,6 @@ class UPat(MathTrait):
                src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None,
                custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None):
-    assert dtype is None or isinstance(dtype, DType)
     self.op: Optional[Tuple[UOps, ...]] = (op,) if isinstance(op, UOps) else op
     self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name = arg, name
