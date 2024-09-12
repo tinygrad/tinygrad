@@ -179,7 +179,12 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     ubuf = UOp(UOps.DEFINE_GLOBAL, out.dtype if isinstance(out.dtype, ImageDType) else PtrDType(out.dtype), (), i)
     ast.append(UOp(UOps.STORE, dtypes.void, (ubuf, output_st.to_uop(), src)))
   sink = UOp(UOps.SINK, dtypes.void, tuple(ast))
-  if AST_REWRITE: sink = graph_rewrite(sink, reduceop_fusor)
+  if AST_REWRITE:
+    try: sink = graph_rewrite(sink, reduceop_fusor)
+    except Exception as e:
+      from tinygrad.engine.graph import graph_uop
+      graph_uop(sink)
+      raise e
   return LBScheduleItem(sink, outs, list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))
 
 # *** DAG creation: decide which LazyBuffers should realize ***
