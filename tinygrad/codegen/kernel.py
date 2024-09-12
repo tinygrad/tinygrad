@@ -325,7 +325,6 @@ class Kernel:
           if tc.dims[tc_dim] > amt:
             self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], tc.dims[tc_dim]//amt), append_opt=False)
             tc_opts.upcasted_input_axes.append((tc_opts.axes[tc_dim], tc.dims[tc_dim]//amt))
-
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
