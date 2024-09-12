@@ -7,7 +7,6 @@ from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import UOps, UOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu # noqa F401
-from tinygrad.ops import NOp
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
@@ -388,10 +387,6 @@ class TestUOpStr(unittest.TestCase):
     with Context(NOOPT=1):
       sink = UOp(UOps.SINK, dtypes.void, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
     assert_equiv_uops(sink, eval(str(sink)))
-
-  def test_nop_str(self):
-    a = NOp(UOps.CONST, dtypes.float, (), 2.0, name="c0") + NOp(UOps.CONST, dtypes.float, (), 3.0, name="c1")
-    assert str(eval(str(a))) == str(a)
 
   def test_variable_const(self):
     # TODO: this is not possible after VALID.

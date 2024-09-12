@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, Sequence, DefaultDict
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, DefaultDict
 import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib
 from enum import auto
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
 from tinygrad.helpers import pretty_print, prod, getenv, all_same, HashEnum
 from tinygrad.shape.symbolic import Variable, sint
@@ -335,7 +335,7 @@ class UOps(HashEnum):
   ENDIF = auto()
 
 BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
-
+COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
 @dataclass(frozen=True, eq=False)
@@ -367,9 +367,6 @@ class UOp(MathTrait):
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self):
     return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else repr(self.arg) if isinstance(self.arg, Variable) else self.arg
-  def commutative(self) -> bool:
-    return (self.op is UOps.ALU and \
-      self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR})
   # *** uop syntactic sugar
   @property
   def st_loc(self) -> int: return 0 if self.op is UOps.CONST else 1
@@ -381,10 +378,19 @@ class UOp(MathTrait):
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
+  def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
-  def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar() if self.dtype is not None else None, (self,), i)
-  def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
+  def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar(), (self,), i)
+  @classmethod
+  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src) # type: ignore
+  @classmethod
+  def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
+  def alu(self, arg, *src:UOp):
+    out_dtype = (self, *src)[-1].dtype
+    if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
+      out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
+    return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
   @classmethod
   @functools.lru_cache(None)
   def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(dtype, b)
@@ -395,15 +401,6 @@ class UOp(MathTrait):
     if dtype is not None and dtype != (sdtype := dtype.scalar()):
       return cls(UOps.VECTORIZE, dtype, src=tuple(cls(UOps.CONST, sdtype, arg=dtypes.as_const(b, sdtype)) for _ in range(dtype.count)))
     return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
-  def alu(self, arg, *src:UOp):
-    out_dtype = (self, *src)[-1].dtype
-    if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
-      out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
-    return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
-  @classmethod
-  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src) # type: ignore
-  @classmethod
-  def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
@@ -608,39 +605,13 @@ def get_location() -> Tuple[str, int]:
 @functools.lru_cache(None)
 def lines(fn) -> List[str]: return open(fn).readlines()
 
-@dataclass(frozen=True, eq=False, repr=False)  # reuse repr from UOp
-class NOp(UOp):
-  name: Optional[str] = None
-  # NOTE: this is fine because None dtype in NOp means any dtype is valid.
-  dtype: Optional[DType] = None # type: ignore
-  src: Tuple[NOp, ...] = tuple()
-  allow_any_len: bool = False
-  location: Tuple[str, int] = field(default_factory=get_location)
-
-  @staticmethod
-  @functools.lru_cache(None)
-  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.NOOP, dtype=dtype, name=name)
-  @staticmethod
-  @functools.lru_cache(None)
-  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return NOp(UOps.CONST, dtype=dtype, name=name)
-
-  # this is needed so NOp has a different cache
-  @classmethod
-  @functools.lru_cache(None)
-  def const(cls, dtype:Optional[DType], b:ConstType|Variable): return cls._const(dtype, b)
-
-  @functools.cached_property
-  def upat(self:NOp) -> UPat:
-    return UPat(name=self.name, dtype=self.dtype, location=self.location) if self.op is UOps.NOOP else \
-      UPat(self.op, self.arg, (list if self.commutative() else tuple)([src.upat for src in self.src]) or None, self.name,
-           self.dtype, self.allow_any_len, location=self.location)
-
-class UPat:
-  def __init__(self, op:Optional[Union[UOps, Set[UOps]]]=None, arg:Any=None, src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None,
-               name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None, allow_any_len:bool=False, location=None,
+class UPat(MathTrait):
+  def __init__(self, op:Optional[Union[UOps, Tuple[UOps, ...]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
+               src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
+               name:Optional[str]=None, allow_any_len:bool=False, location=None,
                custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None):
-    self.op: Optional[Tuple[UOps, ...]] = None if op is None else (tuple(op) if isinstance(op, set) else (op,))
-    self.dtype: Optional[Tuple[DType, ...]] = None if dtype is None else (tuple(dtype) if isinstance(dtype, set) else (dtype,))
+    self.op: Optional[Tuple[UOps, ...]] = (op,) if isinstance(op, UOps) else op
+    self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name = arg, name
     self.in_src = src
     self.src: Any = None
@@ -659,6 +630,31 @@ class UPat:
     else:
       upat_match = [self.in_src] if isinstance(self.in_src, UPat) else ([] if self.in_src is None else self.src[0])
       self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
+
+  @staticmethod
+  @functools.lru_cache(None)
+  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return UPat(dtype=dtype, name=name)
+  @staticmethod
+  @functools.lru_cache(None)
+  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return UPat(UOps.CONST, dtype=dtype, name=name)
+  @staticmethod
+  @functools.lru_cache(None)
+  def const(dtype:Optional[DType], b:ConstType|Variable): return UPat(UOps.CONST, dtype=dtype, arg=b)
+
+  # copied from UOp
+  def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
+  def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
+  def gep(self, i:int): return type(self)(UOps.GEP, None, (self,), i)
+  @classmethod
+  def load(cls, *src:UPat, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src) # type: ignore
+  @classmethod
+  def store(cls, *src:UPat): return cls(UOps.STORE, dtypes.void, src)
+
+  def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
+  def alu(self, arg, *src:UPat):
+    asrc = (self,)+src
+    return type(self)(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype,
+                      list(asrc) if arg in COMMUTATIVE else asrc, arg)
 
   def printable(self:UPat) -> str:
     try:
@@ -687,8 +683,8 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   return res
 
 class PatternMatcher:
-  def __init__(self, patterns:Sequence[Tuple[Union[UPat, NOp], Callable]]):
-    self.patterns = [(p.upat if isinstance(p, NOp) else p, fxn) for p,fxn in patterns]
+  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
+    self.patterns = patterns
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
@@ -710,7 +706,7 @@ class PatternMatcher:
 TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedPattenMatcher(PatternMatcher):
-  def __init__(self, patterns:List[Tuple[Union[UPat, NOp], Callable]]):
+  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
     for p,_ in self.patterns:
       if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
