@@ -67,6 +67,28 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
     #from tinygrad.engine.graph import graph_uops
     #graph_uops(linearize_uop(new_sink))
 
+class TestGraphRewriteConst(unittest.TestCase):
+  def test_gep_const(self):
+    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
+    v2 = v1.gep(1)
+    ret = graph_rewrite(v2, constant_folder)
+    self.assertEqual(ret.dtype, dtypes.int)
+    self.assertEqual(ret.arg, 1)
+
+  def test_gep_const_single(self):
+    v1 = UOp.const(dtypes.int.vec(3), 4)
+    v2 = v1.gep(1)
+    ret = graph_rewrite(v2, constant_folder)
+    self.assertEqual(ret.dtype, dtypes.int)
+    self.assertEqual(ret.arg, 4)
+
+  def test_add_const(self):
+    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
+    v2 = UOp.const(dtypes.int.vec(3), (5,6,7))
+    ret = graph_rewrite(v1+v2, constant_folder)
+    self.assertEqual(ret.dtype, dtypes.int.vec(3))
+    self.assertEqual(ret.arg, (5,7,9))
+
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):
     v1 = UOp(UOps.DEFINE_VAR, dtypes.float)
