@@ -84,7 +84,7 @@ class UOps(HashEnum):
   """
   Holds `UOps.STORE`. SINK defines the AST for a Kernel.
 
-  - **`dtype`**: `None`
+  - **`dtype`**: `dtypes.void`
   - **`src`**: `Tuple[UOp, ...]`, Only global STOREs are allowed.
   - **`arg`**: `Optional[KernelInfo]`
 
@@ -104,7 +104,7 @@ class UOps(HashEnum):
   """
   Defines the ShapeTracker for a buffer UOp `UOps.LOAD`, `UOps.STORE` or `UOps.VALID`.
 
-  - **`dtype`**: `None`
+  - **`dtype`**: `dtypes.void`
   - **`src`**: `Tuple[]`
   - **`arg`**: `ShapeTracker`
   """
@@ -187,7 +187,7 @@ class UOps(HashEnum):
   - **`src`**:
     `Tuple[UOp]`
       - UOps.SHAPETRACKER
-  - **`arg`**: `None`
+  - **`arg`**: `dtypes.void`
 
   A masked CONST is defined as `valid.where(value, 0)`.
   """
@@ -199,19 +199,19 @@ class UOps(HashEnum):
   """
   - **`dtype`**: The casted scalar DType
   - **`src`**: `Tuple[UOp]`
-  - **`arg`**: `None`
+  - **`arg`**: `dtypes.void`
   """
   BITCAST = auto()
   """
   - **`dtype`**: The bitcasted scalar DType
   - **`src`**: `Tuple[UOp]`
-  - **`arg`**: `None`
+  - **`arg`**: `dtypes.void`
   """
   VECTORIZE = auto()
   """
   - **`dtype`**: The upcasted vector DType
   - **`src`**: `Tuple[UOp, ...]`
-  - **`arg`**: `None`
+  - **`arg`**: `dtypes.void`
 
   NOTE: Length of sources must match `dtype.count`
   """
@@ -261,11 +261,11 @@ class UOps(HashEnum):
       - Indexing UOp, can only return `dtypes.int32`.
       - Gate UOp, can only return `dtypes.bool`.
       - Barrier UOp `UOps.BARRIER`.
-  - **`arg`**: `None`
+  - **`arg`**: `dtypes.void`
   """
   STORE = auto()
   """
-  - **`dtype`**: `None`
+  - **`dtype`**: `dtypes.void`
   - **`src`**:
 
     Similar to LOAD, the scheduler and Kernel create STOREs with a SHAPETRACKER uop in src:
@@ -285,7 +285,7 @@ class UOps(HashEnum):
       - Indexing UOp, can only return `dtypes.int32`.
       - Value to store.
       - Gate UOp, can only return `dtypes.bool`. We rewrite this to an IF block in the end.
-  - **`arg`**: `None`
+  - **`arg`**: `dtypes.void`
   """
   ASSIGN = auto()
   # control flow ops
@@ -293,20 +293,20 @@ class UOps(HashEnum):
   """
   Inserts a warp sync between local stores and local loads.
 
-  - **`dtype`**: `None`
+  - **`dtype`**: `dtypes.void`
   - **`src`**: `Tuple[UOp, ...]`, Only local STOREs are allowed.
-  - **`arg`**: `None`
+  - **`arg`**: `dtypes.void`
   """
   IF = auto()
   """
   Gates a single STORE to global memory. The IF block could also contain additional UOps the STORE depends on.
 
-  - **`dtype`**: `None`
+  - **`dtype`**: `dtypes.void`
   - **`src`**:
     `Tuple[UOp, UOp]`
       - Gate UOp, can only return `dtypes.bool`
       - The second UOp starts the gate block; All of its children are gated until the final STORE.
-  - **`arg`**: `None`
+  - **`arg`**: `dtypes.void`
 
   For example, a local reduce must only run on one thread.
 
