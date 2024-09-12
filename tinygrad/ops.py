@@ -340,7 +340,7 @@ END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.E
 @dataclass(frozen=True, eq=False)
 class UOp(MathTrait):
   op: UOps
-  dtype: Optional[DType] = None
+  dtype: DType = dtypes.void
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
   @functools.cached_property
@@ -379,7 +379,7 @@ class UOp(MathTrait):
     ret = self.src[self.st_loc]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
-  def sink(self, *srcs): return UOp(UOps.SINK, None, (self,)+srcs)
+  def sink(self, *srcs): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
   def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
@@ -393,17 +393,17 @@ class UOp(MathTrait):
   @classmethod
   def _const(cls, dtype:Optional[DType], b:ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max))))
-    return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max)))) # type: ignore
+    return cls(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
     if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
   @classmethod
-  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
+  def load(cls, *src:UOp, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src) # type: ignore
   @classmethod
-  def store(cls, *src:UOp): return cls(UOps.STORE, None, src)
+  def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
@@ -441,13 +441,13 @@ class UOp(MathTrait):
   def _min_max(self) -> Tuple[ConstType, ConstType]:
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg:
-      return self.arg[1].arg, self.arg[2].arg if self.arg[2].op is UOps.CONST else dtypes.max(cast(DType, self.dtype))
+      return self.arg[1].arg, self.arg[2].arg if self.arg[2].op is UOps.CONST else dtypes.max(self.dtype)
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
-    if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(cast(DType, self.dtype))
+    if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return (min(self.arg), max(self.arg)) if isinstance(self.arg, tuple) else (self.arg, self.arg)
-    if self.op is UOps.ALU and cast(DType, self.dtype).count == 1:
+    if self.op is UOps.ALU and self.dtype.count == 1:
       s0,s1 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(2)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
       if self.arg is BinaryOps.MUL:
@@ -464,7 +464,7 @@ class UOp(MathTrait):
         if s1.arg < 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
       if self.arg is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
-    return dtypes.min(cast(DType, self.dtype)), dtypes.max(cast(DType, self.dtype))
+    return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -510,7 +510,7 @@ def exec_alu(op:Op, dtype:DType, operands):
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
   if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1].arg, u.arg[2].arg)
-  if u.op is UOps.ALU: return exec_alu(u.arg, cast(DType,u.dtype), tuple(map(uop_alu_resolve, u.src)))
+  if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
 # ***** uop type spec *****
@@ -528,18 +528,18 @@ def type_verify(uops):
         assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
         # TODO: intermediate CONST of Variable is DEFINE_VAR
         assert (isinstance(arg, Variable) and u.src) or (type(arg) is type(dtypes.as_const(arg, dtype))), f"type of {arg=} does not match {dtype}"
-      if uop is UOps.DEFINE_ACC: assert dtype is not None and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
-    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype is not None # type is the output type, not an arg
+      if uop is UOps.DEFINE_ACC: assert dtype != dtypes.void and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
+    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype != dtypes.void # type is the output type, not an arg
     if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
     if uop is UOps.VECTORIZE:
       assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
       assert all(dtype == x.dtype.vec(len(src)) for x in src), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
     if uop is UOps.LOAD and len(src) > 3 and src[3].op is UOps.ALU: assert src[3].dtype == dtypes.bool and src[2].dtype == dtype
     if uop is UOps.GEP: assert dtype == src[0].dtype.scalar(), f"GEP of {src[0].dtype=} should be {src[0].dtype.scalar()} != {dtype}"
-    if uop is UOps.IF: assert dtype is None and len(src) == 2 and src[0].dtype == dtypes.bool
+    if uop is UOps.IF: assert dtype == dtypes.void and len(src) == 2 and src[0].dtype == dtypes.bool
     if uop is UOps.VALID: assert dtype == dtypes.bool and len(src) == 1 and src[0].op is UOps.SHAPETRACKER and arg is None
     if uop is UOps.STORE:
-      assert dtype is None, f"{uop} dtype must be None, got {dtype}"
+      assert dtype == dtypes.void, f"{uop} dtype must be void, got {dtype}"
       if len(src) == 4: assert src[3].dtype == dtypes.bool or src[3].op is UOps.IF, f"bad gate {src[3]}"
     if uop is UOps.ALU:
       if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
@@ -564,7 +564,7 @@ def type_verify(uops):
 def print_uops(uops:List[UOp]):
   for i,u in enumerate(uops):
     formatted_parents = [uops.index(x) if x.op is not UOps.CONST else f"{x.arg}" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str(formatted_parents):32s} {u.arg}")
+    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):25s} " f"{str(formatted_parents):32s} {u.arg}")
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   flops: sint = 0
@@ -591,16 +591,12 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     elif u.op is UOps.SPECIAL:
       mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
     elif u.op is UOps.LOAD:
-      assert u.dtype is not None
       mem += u.dtype.itemsize * mults
     elif u.op is UOps.STORE:
-      assert u.src[2].dtype is not None
       mem += u.src[2].dtype.itemsize * mults
     elif u.op is UOps.ALU and u not in dont_count:
-      assert u.dtype is not None
       flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
-      assert u.arg[1] is not None
       flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
   return flops, mem
 
@@ -617,6 +613,8 @@ def lines(fn) -> List[str]: return open(fn).readlines()
 @dataclass(frozen=True, eq=False, repr=False)  # reuse repr from UOp
 class NOp(UOp):
   name: Optional[str] = None
+  # NOTE: this is fine because None dtype in NOp means any dtype is valid.
+  dtype: Optional[DType] = None # type: ignore
   src: Tuple[NOp, ...] = tuple()
   allow_any_len: bool = False
   location: Tuple[str, int] = field(default_factory=get_location)
