@@ -273,6 +273,7 @@ constant_folder = PatternMatcher([
   (NOp.max(NOp.var('x'), NOp.var('y')), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # GEP/CAST const rules
   (NOp(UOps.GEP, src=(NOp.cvar("c"),), name="root"), lambda root, c: root.const_like(c.arg)),
+  (NOp(UOps.GEP, src=(NOp(UOps.VCONST, name="c"),), name="root"), lambda root, c: root.const_like(c.arg[root.arg])),
   (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: root.const_like(c.arg)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (NOp.var().where(NOp.var("val"), NOp.var("val")), lambda val: val),
@@ -473,8 +474,14 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
+def devectorize_const(c:UOp):
+  if c.dtype.count == 1: return None
+  return UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg) if isinstance(c.arg, tuple) else \
+             tuple(UOp.const(c.dtype.scalar(), c.arg) for _ in range(c.dtype.count)))
+
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
+  (UPat({UOps.VCONST, UOps.CONST}, name='c'), devectorize_const),
   # no ALU on vectorized dtypes
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
