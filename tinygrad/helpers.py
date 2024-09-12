@@ -359,4 +359,4 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 class FastEnum(IntEnum):
   def __str__(self): return Enum.__str__(self)
   @staticmethod
-  def _generate_next_value_(_, __, count, ___): return sum(map(len, FastEnum.__subclasses__())) + count
+  def _generate_next_value_(*_): return setattr(FastEnum, "_count", (x := getattr(FastEnum, "_count", 0) + 1)) or x
