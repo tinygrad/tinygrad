@@ -84,7 +84,6 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), i)), range(4), load.const_like(float('nan')))
 
 def load_store_can_group(ls:UOp, c:UOp, x:UOp, buf:UOp):
-  return None
   # TODO: group here
   """
   if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
@@ -93,8 +92,11 @@ def load_store_can_group(ls:UOp, c:UOp, x:UOp, buf:UOp):
   used = set()
   return None
   """
+  return None
 
 float4_folding = PatternMatcher([
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), load_store_fold),
+  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), load_store_fold),
   #(UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   #(UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   #(UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
@@ -255,7 +257,7 @@ constant_folder = PatternMatcher([
   (NOp(UOps.GEP, None, (NOp.var('x') + NOp.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
   (UPat(UOps.GEP, src=(UPat(UOps.GEP, name='g2'),), name='g1'), combine_gep),
   (UPat(UOps.GEP, src=(UPat(UOps.IF, name='uif'),)), lambda uif: uif),
-  (UPat(UOps.BARRIER, src=(UPat(UOps.SINK, name='sink'),)), lambda sink: UOp(UOps.BARRIER, None, sink.src)),
+  (UPat(UOps.BARRIER, src=(UPat(UOps.SINK, name='sink'),)), lambda sink: UOp(UOps.BARRIER, dtypes.void, sink.src)),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat(UOps.ALU, BinaryOps.ADD, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
   (UPat(UOps.ALU, BinaryOps.MUL, dtype=dtypes.bool, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
@@ -542,8 +544,8 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
 def no_vectorized_load_store(ls:UOp):
   idx = ls.src[1]
   if idx.dtype.count == 1: return None
-  tv = [UOp(ls.op, ls.dtype.scalar() if ls.dtype else None, (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
-  return UOp(UOps.VECTORIZE if ls.dtype is not None else UOps.SINK, ls.dtype, tuple(tv))
+  tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
+  return UOp(UOps.VECTORIZE if ls.dtype != dtypes.void else UOps.SINK, ls.dtype, tuple(tv))
 
 def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
@@ -572,8 +574,6 @@ reducer = PatternMatcher([
   (UPat(UOps.CONST, name='c'), devectorize_const),
   # expand loads
   (UPat({UOps.LOAD, UOps.STORE}, name="ls"), no_vectorized_load_store),
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(UPat(name="buf"), UPat()), allow_any_len=True), name="ex"), load_store_fold),
-  (UPat({UOps.BARRIER, UOps.SINK}, src=UPat(UOps.STORE, src=(UPat(name="buf"), UPat(), UPat()), allow_any_len=True), name="ex"), load_store_fold),
   # devectorize ACC
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   # devectorize WMMA
@@ -619,8 +619,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # expand
   linearize_cnt += 1
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
-    sink = graph_rewrite(sink, folder+(expander+float4_folding if opts is not None and opts.supports_float4 else expander))
-    if getenv("DO_REDUCE", 1): sink = graph_rewrite(sink, folder+reducer)
+    sink = graph_rewrite(sink, folder+expander)
+    if getenv("DO_REDUCE", 1):
+      sink = graph_rewrite(sink, folder+(reducer+float4_folding if opts is not None and opts.supports_float4 else reducer))
 
   # for PTX only
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)

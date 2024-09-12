@@ -16,6 +16,7 @@ class DType:
   def __repr__(self): return f"dtypes.{'_'*(c:=self.count!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.count)*c}"
   def vec(self, sz:int):
     assert sz > 1 and self.count == 1, f"can't vectorize {self} with size {sz}"
+    if self.name == 'void': return self # void doesn't vectorize
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
