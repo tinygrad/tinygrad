@@ -3,7 +3,7 @@ import functools
 from typing import List, Tuple, cast, Optional, Dict
 from tinygrad.shape.shapetracker import ShapeTracker, variable_to_uop
 from tinygrad.shape.symbolic import sint
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.ops import KernelInfo, BinaryOps, BUFFER_UOPS, UOp, UOps
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, get_contraction, prod, partition, flatten
@@ -90,7 +90,13 @@ class IndependentLowerer:
 
   def _to_uop(self, x:UOp) -> UOp:
     if x.op in BUFFER_UOPS:
-      idx, valid = x.st_arg.to_indexed_uops(self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs)
+      validhack = False
+      if x.op is UOps.LOAD and isinstance(x.src[0].dtype, ImageDType) and len((st:=x.src[1].arg).views)==1:
+        # find the shapetracker of a padded image
+        if (0 not in st.views[0].strides) or (0 in st.views[0].strides and st.views[0].mask is None):
+          # print(f"\n{st=}\n{x=}")
+          validhack = True
+      idx, valid = x.st_arg.to_indexed_uops(self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs, validhack)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is UOps.CONST: return valid.where(x.const_like(x.arg), x.const_like(0))

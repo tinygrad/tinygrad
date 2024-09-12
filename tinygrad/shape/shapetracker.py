@@ -68,10 +68,12 @@ class ShapeTracker:
 
   def to_uop(self) -> UOp: return UOp(UOps.SHAPETRACKER, dtypes.void, (), self)
 
-  def to_indexed_uops(self, _idxs:Optional[List[UOp]]=None) -> Tuple[UOp, UOp]:
+  def to_indexed_uops(self, _idxs:Optional[List[UOp]]=None, validhack=False) -> Tuple[UOp, UOp]:
     idxs = [UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), variable_to_uop(s)), i) for i,s in enumerate(self.shape)] \
       if _idxs is None else _idxs
     idx, valid = _uop_view(self.views[-1], idxs, UOp.const(dtypes.bool, True))
+    # ignore the first valid since out of bound read returns 0
+    if validhack: valid = UOp.const(dtypes.bool, True)
     for view in reversed(self.views[0:-1]):
       view = view.minify()
       acc, idxs = 1, []
