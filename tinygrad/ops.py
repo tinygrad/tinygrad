@@ -381,7 +381,11 @@ class UOp(MathTrait):
   def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
   def cast(self, dtype:DType): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return type(self)(UOps.BITCAST, dtype, (self,))
-  def gep(self, i:int): return type(self)(UOps.GEP, self.dtype.scalar(), (self,), i)
+  def gep(self, i:Union[Tuple[int, ...], int]):
+    if isinstance(i, tuple):
+      if i == tuple(range(len(i))): return self
+      return UOp(UOps.GEP, self.dtype.scalar().vec(len(i)), (self,), i)
+    return UOp(UOps.GEP, self.dtype.scalar(), (self,), (i,))
   @classmethod
   def load(cls, *src:UOp, dtype:DType): return cls(UOps.LOAD, dtype, src)
   @classmethod
