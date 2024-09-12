@@ -691,9 +691,11 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
   if pat.src is None: return [store]
   res: List[Dict[str, UOp]] = []
   for vp in pat.src:
-    new_stores = [store.copy()]
-    for uu, vv in zip(uop.src, vp): new_stores = [rstore for nstore in new_stores for rstore in _match(uu, vv, nstore)]
-    res.extend(new_stores)
+    stores, new_stores = [store.copy()], []
+    for uu, vv in zip(uop.src, vp):
+      for s in stores: new_stores.extend(_match(uu, vv, s))
+      stores, new_stores = new_stores, []
+    res.extend(stores)
   return res
 
 class PatternMatcher:
