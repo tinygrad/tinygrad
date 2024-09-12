@@ -168,6 +168,7 @@ class UOps(HashEnum):
   DEFINE_VAR = auto()
   DEFINE_LOCAL = auto()
   DEFINE_ACC = auto()
+  VCONST = auto()
   CONST = auto()
   """
   Defines a single scalar constant value.
