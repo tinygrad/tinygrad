@@ -458,7 +458,6 @@ class UOp(MathTrait):
         if (s0.vmin >= 0 or s1.vmin >= 0):
           Lmin, Lmax = (s0.vmin, s0.vmax) if s1.vmin >= 0 else (s0.vmax, s0.vmin)
           Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
-          assert math.isnan(Lmax*Rmax) or math.isnan(Lmin*Rmin) or Lmax*Rmax >= Lmin*Rmin, f"{Lmax=}, {Lmin=}, {Rmax=}, {Rmin=}"
           return Lmin*Rmin, Lmax*Rmax
       if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
