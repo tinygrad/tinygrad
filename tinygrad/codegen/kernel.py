@@ -464,7 +464,7 @@ class Kernel:
       # ok to pad SUM if all parent ops have f(0) = 0
       if self.first_reduce <= axis:
         check((r:=cast(UOp, self.reduceop)).arg[0] is BinaryOps.ADD and \
-            all(op.arg not in UNSAFE_PAD_OPS for sop in r.src for op in sop.parents), "cannot pad")
+            all(not isinstance(op.arg, Enum) or op.arg not in UNSAFE_PAD_OPS for sop in r.src for op in sop.parents), "cannot pad")
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] == 1: continue  # reduced
