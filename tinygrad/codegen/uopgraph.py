@@ -475,14 +475,11 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
-def devectorize_const(c:UOp):
-  if c.dtype.count == 1: return None
-  return UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg) if isinstance(c.arg, tuple) else \
-             tuple(UOp.const(c.dtype.scalar(), c.arg) for _ in range(c.dtype.count)))
-
 reducer = PatternMatcher([
   (NOp(UOps.REDUCE, name="root"), do_reduce),
-  (UPat({UOps.VCONST, UOps.CONST}, name='c'), devectorize_const),
+  (UPat(UOps.CONST, name='c'),
+   lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.count) if c.dtype.count > 1 else None),
+  (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
   # no ALU on vectorized dtypes
   (UPat({UOps.ALU, UOps.CAST, UOps.BITCAST}, name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
