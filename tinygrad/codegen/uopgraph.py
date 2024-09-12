@@ -316,8 +316,6 @@ constant_folder = PatternMatcher([
   ((NOp.var("x") / NOp.var("x2")) / NOp.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
   (-(NOp.var("x") + NOp.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   ((NOp.cvar("c0") + NOp.var("x")).lt(NOp.cvar("c1")), lambda x,c0,c1: UOp.lt(x, c1-c0)),  # c0 + x < c1 -> x < c1 - c0
-  ((NOp.var("x") & NOp.var("x")), lambda x: x),
-  ((NOp.var("x") | NOp.var("x")), lambda x: x),
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((NOp.var("x") + NOp.var("y")) * NOp.cvar("c"), lambda x,y,c: x*c+y*c if dtypes.is_int(x.dtype) else None),
   # x!=0 -> (bool)x
