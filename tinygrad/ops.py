@@ -1,14 +1,20 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, Sequence, DefaultDict
 import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib
-from enum import auto
+from enum import auto, IntEnum, Enum
 from collections import defaultdict
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import pretty_print, prod, getenv, all_same, FastEnum
+from tinygrad.helpers import pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
+
+# wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
+class FastEnum(IntEnum):
+  def __str__(self): return Enum.__str__(self)
+  @staticmethod
+  def _generate_next_value_(_, __, count, ___): return sum(map(len, FastEnum.__subclasses__())) + count
 
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
