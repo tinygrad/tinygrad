@@ -86,8 +86,17 @@ class TestGraphRewriteConst(unittest.TestCase):
     v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
     v2 = UOp.const(dtypes.int.vec(3), (5,6,7))
     ret = graph_rewrite(v1+v2, constant_folder)
+    self.assertEqual(ret.op, UOps.VCONST)
     self.assertEqual(ret.dtype, dtypes.int.vec(3))
     self.assertEqual(ret.arg, (5,7,9))
+
+  def test_add_const_lose_v(self):
+    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
+    v2 = UOp.const(dtypes.int.vec(3), (2,1,0))
+    ret = graph_rewrite(v1+v2, constant_folder)
+    self.assertEqual(ret.op, UOps.CONST)
+    self.assertEqual(ret.dtype, dtypes.int.vec(3))
+    self.assertEqual(ret.arg, 2)
 
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):

@@ -72,7 +72,8 @@ class IndependentLowerer:
     # upcast loops
     for i,g in enumerate(full_shape[first_upcasted:], start=first_upcasted):
       assert isinstance(g, int), "needs to be int to upcast/unroll"
-      self.idxs.append(UOp(UOps.EXPAND, dtypes.pyint, tuple(UOp.const(dtypes.pyint, j) for j in range(0, g)), ((i,g),)))
+      const = UOp.const(dtypes.pyint.vec(g), tuple(range(g)))
+      self.idxs.append(UOp(UOps.EXPAND, dtypes.pyint, tuple(const.gep(j) for j in range(const.dtype.count)), ((i,g),)))
 
     # late indexes (group for reduce)
     self.ridxs = self.idxs[:]
