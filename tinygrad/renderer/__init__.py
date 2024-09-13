@@ -14,9 +14,9 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
   reduce_axes: List[Tuple[int,int]]
   @property
-  def upcast_axes(self) -> List[Tuple[int,int]]:
+  def early_upcast_axes(self) -> List[Tuple[int,int]]:
     return [(d,self.dims[d]//sz) for d,sz in [(dim,prod(sz for d,sz in self.threads if d==dim)) for dim in range(2)] if self.dims[d]>sz]
-  bufs_upcast_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]]
+  upcast_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]]
   st1_pattern: Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = None
   st2_pattern: Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = None
   expanded_shape: Optional[Tuple[int, ...]] = None
