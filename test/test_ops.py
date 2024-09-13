@@ -1584,8 +1584,6 @@ class TestOps(unittest.TestCase):
               lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
   def test_conv2d(self): self._test_conv2d(bs=1, cin=3)
   def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3)
-
-  @unittest.skipIf(Device.DEFAULT == "DSP", "Fails on DSP, cannot load elf")
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 
