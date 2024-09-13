@@ -3,7 +3,7 @@ from typing import Tuple, List
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UOp
 
-TRANSCENDENTAL_SUPPORTED_DTYPES = {dtypes.float16, dtypes.float32, dtypes.float64}
+TRANSCENDENTAL_SUPPORTED_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
 
 def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""

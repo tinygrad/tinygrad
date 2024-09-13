@@ -315,7 +315,7 @@ class HWCommandQueue:
     Args:
       device: The device to submit the queue to
     """
-    self._submit(device)
+    if self.q: self._submit(device)
     return self
   def _submit(self, device:HCQCompiled): raise NotImplementedError("backend should overload this function")
 
