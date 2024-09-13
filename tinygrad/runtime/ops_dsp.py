@@ -24,7 +24,7 @@ class DSPProgram:
     self.device, self.lib = device, lib
 
     # TODO: Remove lib flush to FS.
-    with tempfile.NamedTemporaryFile(dir='/data/home/nimlgen/tinygrad/tmp', delete=False) as output_file:
+    with tempfile.NamedTemporaryFile(delete=False) as output_file:
       output_file.write(lib)
       output_file.flush()
       if DEBUG >= 6: os.system(f"llvm-readelf -S {output_file.name}")
