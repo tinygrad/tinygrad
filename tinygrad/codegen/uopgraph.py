@@ -221,7 +221,7 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  (UPat(UOps.BARRIER, src=(UPat(UOps.SINK, name='sink'),)), lambda sink: UOp(UOps.BARRIER, dtypes.void, sink.src)),
+  (UPat(UOps.BARRIER, src=(UPat((UOps.VECTORIZE, UOps.SINK), name='sink'),)), lambda sink: UOp(UOps.BARRIER, dtypes.void, sink.src)),
   (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, x.dtype, (x,y), alu.arg),)*alu.dtype.count)),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
@@ -230,6 +230,8 @@ constant_folder = PatternMatcher([
   # VECTORIZE/GEP: the expander rule allows tuple GEP creation, this is just for removal
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"),
    lambda vec,x: x if x.dtype == vec.dtype and tuple(y.arg[0] for y in vec.src) == tuple(range(len(vec.src))) else None),
+  # VECTORIZE of a single element is just that element
+  (UPat(UOps.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
   (UPat(UOps.GEP, src=(UPat(UOps.GEP, name='g2'),), name='g1'),
    lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(g1.dtype.count)))),
@@ -553,7 +555,9 @@ gls = PatternMatcher([
   # load/store expand
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat.var('buf'), UPat(UOps.VECTORIZE, src=UPat.var('x')) + UPat(UOps.VCONST, name='c')),
         name="ls", allow_any_len=True), group_load_store),
+  (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
   # push all GEPs through ALUs
+  # this retains the old REDUCE behavior
   (UPat(UOps.GEP, src=(UPat(UOps.ALU, name='alu'),), name='gep'),
    lambda gep,alu: UOp(UOps.ALU, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
   (UPat(UOps.GEP, src=(UPat(UOps.REDUCE, name='red'),), name='gep'),
@@ -562,8 +566,7 @@ gls = PatternMatcher([
 
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), do_reduce),
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
-  (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name="alu"), no_vectorized_alu),
   # devectorize
   #(UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   #(UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
