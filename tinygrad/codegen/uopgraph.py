@@ -223,7 +223,7 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce):
 constant_folder = PatternMatcher([
   (UPat(UOps.BARRIER, src=(UPat((UOps.VECTORIZE, UOps.SINK), name='sink'),)), lambda sink: UOp(UOps.BARRIER, dtypes.void, sink.src)),
   (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
-   lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, x.dtype, (x,y), alu.arg),)*alu.dtype.count)),
+   lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, alu.dtype.scalar(), (x,y), alu.arg),)*alu.dtype.count)),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat(UOps.ALU, dtypes.bool, arg=BinaryOps.ADD, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
   (UPat(UOps.ALU, dtypes.bool, arg=BinaryOps.MUL, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
@@ -532,10 +532,13 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 def group_load_store(ls:UOp, x:UOp, c:UOp, buf:UOp) -> UOp:
+  if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   is_image = isinstance(buf.dtype, ImageDType)
   lengths = [4] if is_image else ([8,4,2] if buf.dtype == PtrDType(dtypes.half) and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
   lengths += [1]
   outputs = {}
+  # TODO: how do we fold gates?
+  if len(ls.src) > 3: return None
   for o in sorted(c.arg):
     if o in outputs: continue
     for fold_length in lengths:
@@ -545,7 +548,9 @@ def group_load_store(ls:UOp, x:UOp, c:UOp, buf:UOp) -> UOp:
         out_idxs = tuple(c.arg.index(o+i) for i in range(fold_length))
         srcs = [buf, x+UOp.const(c.dtype.scalar(), o)]
         if len(ls.src) > 2: srcs.append(ls.src[2].gep(out_idxs))
-        if len(ls.src) > 3: srcs.append(functools.reduce(operator.__or__, [ls.src[3].gep(i) for i in out_idxs]))
+        if len(ls.src) > 3:
+          # TODO: this is incorrect
+          srcs.append(functools.reduce(operator.__or__, [ls.src[3].gep(i) for i in out_idxs]))
         op = UOp(ls.op, ls.dtype.scalar().vec(fold_length), tuple(srcs))
         for i in range(fold_length): outputs[o+i] = op.gep(i)
         break
@@ -555,11 +560,13 @@ gls = PatternMatcher([
   # load/store expand
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat.var('buf'), UPat(UOps.VECTORIZE, src=UPat.var('x')) + UPat(UOps.VCONST, name='c')),
         name="ls", allow_any_len=True), group_load_store),
+  (UPat((UOps.LOAD, UOps.STORE), src=(UPat.var('buf'), UPat(UOps.VCONST, name='c')),
+        name="ls", allow_any_len=True), lambda buf,c,ls: group_load_store(ls, UOp.const(c.dtype.scalar(), 0), c, buf)),
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
   # push all GEPs through ALUs
   # this retains the old REDUCE behavior
-  (UPat(UOps.GEP, src=(UPat(UOps.ALU, name='alu'),), name='gep'),
-   lambda gep,alu: UOp(UOps.ALU, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
+  (UPat(UOps.GEP, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name='alu'),), name='gep'),
+   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
   (UPat(UOps.GEP, src=(UPat(UOps.REDUCE, name='red'),), name='gep'),
    lambda gep,red: UOp(UOps.REDUCE, gep.dtype, (red.src[0].gep(gep.arg),)+red.src[1:], red.arg)),
 ])
@@ -567,9 +574,9 @@ gls = PatternMatcher([
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), do_reduce),
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name="alu"), no_vectorized_alu),
+  (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   # devectorize
   #(UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
-  #(UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   # delete_redundant_gates (after expand, is this still needed?)
   #(UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
@@ -615,7 +622,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
     sink = graph_rewrite(sink, folder+(expander+float4_folding if opts is not None and opts.supports_float4 else expander))
     sink = graph_rewrite(sink, folder+gls)
-    if getenv("DO_REDUCE", 1): sink = graph_rewrite(sink, folder+reducer)
+    if getenv("DO_REDUCE", 1):
+      sink = graph_rewrite(sink, folder+reducer)
 
   # for PTX only
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
