@@ -89,7 +89,7 @@ class DSPDevice(Compiled):
     pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [len(fp), 0xff])), memoryview(bytearray(f"{fp}".encode()))],
                                  outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=0, ins=2, outs=2), pra=pra)
-    if o1.cast('I')[1] >= 0xf0000000: raise RuntimeError(f"Cannot open lib: {o2.tobytes().decode()}")
+    if o1.cast('i')[1] < 0: raise RuntimeError(f"Cannot open lib: {o2.tobytes().decode()}")
     return o1.cast('I')[0]
 
   def close_lib(self, handle):
