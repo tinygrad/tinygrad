@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, Dict, Any
+from typing import Tuple, Any
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib
 from tinygrad.device import BufferOptions, Compiled, Allocator
 from tinygrad.helpers import from_mv, getenv, DEBUG, round_up, mv_address, to_mv
@@ -8,9 +8,8 @@ from tinygrad.renderer.cstyle import DSPRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
-def qcom_sc(method=0, ins=0, outs=0, fd=0): return (method << 24) | (ins << 16) | (outs << 8)
-
-def qcom_build_pra(ins=None, outs=None, in_fds=None):
+def rpc_sc(method=0, ins=0, outs=0, fd=0): return (method << 24) | (ins << 16) | (outs << 8)
+def rpc_prep_args(ins=None, outs=None, in_fds=None):
   ins, outs, in_fds = ins or list(), outs or list(), in_fds or list()
 
   pra = (qcom_dsp.union_remote_arg * (len(ins) + len(outs) + len(in_fds)))()
@@ -18,24 +17,24 @@ def qcom_build_pra(ins=None, outs=None, in_fds=None):
   attrs = (ctypes.c_uint32 * (len(ins) + len(outs) + len(in_fds)))(*([0] * (len(ins) + len(outs))), *([1] * (len(in_fds))))
 
   for i, mv in enumerate(ins + outs): pra[i].buf.pv, pra[i].buf.len = mv_address(mv) if mv.nbytes > 0 else 0, mv.nbytes
-  return pra, fds, attrs
+  return pra, fds, attrs, (ins, outs)
 
 class DSPProgram:
   def __init__(self, device:DSPDevice, name:str, lib:bytes):
     self.device, self.lib = device, lib
 
     # TODO: Remove lib flush to FS.
-    with tempfile.NamedTemporaryFile(delete=False) as output_file:
+    with tempfile.NamedTemporaryFile(dir='/data/home/nimlgen/tinygrad/tmp', delete=False) as output_file:
       output_file.write(lib)
       output_file.flush()
-      if DEBUG >= 6: os.system(f"llvm-objdump -mhvx -d {output_file.name}")
+      if DEBUG >= 6: os.system(f"llvm-readelf -S {output_file.name}")
       self.filepath = output_file.name
 
   def __del__(self): os.remove(self.filepath)
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
-    pra, fds, attrs = qcom_build_pra(ins=[var_vals_mv:=memoryview(bytearray((len(bufs) + len(vals)) * 4))],
-                                     outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
+    pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs) + len(vals)) * 4))],
+                                       outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
     self.device.exec_lib(self.filepath, (2<<24) | (1<<16) | (1<<8) | len(bufs), pra, fds, attrs)
     return timer[0] / 1e6
@@ -88,16 +87,15 @@ class DSPDevice(Compiled):
 
   def open_lib(self, filepath):
     fp = f"file:///{filepath}?entry&_modver=1.0&_dom=cdsp\0"
-    pra, _, _ = qcom_build_pra(ins=[a1:=memoryview(array.array('I', [len(fp), 0xff])), a2:=memoryview(bytearray(f"{fp}".encode()))],
-                               outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
-    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=qcom_sc(method=0, ins=2, outs=2), pra=pra)
+    pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [len(fp), 0xff])), memoryview(bytearray(f"{fp}".encode()))],
+                                 outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
+    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=0, ins=2, outs=2), pra=pra)
     if o1.cast('I')[1] >= 0xf0000000: raise RuntimeError(f"Cannot open lib: {o2.tobytes().decode()}")
     return o1.cast('I')[0]
 
   def close_lib(self, handle):
-    pra, _, _ = qcom_build_pra(ins=[a1:=memoryview(array.array('I', [handle, 0xff]))],
-                               outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
-    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=qcom_sc(method=1, ins=1, outs=2), pra=pra)
+    pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [handle, 0xff]))], outs=[memoryview(bytearray(0x8)), memoryview(bytearray(0xff))])
+    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=1, ins=1, outs=2), pra=pra)
 
   def exec_lib(self, filepath, sc, args, fds, attrs):
     def _exec_lib():
@@ -112,14 +110,14 @@ class DSPDevice(Compiled):
 
   def init_dsp(self):
     if hasattr(self, 'rpc_fd'):
-      with contextlib.suppress(OSError): qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=4, sc=qcom_sc(method=2, ins=0, outs=0))
+      with contextlib.suppress(OSError): qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=4, sc=rpc_sc(method=2, ins=0, outs=0))
       os.close(self.rpc_fd)
 
     self.rpc_fd = os.open('/dev/adsprpc-smd', os.O_RDONLY | os.O_NONBLOCK)
     qcom_dsp.FASTRPC_IOCTL_GETINFO(self.rpc_fd, 3)
     qcom_dsp.FASTRPC_IOCTL_CONTROL(self.rpc_fd, req=0x3)
     qcom_dsp.FASTRPC_IOCTL_INIT(self.rpc_fd, flags=0x1, file=self.fastrpc_shell_addr, filelen=self.shell_mem.len, filefd=self.shell_mapped.fd)
-    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=3, sc=qcom_sc(method=3, ins=0, outs=0))
+    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=3, sc=rpc_sc(method=3, ins=0, outs=0))
 
 class RPCListner(threading.Thread):
   def __init__(self, device:DSPDevice):
@@ -129,8 +127,8 @@ class RPCListner(threading.Thread):
   def run(self):
     # Setup initial request arguments.
     context, status = 0, 0xffffffff
-    req_args, _, _ = qcom_build_pra(ins=[msg_send:=memoryview(bytearray(0x10)).cast('I'), out_buf:=memoryview(bytearray(0x10000)).cast('I')],
-                                    outs=[msg_recv:=memoryview(bytearray(0x10)).cast('I'), in_buf:=memoryview(bytearray(0x10000)).cast('I')])
+    req_args, _, _, _ = rpc_prep_args(ins=[msg_send:=memoryview(bytearray(0x10)).cast('I'), out_buf:=memoryview(bytearray(0x10000)).cast('I')],
+                                      outs=[msg_recv:=memoryview(bytearray(0x10)).cast('I'), in_buf:=memoryview(bytearray(0x10000)).cast('I')])
     req_args[1].buf.len = 0
 
     while True:
