@@ -16,7 +16,7 @@ def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.mul, x
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 
-def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
+def dedup(x:Iterable[T]): return  x if len(x:=list(x)) < 2 else list(dict.fromkeys(x))   # retains list order
 def argfix(*x):
   if x and x[0].__class__ in (tuple, list):
     if len(x) != 1: raise ValueError(f"bad arg {x}")
