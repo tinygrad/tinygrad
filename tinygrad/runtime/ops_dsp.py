@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, Any
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib
 from tinygrad.device import BufferOptions, Compiled, Allocator
 from tinygrad.helpers import from_mv, getenv, DEBUG, round_up, mv_address, to_mv
 from tinygrad.runtime.ops_clang import ClangCompiler
@@ -24,19 +24,18 @@ class DSPProgram:
     self.device, self.lib = device, lib
 
     # TODO: Remove lib flush to FS.
-    with tempfile.NamedTemporaryFile(delete=False) as output_file:
-      output_file.write(lib)
-      output_file.flush()
-      if DEBUG >= 6: os.system(f"llvm-readelf -S {output_file.name}")
-      self.filepath = output_file.name
+    with tempfile.NamedTemporaryFile(dir='/data/home/nimlgen/tinygrad/tmp', delete=False) as self.filepath:
+      self.filepath.write(lib)
+      self.filepath.flush()
+      if DEBUG >= 6: os.system(f"llvm-objdump -d {self.filepath.name}")
 
-  def __del__(self): os.remove(self.filepath)
+  def __del__(self): os.remove(self.filepath.name)
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs) + len(vals)) * 4))],
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
-    self.device.exec_lib(self.filepath, (2<<24) | (1<<16) | (1<<8) | len(bufs), pra, fds, attrs)
+    self.device.exec_lib(self.filepath.name, (2<<24) | (1<<16) | (1<<8) | len(bufs), pra, fds, attrs)
     return timer[0] / 1e6
 
 class DSPBuffer:
