@@ -314,7 +314,7 @@ return 0; }
 
 if __name__ == "__main__":
   dev = DSPDevice()
-  
+
   bufs = [dev.allocator.alloc(0x60000) for _ in range(4)]
 
   only_entry = dev.compiler.compile(entry)

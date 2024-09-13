@@ -261,14 +261,13 @@ kernel = """__attribute__((noinline)) void r_64_4_4_64_4_4_4(float* restrict __a
 
 entry = """unsigned long long HAP_perf_get_time_us(void);
 int entry(unsigned long long handle, unsigned int sc, void* pra) {
-if ((sc>>24) != 2) return 0;
 return HAP_perf_get_time_us() == 1 ? 4 : 0;
 }
 """
 
 if __name__ == "__main__":
   dev = DSPDevice()
-  
+
   bufs = [dev.allocator.alloc(0x60000) for _ in range(4)]
 
   only_entry = dev.compiler.compile(entry)
