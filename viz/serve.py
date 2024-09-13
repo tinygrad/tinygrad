@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import pickle, json, re, os, sys, time, threading, webbrowser
+from tinygrad.helpers import getenv
 from tinygrad.ops import UOp
 from tinygrad.engine.graph import uops_colors
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -38,21 +39,25 @@ class Handler(BaseHTTPRequestHandler):
       ret = b""
     return self.wfile.write(ret)
 
+RELOADER = getenv("RELOADER", 1)
+BROWSER = getenv("BROWSER", 1)
 def main():
   try:
     st = time.perf_counter()
-    reloader_thread = threading.Thread(target=reloader)
-    reloader_thread.start()
+    if RELOADER:
+      reloader_thread = threading.Thread(target=reloader)
+      reloader_thread.start()
     print("serving at port 8000")
     server_thread = threading.Thread(target=HTTPServer(('', 8000), Handler).serve_forever, daemon=True)
     server_thread.start()
-    webbrowser.open("http://localhost:8000")
+    if BROWSER: webbrowser.open("http://localhost:8000")
     print(f"{(time.perf_counter()-st):.2f}s startup time")
     server_thread.join()
   except KeyboardInterrupt:
     print("viz is shutting down...")
-    stop_reloader.set()
-    reloader_thread.join()
+    if RELOADER:
+      stop_reloader.set()
+      reloader_thread.join()
 
 if __name__ == "__main__":
   main()
