@@ -762,6 +762,9 @@ if TRACK_MATCH_STATS:
       with open("/tmp/rewrites.pkl", "wb") as f:
         print(f"rewrote {len(contexts)} graphs and applied {sum(len(x[1]) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
         pickle.dump(contexts, f)
+    if getenv("VIZ"):
+      import viz.serve
+      viz.serve.main()
 
 # *** simple graph rewrite engine ***
 

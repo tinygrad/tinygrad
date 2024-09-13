@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import pickle, json, re, os, sys, time, threading
+import pickle, json, re, os, sys, time, threading, webbrowser
 from tinygrad.ops import UOp
 from tinygrad.engine.graph import uops_colors
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -25,29 +25,34 @@ class Handler(BaseHTTPRequestHandler):
       self.send_response(200)
       self.send_header('Content-type', 'text/html')
       self.end_headers()
-      with open("index.html", "rb") as f:
+      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
         ret = f.read()
     elif re.search(r'/\d+', self.path):
       self.send_response(200)
       self.send_header('Content-type', 'application/json')
       self.end_headers()
+      with open("/tmp/rewrites.pkl", "rb") as f: uops = pickle.load(f)
       ret = uop_to_json(uops[int(self.path.split("/")[-1])][0])
     else:
       self.send_response(404)
       ret = b""
     return self.wfile.write(ret)
 
-if __name__ == "__main__":
+def main():
   try:
+    st = time.perf_counter()
     reloader_thread = threading.Thread(target=reloader)
     reloader_thread.start()
-    with open("/tmp/rewrites.pkl", "rb") as f:
-      uops = pickle.load(f)
-    #print(uop_to_json(uops[0][0]))
     print("serving at port 8000")
-    HTTPServer(('', 8000), Handler).serve_forever()
+    server_thread = threading.Thread(target=HTTPServer(('', 8000), Handler).serve_forever, daemon=True)
+    server_thread.start()
+    webbrowser.open("http://localhost:8000")
+    print(f"{(time.perf_counter()-st):.2f}s startup time")
+    server_thread.join()
   except KeyboardInterrupt:
     print("viz is shutting down...")
     stop_reloader.set()
     reloader_thread.join()
-    sys.exit(0)
+
+if __name__ == "__main__":
+  main()
