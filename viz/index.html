@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+<style>
+html {
+	background-color: #111111;
+}
+text {
+  font-weight: 300;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+}
+.node rect {
+	stroke: #999;
+	fill: #fff;
+	stroke-width: 1.5px;
+}
+.edgePath path {
+  stroke: #333;
+  stroke-width: 1.5px;
+}
+</style>
+</head>
+<body>
+<svg>
+<g id="render">
+</g>
+</svg>
+
+<script>
+var g = new dagreD3.graphlib.Graph().setGraph({}).setDefaultEdgeLabel(function() { return {}; });
+
+g.setNode(0,  { label: "TOP",       class: "type-TOP" });
+g.setNode(1,  { label: "S",         class: "type-S" });
+
+g.setEdge(0, 1)
+
+var render = new dagreD3.render();
+const svg = document.getElementById("render")
+render(d3.select("svg g"), g);
+</script>
+
