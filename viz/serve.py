@@ -4,9 +4,10 @@ from tinygrad.ops import UOp
 from tinygrad.engine.graph import uops_colors
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+stop_reloader = threading.Event()
 def reloader():
   mtime = os.stat(__file__).st_mtime
-  while 1:
+  while not stop_reloader.is_set():
     if mtime != os.stat(__file__).st_mtime:
       print("reloading server...")
       os.execv(sys.executable, [sys.executable] + sys.argv)
@@ -37,9 +38,16 @@ class Handler(BaseHTTPRequestHandler):
     return self.wfile.write(ret)
 
 if __name__ == "__main__":
-  threading.Thread(target=reloader).start()
-  with open("/tmp/rewrites.pkl", "rb") as f:
-    uops = pickle.load(f)
-  #print(uop_to_json(uops[0][0]))
-  print("serving at port 8000")
-  HTTPServer(('', 8000), Handler).serve_forever()
+  try:
+    reloader_thread = threading.Thread(target=reloader)
+    reloader_thread.start()
+    with open("/tmp/rewrites.pkl", "rb") as f:
+      uops = pickle.load(f)
+    #print(uop_to_json(uops[0][0]))
+    print("serving at port 8000")
+    HTTPServer(('', 8000), Handler).serve_forever()
+  except KeyboardInterrupt:
+    print("viz is shutting down...")
+    stop_reloader.set()
+    reloader_thread.join()
+    sys.exit(0)
