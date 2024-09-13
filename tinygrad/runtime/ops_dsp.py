@@ -109,9 +109,7 @@ class DSPDevice(Compiled):
       _exec_lib()
 
   def init_dsp(self):
-    if hasattr(self, 'rpc_fd'):
-      with contextlib.suppress(OSError): qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=4, sc=rpc_sc(method=2, ins=0, outs=0))
-      os.close(self.rpc_fd)
+    if hasattr(self, 'rpc_fd'): os.close(self.rpc_fd) # pylint: disable=access-member-before-definition
 
     self.rpc_fd = os.open('/dev/adsprpc-smd', os.O_RDONLY | os.O_NONBLOCK)
     qcom_dsp.FASTRPC_IOCTL_GETINFO(self.rpc_fd, 3)
