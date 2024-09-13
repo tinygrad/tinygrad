@@ -318,7 +318,7 @@ class Kernel:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
         for tc_dim, amt in tc.reduce_axes: self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, amt), append_opt=False)
-        for tc_dim, amt in tc.threads: self.apply_opt(Opt(OptOps.UPCAST if AMX else OptOps.LOCAL, tc_opts.axes[tc_dim], amt), append_opt=False)
+        for tc_dim, amt in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], amt), append_opt=False)
         for tc_dim, amt in tc.early_upcast_axes: self.apply_opt(Opt(OptOps.UPCAST, tc_dim, amt), append_opt=False)
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
@@ -646,7 +646,7 @@ class Kernel:
           fix_st2 = functools.partial(fix_st, warp_dims, tcd_dims, tc.expanded_shape, *tc.st2_pattern) if tc.st2_pattern else None
 
           assert apply_to_st is None, "double tensor core? not supported"
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(t[1] for t in tc.threads) // (tc.dims[2] if AMX else 1),
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(t[1] for t in tc.threads),
                       tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in tc.upcast_axes),
                       tuple(self.first_upcast+ax for ax, _ in tc.reduce_axes))
           if self.use_tensor_cores >= 2:
