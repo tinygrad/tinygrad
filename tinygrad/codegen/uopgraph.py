@@ -402,16 +402,14 @@ def do_expand(root:UOp):
   new_srcs = []
   for i,src in enumerate(root.src):
     if src.op is UOps.EXPAND:
-      lst = _swizzle_args(expand_args, src.arg, exclude_args)
-      if list(range(len(lst))) == lst:
+      if expand_args == src.arg:
+        # just remove the expand
         new_srcs.append(src.src[0])
       else:
-        dt_sz = 1
-        if root.dtype.count > 1:
-          # this is probably wrong
-          lst = flatten([[i*root.dtype.count+j for j in range(root.dtype.count)] for i in lst])
-          dt_sz = root.dtype.count
-        new_srcs.append(UOp(UOps.GEP, src.src[0].dtype.scalar().vec(expand_sz*dt_sz), (src.src[0],), tuple(lst)))
+        lst = _swizzle_args(expand_args, src.arg, exclude_args)
+        # if the base dtype is > 1, put those at the end
+        if root.dtype.count > 1: lst = flatten([[i*root.dtype.count+j for j in range(root.dtype.count)] for i in lst])
+        new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
         new_srcs.append(src)
@@ -454,7 +452,7 @@ def do_contract(con:UOp):
   idxs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
     idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]
-  return UOp(UOps.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)) if idxs != list(range(len(idxs))) else ex.src[0],), new_ex_args)
+  return UOp(UOps.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
