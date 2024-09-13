@@ -35,8 +35,7 @@ def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
 
 @functools.lru_cache(None)
 def simplify(views: Tuple[View, ...]) -> Tuple[View, ...]:
-  if len(views) >= 2 and (new_view := views[-2] + views[-1]) is not None:
-    return simplify(views[:-2] + (new_view,))
+  if len(views) >= 2 and (new_view:=views[-2]+views[-1]) is not None: return simplify(views[:-2]+(new_view,))
   return views
 
 @dataclass(frozen=True)
