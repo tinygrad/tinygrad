@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, Dict, Any
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib
 from tinygrad.device import BufferOptions, Compiled, Allocator
 from tinygrad.helpers import from_mv, getenv, DEBUG, round_up, mv_address, to_mv
 from tinygrad.runtime.ops_clang import ClangCompiler
@@ -34,16 +34,10 @@ class DSPProgram:
   def __del__(self): os.remove(self.filepath)
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
-    handle = self.device.open_lib(self.filepath)
-
     pra, fds, attrs = qcom_build_pra(ins=[var_vals_mv:=memoryview(bytearray((len(bufs) + len(vals)) * 4))],
                                      outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
-
-    qcom_dsp.FASTRPC_IOCTL_INVOKE_ATTRS(self.device.rpc_fd, fds=fds, attrs=attrs,
-                                        inv=qcom_dsp.struct_fastrpc_ioctl_invoke(handle=handle, sc=(2<<24)|(1<<16)|(1<<8)|len(bufs), pra=pra))
-
-    self.device.close_lib(handle)
+    self.device.exec_lib(self.filepath, (2<<24) | (1<<16) | (1<<8) | len(bufs), pra, fds, attrs)
     return timer[0] / 1e6
 
 class DSPBuffer:
@@ -72,14 +66,13 @@ class DSPAllocator(Allocator):
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
     self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
-    self.count = 0
 
+    # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
     sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
     sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
-    with tempfile.NamedTemporaryFile(delete=False) as output_file:
-      output_file.write(f"SECTIONS {{ . = 0x10000; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
-      output_file.flush()
-    self.linker_script = output_file.name
+    with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
+      self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
+      self.link_ld.flush()
 
     fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
     self.shell_mem = qcom_dsp.ION_IOC_ALLOC(self.ion_fd, len=round_up(fastrpc_shell.nbytes, 0x1000), align=0x1000, heap_id_mask=0x2000000, flags=0x1)
@@ -88,10 +81,9 @@ class DSPDevice(Compiled):
     ctypes.memmove(self.fastrpc_shell_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
     self.init_dsp()
 
-    self.listener = RPCListner(self)
-    self.listener.start()
+    RPCListner(self).start()
 
-    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.linker_script}"]
+    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
     super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp", args=compiler_args), functools.partial(DSPProgram, self))
 
   def open_lib(self, filepath):
@@ -99,19 +91,28 @@ class DSPDevice(Compiled):
     pra, _, _ = qcom_build_pra(ins=[a1:=memoryview(array.array('I', [len(fp), 0xff])), a2:=memoryview(bytearray(f"{fp}".encode()))],
                                outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=qcom_sc(method=0, ins=2, outs=2), pra=pra)
-    return o1.cast('Q')[0]
+    if o1.cast('I')[1] >= 0xf0000000: raise RuntimeError(f"Cannot open lib: {o2.tobytes().decode()}")
+    return o1.cast('I')[0]
 
   def close_lib(self, handle):
     pra, _, _ = qcom_build_pra(ins=[a1:=memoryview(array.array('I', [handle, 0xff]))],
                                outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=qcom_sc(method=1, ins=1, outs=2), pra=pra)
 
-    self.count += 1
-    if self.count % 512 == 0: self.init_dsp()
+  def exec_lib(self, filepath, sc, args, fds, attrs):
+    def _exec_lib():
+      handle = self.open_lib(filepath)
+      qcom_dsp.FASTRPC_IOCTL_INVOKE_ATTRS(self.rpc_fd, fds=fds, attrs=attrs, inv=qcom_dsp.struct_fastrpc_ioctl_invoke(handle=handle, sc=sc, pra=args))
+      self.close_lib(handle)
+    try: _exec_lib()
+    except OSError:
+      # DSP might ask for a connection reset or just fail with operation not permitted, try to reset connection.
+      self.init_dsp()
+      _exec_lib()
 
   def init_dsp(self):
     if hasattr(self, 'rpc_fd'):
-      qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=4, sc=qcom_sc(method=2, ins=0, outs=0))
+      with contextlib.suppress(OSError): qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=4, sc=qcom_sc(method=2, ins=0, outs=0))
       os.close(self.rpc_fd)
 
     self.rpc_fd = os.open('/dev/adsprpc-smd', os.O_RDONLY | os.O_NONBLOCK)
@@ -137,7 +138,7 @@ class RPCListner(threading.Thread):
       msg_send[:] = array.array('I', [context, status, req_args[1].buf.len, in_buf.nbytes])
 
       try: qcom_dsp.FASTRPC_IOCTL_INVOKE(self.device.rpc_fd, handle=0x3, sc=0x04020200, pra=req_args)
-      except: continue
+      except OSError: continue # retry
 
       context, inbufs, outbufs = msg_recv[0], ((sc:=msg_recv[2]) >> 16) & 0xff, (msg_recv[2] >> 8) & 0xff
 

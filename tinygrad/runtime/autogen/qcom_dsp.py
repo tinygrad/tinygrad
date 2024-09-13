@@ -122,7 +122,7 @@ import fcntl, functools
 
 def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, *args, **kwargs):
   ret = fcntl.ioctl(__fd, (__idir<<30) | (ctypes.sizeof(made := __user_struct(*args, **kwargs))<<16) | (__base<<8) | __nr, made)
-  if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
+  if ret != 0: raise OSError(f"ioctl returned {ret}")
   return made
 
 def _IO(base, nr): return functools.partial(_do_ioctl, 0, ord(base) if isinstance(base, str) else base, nr, None)
