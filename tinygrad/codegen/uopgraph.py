@@ -371,8 +371,8 @@ constant_folder = PatternMatcher([
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
   # remove EXPANDs from SINK
   (UPat(UOps.SINK, name="root"),
-   lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND} else (x,) for x in root.src)), root.arg)
-    if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
+   lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND, UOps.VECTORIZE} else (x,) for x in root.src)),
+                    root.arg) if any(x.op in {UOps.SINK, UOps.EXPAND, UOps.VECTORIZE} for x in root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),
@@ -529,29 +529,53 @@ def no_vectorized_wmma(wmma:UOp):
   wmma_ex = flatten([[e.gep(i) for e in wmmas] for i in range(out_sz)])
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
-#def group_load_store(ls, x, c):
-#  x.divides()
-#  pass
+def group_load_store(ls:UOp, x:UOp, c:UOp, buf:UOp) -> UOp:
+  is_image = isinstance(buf.dtype, ImageDType)
+  lengths = [4] if is_image else ([8,4,2] if buf.dtype == PtrDType(dtypes.half) and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
+  lengths += [1]
+  outputs = {}
+  for o in sorted(c.arg):
+    if o in outputs: continue
+    for fold_length in lengths:
+      if o%fold_length!=0 or not x.divides(fold_length): continue
+      if all(o+i not in outputs and o+i in c.arg for i in range(fold_length)):
+        assert x.dtype.count == 1
+        out_idxs = tuple(c.arg.index(o+i) for i in range(fold_length))
+        srcs = [buf, x+UOp.const(c.dtype.scalar(), o)]
+        if len(ls.src) > 2: srcs.append(ls.src[2].gep(out_idxs))
+        if len(ls.src) > 3: srcs.append(functools.reduce(operator.__or__, [ls.src[3].gep(i) for i in out_idxs]))
+        op = UOp(ls.op, ls.dtype.scalar().vec(fold_length), tuple(srcs))
+        for i in range(fold_length): outputs[o+i] = op.gep(i)
+        break
+  return UOp(UOps.VECTORIZE, ls.dtype, tuple(outputs[x] for x in c.arg))
+
+gls = PatternMatcher([
+  # load/store expand
+  (UPat((UOps.LOAD, UOps.STORE), src=(UPat.var('buf'), UPat(UOps.VECTORIZE, src=UPat.var('x')) + UPat(UOps.VCONST, name='c')),
+        name="ls", allow_any_len=True), group_load_store),
+  # push all GEPs through ALUs
+  (UPat(UOps.GEP, src=(UPat(UOps.ALU, name='alu'),), name='gep'),
+   lambda gep,alu: UOp(UOps.ALU, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
+  (UPat(UOps.GEP, src=(UPat(UOps.REDUCE, name='red'),), name='gep'),
+   lambda gep,red: UOp(UOps.REDUCE, gep.dtype, (red.src[0].gep(gep.arg),)+red.src[1:], red.arg)),
+])
 
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), do_reduce),
-  # load/store expand
-  #(UPat((UOps.LOAD, UOps.STORE), src=(UPat(UOps.VECTORIZE, src=UPat.var('x')) + UPat.cvar('c')), name="ls"), group_load_store),
-
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
+  (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
   # devectorize
-  #(UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
   #(UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   #(UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
-  #(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
   #(UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   #(UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
   # for rendering (final)
-  #(UPat(UOps.CONST, name='c'),
-  # lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.count) if c.dtype.count > 1 else None),
-  #(UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
-  #(UPat(UOps.GEP, name='gep'), lambda gep: UOp(UOps.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
+  (UPat(UOps.CONST, name='c'),
+    lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.count) if c.dtype.count > 1 else None),
+  (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
+  (UPat(UOps.GEP, name='gep'), lambda gep: UOp(UOps.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
 ])
 
 no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE), name="x"),
@@ -587,6 +611,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   linearize_cnt += 1
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
     sink = graph_rewrite(sink, folder+(expander+float4_folding if opts is not None and opts.supports_float4 else expander))
+    sink = graph_rewrite(sink, folder+gls)
     if getenv("DO_REDUCE", 1): sink = graph_rewrite(sink, folder+reducer)
 
   # for PTX only
