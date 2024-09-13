@@ -1,0 +1,17 @@
+viz is a replacement for:
+GRAPH=1
+JITGRAPH=1
+GRAPHUOPS=1
+
+and a viewer for:
+SAVE_SCHEDULE=1
+TRACK_MATCH_STATS=2
+
+to use:
+1. Run tinygrad with VIZ=1 (this saves the pkls and launches the server)
+2. That's it!
+
+This should be able to:
+1. See all schedules
+2. See all graphs and how they were rewritten
+3. See generated code

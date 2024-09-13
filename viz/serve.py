@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import pickle, json, re, os, sys, time, threading
 from tinygrad.ops import UOp
+from tinygrad.engine.graph import uops_colors
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 def reloader():
@@ -14,12 +15,11 @@ def reloader():
 def uop_to_json(x:UOp):
   assert isinstance(x, UOp)
   ret = {}
-  for u in x.sparents: ret[id(u)] = (u.op, str(u.dtype), [id(x) for x in u.src], str(u.arg))
+  for u in x.sparents: ret[id(u)] = (str(u.op)[5:], str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return json.dumps(ret).encode()
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
-    print(f"GET {self.path}")
     if self.path == "/":
       self.send_response(200)
       self.send_header('Content-type', 'text/html')
