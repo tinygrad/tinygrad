@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from typing import Dict, List, Tuple
 import pickle, json, re, os, sys, time, threading, webbrowser
 from tinygrad.helpers import getenv
 from tinygrad.ops import UOp
@@ -14,9 +15,9 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
-def uop_to_json(x:UOp):
+def uop_to_json(x:UOp) -> bytes:
   assert isinstance(x, UOp)
-  ret = {}
+  ret: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents: ret[id(u)] = (str(u.op)[5:], str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return json.dumps(ret).encode()
 
