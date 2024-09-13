@@ -43,7 +43,7 @@ def simplify(views: Tuple[View, ...]) -> Tuple[View, ...]:
 class ShapeTracker:
   views: Tuple[View, ...]
 
-  @functools.lru_cache(None)
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
     views = self.views
     for v in st.views: views = simplify(views + (v,)) # one view at a time = better simplification
@@ -74,7 +74,7 @@ class ShapeTracker:
 
   def reduce(self, axis:Tuple[int, ...]) -> Tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
 
-  @functools.lru_cache(None)
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def to_uop(self) -> UOp: return UOp(UOps.SHAPETRACKER, dtypes.void, (), self)
 
   def to_indexed_uops(self, _idxs:Optional[List[UOp]]=None) -> Tuple[UOp, UOp]:
@@ -98,19 +98,19 @@ class ShapeTracker:
     assert idx.vmax < 1e12, f"real_size broken for {self}"
     return int(idx.vmax+1)
 
-  @functools.lru_cache(None)
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def vars(self) -> Set[Variable]: return set().union(*[v.vars() for v in self.views])
 
   @functools.cached_property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
-  @functools.lru_cache(None)
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def unbind(self) -> Tuple[ShapeTracker, Dict[Variable, int]]:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
   # NOTE: if a stride is not always valid, it will be None
-  @functools.lru_cache(None)
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     ret: List[Optional[sint]] = [None] * len(self.shape)
@@ -144,12 +144,10 @@ class ShapeTracker:
     assert not isinstance(idx.max, int) or idx.max < 2**31, f"idx.max too big. {idx=}, {idx.max=}"
     return idx, valid
 
-  @functools.lru_cache(None)
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.to_indexed_uops()
     return axis in [x.arg for x in graph_rewrite(valid, constant_folder).sparents if x.op is UOps.RANGE]
-
-  @functools.lru_cache(None)
   def simplify(self) -> ShapeTracker: return ShapeTracker(simplify(self.views))
 
   # *** under this line are the movement ops ***
