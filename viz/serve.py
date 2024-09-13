@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple
 import pickle, json, re, os, sys, time, threading, webbrowser
 from tinygrad.helpers import getenv
 from tinygrad.ops import UOp
-from tinygrad.engine.graph import uops_colors
+from tinygrad.engine.graph import uops_colors, word_wrap
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 stop_reloader = threading.Event()
@@ -18,7 +18,9 @@ def reloader():
 def uop_to_json(x:UOp) -> bytes:
   assert isinstance(x, UOp)
   ret: Dict[int, Tuple[str, str, List[int], str, str]] = {}
-  for u in x.sparents: ret[id(u)] = (str(u.op)[5:], str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
+  for u in x.sparents:
+    label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
+    ret[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return json.dumps(ret).encode()
 
 class Handler(BaseHTTPRequestHandler):

@@ -1,72 +1,97 @@
 <!DOCTYPE html>
 <html>
 <head>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
-<script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
-<style>
-html {
-	background-color: #111111;
-}
-body {
-  /*width: 100vw;*/
-  height: 100vh;
-}
-text {
-  font-weight: 300;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  font-size: 14px;
-}
-.node rect {
-	stroke: transparent;
-	fill: #fff;
-	stroke-width: 1.5px;
-}
-.label text {
-  color: black;
-  font-weight: 350;
-}
-.edgePath path {
-  stroke: #777;
-  stroke-width: 1.5px;
-}
-svg {
-  width: 100%;
-  height: 100%;
-}
-</style>
+  <title>tinygrad viz</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+  <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <style>
+  * {
+    overflow: scroll !important;
+  }
+  html, body {
+    background-color: #111111;
+    margin: 0;
+    height: 100%;
+  }
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-y: auto;
+  }
+  svg {
+    height: 100%;
+    width: auto;
+  }
+  .container {
+    width: 100%;
+    height: 100%;
+  }
+  text {
+    font-weight: 300;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+  }
+  .node rect {
+    stroke: transparent;
+    fill: #fff;
+    stroke-width: 1.5px;
+  }
+  .label text {
+    color: black;
+    font-weight: 350;
+  }
+  .label > * {
+    text-align: center;
+  }
+  .edgePath path {
+    stroke: #777;
+    stroke-width: 1.5px;
+  }
+  svg {
+    width: 100%;
+    height: 100%;
+  }
+  </style>
 </head>
 <body>
-<svg>
-<g id="render">
-</g>
-</svg>
+  <div class="container">
+    <svg>
+      <g id="render"></g>
+    </svg>
+  </div>
+  <script>
+  var currentUOps = 0
+  async function main() {
+    const ret = await (await fetch("/"+currentUOps)).json()
+    //console.log(ret)
+    const g = new dagreD3.graphlib.Graph().setGraph({}).setDefaultEdgeLabel(function() { return {}; });
 
-<script>
-var currentUOps = 0
-async function main() {
-  const ret = await (await fetch("/"+currentUOps)).json()
-  //console.log(ret)
-  const g = new dagreD3.graphlib.Graph().setGraph({}).setDefaultEdgeLabel(function() { return {}; });
-
-  for ([k,v] of Object.entries(ret)) {
-    g.setNode(k, {label: v[0], style: `fill: ${v[4]};`, shape: "ellipse" });
-    for (parent of v[2]) {
-      g.setEdge(parent, k)
+    for ([k,v] of Object.entries(ret)) {
+      g.setNode(k, {label: v[0], style: `fill: ${v[4]}; rx: 8; ry: 8;` });
+      for (parent of v[2]) {
+        g.setEdge(parent, k)
+      }
     }
-  }
 
-  const render = new dagreD3.render();
-  render(d3.select("svg g"), g);
-}
-document.addEventListener("keydown", async function(event) {
-  if (event.key == 'ArrowLeft') {
-    currentUOps = Math.max(0, currentUOps-1)
-    main()
+    const render = new dagreD3.render();
+    const svg = d3.select("svg g");
+    render(svg, g);
   }
-  if (event.key == 'ArrowRight') {
-    currentUOps += 1
-    main()
-  }
-})
-main()
-</script>
+  document.addEventListener("keydown", async function(event) {
+    if (event.key == 'ArrowLeft') {
+      event.preventDefault()
+      currentUOps = Math.max(0, currentUOps-1)
+      main()
+    }
+    if (event.key == 'ArrowRight') {
+      event.preventDefault()
+      currentUOps += 1
+      main()
+    }
+  })
+  main()
+  </script>
+  </body>
+</html>

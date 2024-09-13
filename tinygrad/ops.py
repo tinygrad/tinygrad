@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import pretty_print, prod, getenv, all_same
+from tinygrad.helpers import VIZ, pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -720,7 +720,7 @@ class PatternMatcher:
 # *** tracking pattern matcher ***
 
 TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 0)
-contexts: List[Tuple[UOp, List[Tuple[UOp, UOp]]]] = []
+contexts: List[Tuple[UOp, List[Tuple[UOp, UOp]], UOp]] = []
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedPattenMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
@@ -762,7 +762,7 @@ if TRACK_MATCH_STATS:
       with open("/tmp/rewrites.pkl", "wb") as f:
         print(f"rewrote {len(contexts)} graphs and applied {sum(len(x[1]) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
         pickle.dump(contexts, f)
-    if getenv("VIZ"):
+    if VIZ:
       import viz.serve
       viz.serve.main()
 
@@ -782,5 +782,7 @@ class RewriteContext:
       self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x)) else x
     return found
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  if TRACK_MATCH_STATS >= 2: contexts.append((sink, []))
-  return RewriteContext(pm).rewrite(sink)
+  if TRACK_MATCH_STATS >= 2: contexts.append((sink, [], sink))
+  ret = RewriteContext(pm).rewrite(sink)
+  if TRACK_MATCH_STATS >= 2: contexts[-1] = contexts[-1][:-1]+(ret,)
+  return ret
