@@ -212,6 +212,7 @@ class LLaMa:
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
     else:
       weights = load(str(model_path))
+      for v in weights.values(): v.to_(device[0] if isinstance(device, tuple) else device)
     if "model.embed_tokens.weight" in weights:
       weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
