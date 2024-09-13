@@ -435,6 +435,32 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
 
+class DSPRenderer(ClangRenderer):
+  device = "DSP"
+  supports_float4 = False
+  buffer_suffix = " restrict __attribute__((align_value(128)))"
+  kernel_prefix = "__attribute__((noinline)) "
+  type_map = { **ClangRenderer().type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
+  code_for_op = {**ClangRenderer().code_for_op, UnaryOps.SIN: lambda x,dtype: f"__builtin_sin({x})",
+                 UnaryOps.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
+                 UnaryOps.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
+
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+    ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
+    msrc = ['typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
+            'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
+            'unsigned long long HAP_perf_get_time_us(void);',
+            'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {']
+    msrc += ['if ((sc>>24) != 2) return 0;']
+    msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
+    msrc += [f'void *buf_{i} = HAP_mmap(0, sz_or_val_{i}, 3, 0, pra[{i+2}].dma.fd, 0);' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
+    msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
+    msrc += ["*(unsigned long long *)(pra[1].buf.pv) = HAP_perf_get_time_us() - start;"]
+    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += ["return 0; }"]
+    return ret + '\n' + '\n'.join(msrc)
+
 class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDRenderer): device = "HIP"
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"
