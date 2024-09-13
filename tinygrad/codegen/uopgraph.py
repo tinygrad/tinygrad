@@ -222,6 +222,8 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   (UPat(UOps.BARRIER, src=(UPat(UOps.SINK, name='sink'),)), lambda sink: UOp(UOps.BARRIER, dtypes.void, sink.src)),
+  (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
+   lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, x.dtype, (x,y), alu.arg),)*alu.dtype.count)),
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat(UOps.ALU, dtypes.bool, arg=BinaryOps.ADD, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
   (UPat(UOps.ALU, dtypes.bool, arg=BinaryOps.MUL, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
@@ -235,8 +237,9 @@ constant_folder = PatternMatcher([
    lambda gep, vec: UOp(UOps.VECTORIZE, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
   (UPat(UOps.GEP, src=(UPat.cvar("c", vec=False),), name="gep"), lambda gep, c: gep.const_like(c.arg)),
   (UPat(UOps.GEP, src=(UPat(UOps.VCONST, name="c"),), name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
-  # GEP add push
-  (UPat(UOps.GEP, None, (UPat.var('x') + UPat.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
+  # GEP add push (non-shrinking only)
+  (UPat(UOps.GEP, None, (UPat.var('x') + UPat.cvar('c1'),), name="gep"),
+   lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg) if len(gep.arg) >= x.dtype.count else None),
   # tensor core with a 0 input is acc
   *[(UPat(UOps.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
   *[(UPat(UOps.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
@@ -526,23 +529,29 @@ def no_vectorized_wmma(wmma:UOp):
   wmma_ex = flatten([[e.gep(i) for e in wmmas] for i in range(out_sz)])
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
+#def group_load_store(ls, x, c):
+#  x.divides()
+#  pass
+
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), do_reduce),
+  # load/store expand
+  #(UPat((UOps.LOAD, UOps.STORE), src=(UPat(UOps.VECTORIZE, src=UPat.var('x')) + UPat.cvar('c')), name="ls"), group_load_store),
+
   # devectorize
-  (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
-  (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
-  (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
-  # for rendering
-  (UPat(UOps.CONST, name='c'),
-   lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.count) if c.dtype.count > 1 else None),
-  (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
-  (UPat(UOps.GEP, name='gep'), lambda gep: UOp(UOps.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
-  # no ALU on vectorized dtypes
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
+  #(UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
+  #(UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
+  #(UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
+  #(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
   # delete_redundant_gates (after expand, is this still needed?)
-  (UPat(UOps.STORE, name="root"), delete_redundant_gates),
+  #(UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
-  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
+  #(UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
+  # for rendering (final)
+  #(UPat(UOps.CONST, name='c'),
+  # lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.count) if c.dtype.count > 1 else None),
+  #(UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
+  #(UPat(UOps.GEP, name='gep'), lambda gep: UOp(UOps.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
 ])
 
 no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE), name="x"),
