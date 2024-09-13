@@ -72,17 +72,15 @@ class DSPDevice(Compiled):
       self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
       self.link_ld.flush()
 
-    fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
-    self.shell_mem = qcom_dsp.ION_IOC_ALLOC(self.ion_fd, len=round_up(fastrpc_shell.nbytes, 0x1000), align=0x1000, heap_id_mask=0x2000000, flags=0x1)
-    self.shell_mapped = qcom_dsp.ION_IOC_MAP(self.ion_fd, handle=self.shell_mem.handle)
-    self.fastrpc_shell_addr = libc.mmap(0, self.shell_mem.len, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, self.shell_mapped.fd, 0)
-    ctypes.memmove(self.fastrpc_shell_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
-    self.init_dsp()
-
-    RPCListner(self).start()
-
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
     super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp", args=compiler_args), functools.partial(DSPProgram, self))
+
+    fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
+    self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferOptions(nolru=True))
+    ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
+
+    self.init_dsp()
+    RPCListner(self).start()
 
   def open_lib(self, filepath):
     fp = f"file:///{filepath}?entry&_modver=1.0&_dom=cdsp\0"
@@ -116,7 +114,7 @@ class DSPDevice(Compiled):
     self.rpc_fd: int = os.open('/dev/adsprpc-smd', os.O_RDONLY | os.O_NONBLOCK)
     qcom_dsp.FASTRPC_IOCTL_GETINFO(self.rpc_fd, 3)
     qcom_dsp.FASTRPC_IOCTL_CONTROL(self.rpc_fd, req=0x3)
-    qcom_dsp.FASTRPC_IOCTL_INIT(self.rpc_fd, flags=0x1, file=self.fastrpc_shell_addr, filelen=self.shell_mem.len, filefd=self.shell_mapped.fd)
+    qcom_dsp.FASTRPC_IOCTL_INIT(self.rpc_fd, flags=0x1, file=self.shell_buf.va_addr, filelen=self.shell_buf.size, filefd=self.shell_buf.share_info.fd)
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=3, sc=rpc_sc(method=3, ins=0, outs=0))
 
 class RPCListner(threading.Thread):
