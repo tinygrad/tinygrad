@@ -17,11 +17,22 @@ def reloader():
 
 def uop_to_json(x:UOp) -> bytes:
   assert isinstance(x, UOp)
-  ret: Dict[int, Tuple[str, str, List[int], str, str]] = {}
+  graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
-    ret[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
-  return json.dumps(ret).encode()
+    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
+  # this is the spec viz will build up to
+  _ret = {
+    # compressed graph of the UOp
+    "graph": graph,
+    # how much time did we spend on which patterns (ordered)
+    "match_stats": [],
+    # where does this UOp come from
+    "metadata": [],
+    # which PatternMatcher changed this? (eg. expander, reduceop_fusor)
+    "matcher": "",
+  }
+  return json.dumps(graph).encode()
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
