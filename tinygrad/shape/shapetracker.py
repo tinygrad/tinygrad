@@ -33,14 +33,21 @@ def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
       if m[1] != sh: vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
   return iexpr, vexpr
 
+@functools.lru_cache(None)
+def simplify(views: Tuple[View]) -> Tuple[View]:
+  if len(views) >= 2 and (new_view := views[-2] + views[-1]) is not None:
+    return simplify(views[:-2] + (new_view,))
+  return views
+
 @dataclass(frozen=True)
 class ShapeTracker:
   views: Tuple[View, ...]
 
+  @functools.lru_cache(None)
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
-    ret = self
-    for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
-    return ret
+    views = self.views
+    for v in st.views: views = simplify(views + (v,)) # one view at a time = better simplification
+    return ShapeTracker(views)
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
     inverted_views:List[View] = []
@@ -50,6 +57,7 @@ class ShapeTracker:
     return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
 
   @staticmethod
+  @functools.lru_cache(None)
   def from_shape(shape:Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker((View.create(shape),))
 
   @property
@@ -66,6 +74,7 @@ class ShapeTracker:
 
   def reduce(self, axis:Tuple[int, ...]) -> Tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
 
+  @functools.lru_cache(None)
   def to_uop(self) -> UOp: return UOp(UOps.SHAPETRACKER, dtypes.void, (), self)
 
   def to_indexed_uops(self, _idxs:Optional[List[UOp]]=None) -> Tuple[UOp, UOp]:
@@ -89,16 +98,19 @@ class ShapeTracker:
     assert idx.vmax < 1e12, f"real_size broken for {self}"
     return int(idx.vmax+1)
 
+  @functools.lru_cache(None)
   def vars(self) -> Set[Variable]: return set().union(*[v.vars() for v in self.views])
 
-  @property
+  @functools.cached_property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
+  @functools.lru_cache(None)
   def unbind(self) -> Tuple[ShapeTracker, Dict[Variable, int]]:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
   # NOTE: if a stride is not always valid, it will be None
+  @functools.lru_cache(None)
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     ret: List[Optional[sint]] = [None] * len(self.shape)
@@ -132,14 +144,13 @@ class ShapeTracker:
     assert not isinstance(idx.max, int) or idx.max < 2**31, f"idx.max too big. {idx=}, {idx.max=}"
     return idx, valid
 
+  @functools.lru_cache(None)
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.to_indexed_uops()
     return axis in [x.arg for x in graph_rewrite(valid, constant_folder).sparents if x.op is UOps.RANGE]
 
-  def simplify(self) -> ShapeTracker:
-    if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
-      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
-    return self
+  @functools.lru_cache(None)
+  def simplify(self) -> ShapeTracker: return ShapeTracker(simplify(self.views))
 
   # *** under this line are the movement ops ***
 
