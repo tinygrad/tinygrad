@@ -721,7 +721,7 @@ class PatternMatcher:
 
 TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
-contexts: List[Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp]]]] = []
+contexts: List[Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp, str]]]] = []
 class TrackedPattenMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
@@ -742,7 +742,7 @@ class TrackedPattenMatcher(PatternMatcher):
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2: contexts[-1][2].append((uop, ret))
+        if TRACK_MATCH_STATS >= 2: contexts[-1][2].append((uop, ret, p.printable()))
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None

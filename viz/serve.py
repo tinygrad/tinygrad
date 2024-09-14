@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from dataclasses import asdict, dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import pickle, re, os, sys, time, threading, webbrowser, json
 from tinygrad.codegen.uopgraph import linearize_uop
 from tinygrad.device import Device
@@ -28,25 +28,29 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   return graph
 
 def uop_to_prg(ast:UOp) -> str:
-  if any(x.op is UOps.SHAPETRACKER for x in ast.parents): return get_runner(Device.DEFAULT, ast).p.src
-  return Device[Device.DEFAULT].renderer.render("test", linearize_uop(ast))
+  try:
+    if any(x.op is UOps.SHAPETRACKER for x in ast.parents): return get_runner(Device.DEFAULT, ast).p.src
+    return Device[Device.DEFAULT].renderer.render("test", linearize_uop(ast))
+  except Exception:
+    # if we're still rewriting and there's no valid prg yet, it's fine
+    return ""
 
 @dataclass(frozen=True)
 class UOpRet:
   loc: str
-  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]]
+  graphs: List[Tuple[Dict[int, Tuple[str, str, List[int], str, str]], Optional[str]]]
   extra: List[str]
 
-def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp]]]) -> UOpRet:
+def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp, str]]]) -> UOpRet:
   loc, start, matches = ctx
-  graphs = [uop_to_json(start)]
-  for first, rewritten in matches:
-    graph = {**graphs[-1], **uop_to_json(rewritten)}
+  graphs: List[Tuple[Dict, Optional[str]]] = [(uop_to_json(start), None)]
+  for first, rewritten, pattern in matches:
+    graph = {**graphs[-1][0], **uop_to_json(rewritten)}
     for k,v in graph.copy().items():
       if any(x == id(first) for x in v[2]):
         graph[k] = v[:2]+([id(rewritten) if x == id(first) else x for x in v[2]],)+v[3:]
       if k == id(first): del graph[k]
-    graphs.append(graph)
+    graphs.append((graph, pattern))
   return UOpRet(f"{loc[0].split('/')[-1]}:{loc[1]}", graphs, [str(start), uop_to_prg(start)] if start.op is UOps.SINK else [str(start)])
 
 class Handler(BaseHTTPRequestHandler):

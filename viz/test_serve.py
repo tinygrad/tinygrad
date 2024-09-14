@@ -7,7 +7,7 @@ class TestViz(unittest.TestCase):
     with open("/tmp/rewrites.pkl", "rb") as f: uops = pickle.load(f)
     ret = create_graph(uops[4])
     for g in ret.graphs:
-      print(len(g))
+      print(g[1])
       print("---------")
 
 if __name__ == "__main__":
