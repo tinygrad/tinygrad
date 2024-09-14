@@ -60,18 +60,24 @@
     <svg>
       <g id="render"></g>
     </svg>
+    <p class="my-text">hello world</p>
   </div>
   <script>
-  var currentUOps = 0
+  var currentUOp = 0;
+  var totalUOps = 0;
   async function main() {
-    const ret = await (await fetch("/"+currentUOps)).json()
+    const ret = await (await fetch("/"+currentUOp)).json()
     //console.log(ret)
     const g = new dagreD3.graphlib.Graph().setGraph({}).setDefaultEdgeLabel(function() { return {}; });
 
-    for ([k,v] of Object.entries(ret)) {
-      g.setNode(k, {label: v[0], style: `fill: ${v[4]}; rx: 8; ry: 8;` });
-      for (parent of v[2]) {
-        g.setEdge(parent, k)
+    const [location, graphs, total] = ret;
+    totalUOps = total-1;
+    for (ug of graphs) {
+      for ([k,u] of Object.entries(ug)) {
+        g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
+        for (src of u[2]) {
+          g.setEdge(src, k)
+        }
       }
     }
 
@@ -82,12 +88,12 @@
   document.addEventListener("keydown", async function(event) {
     if (event.key == 'ArrowLeft') {
       event.preventDefault()
-      currentUOps = Math.max(0, currentUOps-1)
+      currentUOp = Math.max(0, currentUOp-1)
       main()
     }
     if (event.key == 'ArrowRight') {
       event.preventDefault()
-      currentUOps += 1
+      currentUOp = Math.min(totalUOps, currentUOp+1)
       main()
     }
   })
