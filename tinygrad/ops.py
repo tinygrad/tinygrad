@@ -613,7 +613,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
   # no matchers in ops.py, find the real frame
-  while (frm.f_code.co_filename.split('/')[-1] in {"rewrite.py", "ops.py", '<string>'}) and frm.f_back is not None: frm = frm.f_back
+  while (frm.f_code.co_filename.split('/')[-1] in {"ops.py", '<string>'}) and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
 def lines(fn) -> List[str]: return open(fn).readlines()
@@ -719,9 +719,9 @@ class PatternMatcher:
 
 # *** tracking pattern matcher ***
 
-TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 0)
-contexts: List[Tuple[UOp, List[Tuple[UOp, UOp]]]] = []
+TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
+contexts: List[Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp, str]]]] = []
 class TrackedPattenMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
@@ -742,7 +742,7 @@ class TrackedPattenMatcher(PatternMatcher):
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2: contexts[-1][1].append((uop, ret))
+        if TRACK_MATCH_STATS >= 2: contexts[-1][2].append((uop, ret, p.printable()))
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -760,8 +760,11 @@ if TRACK_MATCH_STATS:
     print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
     if TRACK_MATCH_STATS >= 2:
       with open("/tmp/rewrites.pkl", "wb") as f:
-        print(f"rewrote {len(contexts)} graphs and applied {sum(len(x[1]) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
+        print(f"rewrote {len(contexts)} graphs and applied {sum(len(x[2]) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
         pickle.dump(contexts, f)
+    if getenv("VIZ"):
+      import viz.serve
+      viz.serve.main()
 
 # *** simple graph rewrite engine ***
 
@@ -779,5 +782,5 @@ class RewriteContext:
       self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x)) else x
     return found
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  if TRACK_MATCH_STATS >= 2: contexts.append((sink, []))
+  if TRACK_MATCH_STATS >= 2: contexts.append((get_location(), sink, []))
   return RewriteContext(pm).rewrite(sink)

@@ -18,8 +18,8 @@ class TestDiffSchedule(unittest.TestCase):
     X = Tensor.randn(10, 10).realize()
     idxs = Tensor([0, 2]).realize()
     xt = cast(LazyBuffer, X[idxs].lazydata)
-    with Context(FUSE_ARANGE=0): ref_graph, ref_in_degree = _graph_schedule([xt])
-    with Context(FUSE_ARANGE=1): compare_graph, compare_in_degree = _graph_schedule([xt])
+    with Context(FUSE_ARANGE=0): ref_graph, ref_in_degree, _ = _graph_schedule([xt])
+    with Context(FUSE_ARANGE=1): compare_graph, compare_in_degree, _ = _graph_schedule([xt])
     # 1 arange LazyBuffer folds, 1 arange child's kernel changes
     changed = diff_schedule([(ref_graph, ref_in_degree), (compare_graph, compare_in_degree)])
     self.assertEqual(changed, 1)
@@ -30,15 +30,15 @@ class TestDiffSchedule(unittest.TestCase):
     for _ in range(2):
       X = Tensor.randn(10, 10).realize()
       xt = cast(LazyBuffer, X[idxs].lazydata)
-      with Context(FUSE_ARANGE=0): schedules.append(_graph_schedule([xt]))
-      with Context(FUSE_ARANGE=1): schedules.append(_graph_schedule([xt]))
+      with Context(FUSE_ARANGE=0): schedules.append(_graph_schedule([xt])[:-1])
+      with Context(FUSE_ARANGE=1): schedules.append(_graph_schedule([xt])[:-1])
     changed = diff_schedule(schedules)
     self.assertEqual(changed, 1)
 
   def test_no_diff(self):
     a = cast(LazyBuffer, (Tensor([1])+Tensor([2])).lazydata)
-    with Context(FUSE_ARANGE=0): ref_graph, ref_in_degree = _graph_schedule([a])
-    with Context(FUSE_ARANGE=1): compare_graph, compare_in_degree = _graph_schedule([a])
+    with Context(FUSE_ARANGE=0): ref_graph, ref_in_degree, _ = _graph_schedule([a])
+    with Context(FUSE_ARANGE=1): compare_graph, compare_in_degree, _ = _graph_schedule([a])
     changed = diff_schedule([(ref_graph, ref_in_degree), (compare_graph, compare_in_degree)])
     self.assertEqual(changed, 0)
 
@@ -49,8 +49,8 @@ class TestDiffSchedule(unittest.TestCase):
     c1(img).relu().mean().backward()
     assert img.grad is not None and c1.weight.grad is not None
     outs = [cast(LazyBuffer, img.grad.lazydata), cast(LazyBuffer, c1.weight.grad.lazydata)]
-    with Context(FUSE_CONV_BW=0): ref_graph, ref_in_degree = _graph_schedule(outs)
-    with Context(FUSE_CONV_BW=1): compare_graph, compare_in_degree = _graph_schedule(outs)
+    with Context(FUSE_CONV_BW=0): ref_graph, ref_in_degree, _ = _graph_schedule(outs)
+    with Context(FUSE_CONV_BW=1): compare_graph, compare_in_degree, _ = _graph_schedule(outs)
     changed = diff_schedule([(ref_graph, ref_in_degree), (compare_graph, compare_in_degree)])
     # 1 reduceop folds, its child reduceop changes
     self.assertEqual(changed, 1)
