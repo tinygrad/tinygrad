@@ -40,8 +40,13 @@ class UOpRet:
 def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp]]]) -> UOpRet:
   loc, start, matches = ctx
   graphs = [uop_to_json(start)]
-  # TODO: add the rewritten graphs
-  for _ in matches: pass
+  for first, rewritten in matches:
+    graph = {**graphs[-1], **uop_to_json(rewritten)}
+    for k,v in graph.copy().items():
+      if any(x == id(first) for x in v[2]):
+        graph[k] = v[:2]+([id(rewritten) if x == id(first) else x for x in v[2]],)+v[3:]
+      if k == id(first): del graph[k]
+    graphs.append(graph)
   return UOpRet(f"{loc[0].split('/')[-1]}:{loc[1]}", graphs, [str(start), uop_to_prg(start)] if start.op is UOps.SINK else [str(start)])
 
 class Handler(BaseHTTPRequestHandler):

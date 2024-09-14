@@ -107,18 +107,19 @@
   <script>
   var currentUOp = 0;
   var totalUOps = 0;
+  var currentRewrite = 0;
+  var totalRewrites = 0;
   async function main() {
     const ret = await (await fetch("/"+currentUOp)).json()
     const [location, graphs, blocks, rest] = ret;
     totalUOps = rest.length-1;
+    totalRewrites = graphs.length-1;
     // graph
     const g = new dagreD3.graphlib.Graph().setGraph({}).setDefaultEdgeLabel(function() { return {}; });
-    for (ug of graphs) {
-      for ([k,u] of Object.entries(ug)) {
-        g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
-        for (src of u[2]) {
-          g.setEdge(src, k)
-        }
+    for ([k,u] of Object.entries(graphs[currentRewrite])) {
+      g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
+      for (src of u[2]) {
+        g.setEdge(src, k)
       }
     }
     const svg = d3.select("svg");
@@ -137,6 +138,7 @@
     container.innerHTML = "";
     container.appendChild(Object.assign(document.createElement("p"), { textContent: location }));
     blocks.forEach((b) => container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${b}</code>` })))
+    container.appendChild(Object.assign(document.createElement("p"), { textContent: graphs.length > 1 ? `${graphs.length} total rewrites` : "No rewrites" }));
     // uop list
     const uopList = document.querySelector(".container.uop-list");
     uopList.innerHTML = "";
@@ -153,14 +155,28 @@
     });
   }
   document.addEventListener("keydown", async function(event) {
+    // up and down change the UOp from the list
     if (event.key == 'ArrowUp') {
       event.preventDefault()
+      currentRewrite = 0;
       currentUOp = Math.max(0, currentUOp-1)
       main()
     }
     if (event.key == 'ArrowDown') {
       event.preventDefault()
+      currentRewrite = 0;
       currentUOp = Math.min(totalUOps, currentUOp+1)
+      main()
+    }
+    // left and right go through rewrites in a single UOp
+    if (event.key == 'ArrowLeft') {
+      event.preventDefault()
+      currentRewrite = Math.max(0, currentRewrite-1)
+      main()
+    }
+    if (event.key == 'ArrowRight') {
+      event.preventDefault()
+      currentRewrite = Math.min(totalRewrites, currentRewrite+1)
       main()
     }
   })
