@@ -111,8 +111,6 @@ MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PR
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
 FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
 SPLIT_REDUCEOP, AST_REWRITE = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("AST_REWRITE", 1)
-# TODO: eventually this will replace everything
-VIZ = ContextVar("VIZ", 0) or getenv("GRAPHUOPS") # or getenv("SAVE_SCHEDULE")
 
 @dataclass(frozen=True)
 class Metadata:

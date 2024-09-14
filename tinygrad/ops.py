@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import VIZ, pretty_print, prod, getenv, all_same
+from tinygrad.helpers import pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -719,7 +719,7 @@ class PatternMatcher:
 
 # *** tracking pattern matcher ***
 
-TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 0)
+TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 contexts: List[Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp, str]]]] = []
 class TrackedPattenMatcher(PatternMatcher):
@@ -762,7 +762,7 @@ if TRACK_MATCH_STATS:
       with open("/tmp/rewrites.pkl", "wb") as f:
         print(f"rewrote {len(contexts)} graphs and applied {sum(len(x[2]) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
         pickle.dump(contexts, f)
-    if VIZ:
+    if getenv("VIZ"):
       import viz.serve
       viz.serve.main()
 
