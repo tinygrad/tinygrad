@@ -32,6 +32,8 @@ class DSPProgram:
   def __del__(self): os.remove(self.filepath.name)
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+    if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
+
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs) + len(vals)) * 4))],
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
