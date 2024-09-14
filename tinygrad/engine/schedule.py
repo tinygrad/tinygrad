@@ -23,7 +23,7 @@ sys.setrecursionlimit(10000)
 class ScheduleItem:
   ast: UOp
   bufs: Tuple[Buffer, ...]
-  metadata: Optional[List[Metadata]] = None
+  metadata: Optional[Tuple[Metadata, ...]] = None
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
@@ -411,7 +411,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
+    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), tuple(lsi.metadata)))
     for x in graph[lsi]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
