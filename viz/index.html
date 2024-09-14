@@ -4,6 +4,9 @@
   <title>tinygrad viz</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@100..900&display=swap" rel="stylesheet">
   <script src="https://d3js.org/d3.v5.min.js" charset="utf-8"></script>
   <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
   <style>
@@ -14,9 +17,13 @@
     padding: 0;
     width: 100%;
     height: 100%;
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-    font-size: 14px;
     box-sizing: border-box;
+    font-family: "Noto Sans", sans-serif;
+    font-optical-sizing: auto;
+    font-weight: 400px;
+    font-style: normal;
+    font-variation-settings: "wdth" 100;
+    font-size: 14px;
     overflow: hidden;
   }
   .node rect {
@@ -35,14 +42,16 @@
     stroke-width: 1.5px;
   }
   .main-container {
-    display: flex;
-    background-color: #191919;
+    display: grid;
+    grid-template-columns: repeat(14, 1fr);
+    gap: 8px;
+    padding: 12px;
     width: 100%;
     height: 100%;
-    padding: 12px;
+    background-color: #191919;
   }
   .graph {
-    width: 80%;
+    grid-column: span 10;
   }
   .container {
     height: 100%;
@@ -51,11 +60,27 @@
     padding: 8px;
   }
   .metadata {
-    margin-left: 12px;
-    width: 20%;
+    grid-column: span 3;
     display: flex;
     flex-direction: column;
     overflow: auto;
+  }
+  .uop-list {
+    grid-column: span 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .uop-el {
+    margin-bottom: 8px;
+    padding: 8px 0;
+  }
+  .uop-list > .current-uop {
+    color: #EEEEEE;
+  }
+  .uop-list > div {
+    color: #7B7B7B;
+    cursor: pointer;
   }
   .metadata > * + * {
     margin-top: 8px;
@@ -71,6 +96,7 @@
 </head>
 <body>
   <div class="main-container">
+    <div class="container uop-list"></div>
     <div class="container graph">
       <svg>
         <g id="render"></g>
@@ -83,9 +109,8 @@
   var totalUOps = 0;
   async function main() {
     const ret = await (await fetch("/"+currentUOp)).json()
-    console.log(ret)
-    const [location, graphs, blocks, total] = ret;
-    totalUOps = total-1;
+    const [location, graphs, blocks, rest] = ret;
+    totalUOps = rest.length-1;
     // graph
     const g = new dagreD3.graphlib.Graph().setGraph({}).setDefaultEdgeLabel(function() { return {}; });
     for (ug of graphs) {
@@ -112,14 +137,28 @@
     container.innerHTML = "";
     container.appendChild(Object.assign(document.createElement("p"), { textContent: location }));
     blocks.forEach((b) => container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${b}</code>` })))
+    // uop list
+    const uopList = document.querySelector(".container.uop-list");
+    uopList.innerHTML = "";
+    rest.forEach((r, i) => {
+      const div = Object.assign(document.createElement("div"), { textContent: r, className: "uop-el" });
+      if (i === currentUOp) {
+        div.classList.add("current-uop");
+      }
+      div.addEventListener("click", () => {
+        currentUOp = i;
+        main();
+      });
+      uopList.appendChild(div);
+    });
   }
   document.addEventListener("keydown", async function(event) {
-    if (event.key == 'ArrowLeft') {
+    if (event.key == 'ArrowUp') {
       event.preventDefault()
       currentUOp = Math.max(0, currentUOp-1)
       main()
     }
-    if (event.key == 'ArrowRight') {
+    if (event.key == 'ArrowDown') {
       event.preventDefault()
       currentUOp = Math.min(totalUOps, currentUOp+1)
       main()

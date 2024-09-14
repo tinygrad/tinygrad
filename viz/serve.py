@@ -63,7 +63,10 @@ class Handler(BaseHTTPRequestHandler):
       self.send_header("Content-type", "application/json")
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts = pickle.load(f)
-      ret = json.dumps(tuple(asdict(create_graph(contexts[int(self.path.split("/")[-1])])).values())+(len(contexts),)).encode()
+      # TOOD: cleanup this loc_str
+      rest = [f"{x[0][0].split('/')[-1]}:{x[0][1]}" for x in contexts]
+      current_graph = create_graph(contexts[int(self.path.split("/")[-1])])
+      ret = json.dumps(tuple(asdict(current_graph).values())+(rest,)).encode()
     else:
       self.send_response(404)
       ret = b""
