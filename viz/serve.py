@@ -23,12 +23,12 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 
-def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp]]]) -> Tuple[Tuple[str, int], List]:
+def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp]]]) -> Tuple[str, List]:
   loc, start, matches = ctx
   graphs = [uop_to_json(start)]
   # TODO: add the rewritten graphs
   for _ in matches: pass
-  return (loc, graphs)
+  return (f"{loc[0].split('/')[-1]}:{loc[1]}", graphs)
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):

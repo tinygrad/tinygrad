@@ -8,22 +8,19 @@
   <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
   <style>
   html, body {
-    background-color: #111111;
-    color: white;
+    background-color: #191919;
+    color: #EEEEEE;
     margin: 0;
+    padding: 0;
+    width: 100%;
     height: 100%;
     font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
     font-size: 14px;
-  }
-  body {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    box-sizing: border-box;
     overflow: hidden;
   }
   .node rect {
-    stroke: transparent;
-    fill: #fff;
+    stroke: #313131;
     stroke-width: 1.5px;
   }
   .label text {
@@ -34,38 +31,61 @@
     text-align: center;
   }
   .edgePath path {
-    stroke: #777;
+    stroke: #3A3A3A;
     stroke-width: 1.5px;
   }
-  .container {
+  .main-container {
+    display: flex;
+    background-color: #191919;
     width: 100%;
     height: 100%;
-    overflow-x: auto;
-    overflow-y: auto;
+    padding: 12px;
+  }
+  .graph {
+    width: 80%;
+  }
+  .container {
+    height: 100%;
+    background-color: #111111;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .metadata {
+    margin-left: 12px;
+    width: 20%;
+    display: flex;
+  }
+  .metadata > * + * {
+    margin-top: 8px;
   }
   svg {
     width: 100%;
     height: 100%;
-    display: block;
+  }
+  svg * {
+    cursor: default;
   }
   </style>
 </head>
 <body>
-  <div class="container">
-    <svg>
-      <g id="render"></g>
-    </svg>
+  <div class="main-container">
+    <div class="container graph">
+      <svg>
+        <g id="render"></g>
+      </svg>
+    </div>
+    <div class="container metadata"></div>
   </div>
   <script>
   var currentUOp = 0;
   var totalUOps = 0;
   async function main() {
     const ret = await (await fetch("/"+currentUOp)).json()
-    //console.log(ret)
-    const g = new dagreD3.graphlib.Graph().setGraph({}).setDefaultEdgeLabel(function() { return {}; });
-
+    console.log(ret)
     const [location, graphs, total] = ret;
     totalUOps = total-1;
+    // graph
+    const g = new dagreD3.graphlib.Graph().setGraph({}).setDefaultEdgeLabel(function() { return {}; });
     for (ug of graphs) {
       for ([k,u] of Object.entries(ug)) {
         g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
@@ -74,7 +94,6 @@
         }
       }
     }
-
     const svg = d3.select("svg");
     const inner = svg.select("g");
     var zoom = d3.zoom()
@@ -86,6 +105,10 @@
     svg.call(zoom);
     const render = new dagreD3.render();
     render(inner, g);
+    // metadata
+    const container = document.querySelector(".container.metadata");
+    container.innerHTML = "";
+    container.appendChild(Object.assign(document.createElement("p"), { textContent: location }));
   }
   document.addEventListener("keydown", async function(event) {
     if (event.key == 'ArrowLeft') {
