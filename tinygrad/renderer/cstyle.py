@@ -203,7 +203,7 @@ class ClangRenderer(CStyleLanguage):
                  BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   if AMX:
-    tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(0,sz)],[(1,sz)],[(0,sz),(1,sz)]),
+    tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]),
       dtype_in=dt, dtype_out=dt) for dt, sz in [(dt, amx_sz//dt.itemsize) for dt, amx_sz in zip([dtypes.float], [64])]]
 
   def render_vector_prefix(self, dt:DType) -> str:
