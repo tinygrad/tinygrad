@@ -41,6 +41,10 @@
     stroke: #3A3A3A;
     stroke-width: 1.5px;
   }
+  pre {
+    max-height: 40%;
+    overflow-y: auto;
+  }
   .main-container {
     display: grid;
     grid-template-columns: repeat(14, 1fr);
@@ -58,6 +62,9 @@
     background-color: #111111;
     border-radius: 8px;
     padding: 8px;
+  }
+  code {
+    max-height: 100px;
   }
   .metadata {
     grid-column: span 3;
@@ -134,7 +141,7 @@
     const svg = d3.select("svg");
     const inner = svg.select("g");
     var zoom = d3.zoom()
-      .scaleExtent([1, 2])
+      .scaleExtent([0.25, 2])
       .on("zoom", () => {
         const transform = d3.event.transform;
         inner.attr("transform", transform);
