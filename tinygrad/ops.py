@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, DefaultDict
-import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib, inspect
+import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib
 from enum import auto, IntEnum, Enum
 from collections import defaultdict
 from dataclasses import dataclass
@@ -613,7 +613,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
   # no matchers in ops.py, find the real frame
-  while (frm.f_code.co_filename.split('/')[-1] in {"rewrite.py", "ops.py", '<string>'}) and frm.f_back is not None: frm = frm.f_back
+  while (frm.f_code.co_filename.split('/')[-1] in {"ops.py", '<string>'}) and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
 def lines(fn) -> List[str]: return open(fn).readlines()
