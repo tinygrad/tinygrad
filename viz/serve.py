@@ -32,15 +32,21 @@ def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp]]]) -> Tupl
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
+    if self.path == "/favicon.svg":
+      self.send_response(200)
+      self.send_header("Content-type", "image/svg+xml")
+      self.end_headers()
+      with open(os.path.join(os.path.dirname(__file__), "favicon.svg"), "rb") as f:
+        ret = f.read()
     if self.path == "/":
       self.send_response(200)
-      self.send_header('Content-type', 'text/html')
+      self.send_header("Content-type", "text/html")
       self.end_headers()
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
         ret = f.read()
     elif re.search(r'/\d+', self.path):
       self.send_response(200)
-      self.send_header('Content-type', 'application/json')
+      self.send_header("Content-type", "application/json")
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts = pickle.load(f)
       ret = json.dumps(create_graph(contexts[int(self.path.split("/")[-1])])+(len(contexts),)).encode()
