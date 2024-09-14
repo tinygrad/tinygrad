@@ -54,6 +54,8 @@
     margin-left: 12px;
     width: 20%;
     display: flex;
+    flex-direction: column;
+    overflow: auto;
   }
   .metadata > * + * {
     margin-top: 8px;
@@ -82,7 +84,7 @@
   async function main() {
     const ret = await (await fetch("/"+currentUOp)).json()
     console.log(ret)
-    const [location, graphs, total] = ret;
+    const [location, graphs, blocks, total] = ret;
     totalUOps = total-1;
     // graph
     const g = new dagreD3.graphlib.Graph().setGraph({}).setDefaultEdgeLabel(function() { return {}; });
@@ -109,6 +111,7 @@
     const container = document.querySelector(".container.metadata");
     container.innerHTML = "";
     container.appendChild(Object.assign(document.createElement("p"), { textContent: location }));
+    blocks.forEach((b) => container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${b}</code>` })))
   }
   document.addEventListener("keydown", async function(event) {
     if (event.key == 'ArrowLeft') {

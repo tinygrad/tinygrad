@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+from dataclasses import asdict, dataclass
 from typing import Dict, List, Tuple
 import pickle, re, os, sys, time, threading, webbrowser, json
+from tinygrad.codegen.uopgraph import linearize_uop
+from tinygrad.device import Device
+from tinygrad.engine.realize import get_runner
 from tinygrad.helpers import getenv
-from tinygrad.ops import UOp
+from tinygrad.ops import UOp, UOps
 from tinygrad.engine.graph import uops_colors, word_wrap
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -23,12 +27,22 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 
-def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp]]]) -> Tuple[str, List]:
+def uop_to_prg(ast:UOp) -> str:
+  if any(x.op is UOps.SHAPETRACKER for x in ast.parents): return get_runner(Device.DEFAULT, ast).p.src
+  return Device[Device.DEFAULT].renderer.render("test", linearize_uop(ast))
+
+@dataclass(frozen=True)
+class UOpRet:
+  loc: str
+  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]]
+  extra: List[str]
+
+def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp]]]) -> UOpRet:
   loc, start, matches = ctx
   graphs = [uop_to_json(start)]
   # TODO: add the rewritten graphs
   for _ in matches: pass
-  return (f"{loc[0].split('/')[-1]}:{loc[1]}", graphs)
+  return UOpRet(f"{loc[0].split('/')[-1]}:{loc[1]}", graphs, [str(start), uop_to_prg(start)] if start.op is UOps.SINK else [str(start)])
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -49,7 +63,7 @@ class Handler(BaseHTTPRequestHandler):
       self.send_header("Content-type", "application/json")
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts = pickle.load(f)
-      ret = json.dumps(create_graph(contexts[int(self.path.split("/")[-1])])+(len(contexts),)).encode()
+      ret = json.dumps(tuple(asdict(create_graph(contexts[int(self.path.split("/")[-1])])).values())+(len(contexts),)).encode()
     else:
       self.send_response(404)
       ret = b""
