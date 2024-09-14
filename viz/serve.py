@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Optional, Tuple
-import pickle, re, os, sys, time, threading, webbrowser, json
+import pickle, re, os, sys, time, threading, webbrowser, json, difflib
 from tinygrad.codegen.uopgraph import linearize_uop
 from tinygrad.device import Device
 from tinygrad.engine.realize import get_runner
@@ -38,19 +38,20 @@ def uop_to_prg(ast:UOp) -> str:
 @dataclass(frozen=True)
 class UOpRet:
   loc: str
-  graphs: List[Tuple[Dict[int, Tuple[str, str, List[int], str, str]], Optional[str]]]
+  graphs: List[Tuple[Dict[int, Tuple[str, str, List[int], str, str]], Optional[Tuple[str, List[str]]]]]
   extra: List[str]
 
 def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp, str]]]) -> UOpRet:
   loc, start, matches = ctx
-  graphs: List[Tuple[Dict, Optional[str]]] = [(uop_to_json(start), None)]
+  graphs: List[Tuple[Dict, Optional[Tuple[str, List[str]]]]] = [(uop_to_json(start), None)]
   for first, rewritten, pattern in matches:
+    diff = list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))
     graph = {**graphs[-1][0], **uop_to_json(rewritten)}
     for k,v in graph.copy().items():
       if any(x == id(first) for x in v[2]):
         graph[k] = v[:2]+([id(rewritten) if x == id(first) else x for x in v[2]],)+v[3:]
       if k == id(first): del graph[k]
-    graphs.append((graph, pattern))
+    graphs.append((graph, (pattern, diff)))
   return UOpRet(f"{loc[0].split('/')[-1]}:{loc[1]}", graphs, [str(start), uop_to_prg(start)] if start.op is UOps.SINK else [str(start)])
 
 class Handler(BaseHTTPRequestHandler):

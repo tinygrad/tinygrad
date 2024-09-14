@@ -103,6 +103,7 @@
   }
   svg * {
     cursor: default;
+    user-select: none;
   }
   </style>
 </head>
@@ -159,7 +160,14 @@
         if (i === currentRewrite) {
           rewriteDiv.classList.add("active-uop-el");
           if (g[1] != null) {
-            container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${g[1]}</code>`, className: "wrap" }))
+            const [pattern, diff] = g[1]
+            container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${pattern}</code>`, className: "wrap" }));
+            const diffHtml = diff.map((line) => {
+              if (line.startsWith("+")) return `<span style="color: #30A46C;">${line}</span>`;
+              if (line.startsWith("-")) return `<span style="color: #E5484D;">${line}</span>`;
+              return `<span>${line}</span>`;
+            }).join("<br>");
+            container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${diffHtml}</code>`, className: "wrap" }));
           }
         }
         rewriteDiv.addEventListener("click", () => {
