@@ -38,7 +38,6 @@ class LBScheduleItem:
   ast: UOp
   outputs: List[LazyBuffer]
   inputs: List[LazyBuffer]
-  var_vals: Dict[Variable, int] = field(default_factory=dict)
   metadata: List[Metadata] = field(default_factory=list)
   def __hash__(self):
     """The unique identifier of a schedule item in the toposort."""
@@ -159,10 +158,10 @@ reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> LBScheduleItem:
+def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> Tuple[LBScheduleItem, Dict[Variable, int]]:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
   if (out:=outs[0]).op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
-    return LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), outs, [x.base for x in out.srcs])
+    return LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), outs, [x.base for x in out.srcs]), {}
   # create the stores
   var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
   assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
@@ -185,7 +184,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
       from tinygrad.engine.graph import graph_uop
       graph_uop(sink)
       raise e
-  return LBScheduleItem(sink, outs, list(inputs), var_vals, dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))
+  return LBScheduleItem(sink, outs, list(inputs), dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])), var_vals
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -360,11 +359,16 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
 SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
 def _graph_schedule(outs:List[LazyBuffer]) -> \
   Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
-        DefaultDict[LBScheduleItem, int]]:                  # this is the in-degree of the graph
+        DefaultDict[LBScheduleItem, int], # this is the in-degree of the graph
+        Dict[Variable, int]]: # this has all the var values of the schedule
   """create a graph for realizing the outputs"""
   output_groups, realizes, assign_targets = _get_output_groups(outs)
   # preschedule all buffers in realizes
-  prescheduled = [_lower_lazybuffer(group, realizes) for group in output_groups.values()]
+  prescheduled: List[LBScheduleItem] = []
+  var_vals: Dict[Variable, int] = {}
+  for group in output_groups.values():
+    prescheduled.append((ret:=_lower_lazybuffer(group, realizes))[0])
+    var_vals = merge_dicts([var_vals, ret[1]])
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
   graph: DefaultDict[LBScheduleItem, List[LBScheduleItem]] = defaultdict(list)
@@ -388,26 +392,24 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
       with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
     if len(SCHEDULES) == 0: atexit.register(_save)
     SCHEDULES.append((graph, in_degree))
-  return graph, in_degree
+  return graph, in_degree, var_vals
 
 # *** DAG ordering: breadth first search ***
 
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  graph, in_degree = _graph_schedule(outs)
+  graph, in_degree, var_vals = _graph_schedule(outs)
   if getenv("RUN_PROCESS_REPLAY") and getenv("COMPARE_SCHEDULE", 1):
     # NOTE: process relpay needs PYTHONPATH=., remove this once it just pickles LazyBuffers
     with contextlib.suppress(Exception): importlib.import_module("test.external.process_replay.diff_schedule").process_replay(outs, graph, in_degree)
 
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
-  var_vals: Dict[Variable, int] = {}
   kernel_number = GlobalCounters.kernel_count
   while queue:
     lsi = queue.popleft()
     if GRAPH:
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
-    var_vals = merge_dicts([var_vals, lsi.var_vals])
     for out in lsi.outputs: del out.srcs  # can only schedule once
     schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
     for x in graph[lsi]:
