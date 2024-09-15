@@ -30,7 +30,7 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
 def uop_to_prg(ast:UOp) -> str:
   try:
     if any(x.op is UOps.SHAPETRACKER for x in ast.parents): return get_runner(Device.DEFAULT, ast).p.src
-    return Device[Device.DEFAULT].renderer.render("test", linearize_uop(ast, skip_check=True))
+    return Device[Device.DEFAULT].renderer.render("test", linearize_uop(ast))
   except Exception:
     # if we're still rewriting and there's no valid prg yet, it's fine
     return ""
