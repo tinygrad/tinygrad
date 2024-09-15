@@ -1,7 +1,20 @@
 import unittest, math
 from tinygrad import dtypes
-from tinygrad.ops import UOp, UOps, BinaryOps, UnaryOps
+from tinygrad.ops import UOp, UOps, BinaryOps, UnaryOps, exec_alu
 from tinygrad.codegen.uopgraph import full_graph_rewrite
+
+def evaluate_uop(uop, variables):
+  if uop.op == UOps.CONST:
+    return uop.arg
+  elif uop.op == UOps.DEFINE_VAR:
+    var_name = uop.arg[0]
+    return variables[var_name]
+  elif uop.op == UOps.ALU:
+    src_values = [evaluate_uop(src, variables) for src in uop.src]
+    # Use exec_alu to perform the ALU operation
+    return exec_alu(uop.arg, uop.dtype, src_values)
+  else:
+    raise NotImplementedError(f"Unsupported UOp {uop.op}")
 
 class TestGraphRewrite(unittest.TestCase):
   def test_full_graph_rewrite_division_by_zero(self):
@@ -243,6 +256,206 @@ class TestGraphRewrite(unittest.TestCase):
     # Verify that the optimizer simplified the expression to a constant
     assert optimized_div_uop.op == UOps.CONST, "Expected the entire expression to be simplified to a constant."
     assert optimized_div_uop.arg == 1, f"Expected result to be 1, got {optimized_div_uop.arg}"
+
+  @unittest.skip("broken")
+  def test_full_graph_rewrite_modulo_negative_dividend(self):
+    # Define a symbolic variable 'x' with values from -5 to -1
+    x_var_uop = UOp(UOps.DEFINE_VAR, dtype=dtypes.int32,
+                    arg=('x', UOp.const(dtypes.int32, -5), UOp.const(dtypes.int32, -1)))
+
+    # Create constants
+    const_3 = UOp.const(dtypes.int32, 3)
+
+    # Create an expression: x % 3
+    mod_uop = UOp(UOps.ALU, dtype=dtypes.int32, src=(x_var_uop, const_3), arg=BinaryOps.MOD)
+
+    # Create a SINK UOp
+    sink = UOp(UOps.SINK, dtype=dtypes.void, src=(mod_uop,))
+
+    # Apply optimizer
+    optimized_sink = full_graph_rewrite(sink)
+
+    # Evaluate the expression for each value of x from -5 to -1
+    for x_value in range(-5, 0):
+        # Original expression evaluation
+        original_result = x_value % 3
+
+        # Simulate evaluation of the optimized expression
+        optimized_result = evaluate_uop(optimized_sink.src[0], {'x': x_value})
+
+        # Check that the results are the same
+        assert original_result == optimized_result, f"Mismatch for x={x_value}: expected {original_result}, got {optimized_result}"
+
+  @unittest.skip("broken")
+  def test_full_graph_rewrite_division_negative_divisor(self):
+    # Define a symbolic variable 'x' with values from 1 to 5
+    x_var_uop = UOp(UOps.DEFINE_VAR, dtype=dtypes.int32,
+                    arg=('x', UOp.const(dtypes.int32, 1), UOp.const(dtypes.int32, 5)))
+
+    # Create constants
+    const_neg_2 = UOp.const(dtypes.int32, -2)
+
+    # Create an expression: x // -2
+    div_uop = UOp(UOps.ALU, dtype=dtypes.int32, src=(x_var_uop, const_neg_2), arg=BinaryOps.IDIV)
+
+    # Create a SINK UOp
+    sink = UOp(UOps.SINK, dtype=dtypes.void, src=(div_uop,))
+
+    # Apply optimizer
+    optimized_sink = full_graph_rewrite(sink)
+
+    # Evaluate the expression for each value of x from 1 to 5
+    for x_value in range(1, 6):
+        # Original expression evaluation
+        original_result = x_value // -2
+
+        # Simulate evaluation of the optimized expression
+        optimized_result = evaluate_uop(optimized_sink.src[0], {'x': x_value})
+
+        # Check that the results are the same
+        assert original_result == optimized_result, f"Mismatch for x={x_value}: expected {original_result}, got {optimized_result}"
+
+  def test_full_graph_rewrite_modulo_large_divisor(self):
+    # Define 'x' from 1 to 5
+    x_var_uop = UOp(UOps.DEFINE_VAR, dtype=dtypes.int32,
+                    arg=('x', UOp.const(dtypes.int32, 1), UOp.const(dtypes.int32, 5)))
+
+    # Divisor larger than x_max
+    const_10 = UOp.const(dtypes.int32, 10)
+
+    # Create expression: x % 10
+    mod_uop = UOp(UOps.ALU, dtype=dtypes.int32, src=(x_var_uop, const_10), arg=BinaryOps.MOD)
+
+    # Create SINK UOp
+    sink = UOp(UOps.SINK, dtype=dtypes.void, src=(mod_uop,))
+
+    # Apply optimizer
+    optimized_sink = full_graph_rewrite(sink)
+
+    # Check if the optimizer simplified x % 10 to x_var_uop
+    assert optimized_sink.src[0] is x_var_uop
+
+  def test_full_graph_rewrite_division_with_remainder(self):
+    # Define 'x' from 7 to 9
+    x_var_uop = UOp(UOps.DEFINE_VAR, dtype=dtypes.int32,
+                    arg=('x', UOp.const(dtypes.int32, 7), UOp.const(dtypes.int32, 9)))
+
+    # Divisor is 2
+    const_2 = UOp.const(dtypes.int32, 2)
+
+    # Create expression: x // 2
+    div_uop = UOp(UOps.ALU, dtype=dtypes.int32, src=(x_var_uop, const_2), arg=BinaryOps.IDIV)
+
+    # Create SINK UOp
+    sink = UOp(UOps.SINK, dtype=dtypes.void, src=(div_uop,))
+
+    # Apply optimizer
+    optimized_sink = full_graph_rewrite(sink)
+
+    # Evaluate the expression for each value of x from 7 to 9
+    for x_value in range(7, 10):
+      # Original expression evaluation
+      original_result = x_value // 2
+
+      # Simulate evaluation of the optimized expression
+      optimized_result = evaluate_uop(optimized_sink.src[0], {'x': x_value})
+
+      # Check that the results are the same
+      assert original_result == optimized_result, f"Mismatch for x={x_value}: expected {original_result}, got {optimized_result}"
+
+  def test_full_graph_rewrite_complex_mod_div_expression(self):
+    # Define a symbolic variable 'x' with values from 1 to 10
+    x_var_uop = UOp(UOps.DEFINE_VAR, dtype=dtypes.int32,
+                    arg=('x', UOp.const(dtypes.int32, 1), UOp.const(dtypes.int32, 10)))
+
+    # Create constants
+    const_5 = UOp.const(dtypes.int32, 5)
+    const_3 = UOp.const(dtypes.int32, 3)
+    const_2 = UOp.const(dtypes.int32, 2)
+
+    # Create a complex expression: ((x * 5) % 3) // 2
+    mul_uop = UOp(UOps.ALU, dtype=dtypes.int32, src=(x_var_uop, const_5), arg=BinaryOps.MUL)
+    mod_uop = UOp(UOps.ALU, dtype=dtypes.int32, src=(mul_uop, const_3), arg=BinaryOps.MOD)
+    div_uop = UOp(UOps.ALU, dtype=dtypes.int32, src=(mod_uop, const_2), arg=BinaryOps.IDIV)
+
+    # Create a SINK UOp
+    sink = UOp(UOps.SINK, dtype=dtypes.void, src=(div_uop,))
+
+    # Apply optimizer
+    optimized_sink = full_graph_rewrite(sink)
+
+    # Evaluate the expression for each value of x from 1 to 10
+    for x_value in range(1, 11):
+      # Original expression evaluation
+      original_mul = x_value * 5
+      original_mod = original_mul % 3
+      original_result = original_mod // 2
+
+      # Simulate evaluation of the optimized expression
+      optimized_result = evaluate_uop(optimized_sink.src[0], {'x': x_value})
+
+      # Check that the results are the same
+      assert original_result == optimized_result, f"Mismatch for x={x_value}: expected {original_result}, got {optimized_result}"
+
+  def test_full_graph_rewrite_modulo_variable_divisor(self):
+    # Define symbolic variables 'x' and 'y'
+    x_var_uop = UOp(UOps.DEFINE_VAR, dtype=dtypes.int32,
+                    arg=('x', UOp.const(dtypes.int32, 1), UOp.const(dtypes.int32, 10)))
+    y_var_uop = UOp(UOps.DEFINE_VAR, dtype=dtypes.int32,
+                    arg=('y', UOp.const(dtypes.int32, 2), UOp.const(dtypes.int32, 5)))
+
+    # Create an expression: x % y
+    mod_uop = UOp(UOps.ALU, dtype=dtypes.int32, src=(x_var_uop, y_var_uop), arg=BinaryOps.MOD)
+
+    # Create a SINK UOp
+    sink = UOp(UOps.SINK, dtype=dtypes.void, src=(mod_uop,))
+
+    # Apply optimizer
+    optimized_sink = full_graph_rewrite(sink)
+
+    # Evaluate the expression for values of x from 1 to 10 and y from 2 to 5
+    for x_value in range(1, 11):
+      for y_value in range(2, 6):
+        # Avoid division by zero (y should not be zero)
+        if y_value == 0:
+            continue
+
+        # Original expression evaluation
+        original_result = x_value % y_value
+
+        # Simulate evaluation of the optimized expression
+        optimized_result = evaluate_uop(optimized_sink.src[0], {'x': x_value, 'y': y_value})
+
+        # Check that the results are the same
+        assert original_result == optimized_result, f"Mismatch for x={x_value}, y={y_value}: expected {original_result}, got {optimized_result}"
+
+  def test_full_graph_rewrite_modulo_power_of_two(self):
+    # Define 'x' from 0 to 15
+    x_var_uop = UOp(UOps.DEFINE_VAR, dtype=dtypes.int32,
+                    arg=('x', UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, 15)))
+
+    # Divisor is a power of two
+    const_8 = UOp.const(dtypes.int32, 8)
+
+    # Create expression: x % 8
+    mod_uop = UOp(UOps.ALU, dtype=dtypes.int32, src=(x_var_uop, const_8), arg=BinaryOps.MOD)
+
+    # Create SINK UOp
+    sink = UOp(UOps.SINK, dtype=dtypes.void, src=(mod_uop,))
+
+    # Apply optimizer
+    optimized_sink = full_graph_rewrite(sink)
+
+    # Evaluate the expression for x from 0 to 15
+    for x_value in range(0, 16):
+      # Original expression evaluation
+      original_result = x_value % 8
+
+      # Simulate evaluation of the optimized expression
+      optimized_result = evaluate_uop(optimized_sink.src[0], {'x': x_value})
+
+      # Check that the results are the same
+      assert original_result == optimized_result, f"Mismatch for x={x_value}: expected {original_result}, got {optimized_result}"
 
 if __name__ == '__main__':
   unittest.main()
