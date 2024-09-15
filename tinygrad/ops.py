@@ -616,8 +616,7 @@ def get_location() -> Tuple[str, int]:
   while (frm.f_code.co_filename.split('/')[-1] in {"ops.py", '<string>'}) and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
-def lines(fn) -> List[str]:
-  with open(fn) as f: return f.readlines()
+def lines(fn) -> List[str]: return open(fn).readlines()
 
 class UPat(MathTrait):
   __slots__ = ["op", "dtype", "arg", "name", "src"]
@@ -726,7 +725,7 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: str                                  # location that called graph_rewrite
   start_sink: UOp                           # the sink passed into the rewrite
-  rewrite_steps: List[Tuple[UOp, UOp, str]] # all rewrites of sparents. (bofore, after, UPat printable)
+  rewrite_steps: List[Tuple[UOp, UOp, str]] # all rewrites of sparents. (before, after, UPat printable)
 contexts: List[TrackedRewriteContext] = []
 class TrackedPattenMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
