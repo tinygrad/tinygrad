@@ -79,7 +79,6 @@
     overflow-y: auto;
   }
   .uop-el {
-    margin-bottom: 8px;
     padding: 8px 0;
     color: #7B7B7B;
     cursor: pointer;
@@ -92,6 +91,7 @@
   }
   .rewrite-counter {
     display: flex;
+    flex-wrap: wrap;
   }
   .rewrite-counter > * + * {
     margin-left: 4px;
@@ -101,9 +101,10 @@
     white-space: pre-wrap;
   }
   .code-block {
-    max-height: 40%;
+    max-height: 30%;
+    min-height: 30%;
+    background-color: #191919;
     overflow-y: auto;
-    background-color: #FFFFFF09;
     border-radius: 8px;
     padding: 8px;
   }
