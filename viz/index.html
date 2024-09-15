@@ -129,7 +129,7 @@
     totalRewrites = ctx.graphs.length-1;
     // graph
     const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    const [graph, pattern] = ctx.graphs[currentRewrite];
+    const graph = ctx.graphs[currentRewrite];
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
@@ -163,8 +163,8 @@
         const rewriteDiv = Object.assign(document.createElement("div"), { textContent: i, className: "uop-el" });
         if (i === currentRewrite) {
           rewriteDiv.classList.add("active-uop-el");
-          if (g[1] != null) {
-            const [pattern, diff] = g[1]
+          if (i !== 0) {
+            const [pattern, diff] = ctx.diffs[i];
             container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${pattern}</code>`, className: "wrap" }));
             const diffHtml = diff.map((line) => {
               if (line.startsWith("+")) return `<span style="color: #30A46C;">${line}</span>`;

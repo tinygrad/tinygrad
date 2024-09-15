@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from dataclasses import asdict, dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 import pickle, re, os, sys, time, threading, webbrowser, json, difflib
 from tinygrad.codegen.uopgraph import linearize_uop
 from tinygrad.device import Device
@@ -37,21 +37,24 @@ def uop_to_prg(ast:UOp) -> str:
 
 @dataclass(frozen=True)
 class UOpRet:
-  loc: str
-  graphs: List[Tuple[Dict[int, Tuple[str, str, List[int], str, str]], Optional[Tuple[str, List[str]]]]]
-  extra: List[str]
+  loc: str                                                      # location that called graph_rewrite
+  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]] # a seralized version of UOp graphs
+  diffs: List[Tuple[str, List[str]]]                            # the diffs for each rewrite
+  extra: List[str]                                              # these become code blocks in the UI
 
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
-  graphs: List[Tuple[Dict, Optional[Tuple[str, List[str]]]]] = [(uop_to_json(ctx.sink), None)]
+  graphs = [uop_to_json(ctx.sink)]
+  diffs = []
   for first, rewritten, pattern in ctx.rewrites:
     diff = list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))
-    graph = {**graphs[-1][0], **uop_to_json(rewritten)}
+    graph = {**graphs[-1], **uop_to_json(rewritten)}
     for k,v in graph.copy().items():
       if any(x == id(first) for x in v[2]):
         graph[k] = v[:2]+([id(rewritten) if x == id(first) else x for x in v[2]],)+v[3:]
       if k == id(first): del graph[k]
-    graphs.append((graph, (pattern, diff)))
-  return UOpRet(ctx.loc, graphs, [str(ctx.sink), uop_to_prg(ctx.sink)] if ctx.sink.op is UOps.SINK else [str(ctx.sink)])
+    graphs.append(graph)
+    diffs.append((pattern, diff))
+  return UOpRet(ctx.loc, graphs, diffs, [str(ctx.sink), uop_to_prg(ctx.sink)] if ctx.sink.op is UOps.SINK else [str(ctx.sink)])
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
