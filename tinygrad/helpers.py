@@ -305,7 +305,7 @@ def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POIN
 def mv_address(mv:memoryview): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])  # noqa: E501
 @functools.lru_cache(maxsize=None)
-def init_c_struct_t(fields: Tuple[Tuple[str, Type[ctypes._SimpleCData]], ...]):
+def init_c_struct_t(fields: Tuple[Tuple[str, Type[ctypes._SimpleCData], ...], ...]):
   class CStruct(ctypes.Structure):
     _pack_, _fields_ = 1, fields
   return CStruct
