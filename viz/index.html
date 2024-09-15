@@ -139,7 +139,7 @@
     const svg = d3.select("svg");
     const inner = svg.select("g");
     var zoom = d3.zoom()
-      .scaleExtent([0.25, 2])
+      .scaleExtent([0.05, 2])
       .on("zoom", () => {
         const transform = d3.event.transform;
         inner.attr("transform", transform);
