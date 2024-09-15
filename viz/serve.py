@@ -42,8 +42,8 @@ class UOpRet:
   extra: List[str]
 
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
-  graphs: List[Tuple[Dict, Optional[Tuple[str, List[str]]]]] = [(uop_to_json(ctx.start_sink), None)]
-  for first, rewritten, pattern in ctx.rewrite_steps:
+  graphs: List[Tuple[Dict, Optional[Tuple[str, List[str]]]]] = [(uop_to_json(ctx.sink), None)]
+  for first, rewritten, pattern in ctx.rewrites:
     diff = list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))
     graph = {**graphs[-1][0], **uop_to_json(rewritten)}
     for k,v in graph.copy().items():
@@ -51,7 +51,7 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
         graph[k] = v[:2]+([id(rewritten) if x == id(first) else x for x in v[2]],)+v[3:]
       if k == id(first): del graph[k]
     graphs.append((graph, (pattern, diff)))
-  return UOpRet(ctx.loc, graphs, [str(ctx.start_sink), uop_to_prg(ctx.start_sink)] if ctx.start_sink.op is UOps.SINK else [str(ctx.start_sink)])
+  return UOpRet(ctx.loc, graphs, [str(ctx.sink), uop_to_prg(ctx.sink)] if ctx.sink.op is UOps.SINK else [str(ctx.sink)])
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -74,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
       rest = [x.loc for x in contexts]
       current_graph = create_graph(contexts[int(self.path.split("/")[-1])])
-      ret = json.dumps(tuple(asdict(current_graph).values())+(rest,)).encode()
+      ret = json.dumps((asdict(current_graph), rest)).encode()
     else:
       self.send_response(404)
       ret = b""

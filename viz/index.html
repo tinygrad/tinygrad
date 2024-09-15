@@ -124,12 +124,12 @@
   var totalRewrites = 0;
   async function main() {
     const ret = await (await fetch("/"+currentUOp)).json()
-    const [location, graphs, blocks, rest] = ret;
+    const [ctx, rest] = ret;
     totalUOps = rest.length-1;
-    totalRewrites = graphs.length-1;
+    totalRewrites = ctx.graphs.length-1;
     // graph
     const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    const [graph, pattern] = graphs[currentRewrite];
+    const [graph, pattern] = ctx.graphs[currentRewrite];
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
@@ -150,16 +150,16 @@
     // metadata
     const container = document.querySelector(".container.metadata");
     container.innerHTML = "";
-    container.appendChild(Object.assign(document.createElement("pre"), { textContent: location }));
-    blocks.forEach((b) => {
+    container.appendChild(Object.assign(document.createElement("pre"), { textContent: ctx.loc }));
+    ctx.extra.forEach((b) => {
       if (b.length == 0) return;
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${b}</code>`, className: "code-block" });
       container.appendChild(pre);
     })
-    if (graphs.length > 1) {
+    if (ctx.graphs.length > 1) {
       const rewriteCounter = Object.assign(document.createElement("div"), { className: "rewrite-counter" });
       container.appendChild(rewriteCounter)
-      graphs.forEach((g, i) => {
+      ctx.graphs.forEach((g, i) => {
         const rewriteDiv = Object.assign(document.createElement("div"), { textContent: i, className: "uop-el" });
         if (i === currentRewrite) {
           rewriteDiv.classList.add("active-uop-el");
