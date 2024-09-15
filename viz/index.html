@@ -164,7 +164,7 @@
         if (i === currentRewrite) {
           rewriteDiv.classList.add("active-uop-el");
           if (i !== 0) {
-            const [pattern, diff] = ctx.diffs[i];
+            const [pattern, diff] = ctx.diffs[i-1];
             container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${pattern}</code>`, className: "wrap" }));
             const diffHtml = diff.map((line) => {
               if (line.startsWith("+")) return `<span style="color: #30A46C;">${line}</span>`;
