@@ -2,7 +2,7 @@ from __future__ import annotations
 import multiprocessing, decimal, statistics, random
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Union
+from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
 from tinygrad.dtype import DType, ImageDType
@@ -358,7 +358,7 @@ class HWComputeQueue(HWCommandQueue):
 
 class HWCopyQueue(HWCommandQueue):
   @hcq_command
-  def copy(self, dest:Union[HCQBuffer, int], src:Union[HCQBuffer, int], copy_size:int):
+  def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
     """
     Enqueues a copy command to transfer data.
 

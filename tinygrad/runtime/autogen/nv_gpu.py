@@ -52,7 +52,6 @@ class AsDictMixin:
 
 
 class Structure(ctypes.Structure, AsDictMixin):
-    va_addr, size = None, None
 
     def __init__(self, *args, **kwds):
         # We don't want to use positional arguments fill PADDING_* fields
