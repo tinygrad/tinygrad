@@ -6,7 +6,7 @@ from tinygrad.codegen.uopgraph import linearize_uop
 from tinygrad.device import Device
 from tinygrad.engine.realize import get_runner
 from tinygrad.helpers import getenv
-from tinygrad.ops import UOp, UOps
+from tinygrad.ops import TrackedRewriteContext, UOp, UOps
 from tinygrad.engine.graph import uops_colors, word_wrap
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -41,10 +41,9 @@ class UOpRet:
   graphs: List[Tuple[Dict[int, Tuple[str, str, List[int], str, str]], Optional[Tuple[str, List[str]]]]]
   extra: List[str]
 
-def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp, str]]]) -> UOpRet:
-  loc, start, matches = ctx
-  graphs: List[Tuple[Dict, Optional[Tuple[str, List[str]]]]] = [(uop_to_json(start), None)]
-  for first, rewritten, pattern in matches:
+def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
+  graphs: List[Tuple[Dict, Optional[Tuple[str, List[str]]]]] = [(uop_to_json(ctx.start_sink), None)]
+  for first, rewritten, pattern in ctx.rewrite_steps:
     diff = list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))
     graph = {**graphs[-1][0], **uop_to_json(rewritten)}
     for k,v in graph.copy().items():
@@ -52,7 +51,7 @@ def create_graph(ctx:Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp, str]]]) ->
         graph[k] = v[:2]+([id(rewritten) if x == id(first) else x for x in v[2]],)+v[3:]
       if k == id(first): del graph[k]
     graphs.append((graph, (pattern, diff)))
-  return UOpRet(f"{loc[0].split('/')[-1]}:{loc[1]}", graphs, [str(start), uop_to_prg(start)] if start.op is UOps.SINK else [str(start)])
+  return UOpRet(ctx.loc, graphs, [str(ctx.start_sink), uop_to_prg(ctx.start_sink)] if ctx.start_sink.op is UOps.SINK else [str(ctx.start_sink)])
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -72,9 +71,8 @@ class Handler(BaseHTTPRequestHandler):
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
-      with open("/tmp/rewrites.pkl", "rb") as f: contexts = pickle.load(f)
-      # TOOD: unify this loc_str logic
-      rest = [f"{x[0][0].split('/')[-1]}:{x[0][1]}" for x in contexts]
+      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
+      rest = [x.loc for x in contexts]
       current_graph = create_graph(contexts[int(self.path.split("/")[-1])])
       ret = json.dumps(tuple(asdict(current_graph).values())+(rest,)).encode()
     else:
