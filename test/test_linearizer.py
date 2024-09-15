@@ -1190,7 +1190,7 @@ class TestLinearizer(unittest.TestCase):
 
     # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (16,16,16), False, [Variable("start_pos",1,2)*3,4,5])
 
-    # dim too large and not factorable
+    # # dim too large and not factorable
     # with self.assertRaises(AssertionError):
     #   get_grouped_dims("gidx", (23,), (16,16,16), False,)
     # with self.assertRaises(AssertionError):
@@ -1200,7 +1200,7 @@ class TestLinearizer(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       get_grouped_dims("gidx", (2,3,4,5,6), (16,16,16))
 
-    # variable too large
+    # # variable too large
     # with self.assertRaises(AssertionError):
     #   get_grouped_dims("gidx", (Variable("start_pos",0,16),3,4), (16,16,16), False,)
 
@@ -1340,7 +1340,7 @@ class TestLinearizer(unittest.TestCase):
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
       assert store.src[2].dtype.count > 1 and store.src[2].op is not UOps.VECTORIZE
-    # check the children's vins
+    # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
     assert len([u for u in k.uops if u.op is UOps.IF and u.src[-1] == barrier]) == 1

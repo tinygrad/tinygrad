@@ -88,9 +88,6 @@ class CompiledRunner(Runner):
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     global_size, local_size = self.p.launch_dims(var_vals)
-
-    if DEBUG >= 1: print(f"dispatching {self.p.name} with global_size={global_size} and local_size={local_size}")
-
     if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
       from tinygrad.engine.search import optimize_local_size
