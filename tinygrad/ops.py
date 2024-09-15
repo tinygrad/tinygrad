@@ -719,7 +719,7 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
-    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + self.pdict[(uop.op, None)]:
+    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + ([] if uop.arg is None else self.pdict[(uop.op, None)]):
       if not early_reject.issubset(ler): continue
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
@@ -743,7 +743,7 @@ class TrackedPattenMatcher(PatternMatcher):
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     ret = None
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
-    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + self.pdict[(uop.op, None)]:
+    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + ([] if uop.arg is None else self.pdict[(uop.op, None)]):
       st = time.perf_counter()
       if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
