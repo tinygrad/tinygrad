@@ -68,8 +68,6 @@
   }
   .metadata {
     grid-column: span 3;
-    display: flex;
-    flex-direction: column;
     overflow-y: auto;
   }
   .uop-list {
@@ -102,9 +100,8 @@
   }
   .code-block {
     max-height: 30%;
-    min-height: 30%;
-    background-color: #191919;
     overflow-y: auto;
+    background-color: #191919;
     border-radius: 8px;
     padding: 8px;
   }
@@ -127,12 +124,12 @@
   var totalRewrites = 0;
   async function main() {
     const ret = await (await fetch("/"+currentUOp)).json()
-    const [location, graphs, blocks, rest] = ret;
+    const [ctx, rest] = ret;
     totalUOps = rest.length-1;
-    totalRewrites = graphs.length-1;
+    totalRewrites = ctx.graphs.length-1;
     // graph
     const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    const [graph, pattern] = graphs[currentRewrite];
+    const graph = ctx.graphs[currentRewrite];
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
@@ -142,7 +139,7 @@
     const svg = d3.select("svg");
     const inner = svg.select("g");
     var zoom = d3.zoom()
-      .scaleExtent([0.25, 2])
+      .scaleExtent([0.05, 2])
       .on("zoom", () => {
         const transform = d3.event.transform;
         inner.attr("transform", transform);
@@ -153,21 +150,21 @@
     // metadata
     const container = document.querySelector(".container.metadata");
     container.innerHTML = "";
-    container.appendChild(Object.assign(document.createElement("pre"), { textContent: location }));
-    blocks.forEach((b) => {
+    container.appendChild(Object.assign(document.createElement("pre"), { textContent: ctx.loc }));
+    ctx.extra.forEach((b) => {
       if (b.length == 0) return;
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${b}</code>`, className: "code-block" });
       container.appendChild(pre);
     })
-    if (graphs.length > 1) {
+    if (ctx.graphs.length > 1) {
       const rewriteCounter = Object.assign(document.createElement("div"), { className: "rewrite-counter" });
       container.appendChild(rewriteCounter)
-      graphs.forEach((g, i) => {
+      ctx.graphs.forEach((g, i) => {
         const rewriteDiv = Object.assign(document.createElement("div"), { textContent: i, className: "uop-el" });
         if (i === currentRewrite) {
           rewriteDiv.classList.add("active-uop-el");
-          if (g[1] != null) {
-            const [pattern, diff] = g[1]
+          if (i !== 0) {
+            const [pattern, diff] = ctx.diffs[i-1];
             container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${pattern}</code>`, className: "wrap" }));
             const diffHtml = diff.map((line) => {
               if (line.startsWith("+")) return `<span style="color: #30A46C;">${line}</span>`;
