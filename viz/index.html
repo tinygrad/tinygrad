@@ -151,7 +151,7 @@
     const container = document.querySelector(".container.metadata");
     container.innerHTML = "";
     container.appendChild(Object.assign(document.createElement("pre"), { textContent: ctx.loc }));
-    ctx.extra.forEach((b) => {
+    ctx.extra[currentRewrite].forEach((b) => {
       if (b.length == 0) return;
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${b}</code>`, className: "code-block" });
       container.appendChild(pre);
