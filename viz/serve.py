@@ -28,6 +28,7 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   return graph
 
 def uop_to_prg(ast:UOp) -> str:
+  return ""
   try:
     if any(x.op is UOps.SHAPETRACKER for x in ast.parents): return get_runner(Device.DEFAULT, ast).p.src
     return Device[Device.DEFAULT].renderer.render("test", linearize_uop(ast))
