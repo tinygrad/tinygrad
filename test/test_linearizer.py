@@ -297,23 +297,27 @@ class TestLinearizer(unittest.TestCase):
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
-      [Opt(OptOps.GROUPTOP, 0, 3)], # grouping
+      [Opt(OptOps.GROUPTOP, 0, 3)], # grouping one dimension but not the other
       [Opt(OptOps.GROUPTOP, 1, 3)],
       [Opt(OptOps.GROUPTOP, 0, 6)],
       [Opt(OptOps.GROUPTOP, 1, 6)],
-      [Opt(OptOps.GROUPTOP, 0, 6), Opt(OptOps.GROUPTOP, 1, 3)], # group the reduces differently x
+      [Opt(OptOps.GROUPTOP, 0, 6), Opt(OptOps.GROUPTOP, 1, 3)], # group the reduces differently
       [Opt(OptOps.GROUPTOP, 0, 6), Opt(OptOps.GROUPTOP, 1, 12)],
-      [Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 12), Opt(OptOps.UPCAST, 0, 3)],
-      [Opt(OptOps.UNROLL, 0, 3)],
+      [Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 12), Opt(OptOps.UPCAST, 0, 3)], # group the reduces differently with upcasting
+      [Opt(OptOps.UNROLL, 0, 3)], # test unrolling
       [Opt(OptOps.UNROLL, 1, 3)],
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)], # grouping one dimension twice in the same way, should produce two lidxs
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 0, 3)], # grouping one dimension twice in different ways, should produce two lidxs
     ]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
-    for l in lins:
+    for l in lins[:11]:
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+    for l in lins[11:]: assert len([u for u in l.uops if u.op is UOps.SPECIAL]) > 3, \
+      "grouping one dimension multiple time should produce multiple lidxs"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")

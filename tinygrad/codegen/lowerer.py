@@ -35,8 +35,7 @@ def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int
   return ret[::-1] if reverse else ret
 
 # gets the max of the full shape for each
-# produces a new shape with duplicate dimension shape across reduce axes removed
-# ex. reduces=[(1, 2), (3, 4)], full_shape=(4, 4, 16, 8, 16)-> ((4, 4, 16, 8), [0, 1, 2, 3, 2])
+# produces a new shape with duplicate reduce dimensions removed
 def get_reduce_dims(reduces:List[List], full_shape:Tuple) -> Tuple[Tuple[int, ...], List[int]]:
   permute = list(range(len(full_shape)))
   for ax in range(max(len(r) for r in reduces)):
@@ -73,7 +72,7 @@ class IndependentLowerer:
         # define indexes for GPU-like execution
         reduceops = [x for x in ast.parents if x.op is UOps.REDUCE_AXIS and all(i < first_reduce+group_for_reduces for i in x.arg[1])]
         if len(reduceops) > 1:
-          # try to reuse grouped dims across reduceops
+          # try to reuse grouped dims across sequential reduceops
           rdims, p = get_reduce_dims([[i-global_dims for i in r.arg[1]] for r in reduceops], full_shape[global_dims:first_reduce+group_for_reduces])
           lidxs = get_grouped_dims("lidx", rdims, opts.local_max)
           self.idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + [lidxs[i] for i in p]
