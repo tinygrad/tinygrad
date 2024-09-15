@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import UOps, UOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu # noqa F401
+from tinygrad.ops import UOps, UOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu, _check_type_condition # noqa F401
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
@@ -431,6 +431,45 @@ class TestIndexingOrdering(unittest.TestCase):
     uops = linearize_uop(UOp.sink(st1, st0), skip_check=True)
     stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
+
+def _helper_uop_type_check(u,v,k,exp): 
+    got, _ = _check_type_condition(u,v,k)
+    assert got == exp
+
+class TestUopTypeCheck(unittest.TestCase):
+    def test_type_check_single_types(self):
+        _helper_uop_type_check(UOp(UOps.SHAPETRACKER,dtypes.void,(),ShapeTracker.from_shape((2,2))),'dtype','dtypes.void', True) 
+        _helper_uop_type_check(UOp(UOps.SHAPETRACKER,dtypes.void,(),ShapeTracker.from_shape((2,2))),'src','Tuple[]', True) 
+        _helper_uop_type_check(UOp(UOps.SHAPETRACKER,dtypes.void,(),ShapeTracker.from_shape((2,2))),'arg','ShapeTracker', True) 
+        _helper_uop_type_check(UOp(UOps.SHAPETRACKER,dtypes.int32,(),ShapeTracker.from_shape((2,2))),'dtype','dtypes.void', False)
+        _helper_uop_type_check(UOp(UOps.SHAPETRACKER,dtypes.void,(UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0',4)),),ShapeTracker.from_shape((2,2))),'src','Tuple[]', False) 
+        _helper_uop_type_check(UOp(UOps.SHAPETRACKER,dtypes.void,(),None),'arg','ShapeTracker', False)
+
+    def test_type_check_or(self):
+        _helper_uop_type_check(UOp(UOps.SHAPETRACKER,dtypes.void,(),ShapeTracker.from_shape((2,2))),'src','Tuple[UOp,...] | Tuple[]', True) 
+        _helper_uop_type_check(UOp(UOps.SHAPETRACKER,dtypes.void,(),ShapeTracker.from_shape((2,2))),'src','Tuple[UOp] | Tuple[UOp, UOp]', False) 
+
+    def test_type_check_tuple(self):
+        buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+        uop_with_one_buf = UOp(UOps.ALU, dtypes.int32, (buf,), BinaryOps.ADD)
+        uop_with_two_buf = UOp(UOps.ALU, dtypes.int32, (buf, buf), BinaryOps.ADD)
+        _helper_uop_type_check(buf, 'src', 'Tuple[]', True)
+        _helper_uop_type_check(uop_with_one_buf, 'src', 'Tuple[]', False)
+        _helper_uop_type_check(uop_with_two_buf,'src', 'Tuple[UOp, UOp]', True)
+        _helper_uop_type_check(uop_with_one_buf,'src', 'Tuple[UOp, UOp]', False)
+        _helper_uop_type_check(uop_with_two_buf,'src', '(UOp, UOp)', True)
+        _helper_uop_type_check(uop_with_one_buf,'src', '(UOp, UOp)', False)
+        _helper_uop_type_check(uop_with_two_buf,'src', 'Tuple[UOp, ...]', True)
+
+    def test_type_check_complex_types(self):
+        buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+        uop_with_correct_types = UOp(UOps.REDUCE_AXIS, dtypes.int32, (buf,), (BinaryOps.ADD, [1,2,3]))
+        uop_with_incorrect_types_string = UOp(UOps.REDUCE_AXIS, dtypes.int32, (buf,), (BinaryOps.ADD, ["hello"]))
+        # TO DO: fix this case
+        #_helper_uop_type_check(uop_with_one_buf, 'arg', '(UnaryOps | BinaryOps | TernaryOps)', True)
+        _helper_uop_type_check(uop_with_correct_types, 'arg', '(UnaryOps | BinaryOps | TernaryOps, Tuple[int,...] )', True)
+        _helper_uop_type_check(uop_with_incorrect_types_string, 'arg', '(UnaryOps | BinaryOps | TernaryOps, Tuple[int,...] )', False)
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

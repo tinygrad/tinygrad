@@ -1,4 +1,6 @@
 from __future__ import annotations
+from inspect import getsource
+from re import findall
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, DefaultDict
 import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib
 from enum import auto, IntEnum, Enum
@@ -523,22 +525,69 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 # ***** uop type spec *****
 
+def _type_check_using_docs(u): 
+    conditions = _fetch_type_conditions()
+    for k,v in conditions[u.op.name].items(): 
+        passed_type_check, err_message = _check_type_condition(u,k,v)
+        assert passed_type_check, err_message
+
+@functools.lru_cache(None)
+def _fetch_type_conditions(): 
+    # hack to access doc strings for UOps. Python doesn't support access docstrings via __doc__ for Enums.
+    source, conditions = getsource(UOps), {uop.name: {} for uop in list(UOps)}
+    for uop in list(UOps):
+        block = source.split(f"{uop.name} = auto()")[1].strip()
+        if block[:3] != '"""': continue
+        docstring = block.split('"""')[1]
+        for line in docstring.splitlines():
+            matches = findall(r"- \*{2}`(.*)`\*{2}: `(.*)`", line.strip())
+            if matches: conditions[uop.name][matches[0][0]] = matches[0][1] 
+    return conditions
+
+def _check_type_condition(u, k, v): 
+    or_statements = _parse_special_characters(v, '|')
+    if len(or_statements) != 1: return any([_check_type_condition(u, k, x)[0] for x in or_statements]), f"Invalid {k} for {u}. Expected {v}"
+    # there are no more OR so its safe to do this.
+    if v[0] == '(' and v[-1] == ')': return _check_type_condition(u, k, f"Tuple[{v[1:-1]}]")
+    if v[:5] == 'Tuple': 
+        types = _parse_special_characters(v[6:-1], ',') 
+        if types == []: return eval(f"u.{k}") == (), f"Invalid type of {k} for {u}. Expected ()"
+        if types[-1] == '...': types = [types[0] for _ in eval(f"u.{k}")]
+        if len(types) != len(eval(f"u.{k}")): return False, f"Invalid type of {k} for {u}. Expected length to be:{len(types)}"
+        # check type of each index of tuple
+        return all([_check_type_condition(u,f"{k}[{idx}]",val)[0] for idx, val in enumerate(types)]), f"Invalid type of {k} for {u}. Expected {v}"
+    if v == 'None': return eval(f"u.{k}") is None, f"Invalid type of {k} for {u}. Expected None"
+    if k == 'dtype': return eval(f"u.{k}") == eval(v), f"Invalid type of {k} for {u}. Expected {v}"
+    if v == 'ShapeTracker': from tinygrad.shape.shapetracker import ShapeTracker
+    if isinstance(eval(v), Enum): return eval(f"u.{k}") == eval(v), f"Invalid type of {k} for {u}. Expected {v}"
+    return isinstance(eval(f"u.{k}"), eval(v)), f"Invalid type of {k} for {u}. Expected {v}"
+
+def _parse_special_characters(s: str, special_char: str) -> List[str]: 
+    ret, current_part, level = [], '', 0
+    for char in s: 
+        if char == special_char and level == 0: 
+            ret.append(current_part.strip())
+            current_part = ''
+            continue
+        if char in ['[', '(']: level += 1
+        if char in [']', ')']: level -=1
+        current_part += char
+    ret.append(current_part.strip())
+    return ret if ret != [''] else []
+
 def type_verify(uops):
   for u in uops:
+    _type_check_using_docs(u)
     uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
     if uop is UOps.DEFINE_LOCAL: assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}"
     if uop is UOps.DEFINE_GLOBAL: assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}"
     if isinstance(dtype, ImageDType): assert uop is UOps.DEFINE_GLOBAL, f"{uop} can't be image"
-    if uop is UOps.SHAPETRACKER: assert len(src) == 0, f"SHAPETRACKER must only define a ShapeTracker arg {uop}"
-    if uop is UOps.REDUCE_AXIS: assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in BinaryOps, f"invalid arg for REDUCE_AXIS {arg}"
     if uop in {UOps.CONST, UOps.DEFINE_ACC}:
       if uop is UOps.CONST:
         assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
         # TODO: intermediate CONST of Variable is DEFINE_VAR
         assert (isinstance(arg, Variable) and u.src) or (type(arg) is type(dtypes.as_const(arg, dtype))), f"type of {arg=} does not match {dtype}"
       if uop is UOps.DEFINE_ACC: assert dtype != dtypes.void and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
-    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype != dtypes.void # type is the output type, not an arg
-    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
     if uop is UOps.VECTORIZE:
       assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
       assert all(dtype == x.dtype.vec(len(src)) for x in src), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
