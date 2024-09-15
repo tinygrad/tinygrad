@@ -610,7 +610,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       assert len(all_stores) == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       print_uops(_uops)
-      if not CI:
+      if not CI and not getenv("VIZ"):
         from tinygrad.engine.graph import graph_uops
         graph_uops(_uops)
       raise e

@@ -37,24 +37,26 @@ def uop_to_prg(ast:UOp) -> str:
 
 @dataclass(frozen=True)
 class UOpRet:
-  loc: str                                                      # location that called graph_rewrite
-  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]] # a seralized version of UOp graphs
-  diffs: List[Tuple[str, List[str]]]                            # the diffs for each rewrite
-  extra: List[str]                                              # these become code blocks in the UI
+  loc: str                                                            # location that called graph_rewrite
+  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]]       # a seralized version of UOp graphs
+  diffs: List[Tuple[str, List[str]]]                                  # the diffs for each rewrite
+  extra: List[List[str]]                                              # these become code blocks in the UI
 
-def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
-  graphs = [uop_to_json(ctx.sink)]
-  diffs = []
-  for first, rewritten, pattern in ctx.rewrites:
-    diff = list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))
-    graph = {**graphs[-1], **uop_to_json(rewritten)}
-    for k,v in graph.copy().items():
-      if any(x == id(first) for x in v[2]):
-        graph[k] = v[:2]+([id(rewritten) if x == id(first) else x for x in v[2]],)+v[3:]
-      if k == id(first): del graph[k]
-    graphs.append(graph)
-    diffs.append((pattern, diff))
-  return UOpRet(ctx.loc, graphs, diffs, [str(ctx.sink), uop_to_prg(ctx.sink)] if ctx.sink.op is UOps.SINK else [str(ctx.sink)])
+def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[UOp, UOp]) -> UOp:
+  if (u:=cache.get(base)): return u
+  new_srcs = tuple(new if x.key == prev.key else replace_uop(x, prev, new, cache) for x in base.src)
+  ret = cache[base] = base if new_srcs == base.src else UOp(base.op, base.dtype, new_srcs, base.arg)
+  return ret
+
+def create_graph(ctx:TrackedRewriteContext):
+  uops: List[UOp] = [ctx.sink]
+  diffs: List[Tuple[str, List[str]]] = []
+  extra: List[List[str]] = [[str(ctx.sink), uop_to_prg(ctx.sink)] if ctx.sink.op is UOps.SINK else [str(ctx.sink)]]
+  for (first, rewritten, pattern) in ctx.rewrites:
+    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
+    uops.append(new_sink:=replace_uop(uops[-1], first, rewritten, {}))
+    extra.append([str(new_sink), uop_to_prg(new_sink)] if new_sink.op is UOps.SINK else [str(new_sink)])
+  return UOpRet(ctx.loc, list(map(uop_to_json, uops)), diffs, extra)
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
