@@ -43,18 +43,19 @@ class UOpRet:
   diffs: List[Tuple[str, List[str]]]                            # the diffs for each rewrite
   extra: List[str]                                              # these become code blocks in the UI
 
-def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
-  graphs = [uop_to_json(ctx.sink)]
-  diffs = []
-  for first, rewritten, pattern in ctx.rewrites:
-    diff = list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))
-    graph = {**graphs[-1], **uop_to_json(rewritten)}
-    for k,v in graph.copy().items():
-      if any(x == id(first) for x in v[2]):
-        graph[k] = v[:2]+([id(rewritten) if x == id(first) else x for x in v[2]],)+v[3:]
-      if k == id(first): del graph[k]
-    graphs.append(graph)
-    diffs.append((pattern, diff))
+def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[UOp, UOp]) -> UOp:
+  if (u:=cache.get(base)): return u
+  new_srcs = tuple(new if x.key == prev.key else replace_uop(x, prev, new, cache) for x in base.src)
+  ret = cache[base] = base if new_srcs == base.src else UOp(base.op, base.dtype, new_srcs, base.arg)
+  return ret
+
+def create_graph(ctx:TrackedRewriteContext):
+  uops: List[UOp] = [ctx.sink]
+  diffs: List[Tuple[str, List[str]]] = []
+  for (first, rewritten, pattern) in ctx.rewrites:
+    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
+    uops.append(replace_uop(uops[-1], first, rewritten, {}))
+  graphs = list(map(uop_to_json, uops))
   return UOpRet(ctx.loc, graphs, diffs, [str(ctx.sink), uop_to_prg(ctx.sink)] if ctx.sink.op is UOps.SINK else [str(ctx.sink)])
 
 class Handler(BaseHTTPRequestHandler):
