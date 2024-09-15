@@ -54,28 +54,32 @@ class TestFoldingAndReduction(unittest.TestCase):
     const1 = UOp.const(dtypes.int32, 5)
     const2 = UOp.const(dtypes.int32, 10)
     const3 = UOp.const(dtypes.int32, 20)
-    reduce_uop = (const1 + const2 + const3).reduce(BinaryOps.ADD).sink()
-    optimized_sink = full_graph_rewrite(reduce_uop)
+    optimized_sink = apply_rewrite((const1 + const2 + const3).reduce(BinaryOps.ADD))
     expected_sum = 5 + 10 + 20
-    self.assertEqual(optimized_sink.src[0].arg, expected_sum)
+    self.assertEqual(optimized_sink.arg, expected_sum)
 
   def test_full_graph_rewrite_reduction_with_unused_range(self):
     const1 = UOp.const(dtypes.int32, 15)
     const2 = UOp.const(dtypes.int32, 25)
     rng = UOp.range(dtypes.int32, 0, 10, idx=0)
-    reduce_uop = (const1 + const2).reduce(BinaryOps.ADD, rng).sink()
-    optimized_sink = full_graph_rewrite(reduce_uop)
+    optimized_sink = apply_rewrite((const1 + const2).reduce(BinaryOps.ADD, rng))
     expected_sum = 10 * (15 + 25)
-    self.assertEqual(optimized_sink.src[0].arg, expected_sum)
+    self.assertEqual(optimized_sink.arg, expected_sum)
+
+  @unittest.skip("currently failing")
+  def test_full_graph_rewrite_range_reduction(self):
+    simple_range = UOp.range(dtypes.int32, 0, 5, idx=0)
+    optimized_sink = apply_rewrite(simple_range.reduce(BinaryOps.ADD, simple_range))
+    expected_sum = sum(range(5))
+    self.assertEqual(optimized_sink.arg, expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_simple_reduction_folding(self):
     simple_range = UOp.range(dtypes.int32, 0, 4, idx=0)
     add_uop = simple_range + UOp.const(dtypes.int32, 1)
-    reduce_uop = add_uop.reduce(BinaryOps.ADD, simple_range).sink()
-    optimized_sink = full_graph_rewrite(reduce_uop)
+    optimized_sink = apply_rewrite(add_uop.reduce(BinaryOps.ADD, simple_range))
     expected_sum = sum(i + 1 for i in range(4))
-    self.assertEqual(optimized_sink.src[0].arg, expected_sum)
+    self.assertEqual(optimized_sink.arg, expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_nested_loop_collapse(self):
