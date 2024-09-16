@@ -1,4 +1,5 @@
 from __future__ import annotations
+from functools import total_ordering
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
 import functools
@@ -6,7 +7,8 @@ from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
 
-@dataclass(frozen=True)
+@total_ordering
+@dataclass(frozen=True, order=False)
 class DType:
   priority: int  # this determines when things get upcasted
   itemsize: int
@@ -19,11 +21,8 @@ class DType:
     if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
-  #TODO why is this fixing the comparison TypeError bug?
+  def __eq__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) == (x.priority, x.itemsize, x.name, x.fmt, x.count)
   def __lt__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (x.priority, x.itemsize, x.name, x.fmt, x.count)
-  def __le__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) <= (x.priority, x.itemsize, x.name, x.fmt, x.count)
-  def __gt__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) > (x.priority, x.itemsize, x.name, x.fmt, x.count)
-  def __ge__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) >= (x.priority, x.itemsize, x.name, x.fmt, x.count)
 
 # dependent typing?
 @dataclass(frozen=True, repr=False)
@@ -34,12 +33,9 @@ class ImageDType(DType):
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
-# @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
   def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __hash__(self): return super().__hash__()
-  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
-  def __ne__(self, dt): return not (self == dt)
   def __repr__(self): return f"PtrDType({super().__repr__()})"
 
 class dtypes:
