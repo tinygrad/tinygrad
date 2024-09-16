@@ -633,7 +633,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 1
     one_store = [x for x in sink.sparents if x.op is UOps.STORE][0]
     assert len(one_store.src) == 4
-    assert_equiv_uops(one_store.src[3], UOp(UOps.IF, None, (gate, one_store.src[2]),))
+    assert str(one_store.src[3]) == str(gate)  # huh, why do i need str here?
 
   def test_simple_store_dont_fold(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))

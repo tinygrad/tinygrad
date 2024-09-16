@@ -79,7 +79,7 @@ ptx_matcher = PatternMatcher([
     lambda root, alu: UOp(root.op, root.dtype,
       (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
        UOp.const(dtypes.int64, 0))+root.src[2:])),
-  (UPat(UOps.IF, name="root", dtype=None, src=(UPat(UOps.CAST, name="gate"),UPat())),
+  (UPat(UOps.IF, name="root", dtype=dtypes.void, src=(UPat(UOps.CAST, name="gate"),UPat())),
     lambda root, gate: UOp(root.op, root.dtype, (UOp.eq(gate.src[0], UOp.const(dtypes.int, 0)),) + root.src[1:], root.arg)),
 ])
 
@@ -196,8 +196,8 @@ class PTXRenderer(Renderer):
         if src[2].dtype.count > 1:
           kk(f"st{mem_type}.v{src[2].dtype.count}.{self.mem_types[src[2].dtype.scalar()]} [{r[src[0]]}+{src[1].arg}], {{{', '.join(r[src[2]])}}};")
         else:
-          kk(*self.render_store(r[src[0]], r[src[2]], src[2].dtype,
-                                gate=r[src[3]] if len(src)>3 and src[3].op is not UOps.IF else None, ss=mem_type, offset=src[1].arg))
+          kk(*self.render_store(r[src[0]], r[src[2]], src[2].dtype, ss=mem_type, offset=src[1].arg))
+                                # gate=r[src[3]] if len(src)>3 and src[3].op is not UOps.IF else None, ss=mem_type, offset=src[1].arg))
       else:
         if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
         elif uop is UOps.ALU:
