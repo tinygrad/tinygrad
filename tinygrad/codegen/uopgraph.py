@@ -220,6 +220,7 @@ constant_folder = PatternMatcher([
   # VECTORIZE of a single element is just that element
   (UPat(UOps.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # VECTORIZE void is SINK
+  (UPat(UOps.VECTORIZE, dtype=dtypes.void, src=UPat(UOps.BARRIER, name='b')), lambda b: b),
   (UPat(UOps.VECTORIZE, dtype=dtypes.void, name='x'), lambda x: UOp(UOps.SINK, dtypes.void, x.src)),
   # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
   (UPat(UOps.GEP, src=(UPat(UOps.GEP, name='g2'),), name='g1'),
@@ -397,7 +398,10 @@ def do_expand(root:UOp):
   new_srcs = []
   for i,src in enumerate(root.src):
     if src.op is UOps.EXPAND:
-      if expand_args == src.arg:
+      if root.op is UOps.IF and i == 0:
+        # IF means OR
+        new_srcs.append(functools.reduce(operator.__or__, [src.src[0].gep(i) for i in range(expand_sz)]))
+      elif expand_args == src.arg:
         # just remove the expand
         new_srcs.append(src.src[0])
       else:
@@ -494,7 +498,7 @@ def no_vectorized_load_store(ls:UOp):
   idx = ls.src[1]
   if idx.dtype.count == 1: return None
   tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
-  return UOp(UOps.VECTORIZE if ls.dtype != dtypes.void else UOps.SINK, ls.dtype, tuple(tv))
+  return UOp(UOps.VECTORIZE, ls.dtype, tuple(tv))
 
 def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
