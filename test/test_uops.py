@@ -393,6 +393,10 @@ class TestUOpStr(unittest.TestCase):
     uop = UOp(UOps.CONST, dtypes.int, (), arg=Variable("a",1,10))
     assert str(eval(str(uop))) == str(uop)
 
+  def test_vectorized_str(self):
+    vec = UOp(UOps.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
+    assert str(eval(str(vec))) == str(vec)
+
 class TestIndexingOrdering(unittest.TestCase):
   # NOTE: these tests skip type_verify since they add dtype to STORE
   @unittest.expectedFailure

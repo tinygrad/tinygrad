@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
 from tinygrad.ops import UPat, PatternMatcher, graph_rewrite
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, all_same, partition
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -59,17 +59,6 @@ def fold_expanded(ex, buf):
   # remove Nones for STORE
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
-def vectorize_reduce(vec:UOp):
-  if all_same(vec.src): return None  # don't REDUCE the same thing multiple times
-  if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None    # must have the same reduce ranges
-  if not vec.dtype or vec.dtype.scalar() not in {dtypes.float, dtypes.half}: return None  # only fold float/half like this
-  return UOp(UOps.REDUCE, vec.dtype, (UOp(UOps.VECTORIZE, vec.dtype, tuple(x.src[0] for x in vec.src)),) + vec.src[0].src[1:], vec.src[0].arg)
-
-def vectorize_alu(vec:UOp):
-  if not all_same([x.arg for x in vec.src]): return None
-  return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, vec.src[0].src[i].dtype.vec(vec.dtype.count),
-                                             tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
-
 def fix_unfoldable_image_load(load:UOp, buf:UOp):
   if not isinstance(buf.dtype, ImageDType) or load.src[1].dtype.count == 2: return None
   id4 = load.src[1] % 4
@@ -84,15 +73,13 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
-  (UPat(UOps.VECTORIZE, src=UPat((UOps.ALU, UOps.CAST, UOps.BITCAST)), name="vec"), vectorize_alu),
 ])
 
 # ***** mod *****
 
-def _get_add_chain(x:UOp):
-  if x.op is UOps.ALU and x.arg is BinaryOps.ADD:
-    for s in x.src: yield from _get_add_chain(s)
+def _get_chain(x:UOp, sep:BinaryOps):
+  if x.op is UOps.ALU and x.arg is sep:
+    for s in x.src: yield from _get_chain(s, sep)
   else: yield x
 
 def mod_folding(x:UOp, c:int) -> Optional[UOp]:
@@ -102,7 +89,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   if 0 < c and 0 <= x.vmin and (quotient:=x.vmin//c) == x.vmax//c: return x-quotient*c
 
   remainder, something_changed = [], False
-  for u in _get_add_chain(x):
+  for u in _get_chain(x, BinaryOps.ADD):
     if (factor:=u.const_factor())%c != factor:
       remainder.append(u.divides(factor)*(factor%c))
       something_changed = True
@@ -120,7 +107,7 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   if 0 <= x.vmin and x.vmax < c: return x.const_like(0)
 
   quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
-  for u in _get_add_chain(x):
+  for u in _get_chain(x, BinaryOps.ADD):
     if u.op is UOps.CONST:
       # add all const together first
       if rem_const != 0: something_changed = True
@@ -157,7 +144,7 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
 def fold_unrolled_divs(divs:UOp, c:UOp):
   # div pattern in unrolled arange
   # example: (-x+2561)//-4+(-x+2562)//-4+(-x+2560)//-4+(-x+2559)//-4+2559 -> x
-  add_chain, seen_const, ans = list(_get_add_chain(divs)), [], None
+  add_chain, seen_const, ans = list(_get_chain(divs, BinaryOps.ADD)), [], None
   for u in add_chain:
     if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==-len(add_chain)): return None
     # assumed CONST is the last of an ADD
@@ -227,6 +214,13 @@ constant_folder = PatternMatcher([
   # VECTORIZE/GEP: the expander rule allows tuple GEP creation, this is just for removal
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"),
    lambda vec,x: x if x.dtype == vec.dtype and tuple(y.arg[0] for y in vec.src) == tuple(range(len(vec.src))) else None),
+  # reorder ALU/VECTORIZE
+  (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
+   lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, alu.dtype.scalar(), (x,y), alu.arg),)*alu.dtype.count)),
+  # VECTORIZE of a single element is just that element
+  (UPat(UOps.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
+  # VECTORIZE void is SINK
+  (UPat(UOps.VECTORIZE, dtype=dtypes.void, name='x'), lambda x: UOp(UOps.SINK, dtypes.void, x.src)),
   # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
   (UPat(UOps.GEP, src=(UPat(UOps.GEP, name='g2'),), name='g1'),
    lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(g1.dtype.count)))),
@@ -234,8 +228,9 @@ constant_folder = PatternMatcher([
    lambda gep, vec: UOp(UOps.VECTORIZE, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
   (UPat(UOps.GEP, src=(UPat.cvar("c", vec=False),), name="gep"), lambda gep, c: gep.const_like(c.arg)),
   (UPat(UOps.GEP, src=(UPat(UOps.VCONST, name="c"),), name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
-  # GEP add push
-  (UPat(UOps.GEP, None, (UPat.var('x') + UPat.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
+  # GEP add push (non-shrinking only)
+  (UPat(UOps.GEP, None, (UPat.var('x') + UPat.cvar('c1'),), name="gep"),
+   lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg) if len(gep.arg) >= x.dtype.count else None),
   # tensor core with a 0 input is acc
   *[(UPat(UOps.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
   *[(UPat(UOps.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
@@ -365,10 +360,11 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (UPat(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
-  # remove EXPANDs from SINK
+  # remove EXPANDs from SINK/BARRIER
+  (UPat(UOps.BARRIER, src=(UPat((UOps.VECTORIZE, UOps.SINK), name='sink'),)), lambda sink: UOp(UOps.BARRIER, dtypes.void, sink.src)),
   (UPat(UOps.SINK, name="root"),
-   lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND} else (x,) for x in root.src)), root.arg)
-    if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
+    lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND} else (x,) for x in root.src)), root.arg)
+      if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),
@@ -601,6 +597,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       type_verify(_uops)
       assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
       assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
+      assert not any(x.dtype == dtypes.pyint for x in _uops), "can't return UOp with pyint"
       # TODO: this should be enabled, and the valid clause should be removed
       # NOTE: multiple identical stores to DEFINE_LOCAL is okay
       # NOTE: for PTX you have to propogate through some the calculations to determine if it is a store to DEFINE_LOCAL
@@ -609,7 +606,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       assert len(all_stores) == len(dedup(all_stores)), "repeated stores in uops"
     except AssertionError as e:
       print_uops(_uops)
-      if not CI:
+      if not CI and not getenv("VIZ"):
         from tinygrad.engine.graph import graph_uops
         graph_uops(_uops)
       raise e

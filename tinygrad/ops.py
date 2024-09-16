@@ -40,7 +40,7 @@ T = TypeVar("T")
 class MathTrait:
   # required to implement
   def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
-  def const_like(self, b:ConstType|Variable): raise NotImplementedError
+  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): raise NotImplementedError
 
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
@@ -347,6 +347,8 @@ END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.E
 class UOp(MathTrait):
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
+    # TODO: instant check rules here make debugging easier
+    #if op is UOps.ALU and arg is BinaryOps.CMPNE: assert dtype.scalar() == dtypes.bool
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def replace(self, op: Optional[UOps]=None, dtype:Optional[DType]=None, src: Optional[Tuple[UOp,...]]=None, arg:Any=None):
     return UOp(op or self.op, dtype or self.dtype, self.src if src is None else src, self.arg if arg is None else arg)
@@ -384,12 +386,13 @@ class UOp(MathTrait):
     return ret.arg
   def sink(self, *srcs): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
-  def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
+  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return type(self).const(self.dtype, b)
   def cast(self, dtype:DType): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):
     if isinstance(i, int): i = (i,)
-    if i == tuple(range(len(i))) and self.dtype.count == len(i): return self
+    if self.dtype == dtypes.void or (i == tuple(range(len(i))) and self.dtype.count == len(i)): return self
+    assert len(i) >= 1 and all(x < self.dtype.count for x in i), f"bad GEP on {self.dtype}, {i}"
     return UOp(UOps.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   @classmethod
   def load(cls, *src:UOp, dtype:DType): return cls(UOps.LOAD, dtype, src)
@@ -406,9 +409,16 @@ class UOp(MathTrait):
   @classmethod
   def _const(cls, dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls(UOps.DEFINE_VAR, dtype, arg=(b.expr, cls.const(dtypes.int, b.min), cls.const(dtypes.int, cast(int,b.max)))) # type: ignore
+    if isinstance(b, Variable): return cls.define_var(b.expr, dtype, b.min, cast(int, b.max))
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return cls(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
+  @staticmethod
+  def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType):
+    return UOp(UOps.DEFINE_VAR, dtype, arg=(name, UOp.const(dtype, min_val), UOp.const(dtype, max_val)))
+  @staticmethod
+  def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
+    return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start), UOp.const(dtype, end)), arg=(idx,))
+  def reduce(self, op, *rng): return UOp(UOps.REDUCE, self.dtype, (self,) + rng, op)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
   @property  # parents with self
@@ -425,7 +435,7 @@ class UOp(MathTrait):
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
-    if self.op is UOps.VCONST: return math.gcd(*self.arg)
+    if self.op is UOps.VCONST: return functools.reduce(math.gcd, self.arg)
     if self.op is UOps.ALU:
       if self.arg is BinaryOps.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
       if self.arg is BinaryOps.MUL: return self.src[0].arg if self.src[0].op is UOps.CONST else self.src[1].arg if self.src[1].op is UOps.CONST else 1
@@ -464,7 +474,6 @@ class UOp(MathTrait):
         if (s0.vmin >= 0 or s1.vmin >= 0):
           Lmin, Lmax = (s0.vmin, s0.vmax) if s1.vmin >= 0 else (s0.vmax, s0.vmin)
           Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
-          assert math.isnan(Lmax*Rmax) or math.isnan(Lmin*Rmin) or Lmax*Rmax >= Lmin*Rmin, f"{Lmax=}, {Lmin=}, {Rmax=}, {Rmin=}"
           return Lmin*Rmin, Lmax*Rmax
       if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
@@ -664,7 +673,7 @@ class UPat(MathTrait):
   @classmethod
   def store(cls, *src:UPat): return cls(UOps.STORE, dtypes.void, src)
 
-  def const_like(self, b:ConstType|Variable): return type(self).const(self.dtype, b)
+  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return type(self).const(self.dtype, b)
   def alu(self, arg, *src:UPat):
     asrc = (self,)+src
     return type(self)(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype,
@@ -712,7 +721,7 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
-    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + self.pdict[(uop.op, None)]:
+    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + ([] if uop.arg is None else self.pdict[(uop.op, None)]):
       if not early_reject.issubset(ler): continue
       if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
@@ -721,7 +730,12 @@ class PatternMatcher:
 
 TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
-contexts: List[Tuple[Tuple[str, int], UOp, List[Tuple[UOp, UOp, str]]]] = []
+@dataclass(frozen=True)
+class TrackedRewriteContext:
+  loc: str                                  # location that called graph_rewrite
+  sink: UOp                                 # the sink passed into the rewrite
+  rewrites: List[Tuple[UOp, UOp, str]]      # all rewrites of sparents. (before, after, UPat printable)
+contexts: List[TrackedRewriteContext] = []
 class TrackedPattenMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
@@ -731,7 +745,7 @@ class TrackedPattenMatcher(PatternMatcher):
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     ret = None
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
-    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + self.pdict[(uop.op, None)]:
+    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + ([] if uop.arg is None else self.pdict[(uop.op, None)]):
       st = time.perf_counter()
       if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
@@ -742,7 +756,7 @@ class TrackedPattenMatcher(PatternMatcher):
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2: contexts[-1][2].append((uop, ret, p.printable()))
+        if TRACK_MATCH_STATS >= 2: contexts[-1].rewrites.append((uop, ret, p.printable()))
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -760,7 +774,7 @@ if TRACK_MATCH_STATS:
     print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
     if TRACK_MATCH_STATS >= 2:
       with open("/tmp/rewrites.pkl", "wb") as f:
-        print(f"rewrote {len(contexts)} graphs and applied {sum(len(x[2]) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
+        print(f"rewrote {len(contexts)} graphs and applied {sum(len(x.rewrites) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
         pickle.dump(contexts, f)
     if getenv("VIZ"):
       import viz.serve
@@ -782,5 +796,5 @@ class RewriteContext:
       self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x)) else x
     return found
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  if TRACK_MATCH_STATS >= 2: contexts.append((get_location(), sink, []))
+  if TRACK_MATCH_STATS >= 2: contexts.append(TrackedRewriteContext(f"{(l:=get_location())[0].split('/')[-1]}:{l[1]}", sink, []))
   return RewriteContext(pm).rewrite(sink)

@@ -9,7 +9,7 @@ from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, UOps, BinaryOps
 from tinygrad.ops import graph_rewrite
-from tinygrad.codegen.uopgraph import constant_folder, _get_add_chain
+from tinygrad.codegen.uopgraph import constant_folder, _get_chain
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x.render(render_ops, ctx)
@@ -104,7 +104,7 @@ class ShapeTracker:
     ret: List[Optional[sint]] = [None] * len(self.shape)
     idx, valid = self.to_indexed_uops()
     idx = graph_rewrite(idx, pm=constant_folder)
-    for c in _get_add_chain(idx):
+    for c in _get_chain(idx, BinaryOps.ADD):
       if c.op is UOps.RANGE: ret[c.arg] = 1
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[0].op is UOps.RANGE and c.src[1].op is UOps.CONST: ret[c.src[0].arg] = c.src[1].arg
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[1].op is UOps.RANGE and c.src[0].op is UOps.CONST: ret[c.src[1].arg] = c.src[0].arg
