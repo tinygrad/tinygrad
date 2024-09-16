@@ -118,7 +118,7 @@ class TestOps(unittest.TestCase):
       with self.assertRaises(ValueError): method((2, -3, 0))
 
   def test_negative_dims_full(self):
-    with self.assertRaises(ValueError): Tensor.full(-3, 2)
+    with self.assertRaises(ValueError): Tensor.full((-3,), 2)
     with self.assertRaises(ValueError): Tensor.full((2, -3), 4)
     with self.assertRaises(ValueError): Tensor.full((2, -3, 0), 4)
 

@@ -5,16 +5,16 @@ from tinygrad import dtypes, Device
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, KernelInfo
-from tinygrad.ops import NOp, PatternMatcher
+from tinygrad.ops import UPat, PatternMatcher
 from tinygrad.codegen.lowerer import ast_to_uop
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, constant_folder, float4_folding
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
 simple_pm = PatternMatcher([
-  (NOp.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
-  (NOp.cvar('x') + NOp.cvar('y'), lambda x,y: UOp.const(dtypes.float, x.arg+y.arg)),
-  (NOp.cvar('x') * NOp.cvar('y') * NOp.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
-  ((NOp.var('x') + NOp.cvar('c1')) + NOp.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
+  (UPat.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
+  (UPat.cvar('x') + UPat.cvar('y'), lambda x,y: UOp.const(dtypes.float, x.arg+y.arg)),
+  (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
+  ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
 ])
 
 def to_uops_list(u:List[UOp]) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u)))
@@ -66,6 +66,37 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
     #print(Counter(x.op for x in new_sink.sparents))
     #from tinygrad.engine.graph import graph_uops
     #graph_uops(linearize_uop(new_sink))
+
+class TestGraphRewriteConst(unittest.TestCase):
+  def test_gep_const(self):
+    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
+    v2 = v1.gep(1)
+    ret = graph_rewrite(v2, constant_folder)
+    self.assertEqual(ret.dtype, dtypes.int)
+    self.assertEqual(ret.arg, 1)
+
+  def test_gep_const_single(self):
+    v1 = UOp.const(dtypes.int.vec(3), 4)
+    v2 = v1.gep(1)
+    ret = graph_rewrite(v2, constant_folder)
+    self.assertEqual(ret.dtype, dtypes.int)
+    self.assertEqual(ret.arg, 4)
+
+  def test_add_const(self):
+    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
+    v2 = UOp.const(dtypes.int.vec(3), (5,6,7))
+    ret = graph_rewrite(v1+v2, constant_folder)
+    self.assertEqual(ret.op, UOps.VCONST)
+    self.assertEqual(ret.dtype, dtypes.int.vec(3))
+    self.assertEqual(ret.arg, (5,7,9))
+
+  def test_add_const_lose_v(self):
+    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
+    v2 = UOp.const(dtypes.int.vec(3), (2,1,0))
+    ret = graph_rewrite(v1+v2, constant_folder)
+    self.assertEqual(ret.op, UOps.CONST)
+    self.assertEqual(ret.dtype, dtypes.int.vec(3))
+    self.assertEqual(ret.arg, 2)
 
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):
@@ -214,34 +245,34 @@ class TestUOpGraph(unittest.TestCase):
 
     # possible
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
-    xyzw = tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in range(4))
+    xyzw = tuple(UOp(UOps.GEP, dtypes.float, (val,), (i,)) for i in range(4))
     assert_equiv_uops(_test_vec(xyzw), val)
 
     # unaligned
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
-    wzyx = tuple(UOp(UOps.GEP, dtypes.float, (val,), i) for i in reversed(range(4)))
+    wzyx = tuple(UOp(UOps.GEP, dtypes.float, (val,), (i,)) for i in reversed(range(4)))
     self.assertIs(_test_vec(wzyx).op, UOps.VECTORIZE)
 
     # different_size
     val = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
-    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), i) for i in range(2))
+    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), (i,)) for i in range(2))
     self.assertIs(_test_vec(xy+xy).op, UOps.VECTORIZE)
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
-    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), i) for i in range(2))
+    xy = tuple(UOp(UOps.GEP, dtypes.float, (val, ), (i,)) for i in range(2))
     self.assertIs(_test_vec(xy, count=2).op, UOps.VECTORIZE)
 
     # different vals
     val1 = UOp(UOps.LOAD, dtypes.float.vec(2), (d1, idx))
     val2 = UOp(UOps.LOAD, dtypes.float.vec(2), (d2, idx))
-    xy1 = tuple(UOp(UOps.GEP, dtypes.float, (val1, ), i) for i in range(2))
-    xy2 = tuple(UOp(UOps.GEP, dtypes.float, (val2, ), i) for i in range(2))
+    xy1 = tuple(UOp(UOps.GEP, dtypes.float, (val1, ), (i,)) for i in range(2))
+    xy2 = tuple(UOp(UOps.GEP, dtypes.float, (val2, ), (i,)) for i in range(2))
     self.assertIs(_test_vec(xy1+xy2).op, UOps.VECTORIZE)
 
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
       vec = UOp(UOps.VECTORIZE, dtypes.float.vec(vec_size), tuple(consts))
-      uops = to_uops_list([UOp(UOps.GEP, dtypes.float, (vec,), i) for i in range(vec_size)])
+      uops = to_uops_list([UOp(UOps.GEP, dtypes.float, (vec,), (i,)) for i in range(vec_size)])
       for uop, const in zip(uops, consts):
         assert_equiv_uops(uop, const)
 
@@ -399,7 +430,9 @@ class TestUOpGraph(unittest.TestCase):
     # ranges are closed in the right order
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
-def expander_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + reducer)
+def expander_rewrite(sink):
+  sink = graph_rewrite(sink, constant_folder + expander)
+  return graph_rewrite(sink, constant_folder + reducer)
 def float4_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + float4_folding)
 
 class TestExpander(unittest.TestCase):
@@ -571,7 +604,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     sink = float4_rewrite(sink)
     assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 1
     single_load = [x for x in sink.sparents if x.op is UOps.LOAD][0]
-    self.assertListEqual([src.arg for src in single_load.src[2].src], [0.0, 1.0, 2.0, 3.0])
+    self.assertListEqual(list(single_load.src[2].arg), [0.0, 1.0, 2.0, 3.0])
 
   def test_simple_load_dont_fold_different_gated(self):
     buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
