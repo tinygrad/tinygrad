@@ -45,34 +45,11 @@ libdispatch = libsystem
 libdispatch.dispatch_data_create.restype = objc_id
 
 
-def _send_message(
-    sender: CDLL._FuncPtr, instance_ptr: objc_id, selector: str, *args: Any
-):
-    return sender(
-        instance_ptr,
-        libobjc.sel_registerName(selector.encode()),
-        *args,
-    )
-
-
 def send_message(
     ptr: objc_id, selector: str, /, *args: Any, restype: type = objc_id
 ) -> objc_id:
     sender = libobjc.objc_msgSend if restype == objc_id else libobjc["objc_msgSend"]
     return sender(ptr, libobjc.sel_registerName(selector.encode()), *args)
-
-
-def send_message_with_return_type(
-    restype: type, ptr: objc_id, selector: str, *args: Any
-) -> Any:
-    sender = libobjc["objc_msgSend"]
-    sender.restype = bytes
-    return _send_message(
-        sender,
-        ptr,
-        selector,
-        *args,
-    )
 
 
 NSString: objc_id = libobjc.objc_getClass(b"NSString")
