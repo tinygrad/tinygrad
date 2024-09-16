@@ -498,6 +498,8 @@ expander = PatternMatcher([
   # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU
   (UPat(UOps.EXPAND, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
     lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
+  # do reduce (in expander now)
+  (UPat(UOps.REDUCE, name="root"), do_reduce),
 ])
 
 def no_vectorized_load_store(ls:UOp):
@@ -508,6 +510,12 @@ def no_vectorized_load_store(ls:UOp):
   if ls.op is UOps.STORE and idx.dtype.count != ls.src[2].dtype.count: return None
   tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
   return UOp(UOps.VECTORIZE, ls.dtype, tuple(tv))
+
+def no_vectorized_acc(acc:UOp):
+  if acc.dtype.count == 1: return None
+  alus = tuple(UOp(acc.op, acc.dtype.scalar(),
+    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
+  return UOp(UOps.VECTORIZE, acc.dtype, alus)
 
 def no_vectorized_wmma(wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
@@ -530,13 +538,13 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.REDUCE), name="alu"), no_vectorized_alu),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
+  (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
 ])
 
 reducer = PatternMatcher([
-  (UPat(UOps.REDUCE, name="root"), do_reduce),
   (UPat(UOps.CONST, name='c'),
    lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.count) if c.dtype.count > 1 else None),
   (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
