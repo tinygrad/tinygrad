@@ -2,7 +2,7 @@
 import os, sys
 prev_val = os.getenv("TRACK_MATCH_STATS")
 os.environ["TRACK_MATCH_STATS"] = "2"
-os.environ["VIZ"] = "1"
+#os.environ["VIZ"] = "1"
 from tinygrad.helpers import tqdm
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.tensor import Tensor
@@ -14,7 +14,7 @@ from extra.models.resnet import ResNet50
 a = Tensor.randn(32, 32)
 out = a+2
 sched = out.schedule()
-lower_schedule(sched)
+list(lower_schedule(sched))
 uret = create_graph(contexts[0])
 assert uret.loc.split(":")[0] == "schedule.py"
 assert len(uret.graphs) == len(uret.extra) == 1
@@ -26,7 +26,7 @@ mdl = ResNet50()
 img = Tensor.empty(64, 3, 224, 224)
 out = mdl(img)
 sched = out.schedule()
-lower_schedule(sched)
+list(lower_schedule(sched))
 for ctx in tqdm(contexts):
   ret = create_graph(ctx)
   assert len(ret.graphs) == len(ret.extra)
