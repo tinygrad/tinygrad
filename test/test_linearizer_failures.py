@@ -1202,20 +1202,20 @@ class TestLinearizerFailures(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT == "METAL", "failed on METAL CI")
   def test_failure_51(self):
     # from `BEAM=4 NV=1 HALF=1 IGNORE_BEAM_CACHE=1 DEBUG=2 python3 extra/gemm/simple_matmul.py` resulting in program.op_estimate == 0 because of the incorrect counting of gated stores
-    ast = UOp(UOps.SINK, None, arg=None, src=(
-      UOp(UOps.STORE, None, arg=None, src=(
+    ast = UOp(UOps.SINK, dtypes.void, arg=None, src=(
+      UOp(UOps.STORE, dtypes.void, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=0, src=()),
-        UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4096, 4096, 1), strides=(4096, 1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(4096, 4096, 1), strides=(4096, 1, 0), offset=0, mask=None, contiguous=True),)), src=()),
         UOp(UOps.CAST, dtypes.half, arg=None, src=(
           UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (2,)), src=(
             UOp(UOps.CAST, dtypes.float, arg=None, src=(
               UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
                 UOp(UOps.LOAD, dtypes.half, arg=None, src=(
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1, src=()),
-                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4096, 4096, 4096), strides=(4096, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
+                  UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(4096, 4096, 4096), strides=(4096, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
                 UOp(UOps.LOAD, dtypes.half, arg=None, src=(
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
-                  UOp(UOps.SHAPETRACKER, None, arg=ShapeTracker(views=(View(shape=(4096, 4096, 4096), strides=(0, 1, 4096), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
+                  UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(4096, 4096, 4096), strides=(0, 1, 4096), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.LOCAL, axis=1, amt=16), Opt(op=OptOps.PADTO, axis=2, amt=32)]
     kernel = Kernel(ast)
     for opt in opts: kernel.apply_opt(opt)
