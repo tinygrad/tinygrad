@@ -25,7 +25,7 @@ libobjc.sel_registerName.restype = objc_id
 libobjc.sel_registerName.argtypes = [c_char_p]
 
 metal = load_library(
-    os.environ.get("METAL", "/Library/Frameworks/Metal.framework/Metal")
+    os.environ.get("METALLIBPATH", "/Library/Frameworks/Metal.framework/Metal")
 )
 metal.MTLCreateSystemDefaultDevice.restype = objc_id
 
@@ -54,10 +54,15 @@ def send_message(
 
 NSString: objc_id = libobjc.objc_getClass(b"NSString")
 NSConcreteData: objc_id = libobjc.objc_getClass(b"NSConcreteData")
+NSData: objc_id = libobjc.objc_getClass(b"NSData")
 
 
 def to_ns_str(s: str) -> objc_id:
     return send_message(NSString, "stringWithUTF8String:", s.encode())
+
+
+def to_ns_data(bytes: bytes) -> objc_id:
+    return send_message(NSData, "dataWithBytes:length:", bytes, len(bytes))
 
 
 def int_tuple_to_struct(t: tuple[int, ...]):

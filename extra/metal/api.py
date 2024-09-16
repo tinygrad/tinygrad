@@ -1,9 +1,18 @@
+# pyright: reportPrivateUsage=false
 """Emulate the pyobjc API"""
 
-from extra.metal.cdll import metal, send_message, libobjc, objc_id, to_ns_str
+from extra.metal.cdll import (
+    metal,
+    send_message,
+    libobjc,
+    objc_id,
+    to_ns_str,
+    int_tuple_to_struct,
+)
 from extra.metal.cdll import libdispatch as _libdispatch
 from typing import Optional, cast, Any
-from ctypes import c_ulong, string_at
+from ctypes import c_ulong, string_at, POINTER, _Pointer, c_float, Structure
+import numpy as np
 
 
 class MTLCompileOptions:
@@ -30,19 +39,50 @@ class Encoder:
     def copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(self):
         pass
 
-    def setComputePipelineState_(self, pipeline_state: objc_id):
-        send_message(self.ptr, "setComputePipelineState:", pipeline_state)
+    def setComputePipelineState_(self, pipeline_state: "MTLComputePipelineState"):
+        send_message(self.ptr, "setComputePipelineState:", pipeline_state.ptr)
+
+    def setBuffer_offset_atIndex_(self, buffer: "MTLBuffer", offset: int, index: int):
+        send_message(self.ptr, "setBuffer:offset:atIndex:", buffer.ptr, offset, index)
+
+    def dispatchThreadgroups_threadsPerThreadgroup_(
+        self,
+        threadgroups: Structure,
+        threadPerThreadgroup: Structure,
+    ):
+        send_message(
+            self.ptr,
+            "dispatchThreadgroups:threadsPerThreadgroup:",
+            threadgroups,
+            threadPerThreadgroup,
+        )
+
+    def endEncoding(self):
+        send_message(self.ptr, "endEncoding")
 
 
 class CommandBuffer:
     def __init__(self, ptr: objc_id):
         self.ptr = ptr
+        self.error = lambda: None
+    
+    def GPUEndTime(self):
+        return send_message(self.ptr, "GPUEndTime", restype=c_ulong)
+    
+    def GPUStartTime(self):
+        return send_message(self.ptr, "GPUStartTime", restype=c_ulong)
 
     def computeCommandEncoder(self):
         return Encoder(send_message(self.ptr, "computeCommandEncoder"))
 
     def blitCommandEncoder(self):
         return Encoder(send_message(self.ptr, "blitCommandEncoder"))
+
+    def commit(self):
+        send_message(self.ptr, "commit")
+
+    def waitUntilCompleted(self):
+        send_message(self.ptr, "waitUntilCompleted")
 
 
 class MtlQueue:
@@ -114,22 +154,32 @@ class MTLComputePipelineState:
 
 
 class MTLBufferContents:
-    def __init__(self, ptr: objc_id, length: int):
-        self.ptr = ptr
-        self.length = length
+    def __init__(self, buffer: memoryview):
+        self.buffer = buffer
 
-    def as_buffer(self, _: int):
-        return string_at(self.ptr, self.length)
+    def as_buffer(self, *args: Any):
+        return self.buffer
 
 
 class MTLBuffer:
-    def __init__(self, ptr: objc_id):
+    def __init__(
+        self,
+        ptr: objc_id,
+        buffer: memoryview,
+        length: int,
+    ):
         self.ptr = ptr
+        self.buffer = buffer
+        self.length = length
 
     def contents(self):
-        length = cast(int, send_message(self.ptr, "length", restype=c_ulong))
+        return MTLBufferContents(self.buffer)
+
+    def readonly_contents(self):
         contents_ptr = send_message(self.ptr, "contents")
-        return MTLBufferContents(contents_ptr, length)
+        assert contents_ptr.value
+        contents = (c_float * self.length).from_address(contents_ptr.value)
+        return MTLBufferContents(memoryview(contents))
 
 
 class MTLDevice:
@@ -144,12 +194,36 @@ class MTLDevice:
             send_message(self.ptr, "newCommandQueueWithMaxCommandBufferCount:", count)
         )
 
-    def newBufferWithBytesNoCopy_length_options_deallocator_(self):
-        pass
+    def newBufferWithBytesNoCopy_length_options_deallocator_(
+        self,
+        buffer: "_Pointer[c_float]",
+        buffer_memoryview: memoryview,
+        length: int,
+        options: int,
+        deallocator: Any,
+    ):
+        return MTLBuffer(
+            send_message(
+                self.ptr,
+                "newBufferWithBytesNoCopy:length:options:deallocator:",
+                buffer,
+                length,
+                options,
+                deallocator,
+            ),
+            buffer_memoryview,
+            length,
+        )
 
     def newBufferWithLength_options_(self, size: int, mode: int):
-        return MTLBuffer(
-            send_message(self.ptr, "newBufferWithLength:options:", size, mode)
+        num_elem = size // 4
+        buffer = np.zeros(num_elem, dtype=np.float32)
+        return self.newBufferWithBytesNoCopy_length_options_deallocator_(
+            buffer.ctypes.data_as(POINTER(c_float)),
+            buffer.data.cast("B"),
+            num_elem,
+            mode,
+            None,
         )
 
     def newLibraryWithSource_options_error_(
@@ -173,21 +247,21 @@ class MTLDevice:
                 data,
                 error,
             )
-        )
+        ), None
 
     def newComputePipelineStateWithDescriptor_options_reflection_error_(
-        self, descriptor: objc_id, option: int, reflection: Any, error: Any
+        self, descriptor: MetalComputePipelineDescriptor, option: int, reflection: Any, error: Any
     ):
         return MTLComputePipelineState(
             send_message(
                 self.ptr,
                 "newComputePipelineStateWithDescriptor:options:reflection:error:",
-                descriptor,
+                descriptor.ptr,
                 option,
                 reflection,
                 error,
             )
-        )
+        ), None
 
 
 class _Metal:
@@ -196,13 +270,18 @@ class _Metal:
         self.MTLResourceStorageModeShared = 0
         self.MTLComputePipelineDescriptor = MetalComputePipelineDescriptor
 
+        def MTLSize(*args: int):
+            return int_tuple_to_struct(args)
+
+        self.MTLSize = MTLSize
+
     @staticmethod
     def MTLCreateSystemDefaultDevice():
         return MTLDevice(metal.MTLCreateSystemDefaultDevice())
 
     @staticmethod
-    def MTLPipelineOption():
-        pass
+    def MTLPipelineOption(value: int):
+        return value
 
 
 class _LibDispatch:
