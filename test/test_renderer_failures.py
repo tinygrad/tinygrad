@@ -5,7 +5,7 @@ from tinygrad.codegen.uopgraph import full_graph_rewrite, linearize_uop
 from tinygrad.device import Buffer, Device
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.engine.realize import CompiledRunner
-from tinygrad.helpers import dedup, flatten, getenv, prod
+from tinygrad.helpers import dedup, flatten, getenv, prod, CI
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.ops import BinaryOps, UOp, UOps
 from tinygrad.renderer import Program
@@ -28,6 +28,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "uops are for cstyle")
 class TestCStyleFailures(unittest.TestCase):
+  @unittest.skipIf(CI and Device.DEFAULT == "WEBGPU", "upstream wgpu issue: https://github.com/gfx-rs/wgpu/issues/4399")
   def test_inline_const_alu(self):
     a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     b = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 1)
