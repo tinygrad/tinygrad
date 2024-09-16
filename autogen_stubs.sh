@@ -230,6 +230,19 @@ generate_adreno() {
   python3 -c "import tinygrad.runtime.autogen.adreno"
 }
 
+generate_qcom() {
+  clang2py -k cdefstum \
+    extra/dsp/include/ion.h \
+    extra/dsp/include/msm_ion.h \
+    extra/dsp/include/adsprpc_shared.h \
+    extra/dsp/include/remote_default.h \
+    extra/dsp/include/apps_std.h \
+    -o $BASE/qcom_dsp.py
+
+  fixup $BASE/qcom_dsp.py
+  python3 -c "import tinygrad.runtime.autogen.qcom_dsp"
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -239,6 +252,7 @@ elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
+elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "kgsl" ]; then generate_kgsl
