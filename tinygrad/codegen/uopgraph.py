@@ -161,9 +161,14 @@ def fold_valid_image_load(load:UOp, buf:UOp):
   buf, idx, _, valid = load.src
 
   if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT:
-    if idx.src[1] == valid.src[0] and valid.src[1].arg == cast(ImageDType, buf.dtype).shape[0]:
+    if valid.src[1].arg == cast(ImageDType, buf.dtype).shape[0] and idx.src[1].key == valid.src[0].key:
       # valid: A < bound, idx: (..., A) -> okay to drop valid
       return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
+
+    if valid.src[1].arg == 0 and graph_rewrite(valid.src[0]*(-1)-1, constant_folder).key == idx.src[1].key:
+      # valid: A*(-1) < 0, idx: (..., A-1) -> okay to drop valid
+      return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
+
   return None
 
 # ***** transcendental *****
