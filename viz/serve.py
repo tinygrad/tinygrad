@@ -2,11 +2,8 @@
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Tuple
 import pickle, re, os, sys, time, threading, webbrowser, json, difflib
-from tinygrad.codegen.uopgraph import linearize_uop
-from tinygrad.device import Device
-from tinygrad.engine.realize import get_runner
 from tinygrad.helpers import getenv
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps
+from tinygrad.ops import TrackedRewriteContext, UOp
 from tinygrad.engine.graph import uops_colors, word_wrap
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -27,14 +24,6 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 
-def uop_to_prg(ast:UOp) -> str:
-  try:
-    if any(x.op is UOps.SHAPETRACKER for x in ast.parents): return get_runner(Device.DEFAULT, ast).p.src
-    return Device[Device.DEFAULT].renderer.render("test", linearize_uop(ast))
-  except Exception:
-    # if we're still rewriting and there's no valid prg yet, it's fine
-    return ""
-
 @dataclass(frozen=True)
 class UOpRet:
   loc: str                                                            # location that called graph_rewrite
@@ -48,14 +37,14 @@ def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[UOp, UOp]) -> UOp:
   ret = cache[base] = base if new_srcs == base.src else UOp(base.op, base.dtype, new_srcs, base.arg)
   return ret
 
-def create_graph(ctx:TrackedRewriteContext):
+def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   uops: List[UOp] = [ctx.sink]
   diffs: List[Tuple[str, List[str]]] = []
-  extra: List[List[str]] = [[str(ctx.sink), uop_to_prg(ctx.sink)] if ctx.sink.op is UOps.SINK else [str(ctx.sink)]]
+  extra: List[List[str]] = [[str(ctx.sink)]]
   for (first, rewritten, pattern) in ctx.rewrites:
     diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     uops.append(new_sink:=replace_uop(uops[-1], first, rewritten, {}))
-    extra.append([str(new_sink), uop_to_prg(new_sink)] if new_sink.op is UOps.SINK else [str(new_sink)])
+    extra.append([str(new_sink)])
   return UOpRet(ctx.loc, list(map(uop_to_json, uops)), diffs, extra)
 
 class Handler(BaseHTTPRequestHandler):

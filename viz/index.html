@@ -122,8 +122,15 @@
   var totalUOps = 0;
   var currentRewrite = 0;
   var totalRewrites = 0;
+  var cache = {}
   async function main() {
-    const ret = await (await fetch("/"+currentUOp)).json()
+    let ret;
+    if (currentUOp in cache) {
+      ret = cache[currentUOp];
+    } else {
+      ret = await (await fetch("/"+currentUOp)).json();
+      cache[currentUOp] = ret;
+    }
     const [ctx, rest] = ret;
     totalUOps = rest.length-1;
     totalRewrites = ctx.graphs.length-1;
@@ -193,6 +200,7 @@
       }
       div.addEventListener("click", () => {
         currentUOp = i;
+        currentRewrite = 0;
         main();
       });
       uopList.appendChild(div);
