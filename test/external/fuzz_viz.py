@@ -1,7 +1,6 @@
 # ** setup
 import os, sys, time, pickle
-from typing_extensions import List
-
+from typing import List
 prev_val = os.getenv("TRACK_MATCH_STATS")
 os.environ["TRACK_MATCH_STATS"] = "2"
 #os.environ["VIZ"] = "1"
