@@ -161,8 +161,7 @@ class RPCListner(threading.Thread):
         else: res = os.lseek(fd, in_args[0].cast('I')[1], in_args[0].cast('I')[2])
         status = 0 if res >= 0 else res
       elif sc == 0x4010200: # read
-        fd = in_args[0].cast('I')[0]
-        if fd == TINYFD:
+        if (fd:=in_args[0].cast('I')[0]) == TINYFD:
           buf = self.device.binded_lib[self.device.binded_lib_off:self.device.binded_lib_off+in_args[0].cast('I')[1]]
           self.device.binded_lib_off += len(buf)
         else: buf = os.read(fd, in_args[0].cast('I')[1])
