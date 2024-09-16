@@ -154,6 +154,16 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
   if (newx:=div_folding(x,c)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV: return newx.src[0].lt(newx.src[1])
   return cast(UOp, x.divides(g)).lt(c//g) if ((g:=math.gcd(x.const_factor(), c)) > 1) else None
 
+def canonicalize_lt(x:UOp) -> Optional[UOp]:
+  # a0*x0 + a1*x1 + ... < 0 is equivalent to -x0-x1- ... < 0 if xi >= 0 and ai < 0.
+  changed, ret = False, []
+  for u in _get_chain(x, BinaryOps.ADD):
+    # assumed the negative const is the last src of MUL
+    if not (u.op is UOps.ALU and u.arg is BinaryOps.MUL and u.src[1].op is UOps.CONST and u.src[1].arg < 0 and u.src[0].vmin >= 0): return None
+    if u.src[1].arg != -1: changed = True
+    ret.append(u.src[0]*(-1))
+  return functools.reduce(operator.add, ret).lt(0) if changed else None
+
 def fold_unrolled_divs(divs:UOp, c:UOp):
   # div pattern in unrolled arange
   # example: (-x+2561)//-4+(-x+2562)//-4+(-x+2560)//-4+(-x+2559)//-4+2559 -> x
@@ -327,6 +337,8 @@ constant_folder = PatternMatcher([
   # mul add lt
   (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
    lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
+  # canonicalize idx lt 0
+  (UPat.var("x").lt(UPat.cvar("c", vec=False)), lambda x,c: canonicalize_lt(x) if c.arg == 0 and dtypes.is_int(x.dtype) else None),
   # generic lt folding
   (UPat.var("x").lt(UPat.cvar("c", vec=False)),
     lambda x,c: lt_folding(x, c.arg) if 0 < c.arg and dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
