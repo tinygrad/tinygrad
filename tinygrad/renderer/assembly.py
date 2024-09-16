@@ -79,6 +79,8 @@ ptx_matcher = PatternMatcher([
     lambda root, alu: UOp(root.op, root.dtype,
       (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
        UOp.const(dtypes.int64, 0))+root.src[2:])),
+  (UPat(UOps.IF, name="root", dtype=None, src=(UPat(UOps.CAST, name="gate"),UPat())),
+    lambda root, gate: UOp(root.op, root.dtype, (UOp.eq(gate.src[0], UOp.const(dtypes.int, 0)),) + root.src[1:], root.arg)),
 ])
 
 class PTXRenderer(Renderer):
@@ -177,15 +179,16 @@ class PTXRenderer(Renderer):
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.IF:
         kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
-        kk(f"bra ENDIF_{r[src[0]][1:]}_{uops.index(u)};")
-        kk(f"IF_{r[src[0]][1:]}_{uops.index(u)}:")
+        # kk(f"bra ENDIF_{r[src[0]][1:]}_{uops.index(u)};")
+        # kk(f"IF_{r[src[0]][1:]}_{uops.index(u)}:")
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
         kk(self.code_for_op[BinaryOps.ADD](r[src[0]], r[src[0]], "1", dtypes.int, self.types[dtypes.int]),
             self.code_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[src[0]], r[src[0].src[1]], dtypes.int, self.types[dtypes.int]))
         kk(*self.render_bra(f"LOOP_{r[src[0]][1:]}", pred))
       elif uop is UOps.ENDIF:
-        kk(f"ENDIF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
+        kk(f"IF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
+        # kk(f"ENDIF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
       elif uop is UOps.STORE:
         assert src[0].dtype == dtypes.int64, "store isn't int64"
         assert src[1].op is UOps.CONST, f"store isn't const {u}"
