@@ -512,14 +512,11 @@ def no_vectorized_load_store(ls:UOp):
 def no_vectorized_wmma(wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
   if wmma.dtype.count == out_sz: return None
-  print(wmma.arg[6])
-  print([x.dtype for x in wmma.src], out_sz)
   tsrcs = []
   for s,sz in zip(wmma.src, wmma.arg[6]):
     ssz = prod(x[1] for x in sz)
     tsrcs.append([s.gep(tuple(range(grp, grp+ssz))) for grp in range(0, s.dtype.count, ssz)])
   wmmas = [UOp(UOps.WMMA, wmma.dtype.scalar().vec(out_sz), tsrc, wmma.arg) for tsrc in zip(*tsrcs)]
-  print(len(wmmas), out_sz)
   wmma_ex = flatten([[e.gep(i) for e in wmmas] for i in range(out_sz)])
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
