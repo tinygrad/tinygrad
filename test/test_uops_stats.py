@@ -15,6 +15,7 @@ def get_stats(x:Tensor):
   ei = lower_schedule_item(si)
   return ei.prg.op_estimate, ei.prg.mem_estimate
 
+@unittest.skipIf(getenv("WEBGPU"), "no uint8 on WEBGPU")
 class TestMemoryCount(unittest.TestCase):
   def test_add(self):
     a = Tensor.empty(1024, 1024, dtype=dtypes.uint8)

@@ -426,17 +426,19 @@ class TestTypeSpec(unittest.TestCase):
     tested = 0
     for dtype_str, dtype in [
       ("bool", dtypes.bool), ("int8", dtypes.int8), ("int", dtypes.int), ("uint32", dtypes.uint32), ("float32", dtypes.float32)]:
-      np.testing.assert_equal(Tensor(n, dtype=dtype_str).numpy(), Tensor(n, dtype=dtype).numpy())
-      np.testing.assert_equal(Tensor(n).cast(dtype_str).numpy(), Tensor(n).cast(dtype).numpy())
-      if dtype.itemsize == 4:
-        np.testing.assert_equal(Tensor(n).bitcast(dtype_str).numpy(), Tensor(n).bitcast(dtype).numpy())
-        tested += 1
+      if is_dtype_supported(dtype):
+        np.testing.assert_equal(Tensor(n, dtype=dtype_str).numpy(), Tensor(n, dtype=dtype).numpy())
+        np.testing.assert_equal(Tensor(n).cast(dtype_str).numpy(), Tensor(n).cast(dtype).numpy())
+        if dtype.itemsize == 4:
+          np.testing.assert_equal(Tensor(n).bitcast(dtype_str).numpy(), Tensor(n).bitcast(dtype).numpy())
+          tested += 1
     assert tested == 3
 
     with self.assertRaises(AttributeError): Tensor([1, 2, 3], dtype="nonexistdtype")
     with self.assertRaises(AttributeError): Tensor([1, 2, 3], dtype="")
 
-    np.testing.assert_equal(Tensor(n).sum(acc_dtype="int16").numpy(), Tensor(n).sum(acc_dtype=dtypes.int16).numpy())
+    if is_dtype_supported(dtypes.int16):
+      np.testing.assert_equal(Tensor(n).sum(acc_dtype="int16").numpy(), Tensor(n).sum(acc_dtype=dtypes.int16).numpy())
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
@@ -451,7 +453,8 @@ class TestTypeSpec(unittest.TestCase):
 
     _assert_eq(Tensor.eye(0), dtypes.default_float, np.eye(0))
     _assert_eq(Tensor.eye(3), dtypes.default_float, np.eye(3))
-    _assert_eq(Tensor.eye(3, dtype=dtypes.int64), dtypes.int64, np.eye(3))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.eye(3, dtype=dtypes.int64), dtypes.int64, np.eye(3))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.eye(3, dtype=dtypes.float16), dtypes.float16, np.eye(3))
 
@@ -460,20 +463,23 @@ class TestTypeSpec(unittest.TestCase):
     dtypes.default_int, dtypes.default_float = default_int, default_float
 
     _assert_eq(Tensor.zeros((2, 3)), dtypes.default_float, np.zeros((2, 3)))
-    _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.int64), dtypes.int64, np.zeros((2, 3)))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.int64), dtypes.int64, np.zeros((2, 3)))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.float16), dtypes.float16, np.zeros((2, 3)))
 
     _assert_eq(Tensor.ones((2, 3)), dtypes.default_float, np.ones((2, 3)))
-    _assert_eq(Tensor.ones((2, 3), dtype=dtypes.int64), dtypes.int64, np.ones((2, 3)))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.ones((2, 3), dtype=dtypes.int64), dtypes.int64, np.ones((2, 3)))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.ones((2, 3), dtype=dtypes.float16), dtypes.float16, np.ones((2, 3)))
 
     _assert_eq(Tensor.full((2, 3), 3.0), dtypes.default_float, np.full((2, 3), 3.0))
     _assert_eq(Tensor.full((2, 3), 3), dtypes.default_int, np.full((2, 3), 3))
     _assert_eq(Tensor.full((2, 3), True), dtypes.bool, np.full((2, 3), True))
-    _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
-    _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
+      _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
       _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
@@ -493,8 +499,10 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor.arange(5), dtypes.default_int, np.arange(5))
     _assert_eq(Tensor.arange(120), dtypes.default_int, np.arange(120))
     _assert_eq(Tensor.arange(5.0), dtypes.default_float, np.arange(5))
-    _assert_eq(Tensor.arange(5, dtype=dtypes.int16), dtypes.int16, np.arange(5))
-    _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
+    if is_dtype_supported(dtypes.int16):
+      _assert_eq(Tensor.arange(5, dtype=dtypes.int16), dtypes.int16, np.arange(5))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
     _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7))

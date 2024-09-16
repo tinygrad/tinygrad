@@ -414,6 +414,7 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no int64 on WebGPU")
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 

@@ -20,6 +20,7 @@ class CStyleLanguage(Renderer):
   float4: Optional[str] = None
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
+  external_local_bufs:bool = False
   type_map: Dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
@@ -95,6 +96,7 @@ class CStyleLanguage(Renderer):
 
   def render(self, name:str, uops:List[UOp]) -> str:
     kernel = []
+    prefix = []
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
     depth = 1
     def kk(s): kernel.append("  "*depth+s)
@@ -129,7 +131,7 @@ class CStyleLanguage(Renderer):
         kk(f"if ({r[src[3]]}) {{ {rendered_store} }}" if len(src) > 3 and src[3].op is not UOps.IF else rendered_store)
       else:
         if uop is UOps.RANGE:
-          kk(f"for (int {(expr := ssa('ridx',u))} = {r[src[0]]}; {expr} < {r[src[1]]}; {expr}++) {{")
+          kk(f"for ({self.render_dtype(dtype)} {(expr := ssa('ridx',u))} = {r[src[0]]}; {expr} < {r[src[1]]}; {expr}++) {{")
           depth += 1
         elif uop is UOps.ALU:
           # remove parens if ALU types are the same. TODO: can do more here
@@ -142,7 +144,7 @@ class CStyleLanguage(Renderer):
           if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('alu',u)} = {val};")
         elif uop is UOps.SPECIAL:
-          kk(f"int {args[0]} = {self.code_for_workitem[args[0][0]](args[0][-1])}; /* {args[1]} */")
+          kk(f"{self.render_dtype(dtype)} {args[0]} = {self.code_for_workitem[args[0][0]](args[0][-1])}; /* {args[1]} */")
           r[u] = args[0]
         elif uop is UOps.DEFINE_VAR:
           assert args[0] not in seen_vars, f"duplicate variable {args[0]}"
@@ -168,7 +170,10 @@ class CStyleLanguage(Renderer):
           if child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
-          kk(self.render_local(args[0], dtype, args[1]))
+          if self.external_local_bufs:
+            prefix.append(self.render_local(args[0], dtype, args[1]))
+          else:
+            kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_GLOBAL:
           bufs[u] = (nm:=f"data{args}", (dtype, False))
@@ -185,7 +190,7 @@ class CStyleLanguage(Renderer):
         else: raise RuntimeError(f"failed to render {u}")
 
     # NOTE: this relies on bufs dict preserving order
-    return self.render_kernel(name, kernel, list(bufs.values()), uops)
+    return self.render_kernel(name, kernel, list(bufs.values()), uops, prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"

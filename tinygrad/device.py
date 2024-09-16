@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
-from tinygrad.dtype import DType, ImageDType
+from tinygrad.dtype import DType, ImageDType, dtypes
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -48,12 +48,14 @@ class BufferOptions:
   cpu_access: bool = False
   host: bool = False
   nolru: bool = False
+  wgpu_bool: bool = False
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
                initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
+    if dtype == dtypes.bool and device == "WEBGPU": options = BufferOptions(wgpu_bool=True)
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
     if base is None:
       assert offset == 0, "base buffers can't have offset"

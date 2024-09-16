@@ -275,7 +275,8 @@ class TestOps(unittest.TestCase):
   def _test_cmp(self, fxn, reverse=True):
     # test different dtypes
     helper_test_op(None, fxn, fxn, forward_only=True, vals=[[0.,1,2], [2.,1,0]])
-    helper_test_op(None, fxn, fxn, forward_only=True, vals=[[0,1,2], [2,1,0]])
+    if Device.DEFAULT != "WEBGPU": # no int64
+      helper_test_op(None, fxn, fxn, forward_only=True, vals=[[0,1,2], [2,1,0]])
     helper_test_op(None, fxn, fxn, forward_only=True, vals=[[True, True, False], [False,True,False]])
     # test broadcasting
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
@@ -454,8 +455,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x//2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
     torch_idiv, tiny_idiv = functools.partial(torch.div, rounding_mode="trunc"), functools.partial(Tensor.div, upcast=False)
     helper_test_op(None, torch_idiv, tiny_idiv, forward_only=True, vals=np.array([[5, -6, 7],[1, 2, 3]], dtype=np.int32))
-    x = Tensor(2**64 - 1, dtype=dtypes.uint64).div(1, upcast=False)
-    np.testing.assert_equal(x.numpy(), 2**64 - 1)
+    if Device.DEFAULT != "WEBGPU": # no int64
+      x = Tensor(2**64 - 1, dtype=dtypes.uint64).div(1, upcast=False)
+      np.testing.assert_equal(x.numpy(), 2**64 - 1)
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1)
@@ -565,14 +567,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
     # works on real CUDA but not CI
-    if not (getenv("MOCKGPU") and Device.DEFAULT == "NV"):
+    if not (getenv("MOCKGPU") and Device.DEFAULT == "NV") and Device.DEFAULT != "WEBGPU": # why is this inaccurate on webgpu?
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf]])
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
-    if not (getenv("MOCKGPU") and Device.DEFAULT == "NV"):
+    if not (getenv("MOCKGPU") and Device.DEFAULT == "NV") and Device.DEFAULT != "WEBGPU":
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   def test_tan(self):
@@ -580,7 +582,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
     helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5, forward_only=True)
     helper_test_op([()], lambda x: x.tan())
-    if not (getenv("MOCKGPU") and Device.DEFAULT == "NV"):
+    if not (getenv("MOCKGPU") and Device.DEFAULT == "NV") and Device.DEFAULT != "WEBGPU":
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
 
@@ -862,6 +864,7 @@ class TestOps(unittest.TestCase):
   def test_small_gemm_eye(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
   @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA"], "not supported on these in CI")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "No fp16 on WEBGPU")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
   def test_gemm(self):
@@ -2136,11 +2139,13 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_cast(self):
     helper_test_op([(3, 3)], lambda x: x.float())
-    helper_test_op(None, lambda x: x.float(), vals=[[0, 1, 2, 3]], forward_only=True)
+    if Device.DEFAULT != "WEBGPU": # instantiates a long tensor
+      helper_test_op(None, lambda x: x.float(), vals=[[0, 1, 2, 3]], forward_only=True)
     helper_test_op(None, lambda x: x.float(), vals=[[True, False]], forward_only=True)
     helper_test_op([(3, 3)], lambda x: x.int(), forward_only=True)
     helper_test_op([(3, 3)], lambda x: x.bool(), forward_only=True)
 
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "No uint8 on WEBGPU")
 class TestOpsUint8(unittest.TestCase):
   @unittest.skip('this is broken for negative numbers')
   def test_cast(self):

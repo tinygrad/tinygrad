@@ -829,6 +829,7 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(output, input_list)
   '''
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no int64 on WEBGPU")
   def test_index_ind_dtype(self):
     x = Tensor.randn(4, 4)
     # ind_long = torch.randint(4, (4,), dtype=torch.long)

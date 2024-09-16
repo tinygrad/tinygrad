@@ -128,6 +128,7 @@ class TestMovedConstFolding(unittest.TestCase):
   def test_add_padded_one(self):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.int16) and is_dtype_supported(dtypes.int64), "dtype not supported")
   def test_cast_padded(self):
     # NOTE: this is folded due to CAST_BEFORE_VIEW
     _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))

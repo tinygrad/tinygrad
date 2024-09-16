@@ -1,6 +1,7 @@
 import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
+from tinygrad.device import Device
 from tinygrad.helpers import prod
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
@@ -35,7 +36,8 @@ class BatchNorm:
     self.weight: Optional[Tensor] = Tensor.ones(sz) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(sz) if affine else None
 
-    self.num_batches_tracked = Tensor.zeros(1, dtype='long', requires_grad=False)
+    # TODO WEBGPU can't use long...
+    self.num_batches_tracked = Tensor.zeros(1, dtype='long' if Device.DEFAULT != "WEBGPU" else 'int', requires_grad=False)
     if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
 
   def calc_stats(self, x:Tensor) -> Tuple[Tensor, Tensor]:

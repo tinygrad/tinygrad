@@ -1503,6 +1503,7 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(loss, 6)
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
+  @unittest.skipIf(getenv("WEBGPU"), "MNIST uses uint8")
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
     import torch

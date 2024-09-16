@@ -1,17 +1,25 @@
+from PIL import Image
 from pathlib import Path
 from extra.models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
-from tinygrad.nn.state import safe_save
+from tinygrad.nn.state import get_state_dict, safe_save, safe_load, load_state_dict
 from extra.export_model import export_model
 from tinygrad.helpers import getenv, fetch
 import ast
 
 if __name__ == "__main__":
   model = EfficientNet(0)
-  model.load_from_pretrained()
+  dirname = Path(__file__).parent
+  # exporting a model that's loaded from safetensors doesn't work without loading in from safetensors first
+  # loading the state dict from a safetensor file changes the generated kernels
+  if getenv("WEBGPU"):
+    model.load_from_pretrained()
+    safe_save(get_state_dict(model), (dirname / "net.safetensors").as_posix())
+    load_state_dict(model, safe_load(str(dirname / "net.safetensors")))
+  else:
+    model.load_from_pretrained()
   mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else "webgl" if getenv("WEBGL", "") != "" else ""
   prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
-  dirname = Path(__file__).parent
   if getenv("CLANG", "") == "":
     safe_save(state, (dirname / "net.safetensors").as_posix())
     ext = "js" if getenv("WEBGPU", "") != "" or getenv("WEBGL", "") != "" else "json"

@@ -867,6 +867,7 @@ class TestLinearizerFailures(unittest.TestCase):
   def test_failure_35(self): self.test_failure_34(True)
 
   # from world fuzz_linearizer: PYTHONPATH=. METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=1 FUZZ_N=100 FUZZ_NTH=84 python3 ./test/external/fuzz_linearizer.py
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no uint8 on WEBGPU")
   def test_failure_36(self):
     # UOps.UNMUL left after linearize
     ast = UOp(UOps.SINK, dtypes.void, arg=None, src=(

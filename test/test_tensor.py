@@ -483,22 +483,24 @@ class TestMoveTensor(unittest.TestCase):
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
          strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
   def test_to_preserves(self, src, dest, dtype, requires_grad):
-    s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
-    if requires_grad: s.sum().backward()
-    t = s.to(dest)
-    np.testing.assert_equal(s.numpy(), t.numpy())
-    assert s.dtype == t.dtype
-    assert s.requires_grad == t.requires_grad
-    if requires_grad:
-      np.testing.assert_equal(s.grad.numpy(), t.grad.numpy())
+    if is_dtype_supported(dtype):
+      s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
+      if requires_grad: s.sum().backward()
+      t = s.to(dest)
+      np.testing.assert_equal(s.numpy(), t.numpy())
+      assert s.dtype == t.dtype
+      assert s.requires_grad == t.requires_grad
+      if requires_grad:
+        np.testing.assert_equal(s.grad.numpy(), t.grad.numpy())
 
   @given(strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
   def test_shard_preserves(self, dtype, requires_grad):
-    s = Tensor([1, 2, 3], dtype=dtype, requires_grad=requires_grad)
-    t = s.shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"))
-    np.testing.assert_equal(s.numpy(), t.numpy())
-    assert s.dtype == t.dtype
-    assert s.requires_grad == t.requires_grad
+    if is_dtype_supported(dtype):
+      s = Tensor([1, 2, 3], dtype=dtype, requires_grad=requires_grad)
+      t = s.shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"))
+      np.testing.assert_equal(s.numpy(), t.numpy())
+      assert s.dtype == t.dtype
+      assert s.requires_grad == t.requires_grad
 
   @given(strat.sampled_from([d0, d1]))
   def test_same_dev(self, dev):

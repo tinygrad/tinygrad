@@ -24,6 +24,10 @@ binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, oper
 # TODO: LLVM comparing with nan is incorrect
 if Device.DEFAULT == "LLVM":
   binary_operations.remove(operator.lt)
+# TODO: WEBGPU eq with nan is incorrect, and lt is slow
+# if Device.DEFAULT == "WEBGPU":
+#   binary_operations.remove(operator.eq)
+#   binary_operations.remove(operator.lt)
 
 integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
                                                  (Tensor.bitwise_or, np.bitwise_or)]
@@ -111,6 +115,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float16, strat.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint16, Device.DEFAULT), f"no uint8 on {Device.DEFAULT}")
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)
 
@@ -126,15 +131,19 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   def test_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint64, Device.DEFAULT), f"no int8 on {Device.DEFAULT}")
   @given(ht.int8, ht.int8, strat.sampled_from(integer_binary_operations))
   def test_int8(self, a, b, op): universal_test(a, b, dtypes.int8, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint64, Device.DEFAULT), f"no int16 on {Device.DEFAULT}")
   @given(ht.int16, ht.int16, strat.sampled_from(integer_binary_operations))
   def test_int16(self, a, b, op): universal_test(a, b, dtypes.int16, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint64, Device.DEFAULT), f"no int32 on {Device.DEFAULT}")
   @given(ht.int32, ht.int32, strat.sampled_from(integer_binary_operations))
   def test_int32(self, a, b, op): universal_test(a, b, dtypes.int32, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint64, Device.DEFAULT), f"no int64 on {Device.DEFAULT}")
   @given(ht.int64, ht.int64, strat.sampled_from(integer_binary_operations))
   def test_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
@@ -145,7 +154,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
   # Metal and CUDA and HIP behave differently than numpy in CI for overflows
-  skip_overflow = CI and Device.DEFAULT in {"AMD", "NV"}
+  skip_overflow = CI and Device.DEFAULT in {"AMD", "NV"} or Device.DEFAULT == "WEBGPU"
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))

@@ -27,7 +27,7 @@ def st_shape(draw) -> tuple[int, ...]:
   return s
 
 def tensors_for_shape(s:tuple[int, ...]) -> tuple[torch.tensor, Tensor]:
-  x = np.arange(prod(s)).reshape(s)
+  x = np.arange(prod(s), dtype=np.int32).reshape(s)
   return torch.from_numpy(x), Tensor(x)
 
 def apply(tor, ten, tor_fn, ten_fn=None):

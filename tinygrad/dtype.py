@@ -6,7 +6,7 @@ from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class DType:
   priority: int  # this determines when things get upcasted
   itemsize: int
@@ -18,7 +18,12 @@ class DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
+  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
+  #TODO why is this fixing the comparison TypeError bug?
+  def __lt__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (x.priority, x.itemsize, x.name, x.fmt, x.count)
+  def __le__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) <= (x.priority, x.itemsize, x.name, x.fmt, x.count)
+  def __gt__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) > (x.priority, x.itemsize, x.name, x.fmt, x.count)
+  def __ge__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) >= (x.priority, x.itemsize, x.name, x.fmt, x.count)
 
 # dependent typing?
 @dataclass(frozen=True, repr=False)
