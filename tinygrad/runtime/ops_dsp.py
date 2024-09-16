@@ -8,7 +8,7 @@ from tinygrad.renderer.cstyle import DSPRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
-def rpc_sc(method=0, ins=0, outs=0, fd=0): return (method << 24) | (ins << 16) | (outs << 8)
+def rpc_sc(method=0, ins=0, outs=0, fds=0): return (method << 24) | (ins << 16) | (outs << 8) | fds
 def rpc_prep_args(ins=None, outs=None, in_fds=None):
   ins, outs, in_fds = ins or list(), outs or list(), in_fds or list()
 
@@ -37,7 +37,7 @@ class DSPProgram:
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs) + len(vals)) * 4))],
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
-    self.device.exec_lib(self.filepath.name, (2<<24) | (1<<16) | (1<<8) | len(bufs), pra, fds, attrs)
+    self.device.exec_lib(self.filepath.name, rpc_sc(method=2, ins=1, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
 
 class DSPBuffer:
