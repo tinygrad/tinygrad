@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import unittest
 
 from tinygrad import Device
