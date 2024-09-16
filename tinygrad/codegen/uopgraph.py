@@ -232,6 +232,8 @@ constant_folder = PatternMatcher([
   # lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, alu.dtype.scalar(), (x,y), alu.arg),)*alu.dtype.count)),
   # VECTORIZE of a single element is just that element
   (UPat(UOps.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
+  # VECTORIZE void is SINK
+  (UPat(UOps.VECTORIZE, dtype=dtypes.void, name='x'), lambda x: UOp(UOps.SINK, dtypes.void, x.src)),
   # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
   (UPat(UOps.GEP, src=(UPat(UOps.GEP, name='g2'),), name='g1'),
    lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(g1.dtype.count)))),
