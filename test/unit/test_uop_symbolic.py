@@ -170,6 +170,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mul_2(self):
     self.helper_test_variable(Variable("a", 0, 8)*2, 0, 16, "(a*2)")
+    self.helper_test_variable(2*Variable("a", 0, 8), 0, 16, "(a*2)")
 
   def test_div_1(self):
     self.helper_test_variable(Variable("a", 0, 8)//1, 0, 8, "a")
@@ -440,6 +441,9 @@ class TestSymbolic(unittest.TestCase):
     alu0 = -gidx
     unrolled_div = (alu0+2559)//-2+(alu0+2560)//-2+2559
     self.helper_test_variable(unrolled_div, 0, 2559, "gidx")
+
+  def test_two_level_mul(self):
+    self.helper_test_variable((2*Variable("a", 0, 8))*Variable("b", 0, 8), 0, 128, "(a*b*2)")
 
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
