@@ -232,6 +232,8 @@ constant_folder = PatternMatcher([
    lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, alu.dtype.scalar(), (x,y), alu.arg),)*alu.dtype.count)),
   # VECTORIZE of a single element is just that element
   (UPat(UOps.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
+  # VECTORIZE void is SINK
+  (UPat(UOps.VECTORIZE, dtype=dtypes.void, name='x'), lambda x: UOp(UOps.SINK, dtypes.void, x.src)),
   # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
   (UPat(UOps.GEP, src=(UPat(UOps.GEP, name='g2'),), name='g1'),
    lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(g1.dtype.count)))),
@@ -532,7 +534,7 @@ def no_vectorized_wmma(wmma:UOp):
   wmma_ex = flatten([[e.gep(i) for e in wmmas] for i in range(out_sz)])
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
-def group_load_store(ls:UOp, x:UOp, c:UOp, buf:UOp) -> UOp:
+def group_load_store(ls:UOp, x:UOp, c:UOp, buf:UOp) -> Optional[UOp]:
   if buf.dtype != PtrDType(dtypes.float) and buf.dtype != PtrDType(dtypes.half) and not isinstance(buf.dtype, ImageDType): return None
   is_image = isinstance(buf.dtype, ImageDType)
   lengths = [4] if is_image else ([8,4,2] if buf.dtype == PtrDType(dtypes.half) and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
@@ -558,11 +560,6 @@ def group_load_store(ls:UOp, x:UOp, c:UOp, buf:UOp) -> UOp:
   return UOp(UOps.VECTORIZE, ls.dtype, tuple(outputs[x] for x in c.arg))
 
 gls = PatternMatcher([
-  # load/store expand
-  (UPat((UOps.LOAD, UOps.STORE), src=(UPat.var('buf'), UPat(UOps.VECTORIZE, src=UPat.var('x')) + UPat(UOps.VCONST, name='c')),
-        name="ls", allow_any_len=True), group_load_store),
-  (UPat((UOps.LOAD, UOps.STORE), src=(UPat.var('buf'), UPat(UOps.VCONST, name='c')),
-        name="ls", allow_any_len=True), lambda buf,c,ls: group_load_store(ls, UOp.const(c.dtype.scalar(), 0), c, buf)),
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
   # push all GEPs through ALUs
   # this retains the old REDUCE behavior
@@ -571,6 +568,14 @@ gls = PatternMatcher([
   (UPat(UOps.GEP, src=(UPat(UOps.REDUCE, name='red'),), name='gep'),
    lambda gep,red: UOp(UOps.REDUCE, gep.dtype, (red.src[0].gep(gep.arg),)+red.src[1:], red.arg)),
 ])
+
+gls4 = PatternMatcher([
+  # load/store expand
+  (UPat((UOps.LOAD, UOps.STORE), src=(UPat.var('buf'), UPat(UOps.VECTORIZE, src=UPat.var('x')) + UPat(UOps.VCONST, name='c')),
+        name="ls", allow_any_len=True), group_load_store),
+  (UPat((UOps.LOAD, UOps.STORE), src=(UPat.var('buf'), UPat(UOps.VCONST, name='c')),
+        name="ls", allow_any_len=True), lambda buf,c,ls: group_load_store(ls, UOp.const(c.dtype.scalar(), 0), c, buf)),
+])+gls
 
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), do_reduce),
@@ -622,7 +627,10 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   linearize_cnt += 1
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
     sink = graph_rewrite(sink, folder+(expander+float4_folding if opts is not None and opts.supports_float4 else expander))
-    sink = graph_rewrite(sink, folder+gls)
+    if opts is not None and opts.supports_float4:
+      sink = graph_rewrite(sink, folder+gls4)
+    else:
+      sink = graph_rewrite(sink, folder+gls)
     if getenv("DO_REDUCE", 1):
       sink = graph_rewrite(sink, folder+reducer)
 
