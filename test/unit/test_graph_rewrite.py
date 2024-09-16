@@ -152,6 +152,42 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
     for x_value in range(1, 6):
       self.assertEqual(x_value // -2, evaluate_uop(optimized_sink.src[0], {'x': x_value}))
 
+class TestGEPAndVectorizeRewrite(unittest.TestCase):
+  def test_gep_single_element_extraction(self):
+    # GEP on a vector dtype to extract a single element
+    base_vector = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
+    self.assertEqual(apply_rewrite(base_vector.gep(2)).arg, 3.0)
+
+  def test_gep_tuple_extraction(self):
+    # GEP on a vector dtype to extract multiple elements as a vector
+    base_vector = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
+    optimized_uop = apply_rewrite(base_vector.gep((2, 3)))
+    self.assertEqual([sub_uop.arg for sub_uop in optimized_uop.src], [3.0, 4.0])
+
+  def test_gep_on_vconst(self):
+    # GEP on a VCONST to extract a single element
+    vconst = UOp(UOps.VCONST, dtypes.float32.vec(4), arg=(1.0, 2.0, 3.0, 4.0))
+    self.assertEqual(apply_rewrite(vconst.gep(2)).arg, 3.0)
+
+  def test_gep_tuple_on_vconst(self):
+    # GEP on a VCONST using a tuple to extract multiple elements
+    vconst = UOp(UOps.VCONST, dtypes.float32.vec(4), arg=(7.0, 8.0, 9.0, 10.0))
+    optimized_uop = apply_rewrite(vconst.gep((1, 3)))
+    self.assertEqual([sub_uop.arg for sub_uop in optimized_uop.src], [8.0, 10.0])
+
+  def test_gep_gep_simplification(self):
+    # Nested GEP simplification on a vector dtype
+    base_vector = UOp.const(dtypes.float32.vec(4), (10.0, 20.0, 30.0, 40.0))
+    gep_inner = base_vector.gep(1)  # Extract 2nd element (20.0)
+    self.assertEqual(apply_rewrite(gep_inner.gep(0)).arg, 20.0)
+
+  def test_vectorize_multiple_elements(self):
+    # Vectorizing multiple elements using GEP
+    base_vector = UOp.const(dtypes.float32.vec(4), (5.0, 10.0, 15.0, 20.0))
+    vectorized_uop = UOp(UOps.VECTORIZE, dtypes.float32.vec(4), src=(base_vector.gep(0), base_vector.gep(1), base_vector.gep(2), base_vector.gep(3)))
+    optimized_uop = apply_rewrite(vectorized_uop)
+    self.assertEqual([sub_uop.arg for sub_uop in optimized_uop.src], [5.0, 10.0, 15.0, 20.0])
+
 
 if __name__ == '__main__':
   unittest.main()
