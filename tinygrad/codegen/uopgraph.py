@@ -227,6 +227,11 @@ constant_folder = PatternMatcher([
   # VECTORIZE/GEP: the expander rule allows tuple GEP creation, this is just for removal
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"),
    lambda vec,x: x if x.dtype == vec.dtype and tuple(y.arg[0] for y in vec.src) == tuple(range(len(vec.src))) else None),
+  # reorder ALU/VECTORIZE (broken while we have vectorize_alu!)
+  #(UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
+  # lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, alu.dtype.scalar(), (x,y), alu.arg),)*alu.dtype.count)),
+  # VECTORIZE of a single element is just that element
+  (UPat(UOps.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
   (UPat(UOps.GEP, src=(UPat(UOps.GEP, name='g2'),), name='g1'),
    lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(g1.dtype.count)))),
@@ -234,8 +239,9 @@ constant_folder = PatternMatcher([
    lambda gep, vec: UOp(UOps.VECTORIZE, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
   (UPat(UOps.GEP, src=(UPat.cvar("c", vec=False),), name="gep"), lambda gep, c: gep.const_like(c.arg)),
   (UPat(UOps.GEP, src=(UPat(UOps.VCONST, name="c"),), name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
-  # GEP add push
-  (UPat(UOps.GEP, None, (UPat.var('x') + UPat.cvar('c1'),), name="gep"), lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg)),
+  # GEP add push (non-shrinking only)
+  (UPat(UOps.GEP, None, (UPat.var('x') + UPat.cvar('c1'),), name="gep"),
+   lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg) if len(gep.arg) >= x.dtype.count else None),
   # tensor core with a 0 input is acc
   *[(UPat(UOps.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
   *[(UPat(UOps.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
@@ -365,10 +371,11 @@ constant_folder = PatternMatcher([
   # remove NOOPs from SINK
   (UPat(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
-  # remove EXPANDs from SINK
+  # remove EXPANDs from SINK/BARRIER
+  (UPat(UOps.BARRIER, src=(UPat((UOps.VECTORIZE, UOps.SINK), name='sink'),)), lambda sink: UOp(UOps.BARRIER, dtypes.void, sink.src)),
   (UPat(UOps.SINK, name="root"),
-   lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND} else (x,) for x in root.src)), root.arg)
-    if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
+    lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND} else (x,) for x in root.src)), root.arg)
+      if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),

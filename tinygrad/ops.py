@@ -347,6 +347,8 @@ END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.E
 class UOp(MathTrait):
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
+    # TODO: instant check rules here make debugging easier
+    #if op is UOps.ALU and arg is BinaryOps.CMPNE: assert dtype.scalar() == dtypes.bool
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def replace(self, op: Optional[UOps]=None, dtype:Optional[DType]=None, src: Optional[Tuple[UOp,...]]=None, arg:Any=None):
     return UOp(op or self.op, dtype or self.dtype, self.src if src is None else src, self.arg if arg is None else arg)
@@ -389,7 +391,8 @@ class UOp(MathTrait):
   def bitcast(self, dtype:DType): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):
     if isinstance(i, int): i = (i,)
-    if i == tuple(range(len(i))) and self.dtype.count == len(i): return self
+    if self.dtype == dtypes.void or (i == tuple(range(len(i))) and self.dtype.count == len(i)): return self
+    assert len(i) >= 1 and all(x < self.dtype.count for x in i), f"bad GEP on {self.dtype}, {i}"
     return UOp(UOps.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   @classmethod
   def load(cls, *src:UOp, dtype:DType): return cls(UOps.LOAD, dtype, src)
@@ -471,7 +474,6 @@ class UOp(MathTrait):
         if (s0.vmin >= 0 or s1.vmin >= 0):
           Lmin, Lmax = (s0.vmin, s0.vmax) if s1.vmin >= 0 else (s0.vmax, s0.vmin)
           Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
-          assert math.isnan(Lmax*Rmax) or math.isnan(Lmin*Rmin) or Lmax*Rmax >= Lmin*Rmin, f"{Lmax=}, {Lmin=}, {Rmax=}, {Rmin=}"
           return Lmin*Rmin, Lmax*Rmax
       if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
