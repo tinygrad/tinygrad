@@ -469,22 +469,19 @@ def create_gate(root:UOp) -> Optional[UOp]:
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
-"""
 def destack_expand(outer, inner):
   expand_args = tuple(sorted(outer.arg+inner.arg))
-  outer_sz = prod(x[1] for x in outer.arg)
-  idxs = tuple(_expand_arg_to_idx(inner.arg, rpk) * outer_sz + _expand_arg_to_idx(outer.arg, rpk) for rpk in _choices_from_args(expand_args))
+  inner_sz = prod(x[1] for x in inner.arg)
+  idxs = tuple(_expand_arg_to_idx(outer.arg, rpk) * inner_sz + _expand_arg_to_idx(inner.arg, rpk) for rpk in _choices_from_args(expand_args))
   return UOp(UOps.EXPAND, outer.dtype, (inner.src[0].gep(idxs),), expand_args)
-"""
 
 expander = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
   # create gate MUST BE BEFORE expander
   (UPat(UOps.STORE, name="root"), create_gate),
-  # double expand (wrong, needs a GEP)
-  (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)),
-   lambda inner,outer: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), tuple(sorted(inner.arg+outer.arg)))),
+  # double expand
+  (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)), destack_expand),
   # do expansion
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.IF), name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
