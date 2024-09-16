@@ -82,10 +82,10 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), (i,))), range(4), load.const_like(float('nan')))
 
 float4_folding = PatternMatcher([
-  (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
-  (UPat(UOps.VECTORIZE, src=UPat((UOps.ALU, UOps.CAST, UOps.BITCAST)), name="vec"), vectorize_alu),
+  #(UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  #(UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  #(UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
+  #(UPat(UOps.VECTORIZE, src=UPat((UOps.ALU, UOps.CAST, UOps.BITCAST)), name="vec"), vectorize_alu),
 ])
 
 # ***** mod *****
@@ -406,21 +406,35 @@ def do_expand(root:UOp):
   # NOTE: we 0 out the reduce axis for WMMA. in theory they should all be the same, but is this always correct?
   exclude_args = tuple(dedup(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2])))) if root.op is UOps.WMMA else ()
   expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x[0] not in exclude_args)
-  esrcs = [[src.src[x] for x in _swizzle_args(expand_args, src.arg, exclude_args)] \
-           if src.op is UOps.EXPAND else itertools.repeat(src) for src in root.src]
-  new_srcs = [UOp(root.op, root.dtype, new_src, root.arg) for new_src in zip(*esrcs)]
-  if root.op is UOps.EXPAND:
-    # merge two expands
-    expand_args, old_args = tuple(sorted(root.arg+expand_args)), expand_args
-    assert len(expand_args) == (len(old_args) + len(root.arg))
-    new_srcs = [new_srcs[_expand_arg_to_idx(old_args, rpk)].src[_expand_arg_to_idx(root.arg, rpk)] for rpk in _choices_from_args(expand_args)]
-  if root.op is UOps.IF:
-    # merge ifs into an or
-    conditions = functools.reduce(lambda x,y: x|y, dedup(x.src[0] for x in new_srcs if x.src[0].op is not UOps.CONST))
-    barriers = tuple(set(x.src[1] for x in new_srcs))
-    new_srcs = [UOp(UOps.IF, src=(conditions,)+barriers) for _ in new_srcs]
-  assert prod([x[1] for x in expand_args]) == len(new_srcs)
-  return UOp(UOps.EXPAND, root.dtype, tuple(new_srcs), expand_args)
+  expand_sz = prod([x[1] for x in expand_args])
+  new_srcs = []
+  for i,src in enumerate(root.src):
+    if src.op is UOps.EXPAND:
+      if expand_args == src.arg:
+        # just remove the expand
+        new_srcs.append(src.src[0])
+      else:
+        lst = _swizzle_args(expand_args, src.arg, exclude_args)
+        # if the base dtype is > 1, put those at the end
+        if root.dtype.count > 1: lst = flatten([[i*root.dtype.count+j for j in range(root.dtype.count)] for i in lst])
+        new_srcs.append(src.src[0].gep(tuple(lst)))
+    else:
+      if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
+        new_srcs.append(src)
+      elif src.dtype.count > 1:
+        # put it at the end?
+        new_srcs.append(UOp(UOps.VECTORIZE,
+                            src.dtype.scalar().vec(expand_sz*src.dtype.count), tuple(src.gep(i) for i in range(src.dtype.count))*expand_sz))
+      else:
+        new_srcs.append(UOp(UOps.VECTORIZE, src.dtype.vec(expand_sz), (src,)*expand_sz))
+
+  new_arg = root.arg
+  if root.op is UOps.GEP:
+    assert root.dtype.count == 1
+    # is this right?
+    new_arg = tuple(range(root.arg[0], new_srcs[0].dtype.count, new_srcs[0].dtype.count // expand_sz))
+  nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
+  return UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
 
 acc_number = 0
 def do_reduce(root:UOp):
@@ -443,11 +457,10 @@ def do_contract(con:UOp):
   if ex.op is not UOps.EXPAND: return UOp(UOps.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from EXPAND
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
-  srcs = []
+  idxs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
-    lsrcs = [ex.src[_expand_arg_to_idx(ex.arg, {**rpk, **lrpk})] for lrpk in _choices_from_args(con.arg)]
-    srcs.append(UOp(UOps.VECTORIZE, con.dtype, tuple(lsrcs)))
-  return srcs[0] if len(srcs) == 1 else UOp(UOps.EXPAND, con.dtype, tuple(srcs), new_ex_args)
+    idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]
+  return UOp(UOps.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
@@ -469,9 +482,12 @@ expander = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
   # create gate MUST BE BEFORE expander
   (UPat(UOps.STORE, name="root"), create_gate),
+  # double expand (wrong, needs a GEP)
+  (UPat(UOps.EXPAND, name="e1", src=(UPat(UOps.EXPAND, name="e2"),)),
+   lambda e1,e2: UOp(UOps.EXPAND, e1.dtype, (e2.src[0],), tuple(sorted(e1.arg+e2.arg)))),
   # do expansion
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
-         UOps.VECTORIZE, UOps.REDUCE, UOps.EXPAND, UOps.IF), name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
+         UOps.VECTORIZE, UOps.REDUCE, UOps.IF), name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (UPat(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
   (UPat(UOps.SINK, name="root"),
@@ -486,6 +502,29 @@ expander = PatternMatcher([
   (UPat(UOps.EXPAND, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
     lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
 ])
+
+def no_vectorized_load_store(ls:UOp):
+  idx = ls.src[1]
+  if idx.dtype.count == 1: return None
+  tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
+  return UOp(UOps.VECTORIZE if ls.dtype != dtypes.void else UOps.SINK, ls.dtype, tuple(tv))
+
+def no_vectorized_acc(acc:UOp):
+  if acc.dtype.count == 1: return None
+  alus = tuple(UOp(acc.op, acc.dtype.scalar(),
+    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
+  return UOp(UOps.VECTORIZE, acc.dtype, alus)
+
+def no_vectorized_wmma(wmma:UOp):
+  out_sz = prod(x[1] for x in wmma.arg[6][-1])
+  if wmma.dtype.count == out_sz: return None
+  tsrcs = []
+  for s,sz in zip(wmma.src, wmma.arg[6]):
+    ssz = prod(x[1] for x in sz)
+    tsrcs.append([s.gep(tuple(range(grp, grp+ssz))) for grp in range(0, s.dtype.count, ssz)])
+  wmmas = [UOp(UOps.WMMA, wmma.dtype.scalar().vec(out_sz), tsrc, wmma.arg) for tsrc in zip(*tsrcs)]
+  wmma_ex = flatten([[e.gep(i) for e in wmmas] for i in range(out_sz)])
+  return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
@@ -502,7 +541,10 @@ reducer = PatternMatcher([
   (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
   (UPat(UOps.GEP, name='gep'), lambda gep: UOp(UOps.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   # no ALU on vectorized dtypes
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name="alu"), no_vectorized_alu),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
+  (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
+  (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
+  (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   # delete_redundant_gates (after expand, is this still needed?)
   (UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
