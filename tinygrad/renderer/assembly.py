@@ -63,6 +63,10 @@ ptx_matcher = PatternMatcher([
     lambda root,z: UOp(root.op, root.dtype, root.src[:2] + (z.cast(dtypes.uint8),), root.arg)),
   (UPat(UOps.STORE, name="root", src=(UPat(),UPat(),UPat(),UPat.var("g", dtypes.int))),
     lambda root,g: UOp(root.op, root.dtype, root.src[:3] + (g.cast(dtypes.uint8),), root.arg)),
+  (UPat(UOps.STORE, name="root", src=(UPat(),UPat(),UPat(),UPat(UOps.IF, name="g"))),
+    lambda root,g: UOp(root.op, root.dtype, root.src[:3] +
+      (UOp(g.op, g.dtype, (UOp(UOps.ALU, dtypes.bool, (g.src[0], UOp.const(dtypes.bool, True)), BinaryOps.XOR),) + g.src[1:], g.arg),), root.arg)
+      if g.src[0].arg is not BinaryOps.XOR else None),
   # ptr_ar (load/store)
   (UPat((UOps.LOAD, UOps.STORE), name="root", allow_any_len=True, src=(UPat((UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL)),
                                UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat.var("alu"), UPat.cvar("const")]))),
@@ -175,15 +179,14 @@ class PTXRenderer(Renderer):
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.IF:
-        # NOTE: we invert the condition, so if it's true, we skip the IF block and jump to the ENDIF
-        kk(*self.render_bra(f"ENDIF_{r[src[0]][1:]}_{uops.index(u)}", f"!{_cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)}"))
+        kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
         kk(self.code_for_op[BinaryOps.ADD](r[src[0]], r[src[0]], "1", dtypes.int, self.types[dtypes.int]),
             self.code_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[src[0]], r[src[0].src[1]], dtypes.int, self.types[dtypes.int]))
         kk(*self.render_bra(f"LOOP_{r[src[0]][1:]}", pred))
       elif uop is UOps.ENDIF:
-        kk(f"ENDIF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
+        kk(f"IF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
       elif uop is UOps.STORE:
         assert src[0].dtype == dtypes.int64, "store isn't int64"
         assert src[1].op is UOps.CONST, f"store isn't const {u}"
