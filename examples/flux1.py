@@ -5,60 +5,47 @@
 from tinygrad import Tensor, nn, dtypes, TinyJit
 from tinygrad.nn.state import safe_load, load_state_dict
 from tinygrad.helpers import fetch, tqdm, colored
+from sdxl import FirstStage
 from extra.models.clip import FrozenClosedClipEmbedder
 from extra.models.t5 import T5Embedder
 import numpy as np
 
 import math, time, argparse, tempfile
-from typing import Callable, Union, List, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 from PIL import Image
 
-configs:dict = {
-  "flux": {
-    "in_channels": 64,
-    "vec_in_dim": 768,
-    "context_in_dim": 4096,
-    "hidden_size": 3072,
-    "mlp_ratio": 4.0,
-    "num_heads": 24,
-    "depth": 19,
-    "depth_single_blocks": 38,
-    "axes_dim": [16, 56, 56],
-    "theta": 10_000,
-    "qkv_bias": True
-  },
-
-  "ae": {
-    "scale_factor": 0.3611,
-    "shift_factor": 0.1159,
-    "resolution": 256,
-    "in_channels": 3,
-    "ch": 128,
-    "out_ch": 3,
-    "ch_mult": [1, 2, 4, 4],
-    "num_res_blocks": 2,
-    "z_channels": 16
-  },
-
-  "urls": {
-    "flux-schnell": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
-    "flux-dev": "https://huggingface.co/camenduru/FLUX.1-dev/resolve/main/flux1-dev.sft",
-    "ae": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors",
-    "T5_1_of_2": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/text_encoder_2/model-00001-of-00002.safetensors",
-    "T5_2_of_2": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/text_encoder_2/model-00002-of-00002.safetensors",
-    "T5_tokenizer": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/tokenizer_2/spiece.model",
-    "clip": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/text_encoder/model.safetensors"
-  }
+urls:dict = {
+  "flux-schnell": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
+  "flux-dev": "https://huggingface.co/camenduru/FLUX.1-dev/resolve/main/flux1-dev.sft",
+  "ae": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors",
+  "T5_1_of_2": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/text_encoder_2/model-00001-of-00002.safetensors",
+  "T5_2_of_2": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/text_encoder_2/model-00002-of-00002.safetensors",
+  "T5_tokenizer": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/tokenizer_2/spiece.model",
+  "clip": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/text_encoder/model.safetensors"
 }
 
+def tensor_identity(x:Tensor) -> Tensor: return x
 
-def tensor_identity(x:Tensor) -> Tensor:
-  return x
+class AutoEncoder:
+  def __init__(self, scale_factor:float, shift_factor:float):
+    self.decoder = FirstStage.Decoder(128, 3, 3, 16, [1, 2, 4, 4], 2, 256)
+    self.scale_factor = scale_factor
+    self.shift_factor = shift_factor
+
+  def decode(self, z:Tensor) -> Tensor:
+    z = z / self.scale_factor + self.shift_factor
+    return self.decoder(z)
+
+# Conditioner
+class ClipEmbedder(FrozenClosedClipEmbedder):
+  def __call__(self, texts:str | list[str] | Tensor) -> Tensor | tuple[Tensor,...]:
+    if isinstance(texts, str): texts = [texts]
+    assert isinstance(texts, (list,tuple)), f"expected list of strings, got {type(texts).__name__}"
+    tokens = Tensor.cat(*[Tensor(self.tokenizer.encode(text)) for text in texts], dim=0)
+    return self.transformer.text_model(tokens.reshape(len(texts),-1))[:, tokens.argmax(-1)]
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/math.py
-
 def attention(q:Tensor, k:Tensor, v:Tensor, pe:Tensor) -> Tensor:
   q, k = apply_rope(q, k, pe)
 
@@ -84,152 +71,6 @@ def apply_rope(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
   xk_out = freqs_cis[..., 0] * xk_[..., 0] + freqs_cis[..., 1] * xk_[..., 1]
   return xq_out.reshape(*xq.shape).cast(xq.dtype), xk_out.reshape(*xk.shape).cast(xk.dtype)
 
-# Conditioner
-class ClipEmbedder(FrozenClosedClipEmbedder):
-  def __call__(self, texts:Union[str,List[str],Tensor]) -> Union[Tensor,Tuple[Tensor,...]]:
-    if isinstance(texts, str): texts = [texts]
-    assert isinstance(texts, (list,tuple)), f"expected list of strings, got {type(texts).__name__}"
-    tokens = Tensor.cat(*[Tensor(self.tokenizer.encode(text)) for text in texts], dim=0)
-    return self.transformer.text_model(tokens.reshape(len(texts),-1))[:, tokens.argmax(-1)]
-
-
-# https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/autoencoder.py
-class AttnBlock:
-  def __init__(self, in_channels:int):
-    self.in_channels = in_channels
-
-    self.norm = nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
-
-    self.q = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-    self.k = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-    self.v = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-    self.proj_out = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-
-  def attention(self, h_:Tensor) -> Tensor:
-    h_ = self.norm(h_)
-    q = self.q(h_)
-    k = self.k(h_)
-    v = self.v(h_)
-
-    b, c, h, w = q.shape
-    q = q.rearrange("b c h w -> b 1 (h w) c")
-    k = k.rearrange("b c h w -> b 1 (h w) c")
-    v = v.rearrange("b c h w -> b 1 (h w) c")
-    h_ = Tensor.scaled_dot_product_attention(q, k, v)
-
-    return h_.rearrange("b 1 (h w) c -> b c h w", h=h, w=w, c=c, b=b)
-
-  def __call__(self, x:Tensor) -> Tensor:
-    return x + self.proj_out(self.attention(x))
-
-class ResnetBlock:
-  def __init__(self, in_channels:int, out_channels:int):
-    self.in_channels = in_channels
-    out_channels = in_channels if out_channels is None else out_channels
-    self.out_channels = out_channels
-
-    self.norm1 = nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
-    self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-    self.norm2 = nn.GroupNorm(num_groups=32, num_channels=out_channels, eps=1e-6, affine=True)
-    self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
-    if self.in_channels != self.out_channels:
-      self.nin_shortcut = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-
-  def __call__(self, x):
-    h = x
-    h = self.norm1(h).swish()
-    h = self.conv1(h)
-
-    h = self.norm2(h).swish()
-    h = self.conv2(h)
-
-    if self.in_channels != self.out_channels:  x = self.nin_shortcut(x)
-
-    return x + h
-
-class Upsample:
-  def __init__(self, in_channels:int):
-    self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
-
-  def __call__(self, x:Tensor):
-    x = Tensor.interpolate(x, size=(x.shape[-2] * 2, x.shape[-1] * 2), mode="nearest")
-    x = self.conv(x)
-    return x
-
-class Decoder:
-  def __init__(self, ch:int, out_ch:int, ch_mult:list[int], num_res_blocks:int, in_channels:int, resolution:int, z_channels:int):
-    self.ch = ch
-    self.num_resolutions = len(ch_mult)
-    self.num_res_blocks = num_res_blocks
-    self.resolution = resolution
-    self.in_channels = in_channels
-    self.ffactor = 2 ** (self.num_resolutions - 1)
-
-    # compute in_ch_mult, block_in and curr_res at lowest res
-    block_in = ch * ch_mult[self.num_resolutions - 1]
-    curr_res = resolution // 2 ** (self.num_resolutions - 1)
-    self.z_shape = (1, z_channels, curr_res, curr_res)
-
-    # z to block_in
-    self.conv_in = nn.Conv2d(z_channels, block_in, kernel_size=3, stride=1, padding=1)
-
-    # middle
-    self.mid = {}
-    self.mid["block_1"] = ResnetBlock(in_channels=block_in, out_channels=block_in)
-    self.mid["attn_1"] = AttnBlock(block_in)
-    self.mid["block_2"] = ResnetBlock(in_channels=block_in, out_channels=block_in)
-
-    # upsampling
-    self.up = []
-    for i_level in reversed(range(self.num_resolutions)):
-      block = []
-      block_out = ch * ch_mult[i_level]
-      for _ in range(self.num_res_blocks + 1):
-        block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
-        block_in = block_out
-      up = {}
-      up["block"] = block
-      if i_level != 0:
-        up["upsample"] = Upsample(block_in)
-        curr_res = curr_res * 2
-      self.up.insert(0, up)  # prepend to get consistent order
-
-    # end
-    self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
-    self.conv_out = nn.Conv2d(block_in, out_ch, kernel_size=3, stride=1, padding=1)
-
-  def __call__(self, z:Tensor) -> Tensor:
-    # z to block_in
-    h = self.conv_in(z)
-
-    # middle
-    h = self.mid["block_1"](h)
-    h = self.mid["attn_1"](h)
-    h = self.mid["block_2"](h)
-
-    # upsampling
-    for i_level in reversed(range(self.num_resolutions)):
-      for i_block in range(self.num_res_blocks + 1):
-        h = self.up[i_level]["block"][i_block](h)
-      if i_level != 0:
-        h = self.up[i_level]["upsample"](h)
-
-    # end
-    h = self.norm_out(h).swish()
-    h = self.conv_out(h)
-    return h
-
-class AutoEncoder:
-  def __init__(self, scale_factor:float, shift_factor:float, **decoder_params):
-    self.decoder = Decoder(**decoder_params)
-
-    self.scale_factor = scale_factor
-    self.shift_factor = shift_factor
-
-  def decode(self, z:Tensor) -> Tensor:
-    z = z / self.scale_factor + self.shift_factor
-    return self.decoder(z)
-
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/layers.py
 class EmbedND:
@@ -242,26 +83,6 @@ class EmbedND:
     n_axes = ids.shape[-1]
     emb = Tensor.cat(*[rope(ids[..., i], self.axes_dim[i], self.theta) for i in range(n_axes)], dim=-3)
     return emb.unsqueeze(1)
-
-
-def timestep_embedding(t:Tensor, dim:int, max_period:int = 10000, time_factor:float = 1000.0):
-  """
-  Create sinusoidal timestep embeddings.
-  :param t: a 1-D Tensor of N indices, one per batch element.
-                    These may be fractional.
-  :param dim: the dimension of the output.
-  :param max_period: controls the minimum frequency of the embeddings.
-  :return: an (N, D) Tensor of positional embeddings.
-  """
-  t = time_factor * t
-  half = dim // 2
-  freqs = Tensor.exp(-math.log(max_period) * Tensor.arange(0, stop=half, dtype=dtypes.float32) / half).to(t.device)
-
-  args = t[:, None].float() * freqs[None]
-  embedding = Tensor.cat(Tensor.cos(args), Tensor.sin(args), dim=-1)
-  if dim % 2:  embedding = Tensor.cat(*[embedding, Tensor.zeros_like(embedding[:, :1])], dim=-1)
-  if Tensor.is_floating_point(t):  embedding = embedding.cast(t.dtype)
-  return embedding
 
 class MLPEmbedder:
   def __init__(self, in_dim:int, hidden_dim:int):
@@ -277,9 +98,7 @@ class QKNorm:
     self.key_norm = nn.RMSNorm(dim)
 
   def __call__(self, q:Tensor, k:Tensor) -> tuple[Tensor, Tensor]:
-    q = self.query_norm(q)
-    k = self.key_norm(k)
-    return q, k
+    return self.query_norm(q), self.key_norm(k)
 
 class SelfAttention:
   def __init__(self, dim:int, num_heads:int = 8, qkv_bias:bool = False):
@@ -312,12 +131,7 @@ class Modulation:
 
   def __call__(self, vec:Tensor) -> tuple[ModulationOut, ModulationOut | None]:
     out = self.lin(vec.silu())[:, None, :].chunk(self.multiplier, dim=-1)
-
-    return (
-        ModulationOut(*out[:3]),
-        ModulationOut(*out[3:]) if self.is_double else None
-    )
-
+    return ModulationOut(*out[:3]), ModulationOut(*out[3:]) if self.is_double else None
 
 class DoubleStreamBlock:
   def __init__(self, hidden_size:int, num_heads:int, mlp_ratio:float, qkv_bias:bool = False):
@@ -329,22 +143,14 @@ class DoubleStreamBlock:
     self.img_attn = SelfAttention(dim=hidden_size, num_heads=num_heads, qkv_bias=qkv_bias)
 
     self.img_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-    self.img_mlp = [
-        nn.Linear(hidden_size, mlp_hidden_dim, bias=True),
-        Tensor.gelu,
-        nn.Linear(mlp_hidden_dim, hidden_size, bias=True),
-    ]
+    self.img_mlp = [nn.Linear(hidden_size, mlp_hidden_dim, bias=True), Tensor.gelu, nn.Linear(mlp_hidden_dim, hidden_size, bias=True)]
 
     self.txt_mod = Modulation(hidden_size, double=True)
     self.txt_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
     self.txt_attn = SelfAttention(dim=hidden_size, num_heads=num_heads, qkv_bias=qkv_bias)
 
     self.txt_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-    self.txt_mlp = [
-        nn.Linear(hidden_size, mlp_hidden_dim, bias=True),
-        Tensor.gelu,
-        nn.Linear(mlp_hidden_dim, hidden_size, bias=True),
-    ]
+    self.txt_mlp = [nn.Linear(hidden_size, mlp_hidden_dim, bias=True), Tensor.gelu, nn.Linear(mlp_hidden_dim, hidden_size, bias=True)]
 
   def __call__(self, img:Tensor, txt:Tensor, vec:Tensor, pe:Tensor) -> tuple[Tensor, Tensor]:
     img_mod1, img_mod2 = self.img_mod(vec)
@@ -434,6 +240,25 @@ class LastLayer:
     x = self.linear(x)
     return x
 
+def timestep_embedding(t:Tensor, dim:int, max_period:int = 10000, time_factor:float = 1000.0):
+  """
+  Create sinusoidal timestep embeddings.
+  :param t: a 1-D Tensor of N indices, one per batch element.
+                    These may be fractional.
+  :param dim: the dimension of the output.
+  :param max_period: controls the minimum frequency of the embeddings.
+  :return: an (N, D) Tensor of positional embeddings.
+  """
+  t = time_factor * t
+  half = dim // 2
+  freqs = Tensor.exp(-math.log(max_period) * Tensor.arange(0, stop=half, dtype=dtypes.float32) / half).to(t.device)
+
+  args = t[:, None].float() * freqs[None]
+  embedding = Tensor.cat(Tensor.cos(args), Tensor.sin(args), dim=-1)
+  if dim % 2:  embedding = Tensor.cat(*[embedding, Tensor.zeros_like(embedding[:, :1])], dim=-1)
+  if Tensor.is_floating_point(t):  embedding = embedding.cast(t.dtype)
+  return embedding
+
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/model.py
 class Flux:
   """
@@ -451,11 +276,12 @@ class Flux:
       num_heads:int = 24,
       depth:int = 19,
       depth_single_blocks:int = 38,
-      axes_dim:list[int] = [16, 56, 56],
+      axes_dim:list[int] | None = None,
       theta:int = 10_000,
       qkv_bias:bool = True,
       ):
 
+    axes_dim = axes_dim or [16, 56, 56]
     self.guidance_embed = guidance_embed
     self.in_channels = in_channels
     self.out_channels = self.in_channels
@@ -473,21 +299,8 @@ class Flux:
     self.guidance_in = (MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size) if guidance_embed else tensor_identity)
     self.txt_in = nn.Linear(context_in_dim, self.hidden_size)
 
-    self.double_blocks = [
-        DoubleStreamBlock(
-            self.hidden_size,
-            self.num_heads,
-            mlp_ratio=mlp_ratio,
-            qkv_bias=qkv_bias,
-        )
-        for _ in range(depth)
-    ]
-
-    self.single_blocks = [
-        SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=mlp_ratio)
-        for _ in range(depth_single_blocks)
-    ]
-
+    self.double_blocks = [DoubleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias) for _ in range(depth)]
+    self.single_blocks = [SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=mlp_ratio) for _ in range(depth_single_blocks)]
     self.final_layer = LastLayer(self.hidden_size, 1, self.out_channels)
 
   def __call__(self, img:Tensor, img_ids:Tensor, txt:Tensor, txt_ids:Tensor, timesteps:Tensor, y:Tensor, guidance:Tensor | None = None) -> Tensor:
@@ -510,48 +323,44 @@ class Flux:
     img = Tensor.cat(txt, img, dim=1)
     for block in self.single_blocks:
       img = block(img, vec=vec, pe=pe)
+
     img = img[:, txt.shape[1] :, ...]
 
     img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
     return img
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/util.py
-class Util:
-  def load_flow_model(name:str):
-    # Loading Flux
-    print("Init model")
-    model = Flux(guidance_embed=(name != "flux-schnell"), **configs["flux"])
-    state_dict = {k.replace("scale", "weight"): v for k, v in safe_load(fetch(configs["urls"][name])).items()}
-    load_state_dict(model, state_dict)
-    return model
+def load_flow_model(name:str):
+  # Loading Flux
+  print("Init model")
+  model = Flux(guidance_embed=(name != "flux-schnell"))
+  state_dict = {k.replace("scale", "weight"): v for k, v in safe_load(fetch(urls[name])).items()}
+  load_state_dict(model, state_dict)
+  return model
 
-  def load_T5(name:str, max_length:int = 512):
-    # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
-    print("Init T5")
-    T5 = T5Embedder(max_length, fetch(configs["urls"]["T5_tokenizer"]))
-    pt_1 = fetch(configs["urls"]["T5_1_of_2"])
-    pt_2 = fetch(configs["urls"]["T5_2_of_2"])
-    load_state_dict(T5.encoder, safe_load(pt_1) | safe_load(pt_2), strict=False)
-    return T5
+def load_T5(max_length:int = 512):
+  # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
+  print("Init T5")
+  T5 = T5Embedder(max_length, fetch(urls["T5_tokenizer"]))
+  pt_1 = fetch(urls["T5_1_of_2"])
+  pt_2 = fetch(urls["T5_2_of_2"])
+  load_state_dict(T5.encoder, safe_load(pt_1) | safe_load(pt_2), strict=False)
+  return T5
 
-  def load_clip(name:str):
-    print("Init Clip")
-    clip = ClipEmbedder()
-    load_state_dict(clip.transformer, safe_load(fetch(configs["urls"]["clip"])))
-    return clip
+def load_clip():
+  print("Init Clip")
+  clip = ClipEmbedder()
+  load_state_dict(clip.transformer, safe_load(fetch(urls["clip"])))
+  return clip
 
-  def load_ae(name:str) -> AutoEncoder:
-    # Loading the autoencoder
-    print("Init AE")
-    ae = AutoEncoder(**configs["ae"])
-    load_state_dict(ae, safe_load(fetch(configs["urls"]["ae"])))
-    return ae
+def load_ae() -> AutoEncoder:
+  # Loading the autoencoder
+  print("Init AE")
+  ae = AutoEncoder(0.3611, 0.1159)
+  load_state_dict(ae, safe_load(fetch(urls["ae"])))
+  return ae
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/sampling.py
-def get_noise(num_samples:int, height:int, width:int, dtype:str, seed:int) -> Tensor:
-  Tensor.manual_seed(seed)
-  return Tensor.randn(num_samples, 16, 2 * math.ceil(height / 16), 2 * math.ceil(width / 16), dtype=dtype)
-
 def prepare(T5:T5Embedder, clip:ClipEmbedder, img:Tensor, prompt:str | list[str]) -> dict[str, Tensor]:
   bs, _, h, w = img.shape
   if bs == 1 and not isinstance(prompt, str):
@@ -569,30 +378,17 @@ def prepare(T5:T5Embedder, clip:ClipEmbedder, img:Tensor, prompt:str | list[str]
 
   if isinstance(prompt, str):
     prompt = [prompt]
-  txt = T5(prompt)
+  txt = T5(prompt).realize()
   if txt.shape[0] == 1 and bs > 1:
     txt = txt.expand((bs, *txt.shape[1:]))
   txt_ids = Tensor.zeros(bs, txt.shape[1], 3)
 
-  vec = clip(prompt)
+  vec = clip(prompt).realize()
   if vec.shape[0] == 1 and bs > 1:
     vec = vec.expand((bs, *vec.shape[1:]))
 
-  return {
-      "img": img,
-      "img_ids": img_ids.to(img.device),
-      "txt": txt.to(img.device),
-      "txt_ids": txt_ids.to(img.device),
-      "vec": vec.to(img.device),
-  }
+  return {"img": img, "img_ids": img_ids.to(img.device), "txt": txt.to(img.device), "txt_ids": txt_ids.to(img.device), "vec": vec.to(img.device)}
 
-def time_shift(mu:float, sigma:float, t:Tensor):
-  return math.exp(mu) / (math.exp(mu) + (1 / t - 1) ** sigma)
-
-def get_lin_function(x1:float = 256, y1:float = 0.5, x2:float = 4096, y2:float = 1.15) -> Callable[[float], float]:
-  m = (y2 - y1) / (x2 - x1)
-  b = y1 - m * x1
-  return lambda x: m * x + b
 
 def get_schedule(num_steps:int, image_seq_len:int, base_shift:float = 0.5, max_shift:float = 1.15, shift:bool = True) -> list[float]:
   # extra step for zero
@@ -602,8 +398,8 @@ def get_schedule(num_steps:int, image_seq_len:int, base_shift:float = 0.5, max_s
   # shifting the schedule to favor high timesteps for higher signal images
   if shift:
     # estimate mu based on linear estimation between two points
-    mu = get_lin_function(y1=base_shift, y2=max_shift)(image_seq_len)
-    timesteps = time_shift(mu, 1.0, timesteps)
+    mu = 0.5 + (max_shift - base_shift) * (image_seq_len - 256) / (4096 - 256)
+    timesteps = math.exp(mu) / (math.exp(mu) + (1 / timesteps - 1))
   return timesteps.tolist()
 
 @TinyJit
@@ -620,13 +416,7 @@ def denoise(model, img:Tensor, img_ids:Tensor, txt:Tensor, txt_ids:Tensor, vec:T
   return img
 
 def unpack(x:Tensor, height:int, width:int) -> Tensor:
-  return x.rearrange(
-      "b (h w) (c ph pw) -> b c (h ph) (w pw)",
-      h=math.ceil(height / 16),
-      w=math.ceil(width / 16),
-      ph=2,
-      pw=2,
-  )
+  return x.rearrange("b (h w) (c ph pw) -> b c (h ph) (w pw)", h=math.ceil(height / 16), w=math.ceil(width / 16), ph=2, pw=2)
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/cli.py
 if __name__ == "__main__":
@@ -655,28 +445,28 @@ if __name__ == "__main__":
   height = 16 * (args.height // 16)
   width = 16 * (args.width // 16)
 
-  if args.seed is None:
-    args.seed = Tensor._seed
+  if args.seed is None: args.seed = Tensor._seed
+  else: Tensor.manual_seed(args.seed)
+
   print(f"Generating with seed {args.seed}:\n{args.prompt}")
   t0 = time.perf_counter()
 
-  # prepare input
-  x = get_noise(1, height, width, dtype="bfloat16", seed=args.seed)
+  # prepare input noise
+  x = Tensor.randn(1, 16, 2 * math.ceil(height / 16), 2 * math.ceil(width / 16), dtype="bfloat16")
 
   # load text embedders
-  T5 = Util.load_T5(args.name, max_length=256 if args.name == "flux-schnell" else 512)
-  clip = Util.load_clip(args.name)
+  T5 = load_T5(max_length=256 if args.name == "flux-schnell" else 512)
+  clip = load_clip()
 
   # embed text to get inputs for model
   inp = prepare(T5, clip, x, prompt=args.prompt)
-  for v in inp.values():  v.realize()
   timesteps = get_schedule(args.num_steps, inp["img"].shape[1], shift=(args.name != "flux-schnell"))
 
   # done with text embedders
   del T5, clip
 
   # load model
-  model = Util.load_flow_model(args.name)
+  model = load_flow_model(args.name)
 
   # denoise initial noise
   x = denoise(model, **inp, timesteps=timesteps, guidance=args.guidance)
@@ -685,10 +475,10 @@ if __name__ == "__main__":
   del model, run
 
   # load autoencoder
-  ae = Util.load_ae(args.name)
+  ae = load_ae()
 
   # decode latents to pixel space
-  x = unpack(x.float(), height, width).realize()
+  x = unpack(x.float(), height, width)
   x = ae.decode(x).realize()
 
   t1 = time.perf_counter()
