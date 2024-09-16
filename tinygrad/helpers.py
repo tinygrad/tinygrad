@@ -291,10 +291,10 @@ def cpu_time_execution(cb, enable):
   cb()
   if enable: return time.perf_counter()-st
 
-def cpu_objdump(lib):
+def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
     pathlib.Path(f.name).write_bytes(lib)
-    print(subprocess.check_output(['objdump', '-d', f.name]).decode('utf-8'))
+    print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
 
 # *** ctypes helpers
 
