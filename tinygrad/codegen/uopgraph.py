@@ -497,6 +497,9 @@ expander = PatternMatcher([
 def no_vectorized_load_store(ls:UOp):
   idx = ls.src[1]
   if idx.dtype.count == 1: return None
+  # ugh, the meaning of a dtype.count idx is overloaded
+  if ls.op is UOps.LOAD and idx.dtype.count != ls.dtype.count: return None
+  if ls.op is UOps.STORE and idx.dtype.count != ls.src[2].dtype.count: return None
   tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
   return UOp(UOps.VECTORIZE, ls.dtype, tuple(tv))
 
