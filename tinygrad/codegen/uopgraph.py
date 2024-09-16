@@ -407,7 +407,7 @@ def do_expand(root:UOp):
       else:
         lst = _swizzle_args(expand_args, src.arg, exclude_args)
         # if the base dtype is > 1, put those at the end
-        if root.dtype.count > 1: lst = flatten([[i*root.dtype.count+j for j in range(root.dtype.count)] for i in lst])
+        if src.dtype.count > 1: lst = flatten([[i*src.dtype.count+j for j in range(src.dtype.count)] for i in lst])
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
@@ -512,11 +512,14 @@ def no_vectorized_load_store(ls:UOp):
 def no_vectorized_wmma(wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
   if wmma.dtype.count == out_sz: return None
+  print(wmma.arg[6])
+  print([x.dtype for x in wmma.src], out_sz)
   tsrcs = []
   for s,sz in zip(wmma.src, wmma.arg[6]):
     ssz = prod(x[1] for x in sz)
     tsrcs.append([s.gep(tuple(range(grp, grp+ssz))) for grp in range(0, s.dtype.count, ssz)])
   wmmas = [UOp(UOps.WMMA, wmma.dtype.scalar().vec(out_sz), tsrc, wmma.arg) for tsrc in zip(*tsrcs)]
+  print(len(wmmas), out_sz)
   wmma_ex = flatten([[e.gep(i) for e in wmmas] for i in range(out_sz)])
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
@@ -580,8 +583,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   linearize_cnt += 1
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
     sink = graph_rewrite(sink, folder+expander)
-    sink = graph_rewrite(sink, folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
     if getenv("DO_REDUCE", 1):
+      sink = graph_rewrite(sink, folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
       sink = graph_rewrite(sink, folder+reducer)
 
   # for PTX only
