@@ -79,7 +79,7 @@ class DSPDevice(Compiled):
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
-    fp = f"file:///tinylib?entry&_modver=1.0&_dom=cdsp\0"
+    fp = "file:///tinylib?entry&_modver=1.0&_dom=cdsp\0"
     pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [len(fp), 0xff])), memoryview(bytearray(f"{fp}".encode()))],
                                  outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=0, ins=2, outs=2), pra=pra)
