@@ -82,8 +82,8 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), (i,))), range(4), load.const_like(float('nan')))
 
 float4_folding = PatternMatcher([
-  #(UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  #(UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   #(UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
   #(UPat(UOps.VECTORIZE, src=UPat((UOps.ALU, UOps.CAST, UOps.BITCAST)), name="vec"), vectorize_alu),
 ])
@@ -583,8 +583,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # expand
   linearize_cnt += 1
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
-    sink = graph_rewrite(sink, folder+(expander+float4_folding if opts is not None and opts.supports_float4 else expander))
-    if getenv("DO_REDUCE", 1): sink = graph_rewrite(sink, folder+reducer)
+    sink = graph_rewrite(sink, folder+expander)
+    if getenv("DO_REDUCE", 1):
+      sink = graph_rewrite(sink, folder+(reducer+float4_folding if opts is not None and opts.supports_float4 else reducer))
 
   # for PTX only
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
