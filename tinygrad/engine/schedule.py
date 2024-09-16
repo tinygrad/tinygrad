@@ -135,12 +135,13 @@ def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   swizzles = [x for x in root.src if x.op is UOps.SWIZZLE]
   if len(swizzles) == 0: return None
-  assert all_same([(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles])
-  sw_shape, sw_input_shape = unwrap(swizzles[0].st).shape, unwrap(swizzles[0].src[0].st).shape
+  swizzle_shapes = [(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles]
+  assert all_same([(x, prod(x), prod(y)) for x,y in swizzle_shapes]), f"swizzles must have the same size {swizzle_shapes}"
+  new_shape, new_input_shape = swizzle_shapes[0]
   fixup_cache: Dict[UOp, UOp] = {}
-  new_srcs = [x.src[0] if x.op is UOps.SWIZZLE else st_fixup(x, lambda st:st.reshape(sw_input_shape), fixup_cache) for x in root.src]
+  new_srcs = [x.src[0] if x.op is UOps.SWIZZLE else st_fixup(x, lambda st:st.reshape(new_input_shape), fixup_cache) for x in root.src]
   ret = UOp(root.op, root.dtype, tuple(new_srcs), root.arg)
-  return ret if ret.op is UOps.STORE else ret.swizzle(ShapeTracker.from_shape(sw_shape))
+  return ret if ret.op is UOps.STORE else ret.swizzle(ShapeTracker.from_shape(new_shape))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
