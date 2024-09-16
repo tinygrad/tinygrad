@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
 from tinygrad.ops import UPat, PatternMatcher, graph_rewrite
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, all_same, partition
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -59,17 +59,6 @@ def fold_expanded(ex, buf):
   # remove Nones for STORE
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
-def vectorize_reduce(vec:UOp):
-  if all_same(vec.src): return None  # don't REDUCE the same thing multiple times
-  if not all_same([(x.src[1:], x.arg) for x in vec.src]): return None    # must have the same reduce ranges
-  if not vec.dtype or vec.dtype.scalar() not in {dtypes.float, dtypes.half}: return None  # only fold float/half like this
-  return UOp(UOps.REDUCE, vec.dtype, (UOp(UOps.VECTORIZE, vec.dtype, tuple(x.src[0] for x in vec.src)),) + vec.src[0].src[1:], vec.src[0].arg)
-
-def vectorize_alu(vec:UOp):
-  if not all_same([x.arg for x in vec.src]): return None
-  return UOp(vec.src[0].op, vec.dtype, tuple(UOp(UOps.VECTORIZE, vec.src[0].src[i].dtype.vec(vec.dtype.count),
-                                             tuple(x.src[i] for x in vec.src)) for i in range(len(vec.src[0].src))), vec.src[0].arg)
-
 def fix_unfoldable_image_load(load:UOp, buf:UOp):
   if not isinstance(buf.dtype, ImageDType) or load.src[1].dtype.count == 2: return None
   id4 = load.src[1] % 4
@@ -84,8 +73,6 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
 float4_folding = PatternMatcher([
   (UPat(UOps.EXPAND, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
   (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.REDUCE), name="vec"), vectorize_reduce),
-  (UPat(UOps.VECTORIZE, src=UPat((UOps.ALU, UOps.CAST, UOps.BITCAST)), name="vec"), vectorize_alu),
 ])
 
 # ***** mod *****
