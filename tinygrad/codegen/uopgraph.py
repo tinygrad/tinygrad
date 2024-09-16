@@ -541,23 +541,25 @@ def group_load_store(ls:UOp, x:UOp, c:UOp, buf:UOp) -> Optional[UOp]:
   lengths += [1]
   outputs = {}
   # TODO: how do we fold gates?
-  if len(ls.src) > 3: return None
   for o in sorted(c.arg):
     if o in outputs: continue
     for fold_length in lengths:
       if o%fold_length!=0 or not x.divides(fold_length): continue
       if all(o+i not in outputs and o+i in c.arg for i in range(fold_length)):
         assert x.dtype.count == 1
+        selected = [o+i for i in range(fold_length)]
+        all_args = [i for i,cc in enumerate(c.arg) if cc in selected]
         out_idxs = tuple(c.arg.index(o+i) for i in range(fold_length))
         srcs = [buf, x+UOp.const(c.dtype.scalar(), o)]
-        if len(ls.src) > 2: srcs.append(ls.src[2].gep(out_idxs))
-        if len(ls.src) > 3:
-          # TODO: this is incorrect
-          srcs.append(functools.reduce(operator.__or__, [ls.src[3].gep(i) for i in out_idxs]))
+        assert ls.op is UOps.LOAD or len(all_args) == len(out_idxs)
+        if len(ls.src) > 2: srcs.append(ls.src[2].gep(out_idxs))   # can be wrong. should assert on repeated store
+        if len(ls.src) > 3: srcs.append(functools.reduce(lambda x,y: x|y, [ls.src[3].gep(aa) for aa in all_args]))   # anything triggers the load
         op = UOp(ls.op, ls.dtype.scalar().vec(fold_length), tuple(srcs))
         for i in range(fold_length): outputs[o+i] = op.gep(i)
         break
-  return UOp(UOps.VECTORIZE, ls.dtype, tuple(outputs[x] for x in c.arg))
+  ret = UOp(UOps.VECTORIZE, ls.dtype, tuple(outputs[x] for x in c.arg))
+  if ls.op is UOps.LOAD and len(ls.src) > 3: ret = ls.src[3].where(ret, ls.src[2])
+  return ret
 
 gls = PatternMatcher([
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
@@ -577,10 +579,22 @@ gls4 = PatternMatcher([
         name="ls", allow_any_len=True), lambda buf,c,ls: group_load_store(ls, UOp.const(c.dtype.scalar(), 0), c, buf)),
 ])+gls
 
+# if the gates didn't match, we have to split the load/stores
+"""
+def load_store_late_gate(ls:UOp, gate:UOp):
+  if gate.dtype.count == 1: return None
+  #if gate.op == UOps.VECTORIZE and all_same(gate.src): return UOp(ls.op, ls.dtype, ls.src[0:3] + gate.src[0:1] + ls.src[4:])
+  tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],ls.src[1]+i) + tuple(j.gep(i) for j in ls.src[2:])) for i in range(gate.dtype.count)]
+  return UOp(UOps.VECTORIZE if ls.dtype != dtypes.void else UOps.SINK, ls.dtype, tuple(tv))
+"""
+
 reducer = PatternMatcher([
   (UPat(UOps.REDUCE, name="root"), do_reduce),
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name="alu"), no_vectorized_alu),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
+  # load/store gate
+  #(UPat((UOps.LOAD, UOps.STORE), src=(UPat.var(), UPat.var(), UPat.var(), UPat.var('gate')), name='ls'), load_store_late_gate),
+
   # devectorize
   #(UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   # delete_redundant_gates (after expand, is this still needed?)
