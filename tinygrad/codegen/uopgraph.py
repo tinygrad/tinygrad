@@ -93,26 +93,24 @@ def dedup_load(load:UOp, buf:UOp, base:UOp, idx:UOp, var:Optional[UOp]=None, gat
            (buf, base.broadcast(len(new_idxs))+UOp.const(idx.dtype.scalar().vec(len(new_idxs)), new_idxs))+mgate)
   return ld.gep(tuple(new_idxs.index(x) for x in idx.arg))
 
-def split_load_on_gate(load, buf, idx, var, gate):
-  gate_srcs = gate.src if gate.op is UOps.VECTORIZE else [UOp.const(dtypes.bool, x) for x in gate.arg]
-  splits = dedup(gate_srcs)
-  if len(splits) == 1: return
-  fv: List[Optional[UOp]] = [None]*load.dtype.count
-  for s in splits:
-    idxs = tuple(i for i,g in enumerate(gate_srcs) if g is s)
-    ld = UOp.load(buf, idx.gep(idxs), var.gep(idxs), s.broadcast(len(idxs)), dtype=load.dtype.scalar().vec(len(idxs)))
-    for i,tidx in enumerate(idxs): fv[tidx] = ld.gep(i)
-  return UOp(UOps.VECTORIZE, load.dtype, tuple(cast(List[UOp], fv)))
+def fold_vconst_load(load:UOp, vc:UOp, buf:UOp, idx:UOp, var:UOp, gate:Optional[UOp]=None):
+  idxs = tuple(i for i,x in enumerate(vc.arg) if x)
+  mgate = (var.gep(idxs), gate.broadcast(len(idxs))) if gate is not None else tuple()
+  ld = UOp(UOps.LOAD, load.dtype.scalar().vec(sum(vc.arg)), (buf, idx.gep(idxs))+mgate)
+  # NOTE: this is generating a lot of UOps...we could change vectorize to support non-scalar types
+  return UOp(UOps.VECTORIZE, load.dtype, tuple(ld.gep(idxs.index(i)) if i in idxs else var.gep(i) for i in range(load.dtype.count)))
 
 load_store_folder = PatternMatcher([
   (UPat(UOps.ALU, src=[UPat(UOps.VCONST), UPat()], arg=BinaryOps.CMPLT, name="alu"), no_vectorized_alu),
-  (UPat(UOps.ALU, src=(UPat((UOps.VCONST, UOps.VECTORIZE)),)*2, arg=BinaryOps.AND, name="alu"), no_vectorized_alu),
-  # split load based on gate
-  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat((UOps.VCONST, UOps.VECTORIZE), name='gate'), name="load"), split_load_on_gate),
+  (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE), UPat(UOps.VECTORIZE)), arg=BinaryOps.AND, name="alu"), no_vectorized_alu),
   # idx VCONST simplificiations
   (UPat.load(UPat.var("buf"), UPat(UOps.VECTORIZE, src=UPat(name="base")) + UPat(UOps.VCONST, name="idx"), name="load"), dedup_load),
   (UPat.load(UPat.var("buf"), UPat(UOps.VECTORIZE, src=UPat(name="base")) + UPat(UOps.VCONST, name="idx"),
              UPat(UOps.CONST, name="var"), UPat(UOps.VECTORIZE, src=UPat(name="gate")), name="load"), dedup_load),
+  # gated VCONST simplifications
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat(UOps.VCONST, name="vc"), name="load"), fold_vconst_load),
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"),
+             UPat(UOps.VECTORIZE, src=UPat(name="gate")) & UPat(UOps.VCONST, name="vc"), name="load"), fold_vconst_load),
 ])
 
 # ***** mod *****
