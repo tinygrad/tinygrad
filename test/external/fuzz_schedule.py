@@ -5,7 +5,7 @@ from tinygrad.device import Buffer
 from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.engine.schedule import LBScheduleItem, _graph_schedule, ScheduleItem
+from tinygrad.engine.schedule import LBScheduleItem, _graph_schedule, ScheduleItem, get_rawbufs
 from tinygrad.ops import MetaOps
 from tinygrad.tensor import Tensor, _to_np_dtype
 
@@ -38,7 +38,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
         assign_targets[out.srcs[1]] = out
     for x in lsi.inputs:
       if x not in ground_truth and x.device != "NPY": prerealized[x] = x.buffer.as_buffer()
-    si = ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0))
+    si = ScheduleItem(lsi.ast, rawbufs(*lsi.outputs, *lsi.inputs))
     _exec_si(si, seed)
     for out in lsi.outputs:
       ground_truth[out] = out.buffer.as_buffer()
