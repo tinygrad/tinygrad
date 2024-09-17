@@ -49,9 +49,9 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   extra: List[List[str]] = [[str(ctx.sink)]]
   for (first, rewritten, pattern) in ctx.rewrites:
     # if the sink was replaced, we have to replace the entire graph, otherwise just replace the parent
-    # sometimes it saves rewrites that don't exist in the graph, skip showing those
     new_sink = rewritten if first.op is UOps.SINK else replace_uop(uops[-1], first, rewritten, {})
-    if new_sink is uops[-1]: continue
+    # TODO: sometimes it hits a ctx and can't find any UOp to replace
+    #if new_sink is uops[-1]: continue
     diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     assert new_sink.op is UOps.SINK
     uops.append(new_sink)
