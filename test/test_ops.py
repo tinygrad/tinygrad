@@ -66,7 +66,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
 def prepare_test_op(low, high, shps, vals, forward_only=False):
   if shps is None:
-    ts = [torch.tensor(x, requires_grad=(not forward_only)) for x in vals]
+    ts = [(t:=torch.tensor(x, requires_grad=(not forward_only))).to(torch.int32 if not torch.is_floating_point(t) else None) for x in vals]
   else:
     np.random.seed(0)
     np_data = [np.random.uniform(low=low, high=high, size=size).astype(_to_np_dtype(dtypes.default_float)) for size in shps]

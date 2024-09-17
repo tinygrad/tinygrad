@@ -164,7 +164,7 @@ class test_rearrange_ops(unittest.TestCase):
       ("a b c d e -> b (a c d) e", "a b ... e -> b (a ...) e"),
     ]
 
-    xnp = np.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
+    xnp = np.arange(2 * 3 * 4 * 5 * 6, dtype=np.int32).reshape([2, 3, 4, 5, 6])
     x = Tensor(xnp)
     for pattern in identity_patterns:
       assert np.array_equal(xnp, x.rearrange(pattern).numpy()), pattern
@@ -174,7 +174,7 @@ class test_rearrange_ops(unittest.TestCase):
 
   def test_rearrange_consistency(self):
     shape = [1, 2, 3, 5, 7, 11]
-    xnp = np.arange(np.prod(shape)).reshape(shape)
+    xnp = np.arange(np.prod(shape), dtype=np.int32).reshape(shape)
     x = Tensor(xnp)
     for pattern in [
       "a b c d e f -> a b c d e f",
@@ -205,7 +205,7 @@ class test_rearrange_ops(unittest.TestCase):
     result = temp.rearrange("(f d) c (e b) a -> a b c d e f", **sizes).numpy()
     assert np.array_equal(xnp, result)
 
-    x2 = np.arange(2 * 3 * 4).reshape([2, 3, 4])
+    x2 = np.arange(2 * 3 * 4, dtype=np.int32).reshape([2, 3, 4])
     result = Tensor(x2).rearrange("a b c -> b c a").numpy()
     assert x2[1, 2, 3] == result[2, 3, 1]
     assert x2[0, 1, 2] == result[1, 2, 0]
@@ -213,7 +213,7 @@ class test_rearrange_ops(unittest.TestCase):
   def test_rearrange_permutations(self):
     # tests random permutation of axes against two independent numpy ways
     for n_axes in range(1, 10):
-      x = np.arange(2**n_axes).reshape([2] * n_axes)
+      x = np.arange(2**n_axes, dtype=np.int32).reshape([2] * n_axes)
       permutation = np.random.permutation(n_axes)
       left_expression = " ".join("i" + str(axis) for axis in range(n_axes))
       right_expression = " ".join("i" + str(axis) for axis in permutation)
@@ -224,7 +224,7 @@ class test_rearrange_ops(unittest.TestCase):
         assert x[tuple(pick)] == result[tuple(pick[permutation])]
 
     for n_axes in range(1, 10):
-      x = np.arange(2**n_axes).reshape([2] * n_axes)
+      x = np.arange(2**n_axes, dtype=np.int32).reshape([2] * n_axes)
       permutation = np.random.permutation(n_axes)
       left_expression = " ".join("i" + str(axis) for axis in range(n_axes)[::-1])
       right_expression = " ".join("i" + str(axis) for axis in permutation[::-1])
@@ -310,7 +310,7 @@ class test_rearrange_parsing(unittest.TestCase):
       ("a b … e -> b (a …) e", "a b ... e -> b (a ...) e"),
     ]
 
-    xnp = np.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
+    xnp = np.arange(2 * 3 * 4 * 5 * 6, dtype=np.int32).reshape([2, 3, 4, 5, 6])
     x = Tensor(xnp)
 
     for pattern1, pattern2 in equivalent_rearrange_patterns:
