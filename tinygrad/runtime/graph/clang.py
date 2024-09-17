@@ -19,7 +19,7 @@ class ClangGraph(GraphRunner):
     self.const_base_rawbufs = [b._buf for b in self.const_base_bufs]
 
     # TODO: dedup
-    prgs = '\n'.join(ClangRenderer().render(f"j{i}{to_function_name(ji.prg.p.name)}", ji.prg.p.uops) for i,ji in enumerate(jit_cache))
+    prgs = '\n'.join(device.renderer._render_body(f"j{i}{to_function_name(ji.prg.p.name)}", ji.prg.p.uops) for i,ji in enumerate(jit_cache))
     targs = [(f"arg{i}", (PtrDType(x.dtype), False)) for i,x in enumerate(input_rawbuffers)] + \
             [(f"cbuf{i}", (PtrDType(dtypes.char), False)) for i,x in enumerate(self.const_base_bufs)] + \
             sorted([(f"{v.expr}", (dtypes.int, False)) for v in var_vals])

@@ -209,19 +209,27 @@ class ClangRenderer(CStyleLanguage):
   def render_vector_prefix(self, dt:DType) -> str:
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
 
-  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix, macros = [self.render_vector_prefix(dt) for dt in dedup(uop.dtype for uop in uops if uop.dtype.count>1)], []
-    # https://github.com/corsix/amx
-    for name, (N, M, _), dtype_in, _, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      macros = [
-        '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
-        '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
-      ]
-      prefix += [f"""{(out := self.render_dtype(dtype_in.vec(N*N)))} __{name}({self.render_dtype(dtype_in.vec(N))} data1, {self.render_dtype(dtype_in.vec(M))} data2, {out} data0){{
+  def _render_defines(self, function_name):
+    defs = []
+    if AMX:
+      defs = [self.render_vector_prefix(dt) for dt in dedup(uop.dtype for uop in uops if uop.dtype.count>1)]
+      # https://github.com/corsix/amx
+      for name, (N, M, _), dtype_in, _, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+        defs += [
+          '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
+          '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
+        ]
+        defs += [f"""{(out := self.render_dtype(dtype_in.vec(N*N)))} __{name}({self.render_dtype(dtype_in.vec(N))} data1, {self.render_dtype(dtype_in.vec(M))} data2, {out} data0){{
   AMX_SET(0);\n  for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(4, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}
   AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull);
   for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(5, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}\n  AMX_SET(1);\n  return data0;\n}}"""] # noqa: E501
-    return super().render_kernel(function_name, kernel, bufs, uops, macros + prefix)
+    return "\n".join(defs)
+
+  def _render_entry(self, function_name, bufs) -> str: return ""
+  def _render_body(self, function_name, kernel, bufs, uops): return super().render_kernel(function_name, kernel, bufs, uops)
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    return self._render_defines(function_name) + "\n" + self._render_body(function_name, kernel, bufs, uops) + "\n" + self._render_entry(function_name, bufs)
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
@@ -445,15 +453,15 @@ class DSPRenderer(ClangRenderer):
                  UnaryOps.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
                  UnaryOps.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix) + self._render_entry(function_name, bufs)
+  def _render_defines(self, function_name):
+    return '''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
+                 short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; }; int HAP_power_set(void*, void*);
+            typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;
+            void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset); int HAP_munmap(void *addr, int len);
+            unsigned long long HAP_perf_get_time_us(void);'''
 
   def _render_entry(self, function_name:str, bufs:List[Tuple[str,Tuple[DType,bool]]]) -> str:
-    msrc = ['''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
-                 short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
-            'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
-            'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
-            'unsigned long long HAP_perf_get_time_us(void);', 'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
+    msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
             'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
             'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
