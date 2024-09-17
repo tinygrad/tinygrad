@@ -19,7 +19,7 @@ if __name__ == "__main__":
   list(lower_schedule(sched))
   uret = create_graph(contexts[0])
   assert uret.loc.split(":")[0] == "schedule.py"
-  assert len(uret.graphs) == len(uret.extra) == 1
+  assert len(uret.uops) == len(uret.extra) == 1
   assert len(uret.diffs) == 0
   contexts.clear()
 
@@ -33,8 +33,8 @@ if __name__ == "__main__":
   for ctx in tqdm(contexts):
     st = time.perf_counter()
     ret = create_graph(ctx)
-    assert len(ret.graphs) == len(ret.extra)
-    assert len(ret.diffs) == len(ret.graphs)-1, f"found {len(ret.diffs)} diffs but only {len(ret.graphs)-1} graphs"
+    assert len(ret.uops) == len(ret.extra)
+    assert len(ret.diffs) == len(ret.uops)-1, f"found {len(ret.diffs)} diffs but only {len(ret.uops)-1} uops"
     tms.append(time.perf_counter()-st)
 
   timings = list(zip(contexts, tms))

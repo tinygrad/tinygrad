@@ -4,7 +4,6 @@ from typing import List, Any, DefaultDict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps, UOps, UOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters
-from tinygrad.shape.symbolic import NumNode
 from tinygrad.lazy import LazyBuffer
 
 with contextlib.suppress(ImportError): import networkx as nx
@@ -47,8 +46,8 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
   init_graph()
   if lb.base.realized is None and lb.base.op is MetaOps.CONST: return
   if lb.base != lb:
-    offset = lb.st.expr_idxs([NumNode(0)] * len(lb.st.shape))[0]
-    label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")
+    offset = tuple(x.offset for x in lb.st.views if x.offset != 0)
+    label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if len(offset) else "")
     G.add_node(nm(lb), style='"filled,dashed"', fillcolor="#80ff8080", color="black", label=label)
     G.add_edge(nm(lb.base), nm(lb), color='#00000060')
     lb = lb.base
