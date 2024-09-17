@@ -677,7 +677,7 @@ class UPat(MathTrait):
   def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return type(self)(UOps.GEP, None, (self,), (i,))
   @classmethod
-  def load(cls, *src:UPat, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
+  def load(cls, *src:UPat, dtype:Optional[DType]=None, name:Optional[str]=None): return cls(UOps.LOAD, dtype, src, name=name)
   @classmethod
   def store(cls, *src:UPat): return cls(UOps.STORE, dtypes.void, src)
 
@@ -763,7 +763,7 @@ class TrackedPattenMatcher(PatternMatcher):
         match_stats[p][0] += 1
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
-        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
+        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- {str(ret.dtype)[7:]:15s} --", p.printable())
         if TRACK_MATCH_STATS >= 2: contexts[-1].rewrites.append((uop, ret, p.printable()))
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st

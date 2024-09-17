@@ -75,6 +75,35 @@ float4_folding = PatternMatcher([
   (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
 ])
 
+# *** new load folders ***
+
+def dedup_load(load:UOp, buf:UOp, base:UOp, idx:UOp, var:Optional[UOp]=None, gate:Optional[UOp]=None):
+  if len(dedup(idx.arg)) == len(idx.arg): return None
+  new_idxs = tuple(sorted(dedup(idx.arg)))
+  mgate = (UOp.const(var.dtype.scalar().vec(len(new_idxs)), var.arg), gate.broadcast(len(new_idxs))) \
+    if gate is not None and var is not None else tuple()
+  ld = UOp(UOps.LOAD, load.dtype.scalar().vec(len(new_idxs)),
+           (buf, base.broadcast(len(new_idxs))+UOp.const(idx.dtype.scalar().vec(len(new_idxs)), new_idxs))+mgate)
+  return ld.gep(tuple(new_idxs.index(x) for x in idx.arg))
+
+def fold_vconst_load(load:UOp, vc:UOp, buf:UOp, idx:UOp, var:UOp, gate:Optional[UOp]=None):
+  idxs = tuple(i for i,x in enumerate(vc.arg) if x)
+  mgate = (var.gep(idxs), gate.broadcast(len(idxs))) if gate is not None else tuple()
+  ld = UOp(UOps.LOAD, load.dtype.scalar().vec(sum(vc.arg)), (buf, idx.gep(idxs))+mgate)
+  # NOTE: this is generating a lot of UOps...we could change vectorize to support non-scalar types
+  return UOp(UOps.VECTORIZE, load.dtype, tuple(ld.gep(idxs.index(i)) if i in idxs else var.gep(i) for i in range(load.dtype.count)))
+
+load_store_folder = PatternMatcher([
+  # idx VCONST simplificiations
+  (UPat.load(UPat.var("buf"), UPat(UOps.VECTORIZE, src=UPat(name="base")) + UPat(UOps.VCONST, name="idx"), name="load"), dedup_load),
+  (UPat.load(UPat.var("buf"), UPat(UOps.VECTORIZE, src=UPat(name="base")) + UPat(UOps.VCONST, name="idx"),
+             UPat(UOps.CONST, name="var"), UPat(UOps.VECTORIZE, src=UPat(name="gate")), name="load"), dedup_load),
+  # gated VCONST simplifications
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat(UOps.VCONST, name="vc"), name="load"), fold_vconst_load),
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"),
+             UPat(UOps.VECTORIZE, src=UPat(name="gate")) & UPat(UOps.VCONST, name="vc"), name="load"), fold_vconst_load),
+])
+
 # ***** mod *****
 
 def _get_chain(x:UOp, sep:BinaryOps):
@@ -421,7 +450,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),
     lambda x,c1,y: (x+y)+c1),
-])
+])+load_store_folder
 
 # *** uop expander ***
 
