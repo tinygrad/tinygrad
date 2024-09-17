@@ -51,18 +51,14 @@ class ClipEmbedder(FrozenClosedClipEmbedder):
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/math.py
 def attention(q:Tensor, k:Tensor, v:Tensor, pe:Tensor) -> Tensor:
   q, k = apply_rope(q, k, pe)
-
   x = Tensor.scaled_dot_product_attention(q, k, v)
-  x = x.rearrange("B H L D -> B L (H D)")
-
-  return x
+  return x.rearrange("B H L D -> B L (H D)")
 
 def rope(pos:Tensor, dim:int, theta:int) -> Tensor:
   assert dim % 2 == 0
   scale = Tensor.arange(0, dim, 2, dtype=dtypes.float32, device=pos.device) / dim # NOTE: this is torch.float64 in reference implementation
   omega = 1.0 / (theta**scale)
   out = Tensor.einsum("...n,d->...nd", pos, omega)
-
   out = Tensor.stack(Tensor.cos(out), -Tensor.sin(out), Tensor.sin(out), Tensor.cos(out), dim=-1)
   out = out.rearrange("b n d (i j) -> b n d i j", i=2, j=2)
   return out.float()
@@ -117,8 +113,7 @@ class SelfAttention:
     q, k, v = qkv.rearrange("B L (K H D) -> K B H L D", K=3, H=self.num_heads)
     q, k = self.norm(q, k)
     x = attention(q, k, v, pe=pe)
-    x = self.proj(x)
-    return x
+    return self.proj(x)
 
 @dataclass
 class ModulationOut:
@@ -240,8 +235,7 @@ class LastLayer:
   def __call__(self, x:Tensor, vec:Tensor) -> Tensor:
     shift, scale = vec.sequential(self.adaLN_modulation).chunk(2, dim=1)
     x = (1 + scale[:, None, :]) * self.norm_final(x) + shift[:, None, :]
-    x = self.linear(x)
-    return x
+    return self.linear(x)
 
 def timestep_embedding(t:Tensor, dim:int, max_period:int=10000, time_factor:float=1000.0) -> Tensor:
   """
@@ -329,8 +323,7 @@ class Flux:
 
     img = img[:, txt.shape[1] :, ...]
 
-    img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
-    return img
+    return self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/util.py
 def load_flow_model(name:str):
@@ -484,9 +477,8 @@ if __name__ == "__main__":
   x = ae.decode(x).realize()
 
   t1 = time.perf_counter()
-
-  # fn = output_name.format(idx=idx)
   print(f"Done in {t1 - t0:.1f}s. Saving {args.out}")
+
   # bring into PIL format and save
   x = x.clamp(-1, 1)
   x = x[0].rearrange("c h w -> h w c")

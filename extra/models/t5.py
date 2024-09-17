@@ -176,9 +176,7 @@ class T5Attention:
         num_buckets=self.relative_attention_num_buckets,
         max_distance=self.relative_attention_max_distance,
     )
-    values = self.relative_attention_bias(
-        relative_position_bucket
-    )  # shape (query_length, key_length, num_heads)
+    values = self.relative_attention_bias(relative_position_bucket)  # shape (query_length, key_length, num_heads)
     values = values.permute([2, 0, 1]).unsqueeze(0)  # shape (1, num_heads, query_length, key_length)
     return values
 
@@ -203,9 +201,7 @@ class T5Attention:
       """projects hidden states correctly to key/query states"""
       # self-attn
       # (batch_size, n_heads, seq_length, dim_per_head)
-      hidden_states = shape(proj_layer(hidden_states))
-
-      return hidden_states
+      return shape(proj_layer(hidden_states))
 
     # get query states
     query_states = shape(self.q(hidden_states))  # (batch_size, n_heads, seq_length, dim_per_head)
