@@ -1,8 +1,6 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
-from extra.metal.api import Metal
-import extra.metal.api as api
-import extra.metal.cdll as cdll
+import tinygrad.runtime.support.metal as cdll
 from typing import List, Any, Tuple, Optional, cast
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
