@@ -60,6 +60,27 @@ class TestMemoryCount(unittest.TestCase):
     _, mem = get_stats(a.assign(a+a))
     self.assertEqual(mem, 1024*1024*2)  # 1 read + 1 write
 
+# NOTE: this still isn't testing unroll using the acc
+@unittest.skipUnless(getenv("PYTHON"), "only run test on emulated tensor cores")
+class TestUOpsStatsMatmul(unittest.TestCase):
+  def test_simple_matmul_half(self, N=16):
+    GlobalCounters.reset()
+    a, b = Tensor.empty(N, N, dtype=dtypes.half), Tensor.empty(N, N, dtype=dtypes.half)
+    c = a.matmul(b)
+    c.realize()
+    expected_ops = N ** 3 * 2
+    self.assertEqual(expected_ops, GlobalCounters.global_ops)
+
+  def test_bigger_matmul_half(self): self.test_simple_matmul_half(64)
+
+  def test_batched_matmul_half(self, N=16):
+    GlobalCounters.reset()
+    a, b = Tensor.empty(4, N, N, dtype=dtypes.half), Tensor.empty(1, N, N, dtype=dtypes.half)
+    c = a.matmul(b)
+    c.realize()
+    expected_ops = 4 * N ** 3 * 2
+    self.assertEqual(expected_ops, GlobalCounters.global_ops)
+
 class TestUOpsStats(unittest.TestCase):
   @unittest.skipIf(getenv("PTX"), "wrong in PTX")
   def test_simple_add(self):
@@ -94,16 +115,6 @@ class TestUOpsStats(unittest.TestCase):
     assert expected_ops <= ops and ops <= expected_ops * 1.2
     # NOTE: it's hard to assert on the memory here, all depends on caching
     assert required_mem <= mem
-
-  @unittest.skipUnless(getenv("PYTHON"), "only run test on emulated tensor cores")
-  def test_simple_matmul_half(self):
-    GlobalCounters.reset()
-    N = 16
-    a, b = Tensor.empty(N, N, dtype=dtypes.half), Tensor.empty(N, N, dtype=dtypes.half)
-    c = a.matmul(b)
-    c.realize()
-    expected_ops = N ** 3 * 2
-    self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):

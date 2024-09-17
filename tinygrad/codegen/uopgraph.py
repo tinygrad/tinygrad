@@ -219,6 +219,31 @@ def index_collapse(idx,rng,buf,add,mul,ld,reduce):
   return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx, ld.const_like(0), idx.ge(rng.src[0]) & idx.lt(rng.src[1]))),)+
              tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
+# TODO: there's a lot shared with no_vectorized_wmma here
+def gep_through_wmma(gep:UOp, wmma:UOp):
+  out_sz = prod(x[1] for x in wmma.arg[6][-1])
+  wmma_idxs = gep.arg[::out_sz]
+  for i in range(out_sz):
+    if tuple(x-i for x in gep.arg[i::out_sz]) != wmma_idxs: return None
+  tsrcs = []
+  for s,sz in zip(wmma.src, wmma.arg[6]):
+    src_args = []
+    ssz = prod(x[1] for x in sz)
+    for w in wmma_idxs: src_args += list(range((w//out_sz)*ssz, (w//out_sz)*ssz + ssz))
+    tsrcs.append(s.gep(tuple(src_args)))
+  return UOp(UOps.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
+
+def no_vectorized_wmma(wmma:UOp):
+  out_sz = prod(x[1] for x in wmma.arg[6][-1])
+  if wmma.dtype.count == out_sz: return None
+  tsrcs = []
+  for s,sz in zip(wmma.src, wmma.arg[6]):
+    ssz = prod(x[1] for x in sz)
+    tsrcs.append([s.gep(tuple(range(grp, grp+ssz))) for grp in range(0, s.dtype.count, ssz)])
+  wmmas = [UOp(UOps.WMMA, wmma.dtype.scalar().vec(out_sz), tsrc, wmma.arg) for tsrc in zip(*tsrcs)]
+  wmma_ex = flatten([[e.gep(i) for i in range(out_sz)] for e in wmmas])
+  return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
@@ -247,6 +272,8 @@ constant_folder = PatternMatcher([
   # push all GEPs through ALUs (fix arange stuff)
   (UPat(UOps.GEP, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name='alu'),), name='gep'),
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
+  # push some GEPs through WMMAs
+  (UPat(UOps.GEP, src=(UPat(UOps.WMMA, name="wmma"),), name="gep"), gep_through_wmma),
   # tensor core with a 0 input is acc
   (UPat(UOps.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc),
   (UPat(UOps.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc),
@@ -541,17 +568,6 @@ def no_vectorized_acc(acc:UOp):
   alus = tuple(UOp(acc.op, acc.dtype.scalar(),
     tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
-
-def no_vectorized_wmma(wmma:UOp):
-  out_sz = prod(x[1] for x in wmma.arg[6][-1])
-  if wmma.dtype.count == out_sz: return None
-  tsrcs = []
-  for s,sz in zip(wmma.src, wmma.arg[6]):
-    ssz = prod(x[1] for x in sz)
-    tsrcs.append([s.gep(tuple(range(grp, grp+ssz))) for grp in range(0, s.dtype.count, ssz)])
-  wmmas = [UOp(UOps.WMMA, wmma.dtype.scalar().vec(out_sz), tsrc, wmma.arg) for tsrc in zip(*tsrcs)]
-  wmma_ex = flatten([[e.gep(i) for i in range(out_sz)] for e in wmmas])
-  return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
