@@ -9,6 +9,13 @@ from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX,
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
+def no_vectorized_alu(alu):
+  if alu.dtype.count == 1: return None
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(),
+                   tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if alu.op is not UOps.REDUCE or j == 0 else s for j,s in enumerate(alu.src)),
+                   alu.arg) for i in range(alu.dtype.count))
+  return UOp(UOps.VECTORIZE, alu.dtype, alus)
+
 # ***** float4/image store handling *****
 
 def fold_expanded(ex, buf):
@@ -94,6 +101,8 @@ def fold_vconst_load(load:UOp, vc:UOp, buf:UOp, idx:UOp, var:UOp, gate:Optional[
   return UOp(UOps.VECTORIZE, load.dtype, tuple(ld.gep(idxs.index(i)) if i in idxs else var.gep(i) for i in range(load.dtype.count)))
 
 load_store_folder = PatternMatcher([
+  (UPat(UOps.ALU, src=[UPat(UOps.VCONST), UPat()], arg=BinaryOps.CMPLT, name="alu"), no_vectorized_alu),
+  (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE), UPat(UOps.VECTORIZE)), arg=BinaryOps.AND, name="alu"), no_vectorized_alu),
   # idx VCONST simplificiations
   (UPat.load(UPat.var("buf"), UPat(UOps.VECTORIZE, src=UPat(name="base")) + UPat(UOps.VCONST, name="idx"), name="load"), dedup_load),
   (UPat.load(UPat.var("buf"), UPat(UOps.VECTORIZE, src=UPat(name="base")) + UPat(UOps.VCONST, name="idx"),
@@ -540,13 +549,6 @@ def do_contract(con:UOp):
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
     idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]
   return UOp(UOps.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
-
-def no_vectorized_alu(alu):
-  if alu.dtype.count == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(),
-                   tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if alu.op is not UOps.REDUCE or j == 0 else s for j,s in enumerate(alu.src)),
-                   alu.arg) for i in range(alu.dtype.count))
-  return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 def create_gate(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
