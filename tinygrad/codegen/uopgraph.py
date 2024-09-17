@@ -160,7 +160,6 @@ def fold_unrolled_divs(divs:UOp, c:UOp):
 def simplify_valid_image_load(load:UOp, buf:UOp):
   if not isinstance(buf.dtype, ImageDType) or len(load.src) < 4: return None
   buf, idx, _, valid = load.src
-  # return None
   if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT:
     if valid.src[1].arg == 0 and graph_rewrite(valid.src[0]*(-1)-1, constant_folder).key == idx.src[1].key:
       # valid: A*(-1) < 0, idx: (..., A-1) -> okay to drop valid
