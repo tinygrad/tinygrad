@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Dict, List, Tuple
 import pickle, re, os, sys, time, threading, webbrowser, json, difflib, contextlib
 from tinygrad.helpers import getenv
@@ -29,15 +29,15 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
 
 @dataclass(frozen=True)
 class UOpRet:
-  loc: str                                                            # location that called graph_rewrite
-  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]]       # a seralized version of UOp graphs
-  diffs: List[Tuple[str, List[str]]]                                  # the diffs for each rewrite
-  extra: List[List[str]]                                              # these become code blocks in the UI
+  loc: str                           # location that called graph_rewrite
+  uops: List[UOp]                    # snapshot of the entire AST after each rewrite
+  diffs: List[Tuple[str, List[str]]] # the diffs for each rewrite
+  extra: List[List[str]]             # these become code blocks in the UI
 
-def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[UOp, UOp]) -> UOp:
+def replace_uop(base:UOp, first:UOp, new:UOp, cache:Dict[UOp, UOp]) -> UOp:
   if (u:=cache.get(base)): return u
-  new_srcs = tuple(new if x.key == prev.key else replace_uop(x, prev, new, cache) for x in base.src)
-  ret = cache[base] = base if new_srcs == base.src else UOp(base.op, base.dtype, new_srcs, base.arg)
+  if base.key == first.key: return new
+  ret = cache[base] = UOp(base.op, base.dtype, tuple(replace_uop(x, first, new, cache) for x in base.src), base.arg)
   return ret
 
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
@@ -51,7 +51,7 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
     assert new_sink.op is UOps.SINK
     uops.append(new_sink)
     extra.append([str(new_sink)])
-  return UOpRet(ctx.loc, list(map(uop_to_json, uops)), diffs, extra)
+  return UOpRet(ctx.loc, uops, diffs, extra)
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -73,8 +73,8 @@ class Handler(BaseHTTPRequestHandler):
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
       rest = [x.loc for x in contexts]
-      current_graph = create_graph(contexts[int(self.path.split("/")[-1])])
-      ret = json.dumps((asdict(current_graph), rest)).encode()
+      g = create_graph(contexts[int(self.path.split("/")[-1])])
+      ret = json.dumps(({"loc": g.loc, "graphs": list(map(uop_to_json, g.uops)), "diffs": g.diffs, "extra": g.extra}, rest)).encode()
     else:
       self.send_response(404)
       ret = b""
