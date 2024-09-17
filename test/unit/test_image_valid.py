@@ -21,14 +21,16 @@ def Variable(expr, nmax):
   return UOp(UOps.SPECIAL, dtypes.int, (), (expr, nmax))
 
 class TestValidSimplification(unittest.TestCase):
-  def test_idx_lt_0(self):
-    # (idx1 * (-1) < 0) ? (..., idx1-1) : 0 can drop the valid
+  def test_idx_lt_c(self):
+    # (idx1 * (-1) < c) ? (..., idx1-1+c) : 0 can drop the valid
     gidx0 = Variable("gidx0", 32)
     gidx1 = Variable("gidx1", 32)
-    self.assertEqual(
-      render((10, 10, 4), (gidx1*(-1)).lt(0), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-1))),
-      "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-1))))"
-    )
+    self.assertEqual(render((10, 10, 4), (gidx1*(-1)).lt(0), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-1))),
+                     "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-1))))")
+    self.assertEqual(render((10, 10, 4), (gidx1*(-1)).lt(-1), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-2))),
+                     "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-2))))")
+    self.assertEqual(render((10, 10, 4), (gidx1*(-1)).lt(1), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
+                     "read_imagef(data0, smp, (int2)(gidx0,gidx1))")
 
 if __name__ == '__main__':
   unittest.main()

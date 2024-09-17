@@ -161,8 +161,8 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
   if not isinstance(buf.dtype, ImageDType) or len(load.src) < 4: return None
   buf, idx, _, valid = load.src
   if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT:
-    if valid.src[1].arg == 0 and graph_rewrite(valid.src[0]*(-1)-1, constant_folder).key == idx.src[1].key:
-      # valid: A*(-1) < 0, idx: (..., A-1) -> okay to drop valid
+    if graph_rewrite(valid.src[0]*(-1)-1+valid.src[1].arg, constant_folder).key == idx.src[1].key:
+      # valid: A*(-1) < c, idx: (..., A-1+c) -> okay to drop valid because A*(-1) >= c -> A <= -c -> A-1+c <= -1 is out of bound
       return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
 
 # ***** transcendental *****
