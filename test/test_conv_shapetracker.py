@@ -51,10 +51,6 @@ class TestConvShapetracker(unittest.TestCase):
       print(i, i1, i2, si.inputs[0].size, i1==i2)
       #self.assertEqual(i1, i2)
 
-    for stt in [st, test_st]:
-      s,va = stt.expr_idxs()
-      print(s)
-      print(va)
     with self.assertRaises(AssertionError):
       assert len(st.views) <= 2
 
