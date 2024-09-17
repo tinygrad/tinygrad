@@ -1,4 +1,4 @@
-import sys, pickle, atexit, importlib, contextlib
+import sys, pickle, atexit, importlib, contextlib, functools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
@@ -11,7 +11,7 @@ from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Device
 from tinygrad.shape.view import View, strides_for_shape
 
 # creation can recurse a lot
@@ -159,6 +159,12 @@ reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
+def split_ast(root:UOp, buf_max:int) -> Optional[UOp]:
+  # TOOD: is this always deduped?
+  bufs = [x for x in root.sparents if x.op is UOps.DEFINE_GLOBAL]
+  if len(bufs) <= buf_max: return None
+def buf_split(buf_max:int) -> PatternMatcher: return PatternMatcher([(UPat(UOps.SINK, name="root"), functools.partial(split_ast, buf_max=buf_max))])
+
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> Tuple[LBScheduleItem, Dict[Variable, int]]:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
   if (out:=outs[0]).op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
@@ -181,6 +187,8 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
   sink = UOp(UOps.SINK, dtypes.void, tuple(ast))
   if AST_REWRITE:
     sink = graph_rewrite(sink, reduceop_fusor)
+    if (buf_max:=Device[out.device].renderer.buf_max) is not None:
+      sink = graph_rewrite(sink, buf_split(buf_max))
   return LBScheduleItem(sink, outs, list(inputs), dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])), var_vals
 
 # *** DAG creation: decide which LazyBuffers should realize ***

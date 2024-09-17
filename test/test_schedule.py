@@ -73,7 +73,9 @@ def _test_buf_cnt(cnt:int, bufs_max:int, allowed:int):
   backup_renderer = Device[Device.DEFAULT].renderer
   r = CStyleLanguage()
   r.buf_max = bufs_max
-  alu = functools.reduce(lambda x,y: x+y, [Tensor.ones((1, 1)).contiguous().realize() for _ in range(cnt-1)])
+  loads = [Tensor.ones((1, 1)).contiguous().realize() for _ in range(cnt-1)]
+  Device[Device.DEFAULT].renderer = r
+  alu = functools.reduce(lambda x,y: x+y, loads)
   s = alu.schedule()
   assert len(s) == allowed
   Device[Device.DEFAULT].renderer = backup_renderer
