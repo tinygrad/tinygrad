@@ -124,6 +124,8 @@ load_store_folder = PatternMatcher([
              UPat(UOps.VECTORIZE, src=UPat(name="gate")) & UPat(UOps.VCONST, name="vc"), name="load"), fold_vconst_load),
   # split load based on gate
   (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat((UOps.VCONST, UOps.VECTORIZE), name='gate'), name="load"), split_load_on_gate),
+  # group back to GEP
+  (UPat(UOps.VECTORIZE, name="vec", src=UPat(UOps.GEP, src=(UPat.var('x'),))), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
 ])
 
 # ***** mod *****
