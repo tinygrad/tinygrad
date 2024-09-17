@@ -1,3 +1,5 @@
+# pip3 install sentencepiece
+
 # adapted from https://github.com/huggingface/transformers/blob/main/src/transformers/models/t5/modeling_t5.py
 
 # coding=utf-8
@@ -15,35 +17,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tinygrad T5 model."""
-
-import math
-
-from dataclasses import dataclass
-from typing import List, Union
-
 from tinygrad import nn, Tensor, dtypes
 
+import math
+from dataclasses import dataclass
+from typing import List, Union, Optional, Tuple
+from pathlib import Path
 from sentencepiece import SentencePieceProcessor
 
 # default config is t5-xxl
 @dataclass
 class T5Config:
-  d_ff: int = 10240
-  d_kv: int = 64
-  d_model: int = 4096
-  layer_norm_epsilon: float = 1e-6
-  num_decoder_layers: int = 24
-  num_heads: int = 64
-  num_layers: int = 24
-  relative_attention_num_buckets: int = 32
-  relative_attention_max_distance: int = 128
-  vocab_size: int = 32128
+  d_ff:int = 10240
+  d_kv:int = 64
+  d_model:int = 4096
+  layer_norm_epsilon:float = 1e-6
+  num_decoder_layers:int = 24
+  num_heads:int = 64
+  num_layers:int = 24
+  relative_attention_num_buckets:int = 32
+  relative_attention_max_distance:int = 128
+  vocab_size:int = 32128
 
 class T5Tokenizer:
   def __init__(self, spiece_path):
     self.spp = SentencePieceProcessor(str(spiece_path))
 
-  def encode(self, text:str, max_length:int) -> list[int]:
+  def encode(self, text:str, max_length:int) -> List[int]:
     encoded = self.spp.Encode(text)
     if len(encoded) > max_length - 1: encoded = encoded[:max_length - 1]
     return encoded + [1] + [0]*(max_length - len(encoded) - 1)
@@ -164,7 +164,7 @@ class T5Attention:
     relative_buckets += Tensor.where(is_small, relative_position, relative_position_if_large)
     return relative_buckets
 
-  def compute_bias(self, query_length:int, key_length:int, device=None) -> Tensor:
+  def compute_bias(self, query_length, key_length, device=None) -> Tensor:
     """Compute binned relative position bias"""
     if device is None:
       device = self.relative_attention_bias.weight.device
@@ -182,7 +182,7 @@ class T5Attention:
     values = values.permute([2, 0, 1]).unsqueeze(0)  # shape (1, num_heads, query_length, key_length)
     return values
 
-  def __call__(self, hidden_states:Tensor, position_bias:Tensor | None=None) -> tuple[Tensor, Tensor]:
+  def __call__(self, hidden_states:Tensor, position_bias:Optional[Tensor]=None) -> Tuple[Tensor,Tensor]:
     """
     Self-attention (if key_value_states is None) or attention over source sentence (provided by key_value_states).
     """
@@ -235,20 +235,18 @@ class T5LayerSelfAttention:
     self.SelfAttention = T5Attention(config, has_relative_attention_bias=has_relative_attention_bias)
     self.layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
 
-  def __call__(self, hidden_states:Tensor, position_bias:Tensor | None=None) -> tuple[Tensor, Tensor]:
+  def __call__(self, hidden_states:Tensor, position_bias:Optional[Tensor]=None) -> Tuple[Tensor, Tensor]:
     normed_hidden_states = self.layer_norm(hidden_states)
     attention_output, position_bias = self.SelfAttention(normed_hidden_states, position_bias=position_bias)
-    hidden_states = hidden_states + attention_output
-    return hidden_states, position_bias
+    return hidden_states + attention_output, position_bias
 
 
 class T5Block:
   def __init__(self, config:T5Config, has_relative_attention_bias:bool=False):
-    self.layer = []
-    self.layer.append(T5LayerSelfAttention(config, has_relative_attention_bias=has_relative_attention_bias))
-    self.layer.append(T5LayerFF(config))
+    self.layer = (T5LayerSelfAttention(config, has_relative_attention_bias=has_relative_attention_bias),
+                  T5LayerFF(config))
 
-  def __call__(self, hidden_states:Tensor, position_bias:Tensor | None=None) -> tuple[Tensor, Tensor]:
+  def __call__(self, hidden_states:Tensor, position_bias:Optional[Tensor]=None) -> Tuple[Tensor, Tensor]:
     self_attention_outputs, position_bias = self.layer[0](hidden_states, position_bias=position_bias)
     hidden_states = self_attention_outputs
 
@@ -259,27 +257,21 @@ class T5Block:
 
 
 class T5Stack:
-  def __init__(self, config:T5Config, embed_tokens:nn.Embedding | None=None):
+  def __init__(self, config:T5Config, embed_tokens:nn.Embedding):
     self.config = config
     self.embed_tokens = embed_tokens
     self.block = [T5Block(config, has_relative_attention_bias=bool(i == 0)) for i in range(config.num_layers)]
     self.final_layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
 
   def __call__(self, input_ids:Tensor) -> Tensor:
-    input_shape = input_ids.size()
-    input_ids = input_ids.view(-1, input_shape[-1])
+    input_ids = input_ids.view(-1, input_ids.shape[-1])
 
-    inputs_embeds = self.embed_tokens(input_ids)
-
-    position_bias = None
-
-    hidden_states = inputs_embeds
+    hidden_states, position_bias = self.embed_tokens(input_ids), None
 
     for layer_module in self.block:
       hidden_states, position_bias = layer_module(hidden_states, position_bias=position_bias)
 
     return self.final_layer_norm(hidden_states)
-
 
 
 class T5EncoderModel:
@@ -291,7 +283,7 @@ class T5EncoderModel:
     return self.encoder(input_ids)
 
 class T5Embedder:
-  def __init__(self, max_length:int, spiece_path:str):
+  def __init__(self, max_length:int, spiece_path:Union[str, Path]):
     self.tokenizer = T5Tokenizer(spiece_path)
     self.max_length = max_length
     config = T5Config()

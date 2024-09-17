@@ -1,3 +1,5 @@
+# pip3 install sentencepiece
+
 # This file incorporates code from the following:
 # Github Name                    | License | Link
 # black-forest-labs/flux         | Apache  | https://github.com/black-forest-labs/flux/tree/main/model_licenses
@@ -11,6 +13,7 @@ from extra.models.t5 import T5Embedder
 import numpy as np
 
 import math, time, argparse, tempfile
+from typing import List, Dict, Optional, Union, Tuple, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from PIL import Image
@@ -39,7 +42,7 @@ class AutoEncoder:
 
 # Conditioner
 class ClipEmbedder(FrozenClosedClipEmbedder):
-  def __call__(self, texts:str | list[str] | Tensor) -> Tensor | tuple[Tensor,...]:
+  def __call__(self, texts:Union[str, List[str], Tensor]) -> Tensor:
     if isinstance(texts, str): texts = [texts]
     assert isinstance(texts, (list,tuple)), f"expected list of strings, got {type(texts).__name__}"
     tokens = Tensor.cat(*[Tensor(self.tokenizer.encode(text)) for text in texts], dim=0)
@@ -58,13 +61,13 @@ def rope(pos:Tensor, dim:int, theta:int) -> Tensor:
   assert dim % 2 == 0
   scale = Tensor.arange(0, dim, 2, dtype=dtypes.float32, device=pos.device) / dim # NOTE: this is torch.float64 in reference implementation
   omega = 1.0 / (theta**scale)
-  out = pos.unsqueeze(-1) * omega.unsqueeze(0) # equivalent to Tensor.einsum("...n,d->...nd", pos, omega)
+  out = Tensor.einsum("...n,d->...nd", pos, omega)
 
   out = Tensor.stack(Tensor.cos(out), -Tensor.sin(out), Tensor.sin(out), Tensor.cos(out), dim=-1)
   out = out.rearrange("b n d (i j) -> b n d i j", i=2, j=2)
   return out.float()
 
-def apply_rope(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
+def apply_rope(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor]:
   xq_ = xq.float().reshape(*xq.shape[:-1], -1, 1, 2)
   xk_ = xk.float().reshape(*xk.shape[:-1], -1, 1, 2)
   xq_out = freqs_cis[..., 0] * xq_[..., 0] + freqs_cis[..., 1] * xq_[..., 1]
@@ -74,7 +77,7 @@ def apply_rope(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/layers.py
 class EmbedND:
-  def __init__(self, dim:int, theta:int, axes_dim:list[int]):
+  def __init__(self, dim:int, theta:int, axes_dim:List[int]):
     self.dim = dim
     self.theta = theta
     self.axes_dim = axes_dim
@@ -97,7 +100,7 @@ class QKNorm:
     self.query_norm = nn.RMSNorm(dim)
     self.key_norm = nn.RMSNorm(dim)
 
-  def __call__(self, q:Tensor, k:Tensor) -> tuple[Tensor, Tensor]:
+  def __call__(self, q:Tensor, k:Tensor) -> Tuple[Tensor, Tensor]:
     return self.query_norm(q), self.key_norm(k)
 
 class SelfAttention:
@@ -129,7 +132,7 @@ class Modulation:
     self.multiplier = 6 if double else 3
     self.lin = nn.Linear(dim, self.multiplier * dim, bias=True)
 
-  def __call__(self, vec:Tensor) -> tuple[ModulationOut, ModulationOut | None]:
+  def __call__(self, vec:Tensor) -> Tuple[ModulationOut, Optional[ModulationOut]]:
     out = self.lin(vec.silu())[:, None, :].chunk(self.multiplier, dim=-1)
     return ModulationOut(*out[:3]), ModulationOut(*out[3:]) if self.is_double else None
 
@@ -155,6 +158,7 @@ class DoubleStreamBlock:
   def __call__(self, img:Tensor, txt:Tensor, vec:Tensor, pe:Tensor) -> tuple[Tensor, Tensor]:
     img_mod1, img_mod2 = self.img_mod(vec)
     txt_mod1, txt_mod2 = self.txt_mod(vec)
+    assert img_mod2 is not None and txt_mod2 is not None
     # prepare image for attention
     img_modulated = self.img_norm1(img)
     img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
@@ -193,7 +197,7 @@ class SingleStreamBlock:
   https://arxiv.org/abs/2302.05442 and adapted modulation interface.
   """
 
-  def __init__(self,hidden_size:int, num_heads:int, mlp_ratio:float = 4.0, qk_scale:float | None = None):
+  def __init__(self,hidden_size:int, num_heads:int, mlp_ratio:float=4.0, qk_scale:Optional[float]=None):
     self.hidden_dim = hidden_size
     self.num_heads = num_heads
     head_dim = hidden_size // num_heads
@@ -217,7 +221,6 @@ class SingleStreamBlock:
     mod, _ = self.modulation(vec)
     x_mod = (1 + mod.scale) * self.pre_norm(x) + mod.shift
     qkv, mlp = Tensor.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
-
     q, k, v = qkv.rearrange("B L (K H D) -> K B H L D", K=3, H=self.num_heads)
     q, k = self.norm(q, k)
 
@@ -232,7 +235,7 @@ class LastLayer:
   def __init__(self, hidden_size:int, patch_size:int, out_channels:int):
     self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
     self.linear = nn.Linear(hidden_size, patch_size * patch_size * out_channels, bias=True)
-    self.adaLN_modulation = [Tensor.silu, nn.Linear(hidden_size, 2 * hidden_size, bias=True)]
+    self.adaLN_modulation:List[Callable[[Tensor], Tensor]] = [Tensor.silu, nn.Linear(hidden_size, 2 * hidden_size, bias=True)]
 
   def __call__(self, x:Tensor, vec:Tensor) -> Tensor:
     shift, scale = vec.sequential(self.adaLN_modulation).chunk(2, dim=1)
@@ -240,7 +243,7 @@ class LastLayer:
     x = self.linear(x)
     return x
 
-def timestep_embedding(t:Tensor, dim:int, max_period:int = 10000, time_factor:float = 1000.0):
+def timestep_embedding(t:Tensor, dim:int, max_period:int=10000, time_factor:float=1000.0) -> Tensor:
   """
   Create sinusoidal timestep embeddings.
   :param t: a 1-D Tensor of N indices, one per batch element.
@@ -276,7 +279,7 @@ class Flux:
       num_heads:int = 24,
       depth:int = 19,
       depth_single_blocks:int = 38,
-      axes_dim:list[int] | None = None,
+      axes_dim:Optional[List[int]] = None,
       theta:int = 10_000,
       qkv_bias:bool = True,
       ):
@@ -296,14 +299,14 @@ class Flux:
     self.img_in = nn.Linear(self.in_channels, self.hidden_size, bias=True)
     self.time_in = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size)
     self.vector_in = MLPEmbedder(vec_in_dim, self.hidden_size)
-    self.guidance_in = (MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size) if guidance_embed else tensor_identity)
+    self.guidance_in:Callable[[Tensor], Tensor] = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size) if guidance_embed else tensor_identity
     self.txt_in = nn.Linear(context_in_dim, self.hidden_size)
 
     self.double_blocks = [DoubleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias) for _ in range(depth)]
     self.single_blocks = [SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=mlp_ratio) for _ in range(depth_single_blocks)]
     self.final_layer = LastLayer(self.hidden_size, 1, self.out_channels)
 
-  def __call__(self, img:Tensor, img_ids:Tensor, txt:Tensor, txt_ids:Tensor, timesteps:Tensor, y:Tensor, guidance:Tensor | None = None) -> Tensor:
+  def __call__(self, img:Tensor, img_ids:Tensor, txt:Tensor, txt_ids:Tensor, timesteps:Tensor, y:Tensor, guidance:Optional[Tensor] = None) -> Tensor:
     if img.ndim != 3 or txt.ndim != 3:
       raise ValueError("Input img and txt tensors must have 3 dimensions.")
     # running on sequences img
@@ -317,12 +320,12 @@ class Flux:
     txt = self.txt_in(txt)
     ids = Tensor.cat(txt_ids, img_ids, dim=1)
     pe = self.pe_embedder(ids)
-    for block in self.double_blocks:
-      img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
+    for double_block in self.double_blocks:
+      img, txt = double_block(img=img, txt=txt, vec=vec, pe=pe)
 
     img = Tensor.cat(txt, img, dim=1)
-    for block in self.single_blocks:
-      img = block(img, vec=vec, pe=pe)
+    for single_block in self.single_blocks:
+      img = single_block(img, vec=vec, pe=pe)
 
     img = img[:, txt.shape[1] :, ...]
 
@@ -338,7 +341,7 @@ def load_flow_model(name:str):
   load_state_dict(model, state_dict)
   return model
 
-def load_T5(max_length:int = 512):
+def load_T5(max_length:int=512):
   # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
   print("Init T5")
   T5 = T5Embedder(max_length, fetch(urls["T5_tokenizer"]))
@@ -361,7 +364,7 @@ def load_ae() -> AutoEncoder:
   return ae
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/sampling.py
-def prepare(T5:T5Embedder, clip:ClipEmbedder, img:Tensor, prompt:str | list[str]) -> dict[str, Tensor]:
+def prepare(T5:T5Embedder, clip:ClipEmbedder, img:Tensor, prompt:Union[str, List[str]]) -> Dict[str, Tensor]:
   bs, _, h, w = img.shape
   if bs == 1 and not isinstance(prompt, str):
     bs = len(prompt)
@@ -390,7 +393,7 @@ def prepare(T5:T5Embedder, clip:ClipEmbedder, img:Tensor, prompt:str | list[str]
   return {"img": img, "img_ids": img_ids.to(img.device), "txt": txt.to(img.device), "txt_ids": txt_ids.to(img.device), "vec": vec.to(img.device)}
 
 
-def get_schedule(num_steps:int, image_seq_len:int, base_shift:float = 0.5, max_shift:float = 1.15, shift:bool = True) -> list[float]:
+def get_schedule(num_steps:int, image_seq_len:int, base_shift:float=0.5, max_shift:float=1.15, shift:bool=True) -> List[float]:
   # extra step for zero
   step_size = -1.0 / num_steps
   timesteps = Tensor.arange(1, 0 + step_size, step_size)
@@ -405,7 +408,7 @@ def get_schedule(num_steps:int, image_seq_len:int, base_shift:float = 0.5, max_s
 @TinyJit
 def run(model, *args): return model(*args).realize()
 
-def denoise(model, img:Tensor, img_ids:Tensor, txt:Tensor, txt_ids:Tensor, vec:Tensor, timesteps:list[float], guidance:float = 4.0) -> Tensor:
+def denoise(model, img:Tensor, img_ids:Tensor, txt:Tensor, txt_ids:Tensor, vec:Tensor, timesteps:List[float], guidance:float=4.0) -> Tensor:
   # this is ignored for schnell
   guidance_vec = Tensor((guidance,), device=img.device, dtype=img.dtype).expand((img.shape[0],))
   for t_curr, t_prev in tqdm(list(zip(timesteps[:-1], timesteps[1:])), "Denoising"):
@@ -431,7 +434,6 @@ if __name__ == "__main__":
   parser.add_argument('--out',        type=str,   default=Path(tempfile.gettempdir()) / "rendered.png", help="Output filename")
   parser.add_argument("--num_steps",  type=int,   default=None,           help="number of sampling steps (default 4 for schnell, 50 for guidance distilled)") #noqa:E501
   parser.add_argument("--guidance",   type=float, default=3.5,            help="guidance value used for guidance distillation")
-  parser.add_argument("--offload",    type=bool,  default=False,          help="offload to cpu")
   parser.add_argument("--output_dir", type=str,   default="output",       help="output directory")
   args = parser.parse_args()
 
