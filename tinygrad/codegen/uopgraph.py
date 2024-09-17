@@ -596,7 +596,7 @@ expander = PatternMatcher([
   # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU
   (UPat(UOps.EXPAND, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
     lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
-])+load_store_folder
+])
 
 def no_vectorized_load_store(ls:UOp):
   idx = ls.src[1]
@@ -680,8 +680,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   linearize_cnt += 1
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
     sink = graph_rewrite(sink, folder+expander)
+    sink = graph_rewrite(sink, folder+load_store_folder+just_reduce)
     if getenv("DO_REDUCE", 1):
-      sink = graph_rewrite(sink, folder+just_reduce)
       sink = graph_rewrite(sink, folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
       sink = graph_rewrite(sink, folder+reducer)
 
