@@ -244,9 +244,9 @@ constant_folder = PatternMatcher([
   # push all GEPs through ALUs (fix arange stuff)
   (UPat(UOps.GEP, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name='alu'),), name='gep'),
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
-  #(UPat(UOps.GEP, src=(UPat((UOps.LOAD, UOps.STORE), name='alu'),), name='gep'),
-  # lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), alu.src[0:1]+tuple(x.gep(gep.arg) for x in alu.src[1:]), alu.arg)
-  #   if gep.dtype.count <= alu.dtype.count else None),
+  (UPat(UOps.GEP, src=(UPat((UOps.LOAD, UOps.STORE), name='alu'),), name='gep'),
+   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), alu.src[0:1]+tuple(x.gep(gep.arg) for x in alu.src[1:]), alu.arg)
+     if gep.dtype.count <= alu.dtype.count and alu.dtype.count == alu.src[1].dtype.count else None),
   # tensor core with a 0 input is acc
   *[(UPat(UOps.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
   *[(UPat(UOps.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],

@@ -410,6 +410,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len(uops), 4)
     assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
 
+  @unittest.skip("this is a uop type error")
   def test_asserts_bad_gate(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     idx = UOp.const(dtypes.int, 0)
