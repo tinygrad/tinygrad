@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
 from tinygrad.ops import UPat, PatternMatcher, graph_rewrite
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -393,13 +393,18 @@ def do_expand(root:UOp):
   if len(expands) == 0: return None
   # NOTE: we 0 out the reduce axis for WMMA. in theory they should all be the same, but is this always correct?
   exclude_args = tuple(dedup(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2])))) if root.op is UOps.WMMA else ()
-  expand_args = tuple(x for x in sorted(dedup(flatten([x.arg for x in expands]))) if x[0] not in exclude_args)
+  if all_same(expands_args:=[x.arg for x in expands]) and len(exclude_args) == 0:
+    # if there's only one expand arg, it's okay to use it (optimization)
+    expand_args = expands[0].arg
+  else:
+    # otherwise, we sort them and GEP
+    expand_args = tuple(x for x in sorted(dedup(flatten(expands_args))) if x[0] not in exclude_args)
   expand_sz = prod([x[1] for x in expand_args])
   new_srcs = []
   for i,src in enumerate(root.src):
     if src.op is UOps.EXPAND:
       if root.op is UOps.IF and i == 0:
-        # IF means OR
+        # IF means OR on first arg to IF
         new_srcs.append(functools.reduce(operator.__or__, [src.src[0].gep(i) for i in range(expand_sz)]))
       elif expand_args == src.arg:
         # just remove the expand
@@ -410,13 +415,16 @@ def do_expand(root:UOp):
         if src.dtype.count > 1: lst = flatten([[i*src.dtype.count+j for j in range(src.dtype.count)] for i in lst])
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
+      # non-EXPAND input
       if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
+        # for the first arg of LOAD/STORE and the RANGE args of REDUCE, just pass them through ignoring EXPANDS
         new_srcs.append(src)
       elif src.dtype.count > 1:
-        # put it at the end?
+        # put any input dtype > 1 grouped together
         new_srcs.append(UOp(UOps.VECTORIZE,
                             src.dtype.scalar().vec(expand_sz*src.dtype.count), tuple(src.gep(i) for i in range(src.dtype.count))*expand_sz))
       else:
+        # repeat the arg
         new_srcs.append(UOp(UOps.VECTORIZE, src.dtype.vec(expand_sz), (src,)*expand_sz))
 
   new_arg = root.arg
@@ -469,15 +477,6 @@ def create_gate(root:UOp) -> Optional[UOp]:
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
-#def destack_expand(outer, inner):
-  #expand_args = tuple(sorted(outer.arg+inner.arg))
-  #inner_sz = prod(x[1] for x in inner.arg)
-  #idxs = tuple(_expand_arg_to_idx(outer.arg, rpk) * inner_sz + _expand_arg_to_idx(inner.arg, rpk) for rpk in _choices_from_args(expand_args))
-  #outer_sz = prod(x[1] for x in outer.arg)
-  #idxs = tuple(_expand_arg_to_idx(inner.arg, rpk) * outer_sz + _expand_arg_to_idx(outer.arg, rpk) for rpk in _choices_from_args(expand_args))
-  #print(idxs)
-  #return UOp(UOps.EXPAND, outer.dtype, (inner.src[0].gep(idxs),), expand_args)
-
 expander = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
@@ -485,7 +484,7 @@ expander = PatternMatcher([
   (UPat(UOps.STORE, name="root"), create_gate),
   # double expand
   (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)),
-   lambda outer, inner: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), outer.arg+inner.arg)),
+   lambda outer, inner: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
          UOps.VECTORIZE, UOps.REDUCE, UOps.IF), name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
@@ -529,7 +528,7 @@ def no_vectorized_wmma(wmma:UOp):
     ssz = prod(x[1] for x in sz)
     tsrcs.append([s.gep(tuple(range(grp, grp+ssz))) for grp in range(0, s.dtype.count, ssz)])
   wmmas = [UOp(UOps.WMMA, wmma.dtype.scalar().vec(out_sz), tsrc, wmma.arg) for tsrc in zip(*tsrcs)]
-  wmma_ex = flatten([[e.gep(i) for e in wmmas] for i in range(out_sz)])
+  wmma_ex = flatten([[e.gep(i) for i in range(out_sz)] for e in wmmas])
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:
