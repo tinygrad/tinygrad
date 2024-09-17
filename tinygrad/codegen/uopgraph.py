@@ -213,11 +213,11 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
   buf, idx, invalid_val, valid = load.src
   drop = False
   for stmt in _get_chain(valid, BinaryOps.AND):
-    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT:
+    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
       # valid: A*(-1) < c, idx: (..., A-1+c) -> okay to drop valid because A*(-1) >= c -> A <= -c -> A-1+c <= -1 is out of bound
       if graph_rewrite(stmt.src[0]*(-1)-1+stmt.src[1].arg, constant_folder).key == idx.src[1].key: drop = True
-      # valid: A < image bound, idx: (..., A) -> okay to drop valid
-      elif stmt.src[1].arg == buf_dtype.shape[0] and idx.src[1].key == stmt.src[0].key: drop = True
+      # valid: A < image bound - c, idx: (..., A+c) -> okay to drop valid because A >= bound - c -> A + c >= bound is out of bound
+      elif graph_rewrite(stmt.src[0]+(buf_dtype.shape[0]-stmt.src[1].arg), constant_folder).key == idx.src[1].key: drop = True
 
       if drop:
         new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s is not stmt]) else None
