@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
-import pickle, re, os, sys, time, threading, webbrowser, json, difflib
+import pickle, re, os, sys, time, threading, webbrowser, json, difflib, contextlib
 from tinygrad.helpers import getenv
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps
 from tinygrad.engine.graph import uops_colors, word_wrap
@@ -21,6 +21,9 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
+    if getenv("WITH_SHAPE"):
+      with contextlib.suppress(Exception): # if the UOp is indexed already it's fine
+        if u.st is not None: label += f"\n{u.st.shape}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 
