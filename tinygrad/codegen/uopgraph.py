@@ -158,11 +158,15 @@ def fold_unrolled_divs(divs:UOp, c:UOp):
 # ***** image load valid simplification *****
 
 def simplify_valid_image_load(load:UOp, buf:UOp):
-  if not isinstance(buf.dtype, ImageDType) or len(load.src) < 4: return None
+  if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
   buf, idx, _, valid = load.src
   if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT:
     if graph_rewrite(valid.src[0]*(-1)-1+valid.src[1].arg, constant_folder).key == idx.src[1].key:
       # valid: A*(-1) < c, idx: (..., A-1+c) -> okay to drop valid because A*(-1) >= c -> A <= -c -> A-1+c <= -1 is out of bound
+      return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
+
+    if valid.src[1].arg == buf_dtype.shape[0] and idx.src[1].key == valid.src[0].key:
+      # valid: A < image bound, idx: (..., A) -> okay to drop valid
       return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
 
 # ***** transcendental *****
