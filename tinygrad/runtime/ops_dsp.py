@@ -27,14 +27,16 @@ class DSPProgram:
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
 
-    pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs) + len(vals)) * 4))],
+    pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs)+len(vals))*4)), off_mv:=memoryview(bytearray(len(bufs)*4))],
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
-    self.device.exec_lib(self.lib, rpc_sc(method=2, ins=1, outs=1, fds=len(bufs)), pra, fds, attrs)
+    off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
+    self.device.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
 
 class DSPBuffer:
-  def __init__(self, va_addr:int, size:int, share_info:Any): self.va_addr, self.size, self.share_info = va_addr, size, share_info
+  def __init__(self, va_addr:int, size:int, share_info:Any, offset:int=0):
+    self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
 
 class DSPAllocator(Allocator):
   def __init__(self, device:DSPDevice):
@@ -45,7 +47,7 @@ class DSPAllocator(Allocator):
     b = qcom_dsp.ION_IOC_ALLOC(self.device.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
     share_info = qcom_dsp.ION_IOC_SHARE(self.device.ion_fd, handle=b.handle)
     va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
-    return DSPBuffer(va_addr, size, share_info)
+    return DSPBuffer(va_addr, size, share_info, offset=0)
 
   def _free(self, opaque:DSPBuffer, options:BufferOptions):
     libc.munmap(opaque.va_addr, opaque.size)
@@ -55,6 +57,7 @@ class DSPAllocator(Allocator):
   def as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
   def copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
+  def offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset)
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):

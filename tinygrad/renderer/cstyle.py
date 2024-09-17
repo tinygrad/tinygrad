@@ -456,10 +456,11 @@ class DSPRenderer(ClangRenderer):
             'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
     msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
-    msrc += [f'void *buf_{i} = HAP_mmap(0, sz_or_val_{i}, 3, 0, pra[{i+2}].dma.fd, 0);' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
-    msrc += ["*(unsigned long long *)(pra[1].buf.pv) = HAP_perf_get_time_us() - start;"]
+    msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["return 0; }"]
     return ret + '\n' + '\n'.join(msrc)
