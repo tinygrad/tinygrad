@@ -233,7 +233,7 @@ class TinyJit(Generic[ReturnType]):
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._jit_cache: List[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
-      # TODO: should we always disable the memory planner here?
+      # TODO: should we always disable the memory planner here? it must be off for prune
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
         capturing.append(self)
         try:
@@ -255,16 +255,7 @@ class TinyJit(Generic[ReturnType]):
             input_buffers.append(b)
             extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 
-      # memory planning (optional)
-      # Exclude buffers involved in transfer ops to preserve parallelism.
-      if not self.prune:
-        noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
-        assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
-      else:
-        assigned = {}
-      jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
-
-      # Prune independent kernels.
+      # prune independent kernels (optional)
       if self.prune:
         depends = set(input_buffers)
         for ei in jit_cache:
@@ -275,8 +266,16 @@ class TinyJit(Generic[ReturnType]):
                                     lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
         # run the onetime kernels here
-        for ei in onetime: ei.run(var_vals, jit=True)
+        for ei in onetime:
+          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
+          ei.run(var_vals, jit=True)
         jit_cache = pruned
+
+      # memory planning (optional)
+      # Exclude buffers involved in transfer ops to preserve parallelism.
+      noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
+      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
+      jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
