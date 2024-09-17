@@ -51,5 +51,14 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render((20, 10, 4), (gidx1).lt(10), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
                      "((gidx1<10)?read_imagef(data0, smp, (int2)(gidx0,gidx1)):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
+  def test_generic_idx_lt_bound(self):
+    # (idx1 < image_bound - c) ? (..., idx1 + c) : 0 can drop the valid
+    gidx0 = Variable("gidx0", 32)
+    gidx1 = Variable("gidx1", 32)
+    self.assertEqual(render((10, 10, 4), (gidx1).lt(8), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1+2))),
+                     "read_imagef(data0, smp, (int2)(gidx0,(gidx1+2)))")
+    self.assertEqual(render((10, 10, 4), (gidx1).lt(5), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1+5))),
+                     "read_imagef(data0, smp, (int2)(gidx0,(gidx1+5)))")
+
 if __name__ == '__main__':
   unittest.main()
