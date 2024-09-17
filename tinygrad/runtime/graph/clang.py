@@ -1,11 +1,12 @@
 from typing import List, Dict, cast
 import ctypes
-from tinygrad.helpers import dedup, cpu_time_execution, DEBUG
+from tinygrad.helpers import dedup, cpu_time_execution, DEBUG, to_function_name
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.renderer.cstyle import ClangRenderer
 
 class ClangGraph(GraphRunner):
   def __init__(self, device, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
@@ -15,13 +16,16 @@ class ClangGraph(GraphRunner):
     self.const_base_bufs = dedup(b.base for ji in jit_cache for b in ji.bufs if b not in input_rawbuffers)
     self.const_base_rawbufs = [b._buf for b in self.const_base_bufs]
 
-    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src for ji in jit_cache]))
+    # prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src for ji in jit_cache]))
 
-    targs = [(f"arg{i}", PtrDType(x.dtype)) for i,x in enumerate(input_rawbuffers)] + \
-            [(f"cbuf{i}", PtrDType(dtypes.char)) for i,x in enumerate(self.const_base_bufs)] + \
-            sorted([(f"{v.expr}", dtypes.int) for v in var_vals])
+    prgs = '\n'.join(ClangRenderer().render(to_function_name(ji.prg.p.name), ji.prg.p.uops) for ji in jit_cache)
+    # print(prgs)
 
-    code = ["void batched("+','.join([f"{render_dtype(x[1])} {x[0]}" for x in targs])+") {"]
+    targs = [(f"arg{i}", (PtrDType(x.dtype), False)) for i,x in enumerate(input_rawbuffers)] + \
+            [(f"cbuf{i}", (PtrDType(dtypes.char), False)) for i,x in enumerate(self.const_base_bufs)] + \
+            sorted([(f"{v.expr}", (dtypes.int, False)) for v in var_vals])
+
+    code = ["void batched("+','.join([f"{render_dtype(x[1][0])} {x[0]}" for x in targs])+") {"]
     for ji in jit_cache:
       args = []
       for buf in ji.bufs:
@@ -34,7 +38,8 @@ class ClangGraph(GraphRunner):
       code.append(f"  {cast(CompiledRunner, ji.prg).p.function_name}({','.join(args)});")
     code.append("}")
 
-    entry_jump = device.renderer._render_entry("batched", []) if hasattr(device.renderer, '_render_entry') else ""
+    entry_jump = device.renderer._render_entry("batched", targs) if hasattr(device.renderer, '_render_entry') else ""
+    # print(entry_jump)
 
     if DEBUG >= 1: print("\n".join(code))
     self.clprg = device.runtime("batched", device.compiler.compile_cached(prgs+"\n"+"\n".join(code)+"\n"+entry_jump))

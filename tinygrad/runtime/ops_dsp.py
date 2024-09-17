@@ -21,20 +21,21 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
 
 class DSPProgram:
   def __init__(self, device:DSPDevice, name:str, lib:bytes):
-    self.device, self.lib = device, lib
+    self.device, self.name, self.lib = device, name, lib
     if DEBUG >= 6: cpu_objdump(lib, objdump_tool='llvm-objdump')
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
 
-    pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs) + len(vals)) * 4))],
+    pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs) + len(vals)) * 4)), offset_mv:=memoryview(bytearray(len(bufs) * 4))],
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
-    self.device.exec_lib(self.lib, rpc_sc(method=2, ins=1, outs=1, fds=len(bufs)), pra, fds, attrs)
+    offset_mv.cast('i')[:] = array.array('i', tuple(b.offset for b in bufs))
+    self.device.exec_lib(self.lib, self.name, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
 
 class DSPBuffer:
-  def __init__(self, va_addr:int, size:int, share_info:Any): self.va_addr, self.size, self.share_info = va_addr, size, share_info
+  def __init__(self, va_addr:int, size:int, share_info:Any, offset:int=0): self.va_addr, self.size, self.offset, self.share_info = va_addr, size, offset, share_info
 
 class DSPAllocator(Allocator):
   def __init__(self, device:DSPDevice):
@@ -55,6 +56,7 @@ class DSPAllocator(Allocator):
   def as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
   def copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
+  def offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, offset=buf.offset+offset)
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
@@ -68,7 +70,10 @@ class DSPDevice(Compiled):
       self.link_ld.flush()
 
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
-    super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp", args=compiler_args), functools.partial(DSPProgram, self))
+
+    from tinygrad.runtime.graph.clang import ClangGraph
+    super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp", args=compiler_args), functools.partial(DSPProgram, self),
+                     functools.partial(ClangGraph, self))
 
     fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
     self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferOptions(nolru=True))
@@ -77,9 +82,9 @@ class DSPDevice(Compiled):
     self.init_dsp()
     RPCListner(self).start()
 
-  def open_lib(self, lib):
+  def open_lib(self, lib, kernel_name):
     self.binded_lib, self.binded_lib_off = lib, 0
-    fp = "file:///tinylib?entry&_modver=1.0&_dom=cdsp\0"
+    fp = f"file:///tinylib?entry&_modver=1.0&_dom=cdsp\0"
     pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [len(fp), 0xff])), memoryview(bytearray(fp.encode()))],
                                  outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=0, ins=2, outs=2), pra=pra)
@@ -90,9 +95,9 @@ class DSPDevice(Compiled):
     pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [handle, 0xff]))], outs=[memoryview(bytearray(0x8)), memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=1, ins=1, outs=2), pra=pra)
 
-  def exec_lib(self, lib, sc, args, fds, attrs):
+  def exec_lib(self, lib, kernel_name, sc, args, fds, attrs):
     def _exec_lib():
-      handle = self.open_lib(lib)
+      handle = self.open_lib(lib, kernel_name)
       qcom_dsp.FASTRPC_IOCTL_INVOKE_ATTRS(self.rpc_fd, fds=fds, attrs=attrs, inv=qcom_dsp.struct_fastrpc_ioctl_invoke(handle=handle, sc=sc, pra=args))
       self.close_lib(handle)
     try: _exec_lib()

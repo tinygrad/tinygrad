@@ -448,7 +448,7 @@ class DSPRenderer(ClangRenderer):
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     return super().render_kernel(function_name, kernel, bufs, uops, prefix) + self._render_entry(function_name, bufs)
 
-  def _render_entry(self, fucntion_name:str, bufs:List[Tuple[str,Tuple[DType,bool]]]) -> str:
+  def _render_entry(self, function_name:str, bufs:List[Tuple[str,Tuple[DType,bool]]]) -> str:
     msrc = ['''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
                  short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
             'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
@@ -458,10 +458,11 @@ class DSPRenderer(ClangRenderer):
             'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
     msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
-    msrc += [f'void *buf_{i} = HAP_mmap(0, sz_or_val_{i}, 3, 0, pra[{i+2}].dma.fd, 0);' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'int off_{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'void *buf_{i} = HAP_mmap(0, sz_or_val_{i}, 3, 0, pra[{i+3}].dma.fd, 0) + off_{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
-    msrc += ["*(unsigned long long *)(pra[1].buf.pv) = HAP_perf_get_time_us() - start;"]
+    msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["return 0; }"]
     return '\n'.join(msrc)
