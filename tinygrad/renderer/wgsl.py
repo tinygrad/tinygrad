@@ -8,13 +8,12 @@ def fixup_binops(c,a,b):
   if c.arg == BinaryOps.CMPLT and a.dtype == dtypes.bool: return UOp(c.op, c.dtype, (a.cast(dtypes.int), b.cast(dtypes.int)), c.arg)
   if c.arg in (BinaryOps.MAX, BinaryOps.XOR) and c.dtype == dtypes.bool:
     return UOp(c.op, dtypes.int, (a.cast(dtypes.int), b.cast(dtypes.int)), c.arg).cast(dtypes.bool)
-  # wgpu int mod is wrong (hw specific?). Returns (-2) % (-3) = 1. test_uops::test_mod_int32 broken on Vulkan without this
+  # wgpu int mod is buggy (hw specific?). test_uops::test_mod_int32 is broken on Vulkan without this
   if c.arg == BinaryOps.MOD and c.dtype == dtypes.int:
     return UOp(c.op, dtypes.float, (a.cast(dtypes.float), b.cast(dtypes.float)), c.arg).cast(dtypes.int)
 
 wgsl_matcher = PatternMatcher([
-  (UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL), dtype=PtrDType(dtypes.bool), name="a"),
-   lambda a: UOp(a.op, PtrDType(dtypes.int32), a.src, a.arg)),
+  (UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL), dtype=PtrDType(dtypes.bool), name="a"), lambda a: UOp(a.op, PtrDType(dtypes.int32), a.src, a.arg)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat.var("x"),UPat.var("y"),UPat.var("z"),UPat.var("g", dtype=dtypes.bool))),
     lambda root,x,y,z,g: UOp(root.op, dtypes.int, (x,y,z.cast(dtypes.int), g), root.arg).cast(dtypes.bool)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat.var(),UPat.var(),UPat.var(),UPat(UOps.BARRIER))),

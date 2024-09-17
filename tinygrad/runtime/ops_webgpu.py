@@ -59,6 +59,6 @@ class WebGpuDevice(Compiled):
   def __init__(self, device:str):
     adapter = wgpu.gpu.request_adapter(power_preference="high-performance")
     timestamp_supported = wgpu.FeatureName.timestamp_query in adapter.features
-    device = adapter.request_device(required_features=[wgpu.FeatureName.timestamp_query] if timestamp_supported else [])
-    wgpu_device = (device, timestamp_supported)
-    super().__init__(device, WebGpuAllocator(device), WGSLRenderer(), WGSLCompiler(), functools.partial(WebGPUProgram, wgpu_device))
+    wgpu_device = adapter.request_device(required_features=[wgpu.FeatureName.timestamp_query] if timestamp_supported else [])
+    super().__init__(device, WebGpuAllocator(wgpu_device), WGSLRenderer(), WGSLCompiler(),
+                     functools.partial(WebGPUProgram, (wgpu_device, timestamp_supported)))
