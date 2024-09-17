@@ -185,8 +185,6 @@ class T5Attention:
     Self-attention (if key_value_states is None) or attention over source sentence (provided by key_value_states).
     """
     # Input is (batch_size, seq_length, dim)
-    # Mask is (batch_size, key_length) (non-causal) or (batch_size, key_length, key_length)
-    # past_key_value[0] is (batch_size, n_heads, q_len - 1, dim_per_head)
     batch_size, key_length = hidden_states.shape[:2]
 
     def shape(states):
@@ -212,7 +210,6 @@ class T5Attention:
 
     # compute scores
     scores = Tensor.matmul(query_states, key_states.transpose(3, 2))
-    # equivalent of torch.einsum("bnqd,bnkd->bnqk", query_states, key_states), compatible with onnx op>9
 
     if position_bias is None:
       position_bias = self.compute_bias(key_length, key_length, device=scores.device)
