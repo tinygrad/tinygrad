@@ -441,6 +441,12 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = (alu0+2559)//-2+(alu0+2560)//-2+2559
     self.helper_test_variable(unrolled_div, 0, 2559, "gidx")
 
+  def test_gated_load(self):
+    idx = Variable("idx", 0, 24)
+    self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
+    # TODO: simplify the true branch
+    self.helper_test_variable(idx.lt(4).where(idx//4, idx.const_like(-1)), -1, 6, "((idx<4)?(idx//4):(-1))")
+
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
