@@ -21,7 +21,7 @@ def Variable(expr, nmax):
   return UOp(UOps.SPECIAL, dtypes.int, (), (expr, nmax))
 
 class TestValidSimplification(unittest.TestCase):
-  def test_idx_lt_c(self):
+  def test_idx_neg_lt_c(self):
     # (idx1 * (-1) < c) ? (..., idx1-1+c) : 0 can drop the valid
     gidx0 = Variable("gidx0", 32)
     gidx1 = Variable("gidx1", 32)
@@ -31,6 +31,16 @@ class TestValidSimplification(unittest.TestCase):
                      "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-2))))")
     self.assertEqual(render((10, 10, 4), (gidx1*(-1)).lt(1), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
                      "read_imagef(data0, smp, (int2)(gidx0,gidx1))")
+
+  def test_idx_lt_bound(self):
+    # (idx1 < image_bound) ? (..., idx1) : 0 can drop the valid
+    gidx0 = Variable("gidx0", 32)
+    gidx1 = Variable("gidx1", 32)
+    self.assertEqual(render((10, 10, 4), (gidx1).lt(10), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
+                     "read_imagef(data0, smp, (int2)(gidx0,gidx1))")
+    # 10x20 image, not out of bound
+    self.assertEqual(render((20, 10, 4), (gidx1).lt(10), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
+                     "((gidx1<10)?read_imagef(data0, smp, (int2)(gidx0,gidx1)):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
 if __name__ == '__main__':
   unittest.main()
