@@ -2139,7 +2139,7 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_cast(self):
     helper_test_op([(3, 3)], lambda x: x.float())
-    if Device.DEFAULT != "WEBGPU": # instantiates a long tensor
+    if Device.DEFAULT != "WEBGPU": # no int64
       helper_test_op(None, lambda x: x.float(), vals=[[0, 1, 2, 3]], forward_only=True)
     helper_test_op(None, lambda x: x.float(), vals=[[True, False]], forward_only=True)
     helper_test_op([(3, 3)], lambda x: x.int(), forward_only=True)

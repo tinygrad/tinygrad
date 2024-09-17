@@ -9,10 +9,10 @@ import ast
 
 if __name__ == "__main__":
   model = EfficientNet(0)
+  model.load_from_pretrained()
   dirname = Path(__file__).parent
   # exporting a model that's loaded from safetensors doesn't work without loading in from safetensors first
   # loading the state dict from a safetensor file changes the generated kernels
-  model.load_from_pretrained()
   if getenv("WEBGPU") or getenv("WEBGL"):
     safe_save(get_state_dict(model), (dirname / "net.safetensors").as_posix())
     load_state_dict(model, safe_load(str(dirname / "net.safetensors")))

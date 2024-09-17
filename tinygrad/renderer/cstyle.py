@@ -170,10 +170,8 @@ class CStyleLanguage(Renderer):
           if child_count[u] <= 1: r[u] = val
           else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
-          if self.external_local_bufs:
-            prefix.append(self.render_local(args[0], dtype, args[1]))
-          else:
-            kk(self.render_local(args[0], dtype, args[1]))
+          if self.external_local_bufs: prefix.append(self.render_local(args[0], dtype, args[1]))
+          else: kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_GLOBAL:
           bufs[u] = (nm:=f"data{args}", (dtype, False))

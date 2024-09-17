@@ -122,6 +122,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint16, ht.uint16, strat.sampled_from(integer_binary_operations))
   def test_uint16(self, a, b, op): universal_test(a, b, dtypes.uint16, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint32, Device.DEFAULT), f"no uint32 on {Device.DEFAULT}")
   @given(ht.uint32, ht.uint32, strat.sampled_from(integer_binary_operations))
   def test_uint32(self, a, b, op): universal_test(a, b, dtypes.uint32, op)
 
@@ -133,7 +134,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int8, ht.int8, strat.sampled_from(integer_binary_operations))
   def test_int8(self, a, b, op): universal_test(a, b, dtypes.int8, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uint64, Device.DEFAULT), f"no int16 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.int16, Device.DEFAULT), f"no int16 on {Device.DEFAULT}")
   @given(ht.int16, ht.int16, strat.sampled_from(integer_binary_operations))
   def test_int16(self, a, b, op): universal_test(a, b, dtypes.int16, op)
 
