@@ -258,7 +258,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 
   if force_one_buf:
     new_assigned, new_buf_len, nxt_off = {}, defaultdict(int), defaultdict(int)
-    for k,v in assigned.items(): new_buf_len[k.device] += v.nbytes if assigned.get(v.base) is not None else 0
+    for k,v in assigned.items(): new_buf_len[k.device] += round_up(v.nbytes, 128) if assigned.get(v.base) is not None else 0
     new_bufs = {d:Buffer(d, l, dtypes.uint8) for d,l in new_buf_len.items()}
 
     for k,v in assigned.items():
