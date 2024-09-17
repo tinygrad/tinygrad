@@ -39,18 +39,18 @@ class VisionTransformer:
     self.ln_pre = nn.RMSNorm(hidden_size, eps=1e-5)
     self.patch_conv = nn.Conv2d(num_channels, hidden_size, patch_size, stride=patch_size, bias=False)
     self.transformer = {'layers':[TransformerBlock(hidden_size, intermediate_size, num_attention_heads, num_attention_heads,
-                                                   1e-5, 256, head_dim=hidden_size // num_attention_heads) for _ in range(num_hidden_layers)]}
+                                                   1e-5, 512, head_dim=hidden_size // num_attention_heads) for _ in range(num_hidden_layers)]}
 
     self.freqs_cis = precompute_freqs_cis_2d(hidden_size // num_attention_heads, image_size // patch_size, image_size // patch_size, rope_theta)
 
-  # TODO: Accept more than one image
-  def __call__(self, img):
-    h = self.patch_conv(img)
+  def __call__(self, images):
+    hs = [self.patch_conv(img.unsqueeze(0)) for img in images]
+    h = Tensor.cat(*[h.flatten(2).permute(0, 2, 1) for h in hs], dim=1)
+    h = self.ln_pre(h)
 
-    pos = position_meshgrid([h])
+    pos = position_meshgrid(hs)
     freqs_cis = self.freqs_cis[pos[:,0],pos[:,1]].unsqueeze(0)
 
-    h = self.ln_pre(h.flatten(2).permute(0, 2, 1))
     for layer in self.transformer['layers']: h = layer(h, 0, freqs_cis, mask=None)
     return h.squeeze(0)
 
@@ -81,17 +81,17 @@ class MultiModalTransformer(Transformer):
 
     return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p).realize()
 
-  def __call__(self, tokens:Tensor, image:Optional[Tensor], start_pos:Variable, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
+  def __call__(self, tokens:Tensor, images:List[Tensor], start_pos:Variable, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
     if tokens.shape[0:2] == (1,1) and self.transformer_jit is not None:
       transformer_fxn = partial(self.transformer_jit, start_pos=Variable("start_pos", 0, self.max_context).bind(start_pos))
     else: transformer_fxn = partial(self.transformer, start_pos=start_pos)
-    # if there is no image, this is trivial
-    if image is None: return transformer_fxn(self.tok_embeddings(tokens), temperature, top_k, top_p, alpha_f, alpha_p)
+    # if there are no images, this is trivial
+    if len(images) == 0: return transformer_fxn(self.tok_embeddings(tokens), temperature, top_k, top_p, alpha_f, alpha_p)
     # otherwise we need to compute both the text embeddings and the vision embeddings
-    vision_embeddings = self.vision_language_adapter(self.vision_encoder(image))
+    vision_embeddings = self.vision_language_adapter(self.vision_encoder(images))
     text_embeddings = self.tok_embeddings(tokens)
     # and merge them together
-    merged = merge_multimodal_embeddings(tokens, text_embeddings, vision_embeddings, self.image_token_id)#.realize()
+    merged = merge_multimodal_embeddings(tokens, text_embeddings, vision_embeddings, self.image_token_id)
     return transformer_fxn(merged, temperature, top_k, top_p, alpha_f, alpha_p)
 
 def build(model_dir, device=None, jit=False):
@@ -132,7 +132,7 @@ if __name__ == "__main__":
   parser.add_argument("--count", type=int, default=10, help="number of tokens to generate")
   parser.add_argument("--jit", action=argparse.BooleanOptionalAction, help="enable the (imperfect) JIT")
   parser.add_argument("--prompt", type=str, default=None, help="prompt to model, if missing will enter chatbot mode")
-  parser.add_argument("--image", type=str, default=None, help="image input (url), ignored in chatbot mode")
+  parser.add_argument("--image", type=str, default=[], action='append', help="image input (url), ignored in chatbot mode, set multiple times for multiple inputs")
   parser.add_argument("--temperature", type=float, default=0.35)
   args = parser.parse_args()
   chatbot = args.prompt is None
@@ -156,17 +156,17 @@ if __name__ == "__main__":
   if chatbot: tokenized = chatbot_input()
   else:
     prompt_content = [TextChunk(text=input("Text prompt: ") if chatbot else args.prompt)]
-    if args.image is not None: prompt_content.append(ImageURLChunk(image_url=args.image))
+    for img in args.image: prompt_content.append(ImageChunk(image=Image.open(img)) if Path(img).is_file() else ImageURLChunk(image_url=img))
     tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=[UserMessage(content=prompt_content)], model='pixtral'))
   outputted = tokenized.text
 
-  toks, image, start_pos = tokenized.tokens, Tensor(tokenized.images, device=device, dtype=dtypes.half), 0
+  toks, images, start_pos = tokenized.tokens, [Tensor(img, device=device, dtype=dtypes.half) for img in tokenized.images], 0
   tok_tensor: Optional[Tensor] = None
 
   while True:
     for i in range(args.count):
       next_tok = Tensor([toks[start_pos:]], device=device) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1).to(device)
-      tok_tensor = model(next_tok, image if i == 0 else None, start_pos, temperature=args.temperature)
+      tok_tensor = model(next_tok, images if i == 0 else [], start_pos, temperature=args.temperature)
       tok = tok_tensor.item()
       if tok == tokenizer.instruct_tokenizer.tokenizer.eos_id: break
 
@@ -184,4 +184,4 @@ if __name__ == "__main__":
     tokenized = chatbot_input()
     toks += tokenized.tokens
     outputted += tokenized.text
-    image = Tensor(tokenized.images, device=device, dtype=dtypes.half) if len(tokenized.images) else None
+    images = [Tensor(img, device=device, dtype=dtypes.half) for img in tokenized.images]
