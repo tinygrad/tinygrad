@@ -155,6 +155,17 @@ def fold_unrolled_divs(divs:UOp, c:UOp):
     seen_const.append(s0.src[1].arg)
   return ans if sorted(seen_const)==list(range(c.arg, c.arg+len(add_chain))) and ans is not None and (ans.vmin, ans.vmax)==(0, c.arg) else None
 
+# ***** image load valid simplification *****
+
+def simplify_valid_image_load(load:UOp, buf:UOp):
+  if not isinstance(buf.dtype, ImageDType) or len(load.src) < 4: return None
+  buf, idx, _, valid = load.src
+  # return None
+  if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT:
+    if valid.src[1].arg == 0 and graph_rewrite(valid.src[0]*(-1)-1, constant_folder).key == idx.src[1].key:
+      # valid: A*(-1) < 0, idx: (..., A-1) -> okay to drop valid
+      return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
+
 # ***** transcendental *****
 
 @functools.lru_cache(None)
@@ -494,6 +505,8 @@ reducer = PatternMatcher([
   (UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
+  # image load valid simplification
+  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
 ])
 
 no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE), name="x"),
