@@ -2,7 +2,7 @@ import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
-from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps
+from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps
 from tinygrad.ops import PatternMatcher, UPat, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
