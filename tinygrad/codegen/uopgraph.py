@@ -442,7 +442,7 @@ def do_expand(root:UOp):
                             src.dtype.scalar().vec(expand_sz*src.dtype.count), tuple(src.gep(i) for i in range(src.dtype.count))*expand_sz))
       else:
         # repeat the arg
-        new_srcs.append(UOp(UOps.VECTORIZE, src.dtype.vec(expand_sz), (src,)*expand_sz))
+        new_srcs.append(src.broadcast(expand_sz))
 
   new_arg = root.arg
   if root.op is UOps.GEP:
@@ -464,7 +464,7 @@ def do_reduce(root:UOp):
     ret = UOp(UOps.ASSIGN, root.dtype, (acc, acc.alu(root.arg, ret)))
   # for MAX, we can just ignore the unparented
   if root.arg is BinaryOps.ADD:
-    for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype)
+    for r in reduce_unparented:ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
 def do_contract(con:UOp):
