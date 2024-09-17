@@ -244,6 +244,9 @@ constant_folder = PatternMatcher([
   # push all GEPs through ALUs (fix arange stuff)
   (UPat(UOps.GEP, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name='alu'),), name='gep'),
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
+  #(UPat(UOps.GEP, src=(UPat((UOps.LOAD, UOps.STORE), name='alu'),), name='gep'),
+  # lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), alu.src[0:1]+tuple(x.gep(gep.arg) for x in alu.src[1:]), alu.arg)
+  #   if gep.dtype.count <= alu.dtype.count else None),
   # tensor core with a 0 input is acc
   *[(UPat(UOps.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
   *[(UPat(UOps.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
@@ -325,6 +328,8 @@ constant_folder = PatternMatcher([
   # ** two stage add/mul folding **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.cvar("c2"), lambda x,c1,c2: x+(c1+c2)),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.cvar("c2"), lambda x,c1,c2: x*(c1*c2)),
+  ((UPat.var("x") & UPat.cvar("c1")) & UPat.cvar("c2"), lambda x,c1,c2: x&(c1&c2)),
+  ((UPat.var("x") | UPat.cvar("c1")) | UPat.cvar("c2"), lambda x,c1,c2: x|(c1|c2)),
   # *** rules from symbolic ***
   # ** lt **
   # c0*x<c1 for positive int c0,c1
@@ -368,15 +373,15 @@ constant_folder = PatternMatcher([
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("gate").where(UPat.var("alt"), UPat.load(UPat.var("buf"), UPat.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # fold gated LOAD/STORE
-  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat.const(dtypes.bool, True)),
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat.const(None, True)),
    lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
-  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat.const(dtypes.bool, True), UPat.var("barrier")),
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat.const(None, True), UPat.var("barrier")),
    lambda buf,idx,var,barrier: UOp.load(buf, idx, barrier, dtype=var.dtype)),
-  (UPat.load(UPat.var(), UPat.var(), UPat.var("var"), UPat.const(dtypes.bool, False)), lambda var: var),
-  (UPat.load(UPat.var(), UPat.var(), UPat.var("var"), UPat.const(dtypes.bool, False), UPat.var()), lambda var: var),
-  (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val"), UPat.const(dtypes.bool, True)),
+  (UPat.load(UPat.var(), UPat.var(), UPat.var("var"), UPat.const(None, False)), lambda var: var),
+  (UPat.load(UPat.var(), UPat.var(), UPat.var("var"), UPat.const(None, False), UPat.var()), lambda var: var),
+  (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val"), UPat.const(None, True)),
    lambda buf,idx,val: UOp.store(buf, idx, val)), # pylint: disable=unnecessary-lambda
-  (UPat.store(UPat.var(), UPat.var(), UPat.var(), UPat.const(dtypes.bool, False)), lambda: UOp(UOps.NOOP)),
+  (UPat.store(UPat.var(), UPat.var(), UPat.var(), UPat.const(None, False)), lambda: UOp(UOps.NOOP)),
   # remove NOOPs from SINK
   (UPat(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
