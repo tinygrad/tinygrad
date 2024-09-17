@@ -34,10 +34,13 @@ class UOpRet:
   diffs: List[Tuple[str, List[str]]] # the diffs for each rewrite
   extra: List[List[str]]             # these become code blocks in the UI
 
-def replace_uop(base:UOp, first:UOp, new:UOp, cache:Dict[UOp, UOp]) -> UOp:
-  if (u:=cache.get(base)): return u
-  if base.key == first.key: return new
-  ret = cache[base] = UOp(base.op, base.dtype, tuple(replace_uop(x, first, new, cache) for x in base.src), base.arg)
+def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[bytes, UOp]) -> UOp:
+  if (found:=cache.get(base.key)): return found
+  if base.key == prev.key: ret = new
+  else:
+    new_srcs = tuple(replace_uop(x, prev, new, cache) for x in base.src)
+    ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
+  cache[base.key] = ret
   return ret
 
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
@@ -45,9 +48,11 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   diffs: List[Tuple[str, List[str]]] = []
   extra: List[List[str]] = [[str(ctx.sink)]]
   for (first, rewritten, pattern) in ctx.rewrites:
-    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     # if the sink was replaced, we have to replace the entire graph, otherwise just replace the parent
     new_sink = rewritten if first.op is UOps.SINK else replace_uop(uops[-1], first, rewritten, {})
+    # TODO: sometimes it hits a ctx and can't find any UOp to replace
+    #if new_sink is uops[-1]: continue
+    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     assert new_sink.op is UOps.SINK
     uops.append(new_sink)
     extra.append([str(new_sink)])
