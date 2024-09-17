@@ -62,7 +62,7 @@ class TestMemoryCount(unittest.TestCase):
 
 # NOTE: this still isn't testing unroll using the acc
 @unittest.skipUnless(getenv("PYTHON"), "only run test on emulated tensor cores")
-class TestUOpsStatsMatmul(unittest.TestCase):
+class TestUOpsStatsMatmulHalf(unittest.TestCase):
   def test_simple_matmul_half(self, N=16):
     GlobalCounters.reset()
     a, b = Tensor.empty(N, N, dtype=dtypes.half), Tensor.empty(N, N, dtype=dtypes.half)
