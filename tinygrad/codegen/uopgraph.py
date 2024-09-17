@@ -159,15 +159,18 @@ def fold_unrolled_divs(divs:UOp, c:UOp):
 
 def simplify_valid_image_load(load:UOp, buf:UOp):
   if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
-  buf, idx, _, valid = load.src
-  if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT:
-    if graph_rewrite(valid.src[0]*(-1)-1+valid.src[1].arg, constant_folder).key == idx.src[1].key:
+  buf, idx, invalid_val, valid = load.src
+  drop = False
+  for stmt in _get_chain(valid, BinaryOps.AND):
+    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT:
       # valid: A*(-1) < c, idx: (..., A-1+c) -> okay to drop valid because A*(-1) >= c -> A <= -c -> A-1+c <= -1 is out of bound
-      return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
-
-    if valid.src[1].arg == buf_dtype.shape[0] and idx.src[1].key == valid.src[0].key:
+      if graph_rewrite(stmt.src[0]*(-1)-1+stmt.src[1].arg, constant_folder).key == idx.src[1].key: drop = True
       # valid: A < image bound, idx: (..., A) -> okay to drop valid
-      return UOp(UOps.LOAD, dtype=load.dtype, src=(buf, idx))
+      elif stmt.src[1].arg == buf_dtype.shape[0] and idx.src[1].key == stmt.src[0].key: drop = True
+
+      if drop:
+        new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s is not stmt]) else None
+        return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, new_valid)) if new_valid else UOp(UOps.LOAD, load.dtype, (buf, idx))
 
 # ***** transcendental *****
 

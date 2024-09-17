@@ -32,6 +32,15 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render((10, 10, 4), (gidx1*(-1)).lt(1), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
                      "read_imagef(data0, smp, (int2)(gidx0,gidx1))")
 
+    # should match any one of the AND clause and drop the matched statement from valid
+    valid = (gidx1*(-1)).lt(0) and (gidx0*(-1)).lt(0)
+    self.assertEqual(render((10, 10, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-1))),
+                     "(((gidx0*(-1))<0)?read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-1)))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+
+    valid = (gidx1*(-1)).lt(0) and (gidx1*(-1)).lt(0)
+    self.assertEqual(render((10, 10, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-1))),
+                     "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-1))))")
+
   def test_idx_lt_bound(self):
     # (idx1 < image_bound) ? (..., idx1) : 0 can drop the valid
     gidx0 = Variable("gidx0", 32)
