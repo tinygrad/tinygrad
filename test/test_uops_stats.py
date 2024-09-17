@@ -103,7 +103,7 @@ class TestUOpsStats(unittest.TestCase):
     c = a.matmul(b)
     c.realize()
     expected_ops = N ** 3 * 2
-    assert expected_ops == GlobalCounters.global_ops
+    self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):
