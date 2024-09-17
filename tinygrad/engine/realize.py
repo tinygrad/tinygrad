@@ -167,7 +167,7 @@ def get_runner(dname:str, ast:UOp) -> CompiledRunner:
 class ExecItem:
   prg: Runner
   bufs: List[Optional[Buffer]]
-  metadata: Optional[List[Metadata]] = None
+  metadata: Optional[Tuple[Metadata, ...]] = None
   def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
