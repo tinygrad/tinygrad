@@ -84,6 +84,17 @@ float4_folding = PatternMatcher([
 
 # *** new load folders ***
 
+def split_load_on_gate(load, buf, idx, var, gate):
+  gate_srcs = gate.src if gate.op is UOps.VECTORIZE else [UOp.const(dtypes.bool, x) for x in gate.arg]
+  splits = dedup(gate_srcs)
+  if len(splits) == 1: return
+  fv: List[Optional[UOp]] = [None]*load.dtype.count
+  for s in splits:
+    idxs = tuple(i for i,g in enumerate(gate_srcs) if g is s)
+    ld = UOp.load(buf, idx.gep(idxs), var.gep(idxs), s.broadcast(len(idxs)), dtype=load.dtype.scalar().vec(len(idxs)))
+    for i,tidx in enumerate(idxs): fv[tidx] = ld.gep(i)
+  return UOp(UOps.VECTORIZE, load.dtype, tuple(cast(List[UOp], fv)))
+
 def dedup_load(load:UOp, buf:UOp, base:UOp, idx:UOp, var:Optional[UOp]=None, gate:Optional[UOp]=None):
   if len(dedup(idx.arg)) == len(idx.arg): return None
   new_idxs = tuple(sorted(dedup(idx.arg)))
@@ -111,6 +122,8 @@ load_store_folder = PatternMatcher([
   (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat(UOps.VCONST, name="vc"), name="load"), fold_vconst_load),
   (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"),
              UPat(UOps.VECTORIZE, src=UPat(name="gate")) & UPat(UOps.VCONST, name="vc"), name="load"), fold_vconst_load),
+  # split load based on gate
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat((UOps.VCONST, UOps.VECTORIZE), name='gate'), name="load"), split_load_on_gate),
 ])
 
 # ***** mod *****
@@ -459,7 +472,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),
     lambda x,c1,y: (x+y)+c1),
-])+load_store_folder
+])
 
 # *** uop expander ***
 
@@ -583,7 +596,7 @@ expander = PatternMatcher([
   # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU
   (UPat(UOps.EXPAND, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
     lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
-])
+])+load_store_folder
 
 def no_vectorized_load_store(ls:UOp):
   idx = ls.src[1]
