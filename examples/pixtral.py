@@ -1,6 +1,7 @@
 from typing import Dict, Optional, List
+from PIL import Image
 from mistral_common.protocol.instruct.request import ChatCompletionRequest
-from mistral_common.protocol.instruct.messages import UserMessage, TextChunk, ImageURLChunk
+from mistral_common.protocol.instruct.messages import ImageChunk, UserMessage, TextChunk, ImageURLChunk
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 from mistral_common.tokens.tokenizers.tekken import SpecialTokenPolicy
 from extra.models.llama import Transformer, TransformerBlock, fix_bf16, sample
@@ -130,37 +131,57 @@ if __name__ == "__main__":
   parser.add_argument("--device", type=str, default=None, help="device(s) to run on (ie. NV:0,NV:1)")
   parser.add_argument("--count", type=int, default=10, help="number of tokens to generate")
   parser.add_argument("--jit", action=argparse.BooleanOptionalAction, help="enable the (imperfect) JIT")
-  parser.add_argument("--prompt", type=str, default="Describe this image")
-  parser.add_argument("--image", type=str, default=None, help="Image input")
+  parser.add_argument("--prompt", type=str, default=None, help="prompt to model, if missing will enter chatbot mode")
+  parser.add_argument("--image", type=str, default=None, help="image input (url), ignored in chatbot mode")
   parser.add_argument("--temperature", type=float, default=0.35)
+  args = parser.parse_args()
+  chatbot = args.prompt is None
+  if args.device is None: device = Device.DEFAULT
+  else: device = tuple(args.device.split(',')) if ',' in args.device else args.device
+  Device.DEFAULT = device[0] if isinstance(device, tuple) else device
 
   tokenizer = MistralTokenizer.v3(is_tekken=True, is_mm=True)
   tokenizer.instruct_tokenizer.tokenizer._special_token_policy = SpecialTokenPolicy.KEEP
-  args = parser.parse_args()
-  if args.device is None: device = Device.DEFAULT
-  else: device = tuple(args.device.split(',')) if ',' in args.device else args.device
 
   model = build(args.model, device=device, jit=args.jit)
 
-  prompt_content = [TextChunk(text=args.prompt)]
-  if args.image is not None: prompt_content.append(ImageURLChunk(image_url=args.image))
-  tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=[UserMessage(content=prompt_content)], model='pixtral'))
+  def chatbot_input():
+    prompt_content = [TextChunk(text=input("Text prompt: "))]
+    while True:
+      resp = input("Image path or url [Leave empty to finish input]: ")
+      if resp: prompt_content.append(ImageChunk(image=Image.open(resp)) if Path(resp).is_file() else ImageURLChunk(image_url=resp))
+      else: break
+    return tokenizer.encode_chat_completion(ChatCompletionRequest(messages=[UserMessage(content=prompt_content)], model='pixtral'))
+
+  if chatbot: tokenized = chatbot_input()
+  else:
+    prompt_content = [TextChunk(text=input("Text prompt: ") if chatbot else args.prompt)]
+    if args.image is not None: prompt_content.append(ImageURLChunk(image_url=args.image))
+    tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=[UserMessage(content=prompt_content)], model='pixtral'))
   outputted = tokenized.text
 
-  toks, image, start_pos = tokenized.tokens, Tensor(tokenized.images[0], device=device, dtype=dtypes.half).unsqueeze(0) if args.image is not None else None, 0
+  toks, image, start_pos = tokenized.tokens, Tensor(tokenized.images, device=device, dtype=dtypes.half), 0
   tok_tensor: Optional[Tensor] = None
 
-  for i in range(args.count):
-    next_tok = Tensor([toks[start_pos:]], device=device) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1).to(device)
-    tok_tensor = model(next_tok, image if i == 0 else None, start_pos, temperature=args.temperature)
-    tok = tok_tensor.item()
-    if tok == tokenizer.instruct_tokenizer.tokenizer.eos_id: break
+  while True:
+    for i in range(args.count):
+      next_tok = Tensor([toks[start_pos:]], device=device) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1).to(device)
+      tok_tensor = model(next_tok, image if i == 0 else None, start_pos, temperature=args.temperature)
+      tok = tok_tensor.item()
+      if tok == tokenizer.instruct_tokenizer.tokenizer.eos_id: break
 
-    start_pos = len(toks)
+      start_pos = len(toks)
 
-    toks.append(tok)
+      toks.append(tok)
 
-    cur = tokenizer.decode(toks)
-    sys.stdout.write(cur[len(outputted):])
-    sys.stdout.flush()
-    outputted = cur
+      cur = tokenizer.decode(toks)
+      sys.stdout.write(cur[len(outputted):])
+      sys.stdout.flush()
+      outputted = cur
+
+    if not chatbot: break
+    print()
+    tokenized = chatbot_input()
+    toks += tokenized.tokens
+    outputted += tokenized.text
+    image = Tensor(tokenized.images, device=device, dtype=dtypes.half) if len(tokenized.images) else None
