@@ -501,6 +501,9 @@ expander = PatternMatcher([
   # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU
   (UPat(UOps.EXPAND, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
     lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
+])
+
+just_reduce = PatternMatcher([
   # do reduce (in expander now)
   (UPat(UOps.REDUCE, name="root"), do_reduce),
 ])
@@ -541,9 +544,9 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.REDUCE), name="alu"), no_vectorized_alu),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
-  (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
+  #(UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
 ])
 
@@ -592,7 +595,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
     sink = graph_rewrite(sink, folder+expander)
     if getenv("DO_REDUCE", 1):
-      sink = graph_rewrite(sink, folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
+      sink = graph_rewrite(sink, folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+just_reduce)
       sink = graph_rewrite(sink, folder+reducer)
 
   # for PTX only
