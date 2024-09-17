@@ -136,7 +136,6 @@ class CapturedJit(Generic[ReturnType]):
   extra_view_inputs: List[Tuple[int, int, str, int, DType]]
   expected_names: List[Union[int, str]]
   expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]
-  prune: bool = True
 
   def __reduce__(self):
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
@@ -157,22 +156,6 @@ class CapturedJit(Generic[ReturnType]):
     for idx, offset, device, size, dtype in self.extra_view_inputs:
       input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
-
-    # Prune independent kernels.
-    if self.prune:
-      depends = set(input_buffers)
-      for ei in self.jit_cache:
-        if any(b in depends for b in ei.bufs):
-          if isinstance(ei.prg, CompiledRunner):
-            for out in ei.prg.p.outs: depends.add(cast(Buffer, ei.bufs[out]))
-      pruned, onetime = partition(self.jit_cache,
-                                  lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
-      # run the onetime kernels here
-      for ei in onetime: ei.run(var_vals, jit=True)
-      if DEBUG >= 1: print(f"pruned from {len(self.jit_cache)} -> {len(pruned)} kernels")
-      self._jit_cache = self.jit_cache = pruned
-      self._input_replace = get_input_replace(self._jit_cache, input_buffers)
-      self.prune = False
 
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:
@@ -250,7 +233,8 @@ class TinyJit(Generic[ReturnType]):
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._jit_cache: List[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
-      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
+      # TODO: should we always disable the memory planner here?
+      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
@@ -273,15 +257,32 @@ class TinyJit(Generic[ReturnType]):
 
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.
-      noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
-      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
+      if not self.prune:
+        noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
+        assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
+      else:
+        assigned = {}
       jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
+
+      # Prune independent kernels.
+      if self.prune:
+        depends = set(input_buffers)
+        for ei in jit_cache:
+          if any(b in depends for b in ei.bufs):
+            if isinstance(ei.prg, CompiledRunner):
+              for out in ei.prg.p.outs: depends.add(cast(Buffer, ei.bufs[out]))
+        pruned, onetime = partition(jit_cache,
+                                    lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
+        if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
+        # run the onetime kernels here
+        for ei in onetime: ei.run(var_vals, jit=True)
+        jit_cache = pruned
 
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
       # set this for next run
-      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device, self.prune)
+      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
