@@ -285,9 +285,6 @@ jobs:
      run: npm install puppeteer
    - name: Run WEBGPU Efficientnet
      run: node test/web/test_webgpu.js
-   - name: Run webgpu with debug
-     run: |
-       WEBGPU=1 DEBUG=2 WGPU_BACKEND_TYPE=Metal python test/test_ops.py
    - name: Run selected webgpu tests
      run: |
        WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit --ignore=test/test_multitensor.py --ignore=test/test_copy_speed.py --ignore=test/test_compile_failures.py --ignore test/test_transcendental.py --ignore test/test_search.py --durations=20
