@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, colored, JIT, dedup
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, colored, JIT, dedup, partition
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -136,6 +136,7 @@ class CapturedJit(Generic[ReturnType]):
   extra_view_inputs: List[Tuple[int, int, str, int, DType]]
   expected_names: List[Union[int, str]]
   expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]
+  prune: bool = True
 
   def __reduce__(self):
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
@@ -156,6 +157,22 @@ class CapturedJit(Generic[ReturnType]):
     for idx, offset, device, size, dtype in self.extra_view_inputs:
       input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
+
+    # Prune independent kernels.
+    if self.prune:
+      depends = set(input_buffers)
+      for ei in self.jit_cache:
+        if any(b in depends for b in ei.bufs):
+          if isinstance(ei.prg, CompiledRunner):
+            for out in ei.prg.p.outs: depends.add(cast(Buffer, ei.bufs[out]))
+      pruned, onetime = partition(self.jit_cache,
+                                  lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
+      # run the onetime kernels here
+      for ei in onetime: ei.run(var_vals, jit=True)
+      if DEBUG >= 1: print(f"pruned from {len(self.jit_cache)} -> {len(pruned)} kernels")
+      self._jit_cache = self.jit_cache = pruned
+      self._input_replace = get_input_replace(self._jit_cache, input_buffers)
+      self.prune = False
 
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:
@@ -183,11 +200,12 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buffers, var_vals, names, st_vars_dtype_device
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None):
+  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None, prune=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: Optional[CapturedJit] = captured
     self.cnt: int = 2 if self.fxn is None else 0
+    self.prune = prune
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
@@ -263,7 +281,7 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
       # set this for next run
-      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
+      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device, self.prune)
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
