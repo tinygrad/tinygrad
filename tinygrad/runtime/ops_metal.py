@@ -1,14 +1,16 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
-from extra.metal.api import Metal, libdispatch
-from typing import List, Any, Tuple, Optional
+from extra.metal.api import Metal
+import extra.metal.api as api
+import extra.metal.cdll as cdll
+from typing import List, Any, Tuple, Optional, cast
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
 def wait_check(cbuf: Any):
-  cbuf.waitUntilCompleted()
-  if (error := cbuf.error()) is not None:
+  cdll.send_message(cbuf, "waitUntilCompleted")
+  if (error := cdll.send_message(cbuf, "error", restype=ctypes.c_ulong)) != 0:
     raise RuntimeError(error)
 
 class MetalCompiler(Compiler):
@@ -20,11 +22,17 @@ class MetalCompiler(Compiler):
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    options = Metal.MTLCompileOptions.new()
-    options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
-    try: library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
-    except AssertionError as e: raise CompileError(e) from e
-    return library.libraryDataContents().bytes().tobytes()
+    options = cdll.send_message(
+                cdll.libobjc.objc_getClass(b"MTLCompileOptions"),
+                "new",
+            )
+    cdll.send_message(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
+    library = cdll.send_message(self.device.device, "newLibraryWithSource:options:error:", cdll.to_ns_str(src), options, None)
+    library_contents_ptr = cdll.send_message(library, "libraryDataContents")
+    library_contents_bytes_ptr = cdll.send_message(library_contents_ptr, "bytes")
+    library_length = cast(int, cdll.send_message(library_contents_ptr, "length", restype=ctypes.c_ulong))
+    library_bytes = ctypes.string_at(library_contents_bytes_ptr, library_length)
+    return library_bytes
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
@@ -37,78 +45,82 @@ class MetalProgram:
         if ret:
           print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
     assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
-    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
-    self.fxn = self.library.newFunctionWithName_(name)
-    descriptor = Metal.MTLComputePipelineDescriptor.new()
-    descriptor.setComputeFunction_(self.fxn)
-    descriptor.setSupportIndirectCommandBuffers_(True)
-    self.pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithDescriptor_options_reflection_error_(
-      descriptor, Metal.MTLPipelineOption(0), None, None))
+    data = cdll.libdispatch.dispatch_data_create(lib, len(lib), None, None)
+    self.library = cdll.send_message(self.device.device, "newLibraryWithData:error:", data, None)
+    self.fxn = cdll.send_message(self.library, "newFunctionWithName:", cdll.to_ns_str(name))
+    descriptor = cdll.send_message(cdll.libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new")
+    cdll.send_message(descriptor, "setComputeFunction:", self.fxn)
+    cdll.send_message(descriptor, "setSupportIndirectCommandBuffers:", True)
+    self.pipeline_state = cdll.send_message(self.device.device, "newComputePipelineStateWithDescriptor:options:reflection:error:", descriptor, 0, None, None)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if prod(local_size) > self.pipeline_state.maxTotalThreadsPerThreadgroup(): raise RuntimeError(f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}")  # noqa: E501
-    command_buffer = self.device.mtl_queue.commandBuffer()
-    encoder = command_buffer.computeCommandEncoder()
-    encoder.setComputePipelineState_(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a.buf, a.offset, i)
-    for i,a in enumerate(vals,start=len(bufs)): encoder.setBytes_length_atIndex_(ctypes.c_int32(a), 4, i)
-    encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
-    encoder.endEncoding()
-    command_buffer.commit()
+    if prod(local_size) > cdll.send_message(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong): raise RuntimeError("local size too big")
+    command_buffer = cdll.send_message(self.device.mtl_queue, "commandBuffer")
+    encoder = cdll.send_message(command_buffer, "computeCommandEncoder")
+    cdll.send_message(encoder, "setComputePipelineState:", self.pipeline_state)
+    for i,a in enumerate(bufs): cdll.send_message(encoder, "setBuffer:offset:atIndex:", a.device_buf, a.offset, i)
+    for i,a in enumerate(vals,start=len(bufs)): cdll.send_message(encoder, "setBytes:length:atIndex:", ctypes.c_int32(a), 4, i)
+    cdll.send_message(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", cdll.int_tuple_to_struct(global_size), cdll.int_tuple_to_struct(local_size))
+
+    cdll.send_message(encoder, "endEncoding")
+    cdll.send_message(command_buffer, "commit")
     if wait:
       wait_check(command_buffer)
-      return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
+      return cdll.send_message(command_buffer, "GPUEndTime", restype=ctypes.c_ulong) - cdll.send_message(command_buffer, "GPUStartTime", restype=ctypes.c_ulong)
     self.device.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalBuffer:
-  def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
+  def __init__(self, buf:Any, device_buf: cdll.objc_id, size:int, offset=0): self.buf, self.device_buf, self.size, self.offset = buf, device_buf, size, offset
 
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
     self.device:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
-    ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
-    if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
-    return MetalBuffer(ret, size)
-  def _free(self, opaque:MetalBuffer, options): opaque.buf.release()
+    raw_buf = bytearray(size)
+    buf_memoryview = memoryview(raw_buf).cast("B")
+    buf_ptr = (ctypes.c_char * size).from_buffer(raw_buf)
+    device_buf = cdll.send_message(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", buf_ptr, size, 0, None)
+    if device_buf is None: raise MemoryError(f"Metal OOM while allocating {size=}")
+    return MetalBuffer(buf_memoryview, device_buf, size)
+  def _free(self, opaque:MetalBuffer, options): cdll.send_message(opaque.device_buf, "release")
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
-    src_command_buffer = src_dev.mtl_queue.commandBuffer()
-    encoder = src_command_buffer.blitCommandEncoder()
-    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src.buf, src.offset, dest.buf, dest.offset, sz)
-    encoder.endEncoding()
+    src_command_buffer = cdll.send_message(src_dev.mtl_queue, "commandBuffer")
+    encoder = cdll.send_message(src_command_buffer, "blitCommandEncoder")
+    cdll.send_message(encoder, "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:", src.device_buf, src.offset, dest.device_buf, dest.offset, sz)
+    cdll.send_message(encoder, "endEncoding")
     if src_dev != dest_dev:
-      src_command_buffer.encodeSignalEvent_value_(src_dev.timeline_signal, src_dev.timeline_value)
-      dest_command_buffer = dest_dev.mtl_queue.commandBuffer()
-      dest_command_buffer.encodeWaitForEvent_value_(src_dev.timeline_signal, src_dev.timeline_value)
-      dest_command_buffer.commit()
+      cdll.send_message(src_command_buffer, "encodeSignalEvent:value:", src_dev.timeline_signal, src_dev.timeline_value)
+      dest_command_buffer = cdll.send_message(dest_dev.mtl_queue, "commandBuffer")
+      cdll.send_message(dest_command_buffer, "encodeWaitForEvent:value:", src_dev.timeline_signal, src_dev.timeline_value)
+      cdll.send_message(dest_command_buffer, "commit")
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
       src_dev.timeline_value += 1
-    src_command_buffer.commit()
+    cdll.send_message(src_command_buffer, "commit")
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
   def from_buffer(self, src:memoryview) -> Optional[Any]:
-    ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, src.nbytes, Metal.MTLResourceStorageModeShared, None)
+    ptr = (ctypes.c_char * src.nbytes).from_buffer(src)
+    ret = cdll.send_message(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", ptr, src.nbytes, 0, None)
     if ret: self.device.mv_in_metal.append(src)
-    return MetalBuffer(ret, src.nbytes)
+    return MetalBuffer(src, ret, src.nbytes)
   def as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
-    return src.buf.contents().as_buffer(src.offset+src.size)[src.offset:]
+    return src.buf[src.offset:]
   def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
   def copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)
-  def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
+  def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, buf.device_buf, size, offset)
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
-    self.device = Metal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
+    self.device = cdll.metal.MTLCreateSystemDefaultDevice()
+    self.mtl_queue = cdll.send_message(self.device, "newCommandQueueWithMaxCommandBufferCount:", 1024)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
 
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
 
-    self.timeline_signal = self.device.newSharedEvent()
+    self.timeline_signal = cdll.send_message(self.device, "newSharedEvent")
     self.timeline_value = 0
 
     from tinygrad.runtime.graph.metal import MetalGraph
