@@ -1,5 +1,5 @@
 from typing import Optional, List
-import ctypes, subprocess, pathlib, tempfile
+import ctypes, subprocess, pathlib, tempfile, functools
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -30,4 +30,4 @@ class ClangProgram:
 class ClangDevice(Compiled):
   def __init__(self, device:str):
     from tinygrad.runtime.graph.clang import ClangGraph
-    super().__init__(device, MallocAllocator, ClangRenderer(), ClangCompiler(), ClangProgram, ClangGraph)
+    super().__init__(device, MallocAllocator, ClangRenderer(), ClangCompiler(), ClangProgram, functools.partial(ClangGraph, self))

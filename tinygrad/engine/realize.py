@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, cast, Generator, Tuple, Union
 import time, pprint
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
+from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup, round_up
 from tinygrad.ops import MetaOps, UOps, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
@@ -224,7 +224,7 @@ def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, i
 
 # **************** memory planning ****************
 
-def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], noopt_buffers=None, debug_prefix="") -> Dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], noopt_buffers=None, debug_prefix="", force_one_buf=False) -> Dict[Buffer, Buffer]:
   if getenv("NO_MEMORY_PLANNER"): return {}
   first_appearance, last_appearance = {}, {}
   for i,u in enumerate(buffers):
@@ -256,9 +256,26 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
       if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base).base, offset=buf.offset)
       else: assigned[buf] = assigned.get(buf, buf)
 
+  if force_one_buf:
+    new_assigned, new_buf_len, nxt_off = {}, defaultdict(int), defaultdict(int)
+    for k,v in assigned.items(): new_buf_len[k.device] += v.nbytes if assigned.get(v.base) is not None else 0
+    new_bufs = {d:Buffer(d, l, dtypes.uint8) for d,l in new_buf_len.items()}
+
+    for k,v in assigned.items():
+      if v._base is not None: continue
+      new_assigned[k] = Buffer(v.device, v.size, v.dtype, base=new_bufs[v.device], offset=nxt_off[v.device])
+      nxt_off[v.device] += round_up(v.size, 128)
+
+    for k,v in assigned.items():
+      if v._base is None: continue
+      new_assigned[k] = Buffer(v.device, v.size, v.dtype, base=new_bufs[v.device], offset=new_assigned[v.base].offset + v.offset)
+    assigned = new_assigned
+
   if DEBUG >= 1 and len(ak:=dedup(x for x in assigned.keys() if x._base is None)) != len(av:=dedup(x for x in assigned.values() if x._base is None)):
     print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
           f"{len(ak)} -> {len(av)} bufs")
+
+  if force_one_buf: assert len(set(id(v.base) for k,v in assigned.items())) <= 1
   return assigned
 
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
