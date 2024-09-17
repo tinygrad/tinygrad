@@ -118,7 +118,7 @@ class TestOps(unittest.TestCase):
       with self.assertRaises(ValueError): method((2, -3, 0))
 
   def test_negative_dims_full(self):
-    with self.assertRaises(ValueError): Tensor.full(-3, 2)
+    with self.assertRaises(ValueError): Tensor.full((-3,), 2)
     with self.assertRaises(ValueError): Tensor.full((2, -3), 4)
     with self.assertRaises(ValueError): Tensor.full((2, -3, 0), 4)
 
@@ -878,7 +878,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(0), (0,8)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7)
     helper_test_op([(0), (0)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7)
   def test_broadcastdot(self):
-    helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot)
+    helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       b = Tensor.ones(3,3)

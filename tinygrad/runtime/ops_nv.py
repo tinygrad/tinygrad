@@ -109,8 +109,6 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     self.q = hw_view # type: ignore
 
   def _submit_to_gpfifo(self, dev, gpfifo:GPFifo):
-    if len(self.q) == 0: return
-
     if dev == self.binded_device: cmdq_addr = self.hw_page.va_addr
     else:
       if dev.cmdq_wptr + len(self.q) * 4 > dev.cmdq_page.size:

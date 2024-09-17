@@ -2,14 +2,13 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, Iterable, Any
+from typing import Tuple, List, Optional, Dict, Set, Any
 from tinygrad.helpers import merge_dicts, getenv
-from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
+from tinygrad.shape.symbolic import Variable, MulNode, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps, BinaryOps
-from tinygrad.ops import graph_rewrite
-from tinygrad.codegen.uopgraph import constant_folder, _get_add_chain
+from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite
+from tinygrad.codegen.uopgraph import constant_folder, _get_chain
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x.render(render_ops, ctx)
@@ -104,7 +103,7 @@ class ShapeTracker:
     ret: List[Optional[sint]] = [None] * len(self.shape)
     idx, valid = self.to_indexed_uops()
     idx = graph_rewrite(idx, pm=constant_folder)
-    for c in _get_add_chain(idx):
+    for c in _get_chain(idx, BinaryOps.ADD):
       if c.op is UOps.RANGE: ret[c.arg] = 1
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[0].op is UOps.RANGE and c.src[1].op is UOps.CONST: ret[c.src[0].arg] = c.src[1].arg
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[1].op is UOps.RANGE and c.src[0].op is UOps.CONST: ret[c.src[1].arg] = c.src[0].arg
@@ -116,21 +115,6 @@ class ShapeTracker:
     return tuple(ret)
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
-
-  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None) -> Tuple[Node, Node]:
-    idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)] if idxs is None else list(idxs)
-    idx, valid = self.views[-1].expr(idxs)
-    for view in reversed(self.views[0:-1]):
-      if valid.max == 0: return NumNode(-1), valid
-      view = view.minify()
-      acc, idxs = 1, []
-      for d in reversed(view.shape):
-        idxs.append((idx//acc)%d)
-        acc *= d
-      idx, valid = view.expr(idxs[::-1], valid)
-    assert not isinstance(idx.min, int) or idx.min >= -2**31, f"idx.min too small. {idx=}, {idx.min=}"
-    assert not isinstance(idx.max, int) or idx.max < 2**31, f"idx.max too big. {idx=}, {idx.max=}"
-    return idx, valid
 
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.to_indexed_uops()
