@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.helpers import prod, DEBUG
+from tinygrad.dtype import dtypes
+from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable, NumNode
+from tinygrad.ops import UOp, UOps, graph_rewrite
+from tinygrad.codegen.uopgraph import constant_folder
 from itertools import product
 
-def shapetracker_getitem(st, val):
-  _locals = {"idx0": val, "valid": 1}
-  idx, valid = st.reshape((st.size,)).expr_idxs()
-  exec(f"valid={valid.render()};idx0={idx.render()}", None, _locals)
-  return _locals["idx0"] if _locals["valid"] else -1
+def shapetracker_getitem(st:ShapeTracker, val:int):
+  idx, valid = st.reshape((st.size,)).to_indexed_uops([UOp.const(dtypes.pyint, val)])
+  idx, valid = graph_rewrite(idx, constant_folder), graph_rewrite(valid, constant_folder)
+  assert idx.op is UOps.CONST and valid.op is UOps.CONST
+  return idx.arg, valid.arg
 
 class CheckingShapeTracker:
   def __init__(self, shape):
@@ -70,10 +73,8 @@ class CheckingShapeTracker:
   def contiguous(self): return self.st.contiguous
 
   def assert_same(self):
-    x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
+    x = [(v[0] if (v:=shapetracker_getitem(self.st, i))[1] else -1) for i in range(prod(self.st.shape))]
     y = [self[i] for i in range(prod(self.shape))]
-    idx, valid = self.st.expr_idxs()
-    if DEBUG >= 1: print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
     assert self.st.shape == self.shape
     assert x == y, f"mismatch shapetracker:{x} real:{y}"
 
@@ -163,7 +164,6 @@ class TestIndexExpressions2d(unittest.TestCase):
   def tearDown(self):
     for st, offset, shape, idxs_expr in zip(self.sts, self.offset, self.shapes, self.idxs_exprs):
       numel = prod(shape)
-      assert idxs_expr(self.default_idxs(st.shape)) == st.expr_idxs(None)[0]
       self.check_bounds(idxs_expr(self.default_idxs(st.shape)), offset, numel)
       idx0s = [(0,0), (0, min(1, st.shape[0]-1)), (0, st.shape[0]-1), (min(3, st.shape[0]-1), min(6, st.shape[0]-1)), (st.shape[0]-1, st.shape[0]-1)]
       idx1s = [(0,0), (0, min(1, st.shape[1]-1)), (0, st.shape[1]-1), (min(3, st.shape[1]-1), min(6, st.shape[1]-1)), (st.shape[1]-1, st.shape[1]-1)]
@@ -171,7 +171,6 @@ class TestIndexExpressions2d(unittest.TestCase):
                (st.shape[2]-1, st.shape[2]-1)] if len(st.shape) == 3 else [None for _ in idx0s]
       for idx0, idx1, idx2 in product(idx0s, idx1s, idx2s):
         idxs = [Variable(f"idx{i}", idx[0], idx[1]) for i, idx in enumerate((idx0, idx1, idx2)) if idx is not None]
-        assert idxs_expr(idxs) == st.expr_idxs(idxs)[0]
         self.check_bounds(idxs_expr(idxs), offset, numel)
 
   def default_idx(self, shape):
@@ -785,14 +784,6 @@ class TestShapeTrackerSize(unittest.TestCase):
                                   offset=0, mask=None, contiguous=False), View(shape=(1, 32, 1, (NumNode(1)+Variable('start_pos', 0, 8192)), 128),
                                                                                strides=(0, 128, 0, 4096, 1), offset=0, mask=None, contiguous=False)))
     self.assertEqual(st.real_size(), 8389632)
-
-class TestIdxs(unittest.TestCase):
-  def test_check_idx_range(self):
-    # generated from: (Tensor.rand(4096,599*64) @ Tensor.rand(599*64,1024)).realize()
-    # TODO: use int64
-    st = ShapeTracker(views=(View(shape=(4096, 1024, 599, 1), strides=(613376, 599, 1, 0), offset=0, mask=None, contiguous=True),))
-    with self.assertRaises(AssertionError):
-      st.expr_idxs()
 
 class TestConsecutive(unittest.TestCase):
   @classmethod
