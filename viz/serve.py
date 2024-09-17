@@ -33,13 +33,13 @@ class UOpRet:
   graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]]       # a seralized version of UOp graphs
   diffs: List[Tuple[str, List[str]]]                                  # the diffs for each rewrite
   extra: List[List[str]]                                              # these become code blocks in the UI
-  uops: List[UOp]
 
 def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[bytes, UOp]) -> UOp:
   if (found:=cache.get(base.key)): return found
-  if base.key == prev.key:
-    ret = new
-  else: ret = UOp(base.op, base.dtype, tuple(replace_uop(x, prev, new, cache) for x in base.src), base.arg)
+  if base.key == prev.key: ret = new
+  else:
+    new_srcs = tuple(replace_uop(x, prev, new, cache) for x in base.src)
+    ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
   cache[base.key] = ret
   return ret
 
@@ -48,13 +48,15 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   diffs: List[Tuple[str, List[str]]] = []
   extra: List[List[str]] = [[str(ctx.sink)]]
   for (first, rewritten, pattern) in ctx.rewrites:
-    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     # if the sink was replaced, we have to replace the entire graph, otherwise just replace the parent
-    new_sink = rewritten if rewritten.op is UOps.SINK else replace_uop(uops[-1], first, rewritten, {})
+    # sometimes it saves rewrites that don't exist in the graph, skip showing those
+    new_sink = rewritten if first.op is UOps.SINK else replace_uop(uops[-1], first, rewritten, {})
+    if new_sink is uops[-1]: continue
+    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     assert new_sink.op is UOps.SINK
     uops.append(new_sink)
     extra.append([str(new_sink)])
-  return UOpRet(ctx.loc, list(map(uop_to_json, uops)), diffs, extra, uops)
+  return UOpRet(ctx.loc, list(map(uop_to_json, uops)), diffs, extra)
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
