@@ -632,7 +632,8 @@ def get_location() -> Tuple[str, int]:
   while (frm.f_code.co_filename.split('/')[-1] in {"ops.py", '<string>'}) and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
-def lines(fn) -> List[str]: return open(fn).readlines()
+def lines(fn) -> List[str]:
+  with open(fn) as f: return f.readlines()
 
 class UPat(MathTrait):
   __slots__ = ["op", "dtype", "arg", "name", "src"]
