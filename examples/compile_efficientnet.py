@@ -1,4 +1,3 @@
-from PIL import Image
 from pathlib import Path
 from extra.models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
