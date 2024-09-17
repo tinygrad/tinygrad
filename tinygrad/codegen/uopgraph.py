@@ -9,12 +9,19 @@ from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX,
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
+# ***** basics *****
+
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
   alus = tuple(UOp(alu.op, alu.dtype.scalar(),
                    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if alu.op is not UOps.REDUCE or j == 0 else s for j,s in enumerate(alu.src)),
                    alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
+
+vconst_vgep = PatternMatcher([
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
+])
 
 # ***** float4/image store handling *****
 
@@ -85,7 +92,7 @@ float4_folding = PatternMatcher([
 # *** new load folders ***
 
 def split_load_on_gate(load, buf, idx, var, gate):
-  gate_srcs = gate.src if gate.op is UOps.VECTORIZE else [UOp.const(dtypes.bool, x) for x in gate.arg]
+  gate_srcs = gate.src
   splits = dedup(gate_srcs)
   if len(splits) == 1: return
   fv: List[Optional[UOp]] = [None]*load.dtype.count
@@ -111,7 +118,7 @@ def fold_vconst_load(load:UOp, vc:UOp, buf:UOp, idx:UOp, var:UOp, gate:Optional[
   # NOTE: this is generating a lot of UOps...we could change vectorize to support non-scalar types
   return UOp(UOps.VECTORIZE, load.dtype, tuple(ld.gep(idxs.index(i)) if i in idxs else var.gep(i) for i in range(load.dtype.count)))
 
-load_store_folder = PatternMatcher([
+load_store_folder = vconst_vgep+PatternMatcher([
   (UPat(UOps.ALU, src=[UPat(UOps.VCONST), UPat()], arg=BinaryOps.CMPLT, name="alu"), no_vectorized_alu),
   (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE), UPat(UOps.VECTORIZE)), arg=BinaryOps.AND, name="alu"), no_vectorized_alu),
   # idx VCONST simplificiations
@@ -123,9 +130,7 @@ load_store_folder = PatternMatcher([
   (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"),
              UPat(UOps.VECTORIZE, src=UPat(name="gate")) & UPat(UOps.VCONST, name="vc"), name="load"), fold_vconst_load),
   # split load based on gate
-  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat((UOps.VCONST, UOps.VECTORIZE), name='gate'), name="load"), split_load_on_gate),
-  # group back to GEP
-  (UPat(UOps.VECTORIZE, name="vec", src=UPat(UOps.GEP, src=(UPat.var('x'),))), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat(UOps.VECTORIZE, name='gate'), name="load"), split_load_on_gate),
 ])
 
 # ***** mod *****
@@ -574,9 +579,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
-expander = PatternMatcher([
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
+expander = vconst_vgep+PatternMatcher([
   # create gate MUST BE BEFORE expander
   (UPat(UOps.STORE, name="root"), create_gate),
   # double expand
