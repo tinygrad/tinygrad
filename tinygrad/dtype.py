@@ -13,7 +13,7 @@ class DType:
   name: str
   fmt: Optional[str]
   count: int
-  def __repr__(self): return f"dtypes.{'_'*(c:=self.count!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.count)*c}"
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def vec(self, sz:int):
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
@@ -62,10 +62,12 @@ class dtypes:
       return tuple(dtypes.as_const(x, dtype) for x in val)
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
+  @functools.lru_cache(None)
   def min(dtype:DType):
     if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
     return -float("inf") if dtypes.is_float(dtype) else False
   @staticmethod
+  @functools.lru_cache(None)
   def max(dtype:DType):
     if dtypes.is_int(dtype): return (2**(dtype.itemsize*8-(0 if dtypes.is_unsigned(dtype) else 1)))-1
     return float("inf") if dtypes.is_float(dtype) else True

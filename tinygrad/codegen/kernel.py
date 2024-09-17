@@ -1,6 +1,6 @@
 from __future__ import annotations
 import itertools, functools
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 
@@ -330,7 +330,8 @@ class Kernel:
             if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
           for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
         elif self.opts.device == "CLANG":
-          for (i, sz) in tc.threads: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], sz), append_opt=False)
+          for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
+            if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
         elif self.opts.device in {"CUDA", "NV"}:
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
@@ -367,7 +368,7 @@ class Kernel:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
-          if (self.opts.device == "CLANG" and AMX): return True # skip hand-coded TC opts if CLANG, upcasting will make kernel slower
+          if (self.opts.device == "CLANG" and AMX): return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
           # hand-coded TC opts
           def late_upcast_tc(tc_dim: int):
             if tc_opts.axes_exist[tc_dim]:
@@ -639,9 +640,9 @@ class Kernel:
         # for locals, we use the ShapeTracker that's in the srcs
         st = op.st_arg if op.src[0].op is UOps.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
         st_uop = (st if apply_to_st is None else apply_to_st(st)).to_uop()
-        if op.op is UOps.CONST: return replace(op, src=(st_uop,))
-        if op.op is UOps.STORE: return replace(op, src=(op.src[0], st_uop, fixup_ast(op.src[2], apply_to_st)))
-        return replace(op, src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
+        if op.op is UOps.CONST: return op.replace(src=(st_uop,))
+        if op.op is UOps.STORE: return op.replace(src=(op.src[0], st_uop, fixup_ast(op.src[2], apply_to_st)))
+        return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is UOps.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
         alu_op: BinaryOps = op.arg[0]
@@ -661,7 +662,6 @@ class Kernel:
                                          [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
-          threads = prod(t[1] for t in tc.threads)
           if self.opts.device in {"AMD", "HIP"}:
             reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
             # https://gpuopen.com/learn/wmma_on_rdna3/
@@ -672,8 +672,8 @@ class Kernel:
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device == "CLANG":
-            reduce_axes, upcast_axes = [], [[(1,tc.dims[0])],[(0,tc.dims[1])],[(1, tc.dims[2]), (0, tc.dims[2])]]
-            threads, fix_st1, fix_st2 = threads // tc.dims[2], None, None
+            reduce_axes, upcast_axes = [], [[(1,tc.dims[0])],[(0,tc.dims[1])],[(1, tc.dims[0]), (0, tc.dims[1])]]
+            fix_st1, fix_st2 = None, None
           elif self.opts.device in {"CUDA", "NV"}:
             reduce_axes, upcast_axes = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
@@ -689,7 +689,7 @@ class Kernel:
             raise RuntimeError("unsupported device for tensor cores")
 
           assert apply_to_st is None, "double tensor core? not supported"
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, threads,
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(t[1] for t in tc.threads),
                       tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axes),
                       tuple(self.first_upcast+ax for ax in reduce_axes))
           if self.use_tensor_cores >= 2:
@@ -713,7 +713,7 @@ class Kernel:
           else:
             ret = UOp(UOps.WMMA, tc.dtype_out, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
           new_reduce_axes = tuple(i for i in axis if i-self.first_upcast not in reduce_axes)
-          return replace(op, src=(ret,), arg=(alu_op, new_reduce_axes)) if new_reduce_axes else ret
+          return op.replace(src=(ret,), arg=(alu_op, new_reduce_axes)) if new_reduce_axes else ret
         if self.group_for_reduces:
           start = UOp(UOps.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(alu_op, axis))
           second_axis = tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) \
@@ -734,7 +734,7 @@ class Kernel:
         arg = (alu_op, axis)
       elif op.op is UOps.SINK:
         arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
-      return replace(op, src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
+      return op.replace(src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
     return fixup_ast(self.ast)
 
   # **** this is the lowerer ****
