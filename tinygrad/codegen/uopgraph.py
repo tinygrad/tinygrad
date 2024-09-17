@@ -193,14 +193,6 @@ def threefry2x32(x: UOp, seed: UOp):
 
 # ***** main rewriter *****
 
-def reduce_before_expand(reduce, expand, x):
-  # if the expand is being reduced, you can't push it through
-  # NOTE: could do a partial push here in some cases
-  expands = flatten([x.arg for x in reduce.src[1:] if x.op is UOps.EXPAND])
-  if any(x in expands for x in expand.arg): return None
-  red = UOp(UOps.REDUCE, x.dtype, (x,)+reduce.src[1:], reduce.arg)
-  return UOp(expand.op, expand.dtype, tuple(UOp(UOps.GEP, reduce.dtype, (red,), (i,)) for i in range(x.dtype.count)), expand.arg)
-
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce, idx2=None, idx3=None, extra=None, vec=None):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in reduce.src: return None  # must be the right REDUCE
   if mval.arg >= 0 or loop_start.arg != 0:
@@ -252,16 +244,10 @@ constant_folder = PatternMatcher([
   # push all GEPs through ALUs (fix arange stuff)
   (UPat(UOps.GEP, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST), name='alu'),), name='gep'),
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
-  # GEP add push (non-shrinking only)
-  #(UPat(UOps.GEP, None, (UPat.var('x') + UPat.cvar('c1'),), name="gep"),
-  # lambda x,c1,gep: x.gep(gep.arg) + c1.gep(gep.arg) if len(gep.arg) >= x.dtype.count else None),
   # tensor core with a 0 input is acc
   *[(UPat(UOps.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
   *[(UPat(UOps.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc) for i in [2, 4, 8]],
   # tensor core cleanups
-  *[(UPat(UOps.REDUCE, src=(UPat(UOps.EXPAND,
-                                 src=tuple(UPat(UOps.GEP, dtypes.float, src=(UPat.var("x"),), arg=(i,)) for i in range(j)), name="expand"),)
-    ,name="reduce", allow_any_len=True), reduce_before_expand) for j in ([2,4,8] + ([16,256] if AMX else []))],
   (UPat.var("add") + UPat(UOps.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
@@ -374,7 +360,7 @@ constant_folder = PatternMatcher([
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x") + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c if dtypes.is_int(x.dtype) else None),
   # x!=0 -> (bool)x
-  (UPat.var("x").ne(0), lambda x: x.cast(dtypes.bool)),
+  (UPat.var("x").ne(0), lambda x: x.cast(dtypes.bool.vec(x.dtype.count))),
   # bitwise noops
   ((UPat.var("x") & UPat.var("x")), lambda x: x),
   ((UPat.var("x") | UPat.var("x")), lambda x: x),
@@ -536,11 +522,6 @@ expander = PatternMatcher([
     lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
 ])
 
-just_reduce = PatternMatcher([
-  # do reduce (in expander now)
-  (UPat(UOps.REDUCE, name="root"), do_reduce),
-])
-
 def no_vectorized_load_store(ls:UOp):
   idx = ls.src[1]
   if idx.dtype.count == 1: return None
@@ -575,9 +556,14 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
+just_reduce = PatternMatcher([
+  # do reduce
+  (UPat(UOps.REDUCE, name="root"), do_reduce),
+])
+
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.REDUCE), name="alu"), no_vectorized_alu),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
