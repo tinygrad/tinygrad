@@ -61,6 +61,18 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render((10, 10, 4), (gidx1).lt(5), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1+5))),
                      "read_imagef(data0, smp, (int2)(gidx0,(gidx1+5)))")
 
+  def test_valid_empty_set(self):
+    gidx0 = Variable("gidx0", 32)
+    gidx1 = Variable("gidx1", 32)
+    shape = (1, 2, 4)
+    idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0%2, gidx1+2))
+    # not empty
+    self.assertEqual(render(shape, (gidx0).lt(8) & (-gidx0).lt(-6), idx),
+                     "(((gidx0<8)&((gidx0*(-1))<(-6)))?read_imagef(data0, smp, (int2)((gidx0%2),(gidx1+2))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+
+    # empty
+    self.assertRaises(IndexError, lambda: render(shape, (gidx0).lt(8) & (-gidx0).lt(-7), idx))
+
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
     gidx = Variable("gidx", 512)

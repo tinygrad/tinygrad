@@ -195,6 +195,9 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
         lower = -stmt.src[1].arg+1
         drop_stmt.append(stmt)
 
+  # valid is an empty set
+  if upper < lower: return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
+
   new_indx0, new_indx1 = None, None
   if (L:=(lower * c + d)) // m == (U:=(upper * c + d)) // m:  # in the same row
     if (L % m - c < 0) and (U % m + c >= m):  # spans the whole row
