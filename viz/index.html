@@ -122,6 +122,7 @@
   var totalUOps = 0;
   var currentRewrite = 0;
   var totalRewrites = 0;
+  var pickedGraphs = {"rewritten sink": true, "pre-rewrite sink": false, "pre-rewrite UOp": false, "rewritten UOp": false};
   var cache = {}
   async function main() {
     let ret;
@@ -190,6 +191,25 @@
     } else {
       container.appendChild(Object.assign(document.createElement("p"), { textContent: "No rewrites" }));
     }
+    // graph picker
+    const graphPicker = document.createElement("div");
+    graphPicker.className = "graph-picker";
+    Object.keys(pickedGraphs).map((name, i) => {
+      const opt = document.createElement("input");
+      opt.type = "checkbox";
+      opt.id = `checkbox-${i}`;
+      opt.checked = pickedGraphs[name];
+      opt.addEventListener("click", () => {
+        pickedGraphs[name] = !pickedGraphs[name];
+        main();
+      });
+      const label = document.createElement("label");
+      label.htmlFor = `checkbox-${i}`;
+      label.textContent = name;
+      graphPicker.appendChild(opt)
+      graphPicker.appendChild(label)
+    })
+    container.appendChild(graphPicker)
     // uop list
     const uopList = document.querySelector(".container.uop-list");
     uopList.innerHTML = "";
