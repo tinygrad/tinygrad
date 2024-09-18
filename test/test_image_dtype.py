@@ -3,6 +3,34 @@ import numpy as np
 from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
+from tinygrad.helpers import prod
+
+# TODO: add QCOM support
+@unittest.skipIf(Device.DEFAULT not in ("GPU"), "only images on GPU")
+class TestImageCopy(unittest.TestCase):
+  def test_image_copyout_1x1(self):
+    it = Tensor.arange(4).cast(dtypes.imagef((1,1,4))).realize()
+    buf = it.lazydata.buffer
+    out = buf.as_buffer()
+    np.testing.assert_equal(out.cast('f').tolist(), np.arange(4))
+
+  def test_image_copyout_2x3(self):
+    it = Tensor.arange(2*3*4).cast(dtypes.imagef((2,3,4))).realize()
+    buf = it.lazydata.buffer
+    out = buf.as_buffer()
+    np.testing.assert_equal(out.cast('f').tolist(), np.arange(2*3*4))
+
+  def test_image_roundtrip(self):
+    sz = (4,2,4)
+    it = Tensor.rand(prod(sz)).cast(dtypes.imagef(sz)).realize()
+    buf = it.lazydata.buffer
+    out = buf.as_buffer()
+
+    it2 = Tensor.rand(prod(sz)).cast(dtypes.imagef(sz)).realize()
+    buf2 = it2.lazydata.buffer
+    buf2.copyin(out)
+
+    assert (it == it2).sum().item() == prod(sz)
 
 @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
 class TestImageDType(unittest.TestCase):
