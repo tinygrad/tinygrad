@@ -5,9 +5,8 @@ if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 
 from tinygrad import fetch, Tensor, TinyJit, Device, Context, GlobalCounters
-from tinygrad.helpers import OSX, DEBUG
+from tinygrad.helpers import OSX, DEBUG, Timing
 from tinygrad.tensor import _from_np_dtype
-Device.DEFAULT = "GPU"   # should be QCOM on comma device
 
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
@@ -63,7 +62,9 @@ def test(test_val):
   Tensor.manual_seed(100)
   new_inputs = {nm:Tensor.randn(*st.shape, dtype=dtype).mul(8).realize() for nm, (st, _, dtype, _) in
                 sorted(zip(run.captured.expected_names, run.captured.expected_st_vars_dtype_device))}
-  out = run(**new_inputs)
+  for _ in range(20):
+    with Timing("run model"):
+      out = run(**new_inputs)
   val = out['outputs'].numpy()
   print(out, val.shape, val.dtype)
   np.testing.assert_equal(test_val, val)
