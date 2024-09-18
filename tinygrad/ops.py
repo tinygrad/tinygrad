@@ -537,52 +537,6 @@ def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
-# ***** uop type spec *****
-
-def type_verify(uops):
-  for u in uops:
-    uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
-    if uop is UOps.DEFINE_LOCAL: assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}"
-    if uop is UOps.DEFINE_GLOBAL: assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}"
-    if isinstance(dtype, ImageDType): assert uop is UOps.DEFINE_GLOBAL, f"{uop} can't be image"
-    if uop is UOps.SHAPETRACKER: assert len(src) == 0, f"SHAPETRACKER must only define a ShapeTracker arg {uop}"
-    if uop is UOps.REDUCE_AXIS: assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in BinaryOps, f"invalid arg for REDUCE_AXIS {arg}"
-    if uop in {UOps.CONST, UOps.DEFINE_ACC}:
-      if uop is UOps.CONST:
-        assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
-        # TODO: intermediate CONST of Variable is DEFINE_VAR
-        assert (isinstance(arg, Variable) and u.src) or (type(arg) is type(dtypes.as_const(arg, dtype))), f"type of {arg=} does not match {dtype}"
-      if uop is UOps.DEFINE_ACC: assert dtype != dtypes.void and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
-    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype != dtypes.void # type is the output type, not an arg
-    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
-    if uop is UOps.VECTORIZE:
-      assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
-      assert all(dtype == x.dtype.vec(len(src)) for x in src), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
-    if uop is UOps.LOAD and len(src) > 3 and src[3].op is UOps.ALU: assert src[3].dtype == dtypes.bool and src[2].dtype == dtype
-    if uop is UOps.GEP: assert dtype == src[0].dtype.scalar(), f"GEP of {src[0].dtype=} should be {src[0].dtype.scalar()} != {dtype}"
-    if uop is UOps.IF: assert dtype == dtypes.void and len(src) == 2 and src[0].dtype == dtypes.bool
-    if uop is UOps.VALID: assert dtype == dtypes.bool and len(src) == 1 and src[0].op is UOps.SHAPETRACKER and arg is None
-    if uop is UOps.STORE:
-      assert dtype == dtypes.void, f"{uop} dtype must be void, got {dtype}"
-      if len(src) == 4: assert src[3].dtype == dtypes.bool or src[3].op is UOps.IF, f"bad gate {src[3]}"
-    if uop is UOps.ALU:
-      if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-      elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
-        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
-        assert dtype == bd, f"{arg} output dtype mismatch {dtype=} != {bd=}"
-        assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
-      elif arg is BinaryOps.IDIV:
-        assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), f"input dtype is not int {src[0].dtype=}, {src[1].dtype=}"
-        assert dtypes.is_int(dtype), f"output dtype is not int {dtype=}"
-      elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
-        # the distance to shift isn't typechecked
-        assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
-      elif arg in BinaryOps: assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
-      elif arg == TernaryOps.WHERE:
-        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
-        assert src[0].dtype == bd, f"{arg} selector dtype mismatch {src[0].dtype=} != {bd}"
-        assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
-
 # ***** uop helpers *****
 
 def print_uops(uops:List[UOp]):
@@ -806,3 +760,88 @@ class RewriteContext:
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   if TRACK_MATCH_STATS >= 2: contexts.append(TrackedRewriteContext(f"{(l:=get_location())[0].split('/')[-1]}:{l[1]}", sink, []))
   return RewriteContext(pm).rewrite(sink)
+
+# *** specs for the UOps live here ***
+
+# this is the matcher for the final rendered UOps
+# matcher functions returns True or False (or None to not match)
+spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.bool, r) if (r:=fxn(**kw)) is not None else None, y)) for (x,y) in [
+  (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType))),
+  (UPat(UOps.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType)),
+  (UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST),), name="x", allow_any_len=True), lambda x: all(y.op is UOps.RANGE for y in x.src[1:])),
+  (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
+  (UPat(UOps.SPECIAL, src=()), lambda: True),
+  (UPat(UOps.SHAPETRACKER, src=()), lambda: True),
+  (UPat(UOps.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
+
+  # LOAD takes a <buf, idx, alt?, gate?>
+  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat())), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat(name="alt"), UPat(dtype=dtypes.bool)), name="ld"),
+   lambda ld,alt: ld.dtype == alt.dtype),
+
+  # STORE takes a <buf, idx, val, gate?>
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat())), lambda: True),
+
+  (UPat(UOps.ALU, dtype=dtypes.bool, src=(UPat(name="x"), UPat(name="y")), arg=BinaryOps.CMPLT), lambda x,y: x.dtype == y.dtype),
+  (UPat(UOps.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
+
+  (UPat(UOps.ASSIGN, src=(UPat(UOps.DEFINE_ACC), UPat())), lambda: True),
+  (UPat(UOps.ENDRANGE, dtype=dtypes.void, src=(UPat(UOps.RANGE),)), lambda: True),
+
+  (UPat(UOps.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in BinaryOps),
+  (UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
+  (UPat(UOps.GEP, src=(UPat(name="src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
+  (UPat(UOps.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src))
+  #(UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, src=(UPat(UOps.DEFINE_LOCAL),), allow_any_len=True)), lambda: True),
+]])
+
+# ***** uop type spec *****
+
+def type_verify(uops:List[UOp]):
+  for u in uops:
+    chk = spec.rewrite(u)
+    if chk is None or chk.arg is False:
+      raise RuntimeError(f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
+
+  for u in uops:
+    uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
+    if uop is UOps.DEFINE_LOCAL: assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}"
+    if uop is UOps.DEFINE_GLOBAL: assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}"
+    if isinstance(dtype, ImageDType): assert uop is UOps.DEFINE_GLOBAL, f"{uop} can't be image"
+    if uop is UOps.SHAPETRACKER: assert len(src) == 0, f"SHAPETRACKER must only define a ShapeTracker arg {uop}"
+    if uop is UOps.REDUCE_AXIS: assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in BinaryOps, f"invalid arg for REDUCE_AXIS {arg}"
+    if uop in {UOps.CONST, UOps.DEFINE_ACC}:
+      if uop is UOps.CONST:
+        assert dtype is not None and dtype == dtype.scalar(), f"consts must be scalar, got {dtype}"
+        # TODO: intermediate CONST of Variable is DEFINE_VAR
+        assert (isinstance(arg, Variable) and u.src) or (type(arg) is type(dtypes.as_const(arg, dtype))), f"type of {arg=} does not match {dtype}"
+      if uop is UOps.DEFINE_ACC: assert dtype != dtypes.void and src[0].dtype == dtype, f"dtype mismatch {src[0].dtype=} != {dtype=}"
+    if uop in {UOps.CAST, UOps.BITCAST, UOps.VECTORIZE}: assert arg is None and dtype != dtypes.void # type is the output type, not an arg
+    if uop is UOps.CAST: assert dtype.count == 1 and len(src) == 1
+    if uop is UOps.VECTORIZE:
+      assert dtype.count > 1 and len(src) == dtype.count, f"dtype vectorization mismatch {dtype.count=} != {len(src)=}"
+      assert all(dtype == x.dtype.vec(len(src)) for x in src), f"{dtype=} must be {src[0].dtype.vec(len(src))}"
+    if uop is UOps.LOAD and len(src) > 3 and src[3].op is UOps.ALU: assert src[3].dtype == dtypes.bool and src[2].dtype == dtype
+    if uop is UOps.GEP: assert dtype == src[0].dtype.scalar(), f"GEP of {src[0].dtype=} should be {src[0].dtype.scalar()} != {dtype}"
+    if uop is UOps.IF: assert dtype == dtypes.void and len(src) == 2 and src[0].dtype == dtypes.bool
+    if uop is UOps.VALID: assert dtype == dtypes.bool and len(src) == 1 and src[0].op is UOps.SHAPETRACKER and arg is None
+    if uop is UOps.STORE:
+      assert dtype == dtypes.void, f"{uop} dtype must be void, got {dtype}"
+      if len(src) == 4: assert src[3].dtype == dtypes.bool or src[3].op is UOps.IF, f"bad gate {src[3]}"
+    if uop is UOps.ALU:
+      if arg in UnaryOps: assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
+      elif arg in {BinaryOps.CMPLT, BinaryOps.CMPNE}:
+        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
+        assert dtype == bd, f"{arg} output dtype mismatch {dtype=} != {bd=}"
+        assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
+      elif arg is BinaryOps.IDIV:
+        assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), f"input dtype is not int {src[0].dtype=}, {src[1].dtype=}"
+        assert dtypes.is_int(dtype), f"output dtype is not int {dtype=}"
+      elif arg in {BinaryOps.SHL, BinaryOps.SHR}:
+        # the distance to shift isn't typechecked
+        assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
+      elif arg in BinaryOps: assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
+      elif arg == TernaryOps.WHERE:
+        bd = dtypes.bool.vec(dtype.count) if dtype.count != 1 else dtypes.bool
+        assert src[0].dtype == bd, f"{arg} selector dtype mismatch {src[0].dtype=} != {bd}"
+        assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"
