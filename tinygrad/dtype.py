@@ -1,5 +1,4 @@
 from __future__ import annotations
-from functools import total_ordering
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
 import functools
@@ -30,11 +29,11 @@ class ImageDType(DType):
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
-@dataclass(frozen=True)
+# @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
   def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __hash__(self): return super().__hash__()
-  def __eq__(self, x): return x and (self.priority, self.itemsize, self.name, self.fmt, self.count) == (x.priority, x.itemsize, x.name, x.fmt, x.count)
+  def __eq__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) == (x.priority, x.itemsize, x.name, x.fmt, x.count)
   def __ne__(self, dt): return not (self == dt)
   def __repr__(self): return f"PtrDType({super().__repr__()})"
 
