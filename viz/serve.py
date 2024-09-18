@@ -28,8 +28,7 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   return graph
 
 @dataclass(frozen=True)
-class UOpRet:
-  loc: str                           # location that called graph_rewrite
+class UOpRet(TrackedRewriteContext):
   uops: List[UOp]                    # snapshot of the entire AST after each rewrite
   diffs: List[Tuple[str, List[str]]] # the diffs for each rewrite
   extra: List[List[str]]             # these become code blocks in the UI
@@ -56,7 +55,7 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
     assert new_sink.op is UOps.SINK
     uops.append(new_sink)
     extra.append([str(new_sink)])
-  return UOpRet(ctx.loc, uops, diffs, extra)
+  return UOpRet(ctx.loc, ctx.sink, ctx.rewrites, uops, diffs, extra)
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -79,7 +78,9 @@ class Handler(BaseHTTPRequestHandler):
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
       rest = [x.loc for x in contexts]
       g = create_graph(contexts[int(self.path.split("/")[-1])])
-      ret = json.dumps(({"loc": g.loc, "graphs": list(map(uop_to_json, g.uops)), "diffs": g.diffs, "extra": g.extra}, rest)).encode()
+      ret = json.dumps(({"loc": g.loc, "graphs": list(map(uop_to_json, g.uops)),
+                         "rewrites": list(map(lambda x:(uop_to_json(x[0]),uop_to_json(x[1])), g.rewrites)),
+                         "diffs": g.diffs, "extra": g.extra}, rest)).encode()
     else:
       self.send_response(404)
       ret = b""
