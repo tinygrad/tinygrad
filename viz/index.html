@@ -30,7 +30,6 @@
   }
   svg {
     width: 100%;
-    height: 100%;
   }
   svg * {
     cursor: default;
@@ -153,7 +152,7 @@
           g.setEdge(src, k)
         }
       }
-      const svg = d3.select("svg");
+      const svg = d3.select(target);
       const inner = svg.select("g");
       var zoom = d3.zoom()
         .scaleExtent([0.05, 2])
@@ -165,9 +164,14 @@
       const render = new dagreD3.render();
       render(inner, g);
     }
+    const graphCnt = Object.values(pickedGraphs).filter((v) => v).length;
     Object.values(pickedGraphs).forEach((v, i) => {
-      if (v) renderGraph(ctx.graphs[currentRewrite][i]);
-    })
+      if (v) {
+        renderGraph(ctx.graphs[currentRewrite][i], `.graph-${i}`);
+        const s = document.querySelector(`.graph-${i}`);
+        s.style.height = `${100/graphCnt}%`;
+      }
+    });
     // metadata
     const container = document.querySelector(".container.metadata");
     container.innerHTML = "";
@@ -205,24 +209,26 @@
       container.appendChild(Object.assign(document.createElement("p"), { textContent: "No rewrites" }));
     }
     // graph picker
-    const graphPicker = document.createElement("div");
-    graphPicker.className = "graph-picker";
-    Object.keys(pickedGraphs).map((name, i) => {
-      const opt = document.createElement("input");
-      opt.type = "checkbox";
-      opt.id = `checkbox-${i}`;
-      opt.checked = pickedGraphs[name];
-      opt.addEventListener("click", () => {
-        pickedGraphs[name] = !pickedGraphs[name];
-        main();
-      });
-      const label = document.createElement("label");
-      label.htmlFor = `checkbox-${i}`;
-      label.textContent = name;
-      graphPicker.appendChild(opt)
-      graphPicker.appendChild(label)
-    })
-    container.appendChild(graphPicker)
+    if (currentRewrite !== 0) {
+      const graphPicker = document.createElement("div");
+      graphPicker.className = "graph-picker";
+      Object.keys(pickedGraphs).map((name, i) => {
+        const opt = document.createElement("input");
+        opt.type = "checkbox";
+        opt.id = `checkbox-${i}`;
+        opt.checked = pickedGraphs[name];
+        opt.addEventListener("click", () => {
+          pickedGraphs[name] = !pickedGraphs[name];
+          main();
+        });
+        const label = document.createElement("label");
+        label.htmlFor = `checkbox-${i}`;
+        label.textContent = name;
+        graphPicker.appendChild(opt)
+        graphPicker.appendChild(label)
+      })
+      container.appendChild(graphPicker)
+    }
     // uop list
     const uopList = document.querySelector(".container.uop-list");
     uopList.innerHTML = "";
