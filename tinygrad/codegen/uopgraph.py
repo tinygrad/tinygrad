@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Dict, List, Set, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, PtrDType, ImageDType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
 from tinygrad.ops import UPat, PatternMatcher, graph_rewrite
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
@@ -175,7 +175,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
         return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, new_valid)) if new_valid else UOp(UOps.LOAD, load.dtype, (buf, idx))
 
   # first, parse valid into {expr: ((lower_bound, statement), (upper_bound, statement))}
-  bounds = defaultdict(lambda: [None, None])
+  bounds:DefaultDict[UOp, List[Optional[Tuple[ConstType, UOp]]]] = defaultdict(lambda: [None, None])
   for stmt in _get_chain(valid, BinaryOps.AND):
     if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
       if (s:=stmt.src[0]).op is UOps.ALU and s.arg is BinaryOps.MUL and s.src[1].op is UOps.CONST and s.src[1].arg == -1:
@@ -204,13 +204,13 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
 
   # from valid, find the bound of X
   drop_stmt = []
-  if X in bounds and bounds[X][0] is not None:
-    lower = bounds[X][0][0]
-    drop_stmt.append(bounds[X][0][1])
+  if X in bounds and (b0:=bounds[X][0]) is not None:
+    lower = b0[0]
+    drop_stmt.append(b0[1])
   else: lower = X.vmin
-  if X in bounds and bounds[X][1] is not None:
-    upper = bounds[X][1][0]
-    drop_stmt.append(bounds[X][1][1])
+  if X in bounds and (b1:=bounds[X][1]) is not None:
+    upper = b1[0]
+    drop_stmt.append(b1[1])
   else: upper = X.vmax
 
   # If the contraints in valid implies that it "spans" the whole row, and we can rewrite it to X*c+k for some k, and drop the valid.
