@@ -24,8 +24,8 @@ wgsl_matcher = PatternMatcher([
      lambda a,b: UOp(a.op, dtypes.float, (b.cast(dtypes.float),), a.arg).cast(b.dtype))
     for a in (UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2, UnaryOps.SQRT)],
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val", dtype=dtypes.bool), UPat.var("gate")),
-   lambda buf,idx,val,gate: UOp.store(buf, idx, val.cast(buf.dtype), gate)),
-  (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val", dtype=dtypes.bool)), lambda buf,idx,val: UOp.store(buf, idx, val.cast(buf.dtype))),
+   lambda buf,idx,val,gate: UOp.store(buf, idx, val.cast(dtypes.int), gate)),
+  (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val", dtype=dtypes.bool)), lambda buf,idx,val: UOp.store(buf, idx, val.cast(dtypes.int))),
 ])
 
 class WGSLRenderer(CStyleLanguage):

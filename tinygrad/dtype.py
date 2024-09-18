@@ -7,8 +7,7 @@ from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
 
-@total_ordering
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class DType:
   priority: int  # this determines when things get upcasted
   itemsize: int
@@ -21,9 +20,6 @@ class DType:
     if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
-  def __eq__(self, x):
-    return x and (self.priority, self.itemsize, self.name, self.fmt, self.count) == (x.priority, x.itemsize, x.name, x.fmt, x.count)
-  def __lt__(self, x): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (x.priority, x.itemsize, x.name, x.fmt, x.count)
 
 # dependent typing?
 @dataclass(frozen=True, repr=False)
@@ -34,9 +30,12 @@ class ImageDType(DType):
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
+@dataclass(frozen=True)
 class PtrDType(DType):
   def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __hash__(self): return super().__hash__()
+  def __eq__(self, x): return x and (self.priority, self.itemsize, self.name, self.fmt, self.count) == (x.priority, x.itemsize, x.name, x.fmt, x.count)
+  def __ne__(self, dt): return not (self == dt)
   def __repr__(self): return f"PtrDType({super().__repr__()})"
 
 class dtypes:
