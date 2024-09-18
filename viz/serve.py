@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Dict, List, Tuple
-import pickle, re, os, sys, time, threading, webbrowser, json, difflib
+import pickle, re, os, sys, time, threading, webbrowser, json, difflib, contextlib
 from tinygrad.helpers import getenv
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps
 from tinygrad.engine.graph import uops_colors, word_wrap
@@ -21,20 +21,26 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
+    if getenv("WITH_SHAPE"):
+      with contextlib.suppress(Exception): # if the UOp is indexed already it's fine
+        if u.st is not None: label += f"\n{u.st.shape}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 
 @dataclass(frozen=True)
 class UOpRet:
-  loc: str                                                            # location that called graph_rewrite
-  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]]       # a seralized version of UOp graphs
-  diffs: List[Tuple[str, List[str]]]                                  # the diffs for each rewrite
-  extra: List[List[str]]                                              # these become code blocks in the UI
+  loc: str                           # location that called graph_rewrite
+  uops: List[UOp]                    # snapshot of the entire AST after each rewrite
+  diffs: List[Tuple[str, List[str]]] # the diffs for each rewrite
+  extra: List[List[str]]             # these become code blocks in the UI
 
-def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[UOp, UOp]) -> UOp:
-  if (u:=cache.get(base)): return u
-  new_srcs = tuple(new if x.key == prev.key else replace_uop(x, prev, new, cache) for x in base.src)
-  ret = cache[base] = base if new_srcs == base.src else UOp(base.op, base.dtype, new_srcs, base.arg)
+def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[bytes, UOp]) -> UOp:
+  if (found:=cache.get(base.key)): return found
+  if base.key == prev.key: ret = new
+  else:
+    new_srcs = tuple(replace_uop(x, prev, new, cache) for x in base.src)
+    ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
+  cache[base.key] = ret
   return ret
 
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
@@ -42,13 +48,15 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   diffs: List[Tuple[str, List[str]]] = []
   extra: List[List[str]] = [[str(ctx.sink)]]
   for (first, rewritten, pattern) in ctx.rewrites:
-    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     # if the sink was replaced, we have to replace the entire graph, otherwise just replace the parent
     new_sink = rewritten if first.op is UOps.SINK else replace_uop(uops[-1], first, rewritten, {})
+    # TODO: sometimes it hits a ctx and can't find any UOp to replace
+    #if new_sink is uops[-1]: continue
+    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     assert new_sink.op is UOps.SINK
     uops.append(new_sink)
     extra.append([str(new_sink)])
-  return UOpRet(ctx.loc, list(map(uop_to_json, uops)), diffs, extra)
+  return UOpRet(ctx.loc, uops, diffs, extra)
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -70,8 +78,8 @@ class Handler(BaseHTTPRequestHandler):
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
       rest = [x.loc for x in contexts]
-      current_graph = create_graph(contexts[int(self.path.split("/")[-1])])
-      ret = json.dumps((asdict(current_graph), rest)).encode()
+      g = create_graph(contexts[int(self.path.split("/")[-1])])
+      ret = json.dumps(({"loc": g.loc, "graphs": list(map(uop_to_json, g.uops)), "diffs": g.diffs, "extra": g.extra}, rest)).encode()
     else:
       self.send_response(404)
       ret = b""

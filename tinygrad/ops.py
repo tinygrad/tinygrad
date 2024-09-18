@@ -349,6 +349,9 @@ class UOp(MathTrait):
   def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
     # TODO: instant check rules here make debugging easier
     #if op is UOps.ALU and arg is BinaryOps.CMPNE: assert dtype.scalar() == dtypes.bool
+    #if op is UOps.VECTORIZE and dtype != dtypes.void: assert len(src) == dtype.count, f"{len(src)} invalid for {dtype}"
+    #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
+    #if op is UOps.CAST: assert dtype.count == src[0].dtype.count, f"cast can't change vectorization {src[0].dtype} --> {dtype}"
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def replace(self, op: Optional[UOps]=None, dtype:Optional[DType]=None, src: Optional[Tuple[UOp,...]]=None, arg:Any=None):
     return UOp(op or self.op, dtype or self.dtype, self.src if src is None else src, self.arg if arg is None else arg)
@@ -387,6 +390,10 @@ class UOp(MathTrait):
   def sink(self, *srcs): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return type(self).const(self.dtype, b)
+  def broadcast(self, count:int):
+    assert self.dtype.count == 1
+    if count == 1: return self
+    return UOp(UOps.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):
@@ -625,7 +632,8 @@ def get_location() -> Tuple[str, int]:
   while (frm.f_code.co_filename.split('/')[-1] in {"ops.py", '<string>'}) and frm.f_back is not None: frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
-def lines(fn) -> List[str]: return open(fn).readlines()
+def lines(fn) -> List[str]:
+  with open(fn) as f: return f.readlines()
 
 class UPat(MathTrait):
   __slots__ = ["op", "dtype", "arg", "name", "src"]
@@ -736,7 +744,7 @@ class TrackedRewriteContext:
   sink: UOp                                 # the sink passed into the rewrite
   rewrites: List[Tuple[UOp, UOp, str]]      # all rewrites of sparents. (before, after, UPat printable)
 contexts: List[TrackedRewriteContext] = []
-class TrackedPattenMatcher(PatternMatcher):
+class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
     for p,_ in self.patterns:
@@ -762,7 +770,7 @@ class TrackedPattenMatcher(PatternMatcher):
     return None
 
 if TRACK_MATCH_STATS:
-  PatternMatcher = TrackedPattenMatcher  # type: ignore
+  PatternMatcher = TrackedPatternMatcher  # type: ignore
   import atexit, pickle
   @atexit.register
   def print_match_stats():
