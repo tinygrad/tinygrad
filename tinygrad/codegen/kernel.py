@@ -513,20 +513,20 @@ class Kernel:
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:  # noqa: E501
         # TODO: use 1024 if it's allowed in a smarter way
+        def get_reduce_idxs(st):
+          return [i for i,s in enumerate(zip(self.sts[st].shape,self.sts[st+1].shape)) if s[0] != s[1] and s[0] == first_shape and s[1] == 1]
         for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           try: # may fail due to excessive smem usage
             first_shape = self.full_shape[self.first_reduce]
-            grouped = {}
-            get_reduce_idxs = lambda st: \
-              [i for i,s in enumerate(zip(self.sts[st].shape,self.sts[st+1].shape)) if s[0] != s[1] and s[0] == first_shape and s[1] == 1]
+            grouped = 0
             for st in sorted(range(1,len(self.sts)-1), key=get_reduce_idxs):
               reduce_idxs = get_reduce_idxs(st)
               if len(reduce_idxs) == 0: continue
               i = reduce_idxs[0]
               if all(s.shape[i] % sz == 0 or s.shape[i] == 1 for s in self.sts) and all(v.mask is None for v in self.sts[st].views):
                 self.apply_opt(Opt(OptOps.GROUPTOP, i-self.first_reduce-self.group_for_reduces, sz))
-                grouped.update({i:None})
-            if len(grouped) > 0: break
+                grouped += 1
+            if grouped > 0: break
           except KernelOptError: pass
 
       # are we upcasting in mid reduce? (only for images)
