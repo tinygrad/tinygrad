@@ -55,7 +55,7 @@ def send_message(
 NSString: objc_id = libobjc.objc_getClass(b"NSString")
 NSConcreteData: objc_id = libobjc.objc_getClass(b"NSConcreteData")
 NSData: objc_id = libobjc.objc_getClass(b"NSData")
-
+NSMutableArray: objc_id = libobjc.objc_getClass(b"NSMutableArray")
 
 def to_ns_str(s: str) -> objc_id:
     return send_message(NSString, "stringWithUTF8String:", s.encode())
@@ -64,8 +64,11 @@ def to_ns_str(s: str) -> objc_id:
 def to_ns_data(bytes: bytes) -> objc_id:
     return send_message(NSData, "dataWithBytes:length:", bytes, len(bytes))
 
+def to_ns_array(items: list[Any]) -> objc_id:
+    c_array = (objc_id * len(items))(*items)
+    return c_array
 
-def int_tuple_to_struct(t: tuple[int, ...]):
+def int_tuple_to_struct(t: tuple[int, ...], _type: type = c_ulong):
     class Struct(Structure):
         pass
 
