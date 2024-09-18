@@ -744,7 +744,7 @@ class TrackedRewriteContext:
   sink: UOp                                 # the sink passed into the rewrite
   rewrites: List[Tuple[UOp, UOp, str]]      # all rewrites of sparents. (before, after, UPat printable)
 contexts: List[TrackedRewriteContext] = []
-class TrackedPattenMatcher(PatternMatcher):
+class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
     for p,_ in self.patterns:
@@ -770,7 +770,7 @@ class TrackedPattenMatcher(PatternMatcher):
     return None
 
 if TRACK_MATCH_STATS:
-  PatternMatcher = TrackedPattenMatcher  # type: ignore
+  PatternMatcher = TrackedPatternMatcher  # type: ignore
   import atexit, pickle
   @atexit.register
   def print_match_stats():
