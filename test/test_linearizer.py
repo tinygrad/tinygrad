@@ -1759,6 +1759,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 1
     assert k.upcasted == 1
 
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_multireduce(self):
     Tensor.manual_seed(0)
@@ -1796,6 +1797,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 0
     assert k.upcasted == 0
 
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_double_multireduce(self):
     Tensor.manual_seed(0)

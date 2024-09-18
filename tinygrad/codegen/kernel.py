@@ -517,9 +517,9 @@ class Kernel:
           try: # may fail due to excessive smem usage
             first_shape = self.full_shape[self.first_reduce]
             grouped = {}
-            def get_reduce_idxs(st):
-              return [i for i,s in enumerate(zip(self.sts[st].shape,self.sts[st+1].shape)) if s[0] != s[1] and s[0] == first_shape and s[1] == 1]
-            for st in sorted(range(1,len(self.sts)-1), key=lambda i: get_reduce_idxs(i)):
+            get_reduce_idxs = lambda st: \
+              [i for i,s in enumerate(zip(self.sts[st].shape,self.sts[st+1].shape)) if s[0] != s[1] and s[0] == first_shape and s[1] == 1]
+            for st in sorted(range(1,len(self.sts)-1), key=get_reduce_idxs):
               reduce_idxs = get_reduce_idxs(st)
               if len(reduce_idxs) == 0: continue
               i = reduce_idxs[0]
