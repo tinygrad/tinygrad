@@ -5,8 +5,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.helpers import prod
 
-# TODO: add QCOM support
-@unittest.skipIf(Device.DEFAULT not in ("GPU"), "only images on GPU")
+@unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
 class TestImageCopy(unittest.TestCase):
   def test_image_copyout_1x1(self):
     it = Tensor.arange(4).cast(dtypes.imagef((1,1,4))).realize()
