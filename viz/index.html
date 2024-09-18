@@ -111,7 +111,16 @@
   <div class="main-container">
     <div class="container uop-list"></div>
     <div class="container graph">
-      <svg>
+      <svg class="graph-0">
+        <g id="render"></g>
+      </svg>
+      <svg class="graph-1">
+        <g id="render"></g>
+      </svg>
+      <svg class="graph-2">
+        <g id="render"></g>
+      </svg>
+      <svg class="graph-3">
         <g id="render"></g>
       </svg>
     </div>
@@ -122,7 +131,7 @@
   var totalUOps = 0;
   var currentRewrite = 0;
   var totalRewrites = 0;
-  var pickedGraphs = {"rewritten sink": true, "pre-rewrite sink": false, "pre-rewrite UOp": false, "rewritten UOp": false};
+  var pickedGraphs = {"rewritten sink": true, "pre-rewrite sink": false, "rewritten UOp": false, "pre-rewrite UOp": false};
   var cache = {}
   async function main() {
     let ret;
@@ -136,25 +145,29 @@
     totalUOps = rest.length-1;
     totalRewrites = ctx.graphs.length-1;
     // graph
-    const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    const graph = ctx.graphs[currentRewrite];
-    for ([k,u] of Object.entries(graph)) {
-      g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
-      for (src of u[2]) {
-        g.setEdge(src, k)
+    function renderGraph(graph, target) {
+      const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+      for ([k,u] of Object.entries(graph)) {
+        g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
+        for (src of u[2]) {
+          g.setEdge(src, k)
+        }
       }
+      const svg = d3.select("svg");
+      const inner = svg.select("g");
+      var zoom = d3.zoom()
+        .scaleExtent([0.05, 2])
+        .on("zoom", () => {
+          const transform = d3.event.transform;
+          inner.attr("transform", transform);
+        });
+      svg.call(zoom);
+      const render = new dagreD3.render();
+      render(inner, g);
     }
-    const svg = d3.select("svg");
-    const inner = svg.select("g");
-    var zoom = d3.zoom()
-      .scaleExtent([0.05, 2])
-      .on("zoom", () => {
-        const transform = d3.event.transform;
-        inner.attr("transform", transform);
-      });
-    svg.call(zoom);
-    const render = new dagreD3.render();
-    render(inner, g);
+    Object.values(pickedGraphs).forEach((v, i) => {
+      if (v) renderGraph(ctx.graphs[currentRewrite][i]);
+    })
     // metadata
     const container = document.querySelector(".container.metadata");
     container.innerHTML = "";
