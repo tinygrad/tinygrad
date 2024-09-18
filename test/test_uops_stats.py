@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device
 from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
-from tinygrad.codegen.uopgraph import linearize_uop
+from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
 from tinygrad.ops import BinaryOps, TernaryOps, flops_mem, UOps, UOp
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
@@ -220,33 +220,63 @@ class TestStatsOptimized(unittest.TestCase):
     print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
-  def test_gated_store(self):
-    n = 16
-    ast = (Tensor.empty(n, n) @ Tensor.empty(n, n)).schedule()[-1].ast
-    k = Kernel(ast)
-    opts = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.PADTO, axis=2, amt=8)]
-    for opt in opts: k.apply_opt(opt)
-    p = k.to_program()
-    print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
-    self.assertEqual(p.op_estimate, n*n*n*2*2)
-    expected_res = flops_mem(k.uops, ignore_indexing=True)
-    self.assertEqual(expected_res[0], n*n*n*2*2)
+  def test_gated_store_with_alu_gate(self):
+    n = 4
 
-    # Update the single store to have an IF as the gate
-    adj_uops = k.uops
-    self.assertEqual(len([x for x in adj_uops if x.op is UOps.STORE]), 1)
-    store = adj_uops.pop()
-    self.assertEqual(store.op, UOps.STORE)
-    if_uop = UOp(UOps.IF, None, (store.src[3], store.src[2]), None)
+    a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    b = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
+    con0 = UOp.const(dtypes.float, 0.0)
+    con1 = UOp.const(dtypes.int, n)
 
-    adj_uops.append(if_uop)
-    adj_uops.append(UOp(UOps.STORE, None, (store.src[0], store.src[1], store.src[2], if_uop), store.arg))
-    adj_uops.append(UOp(UOps.ENDIF, None, (if_uop,)))
+    lidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 8))
+    alu0 = UOp(UOps.ALU, dtypes.bool, (lidx0, con1), BinaryOps.CMPLT)
 
-    incorrect_res = flops_mem(adj_uops, ignore_indexing=True)
+    ran0 = UOp(UOps.RANGE, dtypes.int, (UOp.const(dtypes.int, (0,)), con1), (3, True))
+    acc0 = UOp(UOps.DEFINE_ACC, dtypes.float, (con0, ran0), (0,))
+
+    alu1 = UOp(UOps.ALU, dtypes.int, (lidx0, ran0), BinaryOps.ADD)
+    load0 = UOp(UOps.LOAD, dtypes.float, (b, alu1, con0, alu0))
+    alu2 = UOp(UOps.ALU, dtypes.float, (acc0, load0), BinaryOps.ADD)
+    assign0 = UOp(UOps.ASSIGN, dtypes.float, (acc0, alu2))
+
+    store0 = UOp(UOps.STORE, dtypes.void, (a, con1, assign0, alu0))
+    sink = UOp(UOps.SINK, dtypes.void, (store0,))
+
+    uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
+    expected_res = flops_mem(uops, ignore_indexing=True)
+    self.assertEqual(expected_res[0], n*n*2)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
+  def test_gated_store_with_if_gate(self):
+    n = 4
+
+    a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    b = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
+    con0 = UOp.const(dtypes.float, 0.0)
+    con1 = UOp.const(dtypes.int, n)
+
+    lidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 8))
+    alu0 = UOp(UOps.ALU, dtypes.bool, (lidx0, con1), BinaryOps.CMPLT)
+
+    ran0 = UOp(UOps.RANGE, dtypes.int, (UOp.const(dtypes.int, (0,)), con1), (3, True))
+    acc0 = UOp(UOps.DEFINE_ACC, dtypes.float, (con0, ran0), (0,))
+
+    alu1 = UOp(UOps.ALU, dtypes.int, (lidx0, ran0), BinaryOps.ADD)
+    load0 = UOp(UOps.LOAD, dtypes.float, (b, alu1, con0, alu0))
+    alu2 = UOp(UOps.ALU, dtypes.float, (acc0, load0), BinaryOps.ADD)
+    assign0 = UOp(UOps.ASSIGN, dtypes.float, (acc0, alu2))
+
+    if0 = UOp(UOps.IF, dtypes.void, (alu0, assign0))
+    store_with_if = UOp(UOps.STORE, dtypes.void, (a, con1, assign0, if0))
+    sink_w_if = UOp(UOps.SINK, dtypes.void, (store_with_if,))
+
+    uops_w_if = linearize_uop(full_graph_rewrite(sink_w_if, Device[Device.DEFAULT].renderer))
+
+    expected_res = flops_mem(uops_w_if, ignore_indexing=True)
+
     with self.assertRaises(AssertionError):
-      self.assertEqual(incorrect_res[0], n*n*n*2*2)
-    self.assertEqual(incorrect_res[0], 0)
+      self.assertEqual(expected_res[0], n*n*2)
+    self.assertEqual(expected_res[0], 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
