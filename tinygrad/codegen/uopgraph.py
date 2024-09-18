@@ -211,7 +211,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
   if X in bounds and bounds[X][1] is not None:
     upper = bounds[X][1][0]
     drop_stmt.append(bounds[X][1][1])
-  else: upper = X.vmax  
+  else: upper = X.vmax
 
   # If the contraints in valid implies that it "spans" the whole row, and we can rewrite it to X*c+k for some k, and drop the valid.
   new_indx0, new_indx1 = None, None
