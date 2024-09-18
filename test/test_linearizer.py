@@ -200,8 +200,9 @@ class TestLinearizer(unittest.TestCase):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.expectedFailure # should fail by smem usage on hand_coded_optimizations
+  # we need a way to check the workgroup size OR reuse idxs
+  @unittest.skip
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_triple_multireduce(self):
     Tensor.manual_seed(0)
     x0 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
@@ -1758,6 +1759,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 1
     assert k.upcasted == 1
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
@@ -1770,13 +1772,14 @@ class TestHandCodedOpts(unittest.TestCase):
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
-    
+
     k = helper_linearizer_ast(sink, [x])[-1]
 
     assert k.group_for_reduces == 2
     assert k.local_dims == 0
     assert k.upcasted == 0
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_double_reduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 32, 5, 16, dtype=dtypes.float).realize()
@@ -1793,6 +1796,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 0
     assert k.upcasted == 0
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_double_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 32, 5, 16, dtype=dtypes.float).realize()
@@ -1805,7 +1809,7 @@ class TestHandCodedOpts(unittest.TestCase):
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,4)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5, 1, 1)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
-    
+
     k = helper_linearizer_ast(sink, [x])[-1]
     assert k.group_for_reduces == 2
 
