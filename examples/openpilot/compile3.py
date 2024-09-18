@@ -1,4 +1,4 @@
-import os, sys, pickle
+import os, sys, pickle, time
 import numpy as np
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
@@ -63,9 +63,12 @@ def test(test_val):
   new_inputs = {nm:Tensor.randn(*st.shape, dtype=dtype).mul(8).realize() for nm, (st, _, dtype, _) in
                 sorted(zip(run.captured.expected_names, run.captured.expected_st_vars_dtype_device))}
   for _ in range(20):
-    with Timing("run model"):
-      out = run(**new_inputs)
-  val = out['outputs'].numpy()
+    st = time.perf_counter()
+    out = run(**new_inputs)
+    mt = time.perf_counter()
+    val = out['outputs'].numpy()
+    et = time.perf_counter()
+    print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {(et-st)*1e3:6.2f} ms")
   print(out, val.shape, val.dtype)
   np.testing.assert_equal(test_val, val)
   print("**** test done ****")
