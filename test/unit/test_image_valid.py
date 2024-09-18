@@ -98,5 +98,14 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render((1, 64, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
                      "read_imagef(data0, smp, (int2)((idx0+(-201)),0))")
 
+  def test_simplify4(self):
+    # from openpilot
+    # cannot drop valid but can simplify idx
+    idx0 = Variable("idx0", 510)
+    valid = (-idx0).lt(-479) & idx0.lt(488)
+    idx = ((idx0*3+17)%26, (idx0*3+17)//26-56)
+    self.assertEqual(render((1, 26, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
+                     "((((idx0*(-1))<(-479))&(idx0<488))?read_imagef(data0, smp, (int2)(((idx0*3)+(-1439)),0)):(float4)(0.0f,0.0f,0.0f,0.0f))")
+
 if __name__ == '__main__':
   unittest.main()

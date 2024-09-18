@@ -213,16 +213,16 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     drop_stmt.append(b1[1])
   else: upper = X.vmax
 
-  # If the contraints in valid implies that it "spans" the whole row, and we can rewrite it to X*c+k for some k, and drop the valid.
-  new_indx0, new_indx1 = None, None
+  # we can simplify if the valid range is in a single row
   if (L:=(lower * c + d)) // m == (U:=(upper * c + d)) // m:  # in the same row
-    if (L % m - c < 0) and (U % m + c >= m):  # spans the whole row
-      new_indx0 = graph_rewrite(mul - ((L // m) * m - d), constant_folder)
-      new_indx1 = idx.src[1].const_like(L // m + e)
+    new_indx0 = graph_rewrite(mul - ((L // m) * m - d), constant_folder)
+    new_indx1 = idx.src[1].const_like(L // m + e)
+    # if valid spans the whole row, we can drop valid because idx0 will go OOB when invalid
+    if (L % m - c < 0) and (U % m + c >= m):
+      new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
+    else: new_valid = valid
 
-  if new_indx0 and new_indx1:
     new_idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_indx0, new_indx1))
-    new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
     return UOp(UOps.LOAD, load.dtype, (buf, new_idx, invalid_val, new_valid)) if new_valid else UOp(UOps.LOAD, load.dtype, (buf, new_idx))
 
 # ***** transcendental *****
