@@ -61,7 +61,7 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render((10, 10, 4), (gidx1).lt(5), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1+5))),
                      "read_imagef(data0, smp, (int2)(gidx0,(gidx1+5)))")
 
-  def test_full_row1(self):
+  def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
     gidx = Variable("gidx", 512)
     valid = gidx.lt(488) & (-gidx).lt(-479)
@@ -70,7 +70,7 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render((1, 26, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
                      "read_imagef(data0, smp, (int2)(((gidx*3)+(-1438)),0))")
 
-  def test_full_row2(self):
+  def test_simplify2(self):
     # from GPU=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
     lidx = Variable("lidx", 4)
     valid = lidx.lt(3) & (-lidx).lt(0)
@@ -78,7 +78,7 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render((1, 2, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
                      "read_imagef(data0, smp, (int2)((lidx+(-1)),0))")
 
-  def test_full_row3(self):
+  def test_simplify3(self):
     # from openpilot
     idx0 = Variable("idx0", 265)
     valid = (-idx0).lt(-200)
