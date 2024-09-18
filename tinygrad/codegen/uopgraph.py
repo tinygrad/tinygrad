@@ -157,6 +157,9 @@ def fold_unrolled_divs(divs:UOp, c:UOp):
 
 # ***** image load valid simplification *****
 
+def _recursive_sub(uop:UOp, old_new:Dict[UOp,UOp]):
+  return old_new.get(uop, UOp(uop.op, uop.dtype, tuple(_recursive_sub(s, old_new) for s in uop.src), uop.arg))
+
 def simplify_valid_image_load(load:UOp, buf:UOp):
   if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
   buf, idx, invalid_val, valid = load.src
@@ -182,10 +185,14 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
         bounds[s.src[0]][0] = (-stmt.src[1].arg+1, stmt)
       else: bounds[s][1] = (stmt.src[1].arg-1, stmt)
 
-  for v in bounds.values():
+  old_new:Dict[UOp,UOp] = {}
+  for u,v in bounds.items():
     # some expr has lower bound > upper bound -> valid is an empty set
     if v[0] is not None and v[1] is not None and v[0][0] > v[1][0]:
       return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
+    bound = (v[0][0] if v[0] is not None else u.vmin, v[1][0] if v[1] is not None else u.vmax)
+    old_new[u] = UOp(UOps.DEFINE_VAR, u.dtype, arg=(f"fake{len(old_new)}", u.const_like(bound[0]), u.const_like(bound[1])))
+  new_old = {v:k for k,v in old_new.items()}
 
   # next, parse idx by the form ((X*c+d)%m, ((X*c+d)//m+e))
   # parse m
@@ -200,7 +207,6 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
   e = add1.src[1].arg if (add1:=idx.src[1]).op is UOps.ALU and add1.arg is BinaryOps.ADD and add1.src[1].op is UOps.CONST else 0
   div = add1.src[0] if e else add1
   m_ = div.src[1].arg if div.op is UOps.ALU and div.arg is BinaryOps.IDIV and div.src[1].op is UOps.CONST else None
-  if m_ != m or div.src[0] != add: return None
 
   # from valid, find the bound of X
   drop_stmt = []
@@ -218,12 +224,15 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
   if (L:=(lower * c + d)) // m == (U:=(upper * c + d)) // m:  # in the same row
     if (L % m - c < 0) and (U % m + c >= m):  # spans the whole row
       new_indx0 = graph_rewrite(mul - ((L // m) * m - d), constant_folder)
-      new_indx1 = idx.src[1].const_like(L // m + e)
+      if m_ == m and div.src[0] == add: new_indx1 = idx.src[1].const_like(L // m + e)
 
   if new_indx0 and new_indx1:
     new_idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_indx0, new_indx1))
     new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
     return UOp(UOps.LOAD, load.dtype, (buf, new_idx, invalid_val, new_valid)) if new_valid else UOp(UOps.LOAD, load.dtype, (buf, new_idx))
+
+  narrowed = _recursive_sub(graph_rewrite(_recursive_sub(idx, old_new), constant_folder), new_old)
+  if narrowed.key != idx.key: return UOp(UOps.LOAD, load.dtype, (buf, narrowed, invalid_val, valid))
 
 # ***** transcendental *****
 

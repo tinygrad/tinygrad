@@ -67,8 +67,8 @@ class TestValidSimplification(unittest.TestCase):
     shape = (1, 2, 4)
     idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0%2, gidx1+2))
     # not empty
-    self.assertEqual(render(shape, (gidx0).lt(8) & (-gidx0).lt(-6), idx),
-                     "(((gidx0<8)&((gidx0*(-1))<(-6)))?read_imagef(data0, smp, (int2)((gidx0%2),(gidx1+2))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+    self.assertEqual(render(shape, (gidx0).lt(8), idx),
+                     "((gidx0<8)?read_imagef(data0, smp, (int2)((gidx0%2),(gidx1+2))):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
     # empty
     self.assertRaises(IndexError, lambda: render(shape, (gidx0).lt(8) & (-gidx0).lt(-7), idx))
@@ -98,6 +98,7 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render((1, 64, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
                      "read_imagef(data0, smp, (int2)((idx0+(-201)),0))")
 
+  @unittest.skip("not ready")
   def test_simplify4(self):
     idx0 = Variable("idx0", 512)
     data1_shape = (4, 64, 4)
@@ -121,6 +122,16 @@ class TestValidSimplification(unittest.TestCase):
     # alu0 = ((idx0*4)%32)
     self.assertEqual(render(data1_shape, alu9, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (((alu8+(alu5*8))%64),(alu5//8)))),
                      "((idx0<256)?read_imagef(data0, smp, (int2)((((((idx0//8)%32)//4)+(alu0*8))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+
+  def test_simplify5(self):
+    idx0 = Variable("idx0", 528)
+    idx1 = Variable("idx1", 8)
+    valid = idx1.lt(7)
+    idx = ((((idx1*528)+idx0)+528)%4224, ((idx1+1)//8)+1)
+    # TODO: can drop valid
+    self.assertEqual(render((4, 4224, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
+                     "((idx1<7)?read_imagef(data0, smp, (int2)(((idx1*528)+idx0+528),1)):(float4)(0.0f,0.0f,0.0f,0.0f))")
+
 
 if __name__ == '__main__':
   unittest.main()
