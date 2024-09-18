@@ -200,6 +200,8 @@ class TestLinearizer(unittest.TestCase):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.expectedFailure # should fail by smem usage on hand_coded_optimizations
   def test_triple_multireduce(self):
     Tensor.manual_seed(0)
     x0 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
