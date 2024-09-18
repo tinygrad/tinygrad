@@ -351,9 +351,9 @@ class Kernel:
         else:
           if (self.opts.device == "CLANG" and AMX): return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
           # hand-coded TC opts
-          for tc_dim in [tc_dim for tc_dim in [1, 0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
-            ax_div = [upc for upc in [5,4,3,2,1] if self.full_shape[tc_opts.axes[tc_dim]]%upc == 0][0]
-            if ax_div != 1: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], ax_div))
+          for dim in [tc_opts.axes[tc_dim] for tc_dim in [1, 0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
+            ax_div = [upc for upc in [5,4,3,2,1] if self.full_shape[dim]%upc == 0][0]
+            if ax_div != 1: self.apply_opt(Opt(OptOps.UPCAST, dim, ax_div))
 
           if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
             for upc in [4,2]:
