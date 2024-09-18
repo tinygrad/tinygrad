@@ -769,6 +769,8 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType))),
   (UPat(UOps.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType)),
   (UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST),), name="x", allow_any_len=True), lambda x: all(y.op is UOps.RANGE for y in x.src[1:])),
+  (UPat(UOps.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], UOp) and isinstance(x.arg[2], UOp)),
+
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
   (UPat(UOps.SHAPETRACKER, src=()), lambda: True),
