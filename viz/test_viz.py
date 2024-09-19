@@ -88,6 +88,7 @@ class TestViz(unittest.TestCase):
     new_sink = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, new_sink, unified=0)
     self.assert_valid_ctx(contexts)
+    assert all(ctx.loc.split("/")[-1].split(":")[0] == __file__.split("/")[-1] for ctx in contexts)
 
   @unittest.skipIf(CI, "slow, it's generating diffs for 36202 rules")
   def test_fuzz_resnet(self):
