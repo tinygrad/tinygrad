@@ -175,7 +175,7 @@ class UOp(MathTrait):
     ret = self.src[self.st_loc]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
-  def sink(self, *srcs): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
+  def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return type(self).const(self.dtype, b)
   def broadcast(self, count:int):
