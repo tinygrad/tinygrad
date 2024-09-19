@@ -60,8 +60,8 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.uint16, 0)
     _test_bitcasted(t, dtypes.float32, 0.0)
     _test_bitcasted(t, dtypes.uint32, 0)
-    # pi in float16 stored via int32
-    t.bitcast(dtypes.uint32).assign(Tensor.full((128, 32), 0x42484248, dtype=dtypes.uint32)).realize()
+    # pi in float16 stored via int16
+    t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
     _test_bitcasted(t, dtypes.float16, 3.140625)
     _test_bitcasted(t, dtypes.float32, 50.064727)
     _test_bitcasted(t, dtypes.uint16, 0x4248)
@@ -308,19 +308,19 @@ class TestDiskTensor(unittest.TestCase):
   def test_copy_from_disk(self):
     fn = pathlib.Path(temp("dt_copy_from_disk"))
     fn.unlink(missing_ok=True)
-    fn.write_bytes(bytes(range(256))*1024*4)
+    fn.write_bytes(bytes(range(256))*1024)
 
-    t = Tensor.empty(256*1024, device=f"disk:{temp('dt_copy_from_disk')}", dtype=dtypes.uint32)
+    t = Tensor.empty(256*1024, device=f"disk:{temp('dt_copy_from_disk')}", dtype=dtypes.uint8)
     on_dev = t.to(Device.DEFAULT).realize()
     np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
   def test_copy_from_disk_offset(self):
     fn = pathlib.Path(temp("dt_copy_from_disk_offset"))
     fn.unlink(missing_ok=True)
-    fn.write_bytes(bytes(range(256))*1024*4)
+    fn.write_bytes(bytes(range(256))*1024)
 
     for off in [314, 991, 2048, 4096]:
-      t = Tensor.empty(256*1024, device=f"disk:{temp('dt_copy_from_disk_offset')}", dtype=dtypes.uint32)[off:]
+      t = Tensor.empty(256*1024, device=f"disk:{temp('dt_copy_from_disk_offset')}", dtype=dtypes.uint8)[off:]
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
@@ -329,10 +329,10 @@ class TestDiskTensor(unittest.TestCase):
 
     fn = pathlib.Path(temp("dt_copy_from_disk_huge"))
     fn.unlink(missing_ok=True)
-    fn.write_bytes(bytes(range(256))*1024*256*4)
+    fn.write_bytes(bytes(range(256))*1024*256)
 
     for off in [0, 551]:
-      t = Tensor.empty(256*1024*256, device=f"disk:{temp('dt_copy_from_disk_huge')}", dtype=dtypes.uint32)[off:]
+      t = Tensor.empty(256*1024*256, device=f"disk:{temp('dt_copy_from_disk_huge')}", dtype=dtypes.uint8)[off:]
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
