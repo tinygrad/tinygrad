@@ -431,15 +431,13 @@ class TestSymbolic(unittest.TestCase):
 
   def test_arange_unrolled4(self):
     gidx = Variable("gidx", 0, 2559)
-    alu0 = -gidx
-    unrolled_div = (alu0+2561)//-4+(alu0+2562)//-4+(alu0+2560)//-4+(alu0+2559)//-4+2559
-    self.helper_test_variable(unrolled_div, 0, 2559, "gidx")
+    unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
+    self.helper_test_variable(unrolled_div, 2559, 5118, "(gidx+2559)")
 
   def test_arange_unrolled2(self):
     gidx = Variable("gidx", 0, 2559)
-    alu0 = -gidx
-    unrolled_div = (alu0+2559)//-2+(alu0+2560)//-2+2559
-    self.helper_test_variable(unrolled_div, 0, 2559, "gidx")
+    unrolled_div = (gidx+2559)//2+(gidx+2560)//2+3
+    self.helper_test_variable(unrolled_div, 2562, 5121, "(gidx+2562)")
 
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)

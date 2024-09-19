@@ -146,19 +146,20 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
   if (newx:=div_folding(x,c)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV: return newx.src[0].lt(newx.src[1])
   return cast(UOp, x.divides(g)).lt(c//g) if ((g:=math.gcd(x.const_factor(), c)) > 1) else None
 
-def fold_unrolled_divs(divs:UOp, c:UOp):
+def fold_unrolled_divs(divs:UOp):
   # div pattern in unrolled arange
-  # example: (-x+2561)//-4+(-x+2562)//-4+(-x+2560)//-4+(-x+2559)//-4+2559 -> x
+  # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
   add_chain, seen_const, ans = list(_get_chain(divs, BinaryOps.ADD)), [], None
   for u in add_chain:
-    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==-len(add_chain)): return None
+    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==len(add_chain)): return None
     # assumed CONST is the last of an ADD
-    if not ((s0:=u.src[0]).op is UOps.ALU and s0.arg is BinaryOps.ADD and s0.src[1].op is UOps.CONST and s0.src[1].op is UOps.CONST): return None
-    if not ((neg:=s0.src[0]).op is UOps.ALU and neg.arg is BinaryOps.MUL and neg.src[1].op is UOps.CONST and neg.src[1].arg==-1): return None
-    if ans is None: ans = neg.src[0]
-    if ans != neg.src[0]: return None
-    seen_const.append(s0.src[1].arg)
-  return ans if sorted(seen_const)==list(range(c.arg, c.arg+len(add_chain))) and ans is not None and (ans.vmin, ans.vmax)==(0, c.arg) else None
+    if (s0:=u.src[0]).op is UOps.ALU and s0.arg is BinaryOps.ADD and s0.src[1].op is UOps.CONST and s0.src[1].op is UOps.CONST:
+      seen_const.append(s0.src[1].arg)
+      s0 = s0.src[0]
+    else: seen_const.append(0)
+    if ans is None: ans = s0
+    if ans != s0: return None
+  return ans if ans is not None and sorted(seen_const)==list(range(len(add_chain))) else None
 
 # ***** image load valid simplification *****
 
@@ -349,7 +350,7 @@ constant_folder = PatternMatcher([
     .where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   # unrolled arange div folding
-  (UPat.var("divs") + UPat.cvar("c"), fold_unrolled_divs),
+  (UPat(UOps.ALU, name="divs", src=[UPat(), UPat(UOps.ALU, arg=BinaryOps.IDIV)], arg=BinaryOps.ADD), fold_unrolled_divs),
   # indexing, with cast or where
   (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*
     UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
