@@ -279,7 +279,7 @@ class QCOMProgram(HCQProgram):
 class QCOMAllocator(HCQAllocator):
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.image is not None:
-      pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.base.itemsize), 1 << (pitchalign:=6))
+      pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.itemsize) + 1, 1 << (pitchalign:=6))
       texture = self.device._gpu_alloc(pitch * round_up(options.image.shape[0], 16), kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
 
       # Extend HCQBuffer with texture-related info.
