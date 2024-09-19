@@ -65,8 +65,8 @@ class MathTrait:
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
   # TODO: use this one instead
-  #def ge(self, x): return self.lt(x).ne(True)
-  def ge(self, x): return (-self).lt(-x+1)
+  def ge(self, x): return self.lt(x).ne(True)
+  #def ge(self, x): return (-self).lt(-x+1)
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
@@ -382,14 +382,14 @@ def lines(fn) -> List[str]:
   with open(fn) as f: return f.readlines()
 
 class UPat(MathTrait):
-  __slots__ = ["op", "dtype", "arg", "name", "src"]
+  __slots__ = ["op", "dtype", "arg", "name", "src", "_any"]
   def __init__(self, op:Optional[Union[UOps, Tuple[UOps, ...]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
                src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
-               name:Optional[str]=None, allow_any_len:bool=False, location=None,
+               name:Optional[str]=None, allow_any_len:bool=False, location=None, _any=False,
                custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None):
     self.op: Optional[Tuple[UOps, ...]] = (op,) if isinstance(op, UOps) else op
     self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
-    self.arg, self.name = arg, name
+    self.arg, self.name, self._any = arg, name, _any
     self.src: Any = None
 
     # try all permutations if it's a list
@@ -406,6 +406,9 @@ class UPat(MathTrait):
     else:
       upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
       self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
+
+  @staticmethod
+  def any(*src): return UPat(src=src, _any=True)
 
   @staticmethod
   @functools.lru_cache(None)
@@ -446,6 +449,10 @@ class UPat(MathTrait):
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+  if pat._any:
+    for x in pat.src[0]:
+      if (match:=_match(uop, x, store.copy())): return match
+    return []
   if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
      (pat.dtype is not None and uop.dtype not in pat.dtype) or \
      (pat.arg is not None and pat.arg != uop.arg) or \

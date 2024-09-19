@@ -162,73 +162,61 @@ def fold_unrolled_divs(divs:UOp, c:UOp):
 
 # ***** image load valid simplification *****
 
+def is_increasing(f:UOp):
+  # is f a monotonically increasing function regards its input
+  if f.op in [UOps.CONST, UOps.DEFINE_VAR, UOps.SPECIAL]: return True
+  if f.op is UOps.ALU and f.arg is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
+  if f.op is UOps.ALU and f.arg in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is UOps.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
+  return False  # False if not sure
+
+def replace_uop(uop:UOp, old:UOp, new:UOp):
+  # replace all `old` in `uop` to `new`
+  return new if uop is old else UOp(uop.op, uop.dtype, tuple(replace_uop(s, old, new) for s in uop.src), uop.arg)
+
 def simplify_valid_image_load(load:UOp, buf:UOp):
   if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
   buf, idx, invalid_val, valid = load.src
+  start_idx = idx
 
-  # TODO: merge this into the generic case
-  drop = False
-  for stmt in _get_chain(valid, BinaryOps.AND):
-    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
-      # valid: A*(-1) < c, idx: (..., A-1+c) -> okay to drop valid because A*(-1) >= c -> A <= -c -> A-1+c <= -1 is out of bound
-      if graph_rewrite(stmt.src[0]*(-1)-1+stmt.src[1].arg, constant_folder).key == idx.src[1].key: drop = True
-      # valid: A < image bound - c, idx: (..., A+c) -> okay to drop valid because A >= bound - c -> A + c >= bound is out of bound
-      elif graph_rewrite(stmt.src[0]+(buf_dtype.shape[0]-stmt.src[1].arg), constant_folder).key == idx.src[1].key: drop = True
-
-      if drop:
-        new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s is not stmt]) else None
-        return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, new_valid)) if new_valid else UOp(UOps.LOAD, load.dtype, (buf, idx))
-
-  # first, parse valid into {expr: ((lower_bound, statement), (upper_bound, statement))}
-  bounds:DefaultDict[UOp, List[Optional[Tuple[ConstType, UOp]]]] = defaultdict(lambda: [None, None])
+  # first, parse valid into {expr: (lower_bound, upper_bound)}
+  bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
   for stmt in _get_chain(valid, BinaryOps.AND):
     if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
       if (s:=stmt.src[0]).op is UOps.ALU and s.arg is BinaryOps.MUL and s.src[1].op is UOps.CONST and s.src[1].arg == -1:
-        bounds[s.src[0]][0] = (-stmt.src[1].arg+1, stmt)
-      else: bounds[s][1] = (stmt.src[1].arg-1, stmt)
+        bounds[s.src[0]][0] = -stmt.src[1].arg+1
+      else: bounds[s][1] = stmt.src[1].arg-1
 
-  for v in bounds.values():
+  for uop,v in bounds.items():
     # some expr has lower bound > upper bound -> valid is an empty set
-    if v[0] is not None and v[1] is not None and v[0][0] > v[1][0]:
+    if v[0] is not None and v[1] is not None and v[0] > v[1]:
       return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
+    bound =  uop.const_like(uop.vmin if v[0] is None else v[0]), uop.const_like(uop.vmax if v[1] is None else v[1])
+    new = UOp(UOps.DEFINE_VAR, uop.dtype, (), ("fake", bound[0], bound[1]))
+    newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
+    if newidx.key != idx.key: idx = newidx
 
-  # next, parse idx by the form ((X*c+d)%m, ((X*c+d)//m+e))
-  # parse m
-  m = mod.src[1].arg if (mod:=idx.src[0]).op is UOps.ALU and mod.arg is BinaryOps.MOD and mod.src[1].op is UOps.CONST else None
-  if not m or m != buf_dtype.shape[1]: return None
-  # parse idx.src[0]
-  d = add.src[1].arg if (add:=mod.src[0]).op is UOps.ALU and add.arg is BinaryOps.ADD and add.src[1].op is UOps.CONST else 0
-  mul = add.src[0] if d else add  # + d is optional
-  c = mul.src[1].arg if mul.op is UOps.ALU and mul.arg is BinaryOps.MUL and mul.src[1].op is UOps.CONST else 1
-  X = mul.src[0] if c != 1 else mul  # * c is optional
-  # parse idx.src[1]
-  e = add1.src[1].arg if (add1:=idx.src[1]).op is UOps.ALU and add1.arg is BinaryOps.ADD and add1.src[1].op is UOps.CONST else 0
-  div = add1.src[0] if e else add1
-  m_ = div.src[1].arg if div.op is UOps.ALU and div.arg is BinaryOps.IDIV and div.src[1].op is UOps.CONST else None
-  if m_ != m or div.src[0] != add: return None
-
-  # from valid, find the bound of X
   drop_stmt = []
-  if X in bounds and (b0:=bounds[X][0]) is not None:
-    lower = b0[0]
-    drop_stmt.append(b0[1])
-  else: lower = X.vmin
-  if X in bounds and (b1:=bounds[X][1]) is not None:
-    upper = b1[0]
-    drop_stmt.append(b1[1])
-  else: upper = X.vmax
+  for stmt in _get_chain(valid, BinaryOps.AND):
+    if not (stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST): continue
+    if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.MUL and (s01:=s0.src[1]).op is UOps.CONST and s01.arg == -1:
+      # -X < c -> X > -c, check if it's negative when X = -c
+      for i in idx.src:
+        if is_increasing(i) and (rw:=graph_rewrite(replace_uop(i, s0.src[0], s0.const_like(-stmt.src[1].arg)), constant_folder)):
+          if rw.op is UOps.CONST and rw.arg < 0:
+            drop_stmt.append(stmt)
+            break
+    else:
+      # X < c, check if it's out of bound when X = c
+      for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
+        if is_increasing(i) and (rw:=graph_rewrite(replace_uop(i, s0, s0.const_like(stmt.src[1].arg)), constant_folder)):
+          if rw.op is UOps.CONST and rw.arg >= b:
+            drop_stmt.append(stmt)
+            break
 
-  # If the contraints in valid implies that it "spans" the whole row, and we can rewrite it to X*c+k for some k, and drop the valid.
-  new_indx0, new_indx1 = None, None
-  if (L:=(lower * c + d)) // m == (U:=(upper * c + d)) // m:  # in the same row
-    if (L % m - c < 0) and (U % m + c >= m):  # spans the whole row
-      new_indx0 = graph_rewrite(mul - ((L // m) * m - d), constant_folder)
-      new_indx1 = idx.src[1].const_like(L // m + e)
-
-  if new_indx0 and new_indx1:
-    new_idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (new_indx0, new_indx1))
+  if drop_stmt or idx.key != start_idx.key:
     new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
-    return UOp(UOps.LOAD, load.dtype, (buf, new_idx, invalid_val, new_valid)) if new_valid else UOp(UOps.LOAD, load.dtype, (buf, new_idx))
+    return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, new_valid)) if new_valid else UOp(UOps.LOAD, load.dtype, (buf, idx))
+  return None
 
 # ***** transcendental *****
 
@@ -254,9 +242,11 @@ def threefry2x32(x: UOp, seed: UOp):
 
 # ***** main rewriter *****
 
-def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce, idx2=None, idx3=None, extra=None, vec=None):
+def loop_collapse(compval, idx, multconst, rng:UOp, reduce, idx2=None, idx3=None, extra=None, vec=None, ne=None, mval:UOp=UOp.const(dtypes.int32, 1)):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in reduce.src: return None  # must be the right REDUCE
-  if mval.arg >= 0 or loop_start.arg != 0:
+  loop_start, loop_end = rng.src
+  mval_arg = mval.arg
+  if loop_start.arg != 0:
     # TODO: support and test this with other mvals and loop_starts
     if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
     return None
@@ -266,13 +256,18 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
     # idx, mval, loop_start, loop_end
     def dvec(x): return UOp(UOps.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
     idx, mval, loop_start, loop_end = dvec(idx), dvec(mval), dvec(loop_start), dvec(loop_end)
-  comprange = UOp.min(loop_end, UOp.max((idx-compval-mval)//mval + (loop_end-loop_start), loop_start))
+  if mval_arg > 0 and ne is not None:
+    comprange = UOp.min(loop_end, UOp.max((idx-compval)//mval + (loop_end-loop_start), loop_start))
+  elif mval_arg < 0 and ne is None:
+    comprange = UOp.min(loop_end, UOp.max((idx-compval-mval)//mval + (loop_end-loop_start), loop_start))
+  else:
+    return None
   new_reduce_op = comprange.cast(multconst.dtype) * multconst
   ret = UOp(UOps.REDUCE, reduce.dtype, (new_reduce_op,) + tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
   if extra is not None: ret = ret + UOp(UOps.REDUCE, reduce.dtype, (extra,) + reduce.src[1:], reduce.arg)
   return ret
 
-def index_collapse(idx,rng,buf,add,mul,ld,reduce):
+def index_collapse(idx,rng,buf,ld,reduce,add=UOp.const(dtypes.int, 0),mul=UOp.const(dtypes.int, 1)):
   if rng not in reduce.src: return None
   return UOp(reduce.op, reduce.dtype, (UOp(ld.op, ld.dtype, (buf, add+mul*idx, ld.const_like(0), idx.ge(rng.src[0]) & idx.lt(rng.src[1]))),)+
              tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
@@ -340,44 +335,28 @@ constant_folder = PatternMatcher([
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
   (UPat(UOps.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("seed")), arg=BinaryOps.THREEFRY), threefry2x32),
-  # extra arange loop folding because we don't fold adds. TODO: fold adds
-  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng") +
-                          UPat.var("idx2") + UPat.var("idx3")).lt(UPat.cvar("compval"))
-                        .where(UPat.cvar("multconst"), UPat.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng") +
-                          UPat.var("idx2")).lt(UPat.cvar("compval"))
-                        .where(UPat.cvar("multconst"), UPat.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  # arange loop folding (reduce)
-  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng"))
-   .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)),),
-   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  # arange loop folding (unrolled)
-  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng"))
-   .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)) + UPat.var("extra"),),
-   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  # arange loop folding (vectorized)
-  (UPat(UOps.REDUCE, src=(UPat(UOps.VECTORIZE, name="vec", src=(UPat.var("idx") + UPat.cvar("mval", vec=False) *
-                                                    UPat(UOps.RANGE, src=(UPat.cvar("loop_start", vec=False), UPat.var("loop_end")), name="rng")))
-   .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)),),
-   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  # arange loop folding (unrolled, vectorized)
-  (UPat(UOps.REDUCE, src=(UPat(UOps.VECTORIZE, name="vec", src=(UPat.var("idx") + UPat.cvar("mval", vec=False) *
-                                                    UPat(UOps.RANGE, src=(UPat.cvar("loop_start", vec=False), UPat.var("loop_end")), name="rng")))
-   .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)) + UPat.var("extra"),),
-   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+  # arange loop folding
+  (UPat(UOps.REDUCE, src=(UPat.any(m2:=UPat.any(
+    m1:=(UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, name="rng")),
+    m1 + UPat.var("idx2"), m1 + UPat.var("idx2") + UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=m1))
+    .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
+    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+  # arange loop folding (new ge)
+  (UPat(UOps.REDUCE, src=(UPat.any(m2:=UPat.any(
+    m1:=(UPat.var("idx") + UPat.any(UPat.cvar("mval") * UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
+    m1 + UPat.var("idx2"), m1 + UPat.var("idx2") + UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=m1))
+    .lt(UPat.cvar("compval")).ne(UPat(UOps.CONST, name="ne", arg=True))
+    .where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
+    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   # unrolled arange div folding
   (UPat.var("divs") + UPat.cvar("c"), fold_unrolled_divs),
-  # indexing (with a multiply offset)!
+  # indexing, with cast or where
   (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*
-    UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng")), name="ld"),),
-    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
-  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*
-    UPat(UOps.LOAD, src=(UPat.var("buf"), UPat(UOps.RANGE, name="rng")), name="ld"),),
-    arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
-    lambda **kwargs: index_collapse(add=UOp.const(dtypes.int, 0), mul=UOp.const(dtypes.int, 1), **kwargs)),
+    UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
+         name="ld"),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
   (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(
-    UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng")), name="ld"), UPat.const(None, 0.0)),),
-    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
+    UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
+         name="ld"), UPat.const(None, 0.0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
   # max folding
   (UPat.max(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # GEP/CAST const rules
