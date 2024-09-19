@@ -187,7 +187,7 @@ def is_increasing(f:UOp):
 
 def replace_uop(uop:UOp, old:UOp, new:UOp):
   # replace all `old` in `uop` to `new`
-  return new if uop is old else UOp(uop.op, uop.dtype, tuple(replace_uop(s, old, new) for s in uop.src), uop.arg)
+  return new if uop.key == old.key else UOp(uop.op, uop.dtype, tuple(replace_uop(s, old, new) for s in uop.src), uop.arg)
 
 def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
   # if it's X <= c, returns X, True, c
@@ -216,14 +216,38 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     # some expr has lower bound > upper bound -> valid is an empty set
     if v[0] is not None and v[1] is not None and v[0] > v[1]:
       return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
-    new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
-    newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
-    if newidx.key != idx.key: idx = newidx
+
+    if uop.op is UOps.ALU and uop.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(uop, BinaryOps.ADD)):
+      # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
+      newidxs: List[List[UOp]] = [[], []]
+      for variable in _get_chain(uop, BinaryOps.ADD):
+        new = UOp(UOps.DEFINE_VAR, variable.dtype, (), ("fake", 1, variable.vmax))
+        newidx = replace_uop(graph_rewrite(replace_uop(idx, variable, new), constant_folder), new, variable)
+        newidxs[0].append(newidx.src[0])
+        newidxs[1].append(newidx.src[1])
+
+      if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same([i.key for i in newidxs[0]])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
+      if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same([i.key for i in newidxs[1]])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
+
+    elif is_irreducible(uop):
+      new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
+      newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
+      if newidx.key != idx.key: idx = newidx
 
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
   for stmt in _get_chain(valid, BinaryOps.AND):
     X, is_upper_bound, c = parse_valid(stmt)
+
+    # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
+    if not is_upper_bound and c == 1 and X.op is UOps.ALU and X.arg is BinaryOps.ADD and \
+      all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(X, BinaryOps.ADD)):
+      testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), _get_chain(X, BinaryOps.ADD), idx)
+      testidx = graph_rewrite(testidx, constant_folder)
+      if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
+        drop_stmt.append(stmt)
+        continue
+
     # if X <= c, check if it's out of bound when X = c+1
     # if X >= c, check if it's out of bound when X = c-1
     test_value = c + 1 if is_upper_bound else c - 1
