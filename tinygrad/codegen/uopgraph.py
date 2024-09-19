@@ -49,7 +49,7 @@ def fold_expanded(ex, buf):
           # generate the folded new_srcs
           if is_load:
             new_load = UOp(UOps.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
-            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), (i,))
+            for i in range(fold_length): new_srcs[offsets[o+i]] = new_load.gep(i)
           else:
             for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.STORE, dtypes.void, tuple(new_src)) if i == 0 else None
           for i in range(fold_length): used.add((rootsrc,o+i))
@@ -68,7 +68,7 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   if len(new_src) >= 4:
     new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(4), tuple(new_src[2] for _ in range(4)))
   vec_load = UOp(UOps.LOAD, load.dtype.vec(4), tuple(new_src))
-  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), (i,))), range(4), load.const_like(float('nan')))
+  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), load.const_like(float('nan')))
 
 float4_folding = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
@@ -455,8 +455,7 @@ constant_folder = PatternMatcher([
       if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),
-    lambda x,c1,y: (x+y)+c1),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
 ])
 
 # *** uop expander ***
@@ -550,9 +549,7 @@ def do_contract(con:UOp):
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(),
-                   tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if alu.op is not UOps.REDUCE or j == 0 else s for j,s in enumerate(alu.src)),
-                   alu.arg) for i in range(alu.dtype.count))
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 def create_gate(root:UOp) -> Optional[UOp]:
@@ -602,7 +599,7 @@ def no_vectorized_load_store(ls:UOp):
 def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
   alus = tuple(UOp(acc.op, acc.dtype.scalar(),
-    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
+    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:

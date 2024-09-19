@@ -185,7 +185,12 @@ class UOp(MathTrait):
   def cast(self, dtype:DType): return type(self)(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return type(self)(UOps.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):
-    if isinstance(i, int): i = (i,)
+    if isinstance(i, int):
+      # NOTE: these are just shortcuts to not have to create and fold later
+      if self.op is UOps.VECTORIZE: return self.src[i]
+      if self.op is UOps.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
+      if self.op is UOps.CONST: return UOp.const(self.dtype.scalar(), self.arg)
+      i = (i,)
     if self.dtype == dtypes.void or (i == tuple(range(len(i))) and self.dtype.count == len(i)): return self
     assert len(i) >= 1 and all(x < self.dtype.count for x in i), f"bad GEP on {self.dtype}, {i}"
     return UOp(UOps.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
