@@ -355,11 +355,9 @@ class Kernel:
             szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]]%sz==0]
             if szs: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], szs[0]))
 
-          if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
-            for upc in [4,2]:
-              if self.full_shape[tc_opts.axes[0]] % upc == 0:
-                self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
-                break
+          # attempt to local N
+          if tc_opts.axes_exist[0] and (szs:=[sz for sz in [4,2] if self.full_shape[tc_opts.axes[0]]%sz==0]):
+            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], szs[0]))
       return True
     except KernelOptError:
       return False
