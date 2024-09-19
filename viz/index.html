@@ -62,6 +62,7 @@
   }
   .graph {
     grid-column: span 10;
+    position: relative;
   }
   .container {
     height: 100%;
@@ -108,6 +109,26 @@
     border-radius: 8px;
     padding: 8px;
   }
+  .spinner {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 32px;
+    height: 32px;
+    border: 4px solid #B4B4B4;
+    border-bottom-color: transparent;
+    border-radius: 50%;
+    display: inline-block;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
   </style>
 </head>
 <body>
@@ -127,11 +148,27 @@
   var totalRewrites = 0;
   var cache = {}
   async function main() {
+    const existingSpiner = document.querySelector(".spinner");
+    if (existingSpiner != null) {
+      document.querySelector(".graph").removeChild(existingSpiner);
+    }
     let ret;
     if (currentUOp in cache) {
       ret = cache[currentUOp];
     } else {
+      const spinner = Object.assign(document.createElement("div"), { className: "spinner" });
+      let spinnerTimeout;
+      const showSpinner = () => {
+        document.querySelector(".graph").appendChild(spinner);
+        Object.assign(document.querySelector("svg"), { style: "visibility: hidden;" });
+      };
+      spinnerTimeout = setTimeout(showSpinner, 200);
       ret = await (await fetch(`/graph?uop_idx=${currentUOp}`)).json();
+      clearTimeout(spinnerTimeout);
+      if (spinner.parentNode) {
+        spinner.remove();
+        Object.assign(document.querySelector("svg"), { style: "visibility: visible;" });
+      }
       cache[currentUOp] = ret;
     }
     const [ctx, rest] = ret;
