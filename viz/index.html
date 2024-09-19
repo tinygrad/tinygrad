@@ -135,25 +135,27 @@
     totalUOps = rest.length-1;
     totalRewrites = ctx.graphs.length-1;
     // graph
-    const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    const graph = ctx.graphs[currentRewrite];
-    for ([k,u] of Object.entries(graph)) {
-      g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
-      for (src of u[2]) {
-        g.setEdge(src, k)
+    function renderGraph(graph) {
+      const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+      for ([k,u] of Object.entries(graph)) {
+        g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
+        for (src of u[2]) {
+          g.setEdge(src, k)
+        }
       }
+      const svg = d3.select("svg");
+      const inner = svg.select("g");
+      var zoom = d3.zoom()
+        .scaleExtent([0.05, 2])
+        .on("zoom", () => {
+          const transform = d3.event.transform;
+          inner.attr("transform", transform);
+        });
+      svg.call(zoom);
+      const render = new dagreD3.render();
+      render(inner, g);
     }
-    const svg = d3.select("svg");
-    const inner = svg.select("g");
-    var zoom = d3.zoom()
-      .scaleExtent([0.05, 2])
-      .on("zoom", () => {
-        const transform = d3.event.transform;
-        inner.attr("transform", transform);
-      });
-    svg.call(zoom);
-    const render = new dagreD3.render();
-    render(inner, g);
+    renderGraph(ctx.graphs[currentRewrite][0])
     // metadata
     const container = document.querySelector(".container.metadata");
     container.innerHTML = "";
@@ -166,7 +168,7 @@
     if (ctx.graphs.length > 1) {
       const rewriteCounter = Object.assign(document.createElement("div"), { className: "rewrite-counter" });
       container.appendChild(rewriteCounter)
-      ctx.graphs.forEach((g, i) => {
+      ctx.graphs.forEach((_, i) => {
         const rewriteDiv = Object.assign(document.createElement("div"), { textContent: i, className: "uop-el" });
         if (i === currentRewrite) {
           rewriteDiv.classList.add("active-uop-el");
