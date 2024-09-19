@@ -123,11 +123,12 @@ class PythonProgram:
             ul[i] = [load([inp[i][j] if dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
             ul[i] = load(inp)
-        elif uop is UOps.PHI:
+        elif uop is UOps.ASSIGN:
           for j in range(len(inp[0])): inp[0][j] = inp[1][j]
           ul[i] = inp[0]
         elif uop is UOps.GEP:
-          ul[i] = inp[0][arg]
+          assert len(arg) == 1
+          ul[i] = inp[0][arg[0]]
         elif uop is UOps.WMMA:
           # here are the models for the WMMA instruction on the different hardware
           def wmma_helper(WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):

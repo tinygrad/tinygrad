@@ -126,8 +126,6 @@ class ResNet:
     return self.forward(x)
 
   def load_from_pretrained(self):
-    # TODO replace with fake torch load
-
     model_urls = {
       (18, 1, 64): 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
       (34, 1, 64): 'https://download.pytorch.org/models/resnet34-333f7ec4.pth',
@@ -138,16 +136,15 @@ class ResNet:
     }
 
     self.url = model_urls[(self.num, self.groups, self.base_width)]
-    for k, v in torch_load(fetch(self.url)).items():
+    for k, dat in torch_load(fetch(self.url)).items():
       obj: Tensor = get_child(self, k)
-      dat = v.numpy()
 
       if 'fc.' in k and obj.shape != dat.shape:
         print("skipping fully connected layer")
         continue # Skip FC if transfer learning
 
       if 'bn' not in k and 'downsample' not in k: assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
-      obj.assign(dat.reshape(obj.shape))
+      obj.assign(dat.to(obj.device).reshape(obj.shape))
 
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)
 ResNet34 = lambda num_classes=1000: ResNet(34, num_classes=num_classes)
@@ -155,3 +152,13 @@ ResNet50 = lambda num_classes=1000: ResNet(50, num_classes=num_classes)
 ResNet101 = lambda num_classes=1000: ResNet(101, num_classes=num_classes)
 ResNet152 = lambda num_classes=1000: ResNet(152, num_classes=num_classes)
 ResNeXt50_32X4D = lambda num_classes=1000: ResNet(50, num_classes=num_classes, groups=32, width_per_group=4)
+
+if __name__ == "__main__":
+  model = ResNet18()
+  model.load_from_pretrained()
+  from tinygrad import Context, GlobalCounters, TinyJit
+  jmodel = TinyJit(model)
+  jmodel(Tensor.rand(1, 3, 224, 224)).realize()
+  GlobalCounters.reset()
+  with Context(GRAPH=1): jmodel(Tensor.rand(1, 3, 224, 224)).realize()
+  for i in range(10): jmodel(Tensor.rand(1, 3, 224, 224))

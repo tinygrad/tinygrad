@@ -1,5 +1,7 @@
 from __future__ import annotations
 import unittest
+
+from tinygrad import Tensor
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
@@ -30,7 +32,7 @@ class TestVerifyAST(unittest.TestCase):
     buf_2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 2)
     a = UOp(UOps.LOAD, dtype, (buf_1, ShapeTracker.from_shape((32, 1)).to_uop()))
     b = UOp(UOps.LOAD, dtype, (buf_2, ShapeTracker.from_shape((32, 1)).to_uop()))
-    store = UOp(UOps.STORE, None, (buf_0, ShapeTracker.from_shape((32, 1)).to_uop(), a+b))
+    store = UOp(UOps.STORE, dtypes.void, (buf_0, ShapeTracker.from_shape((32, 1)).to_uop(), a+b))
     helper_test_verify_ast(store)
 
   def test_exactly_one_full_shape(self):
@@ -71,6 +73,14 @@ class TestVerifyAST(unittest.TestCase):
     r = UOp(UOps.REDUCE_AXIS, dtypes.float, (a,), (ReduceOps.SUM, (0,)))
     st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r+a)
     with self.assertRaisesRegex(InvalidASTException, "implicit expand"): helper_test_verify_ast(st)
+
+  def test_buffer_uops_st(self):
+    a = Tensor.randn(4, 4)+2
+    uop_sts = verify_ast(a.schedule()[-1].ast)
+    store_st = [st for u,st in uop_sts.items() if u.op is UOps.STORE][0]
+    self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
+    const_st = [st for u,st in uop_sts.items() if u.op is UOps.CONST][0]
+    self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
 if __name__ == '__main__':
   unittest.main()

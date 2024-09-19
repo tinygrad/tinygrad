@@ -87,6 +87,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] [CUDA](tinygrad/runtime/ops_cuda.py)
 - [x] [AMD](tinygrad/runtime/ops_amd.py)
 - [x] [NV](tinygrad/runtime/ops_nv.py)
+- [x] [QCOM](tinygrad/runtime/ops_qcom.py)
 
 And it is easy to add more! Your accelerator of choice only needs to support a total of ~25 low level ops.
 
