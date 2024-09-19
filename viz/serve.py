@@ -29,10 +29,10 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
 
 @dataclass(frozen=True)
 class UOpRet:
-  loc: str                           # location that called graph_rewrite
-  uops: List[UOp]                    # snapshot of the entire AST after each rewrite
-  diffs: List[Tuple[str, List[str]]] # the diffs for each rewrite
-  extra: List[List[str]]             # these become code blocks in the UI
+  loc: str
+  graphs: List[Tuple[UOp, UOp, UOp, UOp]] # snapshot of the entire AST after each rewrite
+  diffs: List[Tuple[str, List[str]]]      # the diffs for each rewrite
+  extra: List[List[str]]                  # these become code blocks in the UI
 
 def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[bytes, UOp]) -> UOp:
   if (found:=cache.get(base.key)): return found
@@ -45,6 +45,7 @@ def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[bytes, UOp]) -> UOp:
 
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   uops: List[UOp] = [ctx.sink]
+  graphs: List[Tuple[UOp, UOp, UOp, UOp]] = [(ctx.sink, ctx.sink, ctx.sink, ctx.sink)]
   diffs: List[Tuple[str, List[str]]] = []
   extra: List[List[str]] = [[str(ctx.sink)]]
   for (first, rewritten, pattern) in ctx.rewrites:
@@ -53,10 +54,11 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
     # TODO: sometimes it hits a ctx and can't find any UOp to replace
     #if new_sink is uops[-1]: continue
     diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
-    assert new_sink.op is UOps.SINK
+    assert new_sink.op is uops[-1].op
+    graphs.append((new_sink, uops[-1], rewritten, first))
     uops.append(new_sink)
     extra.append([str(new_sink)])
-  return UOpRet(ctx.loc, uops, diffs, extra)
+  return UOpRet(ctx.loc, graphs, diffs, extra)
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -79,7 +81,8 @@ class Handler(BaseHTTPRequestHandler):
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
       rest = [x.loc for x in contexts]
       g = create_graph(contexts[int(self.path.split("/")[-1])])
-      ret = json.dumps(({"loc": g.loc, "graphs": list(map(uop_to_json, g.uops)), "diffs": g.diffs, "extra": g.extra}, rest)).encode()
+      ret = json.dumps(({"loc": g.loc, "graphs": [[uop_to_json(x) for x in graph] for graph in g.graphs],
+                         "diffs": g.diffs, "extra": g.extra}, rest)).encode()
     else:
       self.send_response(404)
       ret = b""
