@@ -178,7 +178,8 @@
           if (i !== 0) {
             const [pattern, loc, diff] = ctx.diffs[i-1];
             const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
-            pre.appendChild(Object.assign(document.createElement("a"), { innerText: loc.join("#")+"\n\n", href: "vscode://file"+loc.join(":") }));
+            const parts = loc.join(":").split("/");
+            pre.appendChild(Object.assign(document.createElement("a"), { innerText: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/") }));
             pre.appendChild(Object.assign(document.createElement("code"), { innerText: pattern }));
             container.appendChild(pre);
             const diffHtml = diff.map((line) => {
