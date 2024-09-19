@@ -101,6 +101,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   return functools.reduce(operator.add, remainder)%c if remainder else x.const_like(0)
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
+  if x.dtype.count > 1: return None  # TODO: there's bugs without this
   # simplify x // c, None means no change
 
   # simple cancel div case
