@@ -173,8 +173,11 @@
         if (i === currentRewrite) {
           rewriteDiv.classList.add("active-uop-el");
           if (i !== 0) {
-            const [pattern, diff] = ctx.diffs[i-1];
-            container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${pattern}</code>`, className: "wrap" }));
+            const [pattern, patternLocation, diff] = ctx.diffs[i-1];
+            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
+            pre.appendChild(Object.assign(document.createElement("code"), { innerText: patternLocation+"\n\n" }));
+            pre.appendChild(Object.assign(document.createElement("code"), { innerText: pattern }));
+            container.appendChild(pre);
             const diffHtml = diff.map((line) => {
               if (line.startsWith("+")) return `<span style="color: #30A46C;">${line}</span>`;
               if (line.startsWith("-")) return `<span style="color: #E5484D;">${line}</span>`;
