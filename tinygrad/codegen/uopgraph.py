@@ -454,8 +454,7 @@ constant_folder = PatternMatcher([
       if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),
-    lambda x,c1,y: (x+y)+c1),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
 ])
 
 # *** uop expander ***
@@ -549,9 +548,7 @@ def do_contract(con:UOp):
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(),
-                   tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if alu.op is not UOps.REDUCE or j == 0 else s for j,s in enumerate(alu.src)),
-                   alu.arg) for i in range(alu.dtype.count))
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 def create_gate(root:UOp) -> Optional[UOp]:
