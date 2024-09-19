@@ -3,7 +3,7 @@ from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast,
 import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib
 from enum import auto, IntEnum, Enum
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
 from tinygrad.helpers import pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
@@ -373,7 +373,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
 
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
-  # find the real frame
+  # find the real frame in the file that has the UPat
   while frm.f_back is not None and any(fp == frm.f_back.f_code.co_filename.split("/")[-1] for fp in {"ops.py", "uopgraph.py", "schedule.py"}):
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
@@ -486,9 +486,9 @@ TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedRewriteContext:
-  loc: str                                  # location that called graph_rewrite
-  sink: UOp                                 # the sink passed into the rewrite
-  rewrites: List[Tuple[UOp, UOp, UPat]]     # all rewrites of sparents. (before, after, UPat)
+  loc: str                                                                # location that called graph_rewrite
+  sink: UOp                                                               # the sink passed into the rewrite
+  rewrites: List[Tuple[UOp, UOp, UPat]] = field(default_factory=list)     # all rewrites of sparents. (before, after, UPat)
 contexts: List[TrackedRewriteContext] = []
 class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
@@ -550,7 +550,7 @@ class RewriteContext:
       self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x)) else x
     return found
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  if TRACK_MATCH_STATS >= 2: contexts.append(TrackedRewriteContext(f"{(l:=get_location())[0].split('/')[-1]}:{l[1]}", sink, []))
+  if TRACK_MATCH_STATS >= 2: contexts.append(TrackedRewriteContext(f"{(f:=sys._getframe(1)).f_code.co_filename.split('/')[-1]}:{f.f_lineno}", sink))
   return RewriteContext(pm).rewrite(sink)
 
 # ***** uop type spec *****
