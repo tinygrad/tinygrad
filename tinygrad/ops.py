@@ -371,12 +371,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
 
 # ***** pattern matcher *****
 
-def get_location() -> Tuple[str, int]:
-  frm = sys._getframe(1)
-  # find the real frame
-  while frm.f_back is not None and any(fp == frm.f_back.f_code.co_filename.split("/")[-1] for fp in {"ops.py", "uopgraph.py", "schedule.py"}):
-    frm = frm.f_back
-  return frm.f_code.co_filename, frm.f_lineno
+def get_location() -> Tuple[str, int]: return (frm:=sys._getframe(2)).f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
 def lines(fn) -> List[str]:
   with open(fn) as f: return f.readlines()
