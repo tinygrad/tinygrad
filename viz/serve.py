@@ -53,7 +53,7 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
     # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
     new_sink = replace_uop(uops[-1], first, rewritten, {**seen_replaces})
     # sanity check
-    assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i} {new_sink}"
+    assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
     # update ret data
     diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     graphs.append((new_sink, uops[-1], rewritten, first))
