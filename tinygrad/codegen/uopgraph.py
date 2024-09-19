@@ -91,7 +91,9 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   remainder, something_changed = [], False
   for u in _get_chain(x, BinaryOps.ADD):
     if (factor:=u.const_factor())%c != factor:
-      remainder.append(u.divides(factor)*(factor%c))
+      divides = u.divides(factor)*(factor%c)
+      assert divides is not None
+      remainder.append(divides)
       something_changed = True
     elif u.op is UOps.ALU and u.arg is BinaryOps.MOD and (s1:=u.src[1]).op is UOps.CONST and s1.arg%c == 0:
       remainder.append(u.src[0])
@@ -114,8 +116,9 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
       rem_const += u.arg
     elif (factor:=u.const_factor())%c == 0:
       if factor:
-        if (divide:=u.divides(c)) is not None: quotient.append(divide)
-        else: return None
+        divides = u.divides(c)
+        assert divides is not None
+        quotient.append(divides)
       something_changed = True
     else:
       # divisor is the smallest common divisor of all MULs

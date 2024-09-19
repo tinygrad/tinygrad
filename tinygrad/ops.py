@@ -64,8 +64,9 @@ class MathTrait:
   def eq(self, x): return self.ne(x).ne(True)
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
-  #def ge(self, x): return (-self).lt(-x+1)
-  def ge(self, x): return self.lt(x).ne(True)
+  # TODO: use this one instead
+  #def ge(self, x): return self.lt(x).ne(True)
+  def ge(self, x): return (-self).lt(-x+1)
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
@@ -237,6 +238,7 @@ class UOp(MathTrait):
   def divides(self, v) -> Optional[UOp]:
     if v==1: return self
     if self.op is UOps.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
+    if self.op is UOps.VCONST: return self.const_like(tuple(x//v for x in self.arg)) if all(x%v == 0 for x in self.arg) else None
     if self.op is UOps.ALU:
       if self.arg is BinaryOps.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
       if self.arg is BinaryOps.MUL:
