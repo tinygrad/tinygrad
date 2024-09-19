@@ -30,6 +30,7 @@
   }
   svg {
     width: 100%;
+    height: 100%;
   }
   svg * {
     cursor: default;
@@ -110,16 +111,7 @@
   <div class="main-container">
     <div class="container uop-list"></div>
     <div class="container graph">
-      <svg class="graph-0">
-        <g id="render"></g>
-      </svg>
-      <svg class="graph-1">
-        <g id="render"></g>
-      </svg>
-      <svg class="graph-2">
-        <g id="render"></g>
-      </svg>
-      <svg class="graph-3">
+      <svg>
         <g id="render"></g>
       </svg>
     </div>
@@ -130,7 +122,6 @@
   var totalUOps = 0;
   var currentRewrite = 0;
   var totalRewrites = 0;
-  var pickedGraphs = {"rewritten sink": true, "pre-rewrite sink": false, "rewritten UOp": false, "pre-rewrite UOp": false};
   var cache = {}
   async function main() {
     let ret;
@@ -144,34 +135,25 @@
     totalUOps = rest.length-1;
     totalRewrites = ctx.graphs.length-1;
     // graph
-    function renderGraph(graph, target) {
-      const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-      for ([k,u] of Object.entries(graph)) {
-        g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
-        for (src of u[2]) {
-          g.setEdge(src, k)
-        }
+    const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+    const graph = ctx.graphs[currentRewrite];
+    for ([k,u] of Object.entries(graph)) {
+      g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
+      for (src of u[2]) {
+        g.setEdge(src, k)
       }
-      const svg = d3.select(target);
-      const inner = svg.select("g");
-      var zoom = d3.zoom()
-        .scaleExtent([0.05, 2])
-        .on("zoom", () => {
-          const transform = d3.event.transform;
-          inner.attr("transform", transform);
-        });
-      svg.call(zoom);
-      const render = new dagreD3.render();
-      render(inner, g);
     }
-    const graphCnt = Object.values(pickedGraphs).filter((v) => v).length;
-    Object.values(pickedGraphs).forEach((v, i) => {
-      if (v) {
-        renderGraph(ctx.graphs[currentRewrite][i], `.graph-${i}`);
-        const s = document.querySelector(`.graph-${i}`);
-        s.style.height = `${100/graphCnt}%`;
-      }
-    });
+    const svg = d3.select("svg");
+    const inner = svg.select("g");
+    var zoom = d3.zoom()
+      .scaleExtent([0.05, 2])
+      .on("zoom", () => {
+        const transform = d3.event.transform;
+        inner.attr("transform", transform);
+      });
+    svg.call(zoom);
+    const render = new dagreD3.render();
+    render(inner, g);
     // metadata
     const container = document.querySelector(".container.metadata");
     container.innerHTML = "";
@@ -207,27 +189,6 @@
       })
     } else {
       container.appendChild(Object.assign(document.createElement("p"), { textContent: "No rewrites" }));
-    }
-    // graph picker
-    if (currentRewrite !== 0) {
-      const graphPicker = document.createElement("div");
-      graphPicker.className = "graph-picker";
-      Object.keys(pickedGraphs).map((name, i) => {
-        const opt = document.createElement("input");
-        opt.type = "checkbox";
-        opt.id = `checkbox-${i}`;
-        opt.checked = pickedGraphs[name];
-        opt.addEventListener("click", () => {
-          pickedGraphs[name] = !pickedGraphs[name];
-          main();
-        });
-        const label = document.createElement("label");
-        label.htmlFor = `checkbox-${i}`;
-        label.textContent = name;
-        graphPicker.appendChild(opt)
-        graphPicker.appendChild(label)
-      })
-      container.appendChild(graphPicker)
     }
     // uop list
     const uopList = document.querySelector(".container.uop-list");
