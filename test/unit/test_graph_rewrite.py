@@ -1,5 +1,6 @@
 import unittest, math
 from tinygrad import dtypes
+from tinygrad.helpers import all_same
 from tinygrad.ops import UOp, UOps, BinaryOps, exec_alu
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 
@@ -110,6 +111,17 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     optimized_div_uop = apply_rewrite(((k_var_uop * 12 + 8) % 6) // 2)
     self.assertEqual(optimized_div_uop.op, UOps.CONST)
     self.assertEqual(optimized_div_uop.arg, 1)
+
+  def test_graph_rewrite_div_folding_bug(self):
+    lhs = UOp(UOps.ALU, dtypes.int.vec(4), arg=BinaryOps.ADD, src=(
+      UOp(UOps.VECTORIZE, dtypes.int.vec(4), arg=None, src=(UOp(UOps.SPECIAL, dtypes.int, arg=('lidx0', 32), src=()),)*4),
+      UOp(UOps.VCONST, dtypes.int.vec(4), arg=(0, 256, 512, 768), src=())))
+    rhs = UOp.const(dtypes.int.vec(4), 2)
+    unopt = lhs.lt(rhs)
+    opt = apply_rewrite(unopt)
+    print(unopt)
+    print(opt)
+    if opt.op is UOps.VECTORIZE: self.assertFalse(all_same(opt.src))
 
   def test_full_graph_rewrite_modulo_large_divisor(self):
     x_var_uop = UOp.define_var('x', dtypes.int32, 1, 5)

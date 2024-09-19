@@ -101,7 +101,6 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   return functools.reduce(operator.add, remainder)%c if remainder else x.const_like(0)
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
-  if x.dtype.count > 1: return None  # TODO: there's bugs without this
   # simplify x // c, None means no change
 
   # simple cancel div case
@@ -114,7 +113,9 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
       if rem_const != 0: something_changed = True
       rem_const += u.arg
     elif (factor:=u.const_factor())%c == 0:
-      if factor: quotient.append(u.divides(c))
+      if factor:
+        if (divide:=u.divides(c)) is not None: quotient.append(divide)
+        else: return None
       something_changed = True
     else:
       # divisor is the smallest common divisor of all MULs
