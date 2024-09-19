@@ -21,9 +21,9 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
 @dataclass(frozen=True)
 class UOpRet:
   loc: str
-  graphs: List[Tuple[UOp, UOp, UOp, UOp]]      # snapshot of the entire AST after each rewrite
-  diffs: List[Tuple[str, str, List[str]]]      # the diffs for each rewrite
-  extra: List[List[str]]                       # these become code blocks in the UI
+  graphs: List[Tuple[UOp, UOp, UOp, UOp]]                  # snapshot of the entire AST after each rewrite
+  diffs: List[Tuple[str, Tuple[str, int], List[str]]]      # the diffs for each rewrite
+  extra: List[List[str]]                                   # these become code blocks in the UI
 
 def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
   if (found:=replaces.get(base.key)): return found
@@ -34,7 +34,7 @@ def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   uops: List[UOp] = [ctx.sink]
   graphs: List[Tuple[UOp, UOp, UOp, UOp]] = [(ctx.sink, ctx.sink, ctx.sink, ctx.sink)]
-  diffs: List[Tuple[str, str, List[str]]] = []
+  diffs: List[Tuple[str, Tuple[str, int], List[str]]] = []
   extra: List[List[str]] = [[str(ctx.sink)]]
   seen_replaces: Dict[bytes, UOp] = {}
   for i, (first, rewritten, pattern) in enumerate(ctx.rewrites):
@@ -45,9 +45,7 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
     # sanity check
     assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
     # update ret data
-    loc_str = f"{pattern.location[0].split('/')[-1]}:{pattern.location[1]}"
-    diffs.append((str(pattern), loc_str, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
-    assert new_sink.op is uops[-1].op
+    diffs.append((str(pattern), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     graphs.append((new_sink, uops[-1], rewritten, first))
     uops.append(new_sink)
     extra.append([str(new_sink)])
