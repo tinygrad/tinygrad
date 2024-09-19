@@ -29,7 +29,8 @@ class TestArange(unittest.TestCase):
     f2 = self._get_flops(2560, opts) + 1
     print(f"{f1=}, {f2=}")
     assert (f1 < 5000 and f2 < 5000) or (f2 / f1 < 15), f"bad complexity, flops {f2/f1:.1f}X while inputs 10X"
-    if limit is not None:
+    if limit is not None and not getenv("PTX"):
+      # PTX counts index ALU in flops
       assert f1 <= limit, f"{f1=}, {limit=}"
 
   def test_complexity_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)], limit=1)
