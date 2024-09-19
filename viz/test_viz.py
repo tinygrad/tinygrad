@@ -50,9 +50,9 @@ class TestViz(unittest.TestCase):
     gep = UOp(UOps.GEP, dtypes.int, (vec,), (0,))
     sink = UOp(UOps.STORE, dtypes.void, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0), gep)).sink()
     pm = PatternMatcher([
-      (UPat(UOps.VECTORIZE, name="root", src=(UPat(UOps.CONST, name="const"),), allow_any_len=True),
+      (UPat(UOps.VECTORIZE, name="root", src=(UPat(UOps.CONST, name="const"),), allow_any_len=True, location="test"),
        lambda root,const: UOp.const_like(root, const.arg) if all_same(root.src) else None),
-      (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),)), lambda root,x: root.const_like(x.arg))
+      (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),), location="test"), lambda root,x: root.const_like(x.arg))
     ])
     ret = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, ret)
