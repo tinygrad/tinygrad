@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 import pickle, re, os, sys, time, threading, webbrowser, json, difflib, contextlib
-from tinygrad.helpers import getenv, flatten
+from tinygrad.helpers import getenv
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps
 from tinygrad.engine.graph import uops_colors, word_wrap
 from http.server import HTTPServer, BaseHTTPRequestHandler
