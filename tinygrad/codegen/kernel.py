@@ -647,8 +647,7 @@ class Kernel:
 
           assert apply_to_st is None, "double tensor core? not supported"
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(t[1] for t in tc.threads),
-                      tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in tc.upcast_axes),
-                      tuple(self.first_upcast+ax for ax, _ in tc.reduce_axes))
+            tuple(tuple((self.first_upcast+ax,sz) for ax,sz in up) for up in tc.upcast_axes), tuple(self.first_upcast+ax for ax,_ in tc.reduce_axes))
           if self.use_tensor_cores >= 2:
             if self.use_tensor_cores == 3:
               # TC=3, emulate the warp addressing with locals
