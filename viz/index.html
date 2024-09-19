@@ -28,6 +28,9 @@
     font-size: 14px;
     overflow: hidden;
   }
+  a {
+    color: #0090FF;
+  }
   svg {
     width: 100%;
     height: 100%;
@@ -128,32 +131,34 @@
     if (currentUOp in cache) {
       ret = cache[currentUOp];
     } else {
-      ret = await (await fetch("/"+currentUOp)).json();
+      ret = await (await fetch(`/graph?uop_idx=${currentUOp}`)).json();
       cache[currentUOp] = ret;
     }
     const [ctx, rest] = ret;
     totalUOps = rest.length-1;
     totalRewrites = ctx.graphs.length-1;
     // graph
-    const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    const graph = ctx.graphs[currentRewrite];
-    for ([k,u] of Object.entries(graph)) {
-      g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
-      for (src of u[2]) {
-        g.setEdge(src, k)
+    function renderGraph(graph) {
+      const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+      for ([k,u] of Object.entries(graph)) {
+        g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
+        for (src of u[2]) {
+          g.setEdge(src, k)
+        }
       }
+      const svg = d3.select("svg");
+      const inner = svg.select("g");
+      var zoom = d3.zoom()
+        .scaleExtent([0.05, 2])
+        .on("zoom", () => {
+          const transform = d3.event.transform;
+          inner.attr("transform", transform);
+        });
+      svg.call(zoom);
+      const render = new dagreD3.render();
+      render(inner, g);
     }
-    const svg = d3.select("svg");
-    const inner = svg.select("g");
-    var zoom = d3.zoom()
-      .scaleExtent([0.05, 2])
-      .on("zoom", () => {
-        const transform = d3.event.transform;
-        inner.attr("transform", transform);
-      });
-    svg.call(zoom);
-    const render = new dagreD3.render();
-    render(inner, g);
+    renderGraph(ctx.graphs[currentRewrite][0])
     // metadata
     const container = document.querySelector(".container.metadata");
     container.innerHTML = "";
@@ -166,13 +171,17 @@
     if (ctx.graphs.length > 1) {
       const rewriteCounter = Object.assign(document.createElement("div"), { className: "rewrite-counter" });
       container.appendChild(rewriteCounter)
-      ctx.graphs.forEach((g, i) => {
+      ctx.graphs.forEach((_, i) => {
         const rewriteDiv = Object.assign(document.createElement("div"), { textContent: i, className: "uop-el" });
         if (i === currentRewrite) {
           rewriteDiv.classList.add("active-uop-el");
           if (i !== 0) {
-            const [pattern, diff] = ctx.diffs[i-1];
-            container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${pattern}</code>`, className: "wrap" }));
+            const [pattern, loc, diff] = ctx.diffs[i-1];
+            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
+            const parts = loc.join(":").split("/");
+            pre.appendChild(Object.assign(document.createElement("a"), { innerText: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/") }));
+            pre.appendChild(Object.assign(document.createElement("code"), { innerText: pattern }));
+            container.appendChild(pre);
             const diffHtml = diff.map((line) => {
               if (line.startsWith("+")) return `<span style="color: #30A46C;">${line}</span>`;
               if (line.startsWith("-")) return `<span style="color: #E5484D;">${line}</span>`;

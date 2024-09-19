@@ -1269,16 +1269,16 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT not in view_supported_devices, "subbuffer not supported")
   def test_bitcast_subbufer(self):
     x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.e(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=True)
+    a = x.alu(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=True)
     b = x.cast(dtypes.int32, True, allow_buffer_view=True)
-    b = a.e(BinaryOps.ADD, b)
+    b = a.alu(BinaryOps.ADD, b)
     check_schedule(b, 2) # this should fuse when it makes sense
 
   def test_bitcast_disable_subbufer(self):
     x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.e(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
+    a = x.alu(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
     b = x.cast(dtypes.int32, True, allow_buffer_view=False)
-    b = a.e(BinaryOps.ADD, b)
+    b = a.alu(BinaryOps.ADD, b)
     check_schedule(b, 1)
 
   def test_reduceop_reshape_dont_push(self):

@@ -21,20 +21,21 @@ if __name__ == "__main__":
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
   new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in input_shapes.items()}
-  new_inputs_np = {k:inp.numpy() for k,inp in new_inputs.items()}
+  new_inputs_junk = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in input_shapes.items()}
 
   # benchmark
   for _ in range(5):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    ret = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
+    ret = next(iter(run_onnx(new_inputs_junk).values())).cast(dtypes.float32).numpy()
     print(f"unjitted: {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
-  run_onnx_jit = TinyJit(run_onnx)
-  for _ in range(10):
+  # NOTE: the inputs to a JIT must be first level arguments
+  run_onnx_jit = TinyJit(lambda **kwargs: run_onnx(kwargs), prune=True)
+  for _ in range(20):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
+    ret = next(iter(run_onnx_jit(**new_inputs_junk).values())).cast(dtypes.float32).numpy()
     print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
   suffix = ""
@@ -43,14 +44,14 @@ if __name__ == "__main__":
   path = Path(__file__).parent / "openpilot" / f"{hashlib.md5(OPENPILOT_MODEL.encode()).hexdigest()}{suffix}.npy"
 
   # validate if we have records
-  tinygrad_out = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
+  tinygrad_out = next(iter(run_onnx_jit(**new_inputs).values())).cast(dtypes.float32).numpy()
   if getenv("SAVE_OUTPUT"):
     np.save(path, tinygrad_out)
     print(f"saved output to {path}!")
   elif getenv("FUZZ") and path.exists():
     known_good_out = np.load(path)
     for _ in trange(1000):
-      ret = next(iter(run_onnx_jit(new_inputs).values())).cast(dtypes.float32).numpy()
+      ret = next(iter(run_onnx_jit(**new_inputs).values())).cast(dtypes.float32).numpy()
       np.testing.assert_allclose(known_good_out, ret, atol=1e-2, rtol=1e-2)
     print(colored("fuzz validated!", "green"))
   elif path.exists():
