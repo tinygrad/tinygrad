@@ -11,7 +11,6 @@ from tinygrad.codegen.uopgraph import constant_folder, devectorize, float4_foldi
 from test.external.process_replay.helpers import print_diff
 from viz.serve import create_graph
 
-@unittest.skip("TODO: some of these graph_rewrites don't display a diff in VIZ=1")
 class TestViz(unittest.TestCase):
   def tearDown(self) -> None:
     from tinygrad.ops import contexts
