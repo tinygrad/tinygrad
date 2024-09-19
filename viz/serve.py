@@ -7,15 +7,6 @@ from tinygrad.ops import TrackedRewriteContext, UOp
 from tinygrad.engine.graph import uops_colors, word_wrap
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-stop_reloader = threading.Event()
-def reloader():
-  mtime = os.stat(__file__).st_mtime
-  while not stop_reloader.is_set():
-    if mtime != os.stat(__file__).st_mtime:
-      print("reloading server...")
-      os.execv(sys.executable, [sys.executable] + sys.argv)
-    time.sleep(0.1)
-
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
@@ -91,6 +82,14 @@ class Handler(BaseHTTPRequestHandler):
     return self.wfile.write(ret)
 
 BROWSER = getenv("BROWSER", 1)
+stop_reloader = threading.Event()
+def reloader():
+  mtime = os.stat(__file__).st_mtime
+  while not stop_reloader.is_set():
+    if mtime != os.stat(__file__).st_mtime:
+      print("reloading server...")
+      os.execv(sys.executable, [sys.executable] + sys.argv)
+    time.sleep(0.1)
 def main():
   try:
     st = time.perf_counter()
