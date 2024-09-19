@@ -65,8 +65,8 @@ class MathTrait:
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
   # TODO: use this one instead
-  #def ge(self, x): return self.lt(x).ne(True)
-  def ge(self, x): return (-self).lt(-x+1)
+  def ge(self, x): return self.lt(x).ne(True)
+  #def ge(self, x): return (-self).lt(-x+1)
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
