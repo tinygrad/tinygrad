@@ -6,11 +6,11 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import UOps, UOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu # noqa F401
+from tinygrad.ops import UOps, UOp, UPat, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu, spec # noqa F401
 from tinygrad.renderer import Program
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.schedule import create_schedule, reduceop_fusor
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
+from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, constant_folder
 from tinygrad.shape.symbolic import Variable
 from test.helpers import is_dtype_supported, assert_equiv_uops
 
@@ -435,6 +435,14 @@ class TestIndexingOrdering(unittest.TestCase):
     uops = linearize_uop(UOp.sink(st1, st0), skip_check=True)
     stores = [st for st in uops if st.op is UOps.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
+
+class TestUPatHelpers(unittest.TestCase):
+  def test_location(self):
+    self.assertEqual(constant_folder.patterns[0][0].location[0].split("/")[-1], "uopgraph.py")
+    self.assertEqual(reduceop_fusor.patterns[0][0].location[0].split("/")[-1], "schedule.py")
+    self.assertEqual(spec.patterns[0][0].location[0].split("/")[-1], "ops.py")
+    test_upat = UPat(UOps.CONST, dtypes.bool)
+    self.assertEqual(test_upat.location[0].split("/")[-1], __file__.split("/")[-1])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
