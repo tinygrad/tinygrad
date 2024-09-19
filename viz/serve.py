@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple
 import pickle, re, os, sys, time, threading, webbrowser, json, difflib, contextlib
 from tinygrad.helpers import getenv
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps
+from tinygrad.ops import TrackedRewriteContext, UOp
 from tinygrad.engine.graph import uops_colors, word_wrap
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -48,16 +48,18 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   graphs: List[Tuple[UOp, UOp, UOp, UOp]] = [(ctx.sink, ctx.sink, ctx.sink, ctx.sink)]
   diffs: List[Tuple[str, List[str]]] = []
   extra: List[List[str]] = [[str(ctx.sink)]]
-  for (first, rewritten, pattern) in ctx.rewrites:
-    # if the sink was replaced, we have to replace the entire graph, otherwise just replace the parent
-    new_sink = rewritten if first.op is UOps.SINK else replace_uop(uops[-1], first, rewritten, {})
-    # TODO: sometimes it hits a ctx and can't find any UOp to replace
-    #if new_sink is uops[-1]: continue
+  seen_replaces: Dict[bytes, UOp] = {}
+  for i, (first, rewritten, pattern) in enumerate(ctx.rewrites):
+    # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
+    new_sink = replace_uop(uops[-1], first, rewritten, {**seen_replaces})
+    # sanity check
+    assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i} {new_sink}"
+    # update ret data
     diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
-    assert new_sink.op is uops[-1].op
     graphs.append((new_sink, uops[-1], rewritten, first))
     uops.append(new_sink)
     extra.append([str(new_sink)])
+    seen_replaces[first.key] = rewritten
   return UOpRet(ctx.loc, graphs, diffs, extra)
 
 class Handler(BaseHTTPRequestHandler):
