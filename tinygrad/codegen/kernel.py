@@ -310,7 +310,7 @@ class Kernel:
         # can only fuse reduces with the same tc options
         assert all_same(tensor_core_opts)
         if tensor_core_opts[0] is None: continue
-        # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
+        # tensor core -- unroll the reduce dim, create the correct thread pattern, then upcast input
         self.tensor_core_opts = tc_opts = tensor_core_opts[0]
 
         # attempt to pad the tensor axes that require it
