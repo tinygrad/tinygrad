@@ -242,10 +242,11 @@ def threefry2x32(x: UOp, seed: UOp):
 
 # ***** main rewriter *****
 
-def loop_collapse(compval, idx, mval, multconst, rng:UOp, reduce, idx2=None, idx3=None, extra=None, vec=None):
+def loop_collapse(compval, idx, multconst, rng:UOp, reduce, idx2=None, idx3=None, extra=None, vec=None, ne=None, mval:UOp=UOp.const(dtypes.int32, 1)):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in reduce.src: return None  # must be the right REDUCE
   loop_start, loop_end = rng.src
-  if mval.arg >= 0 or loop_start.arg != 0:
+  mval_arg = mval.arg
+  if loop_start.arg != 0:
     # TODO: support and test this with other mvals and loop_starts
     if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
     return None
@@ -255,7 +256,12 @@ def loop_collapse(compval, idx, mval, multconst, rng:UOp, reduce, idx2=None, idx
     # idx, mval, loop_start, loop_end
     def dvec(x): return UOp(UOps.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
     idx, mval, loop_start, loop_end = dvec(idx), dvec(mval), dvec(loop_start), dvec(loop_end)
-  comprange = UOp.min(loop_end, UOp.max((idx-compval-mval)//mval + (loop_end-loop_start), loop_start))
+  if mval_arg > 0 and ne is not None:
+    comprange = UOp.min(loop_end, UOp.max((idx-compval)//mval + (loop_end-loop_start), loop_start))
+  elif mval_arg < 0 and ne is None:
+    comprange = UOp.min(loop_end, UOp.max((idx-compval-mval)//mval + (loop_end-loop_start), loop_start))
+  else:
+    return None
   new_reduce_op = comprange.cast(multconst.dtype) * multconst
   ret = UOp(UOps.REDUCE, reduce.dtype, (new_reduce_op,) + tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
   if extra is not None: ret = ret + UOp(UOps.REDUCE, reduce.dtype, (extra,) + reduce.src[1:], reduce.arg)
@@ -334,6 +340,13 @@ constant_folder = PatternMatcher([
     m1:=(UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, name="rng")),
     m1 + UPat.var("idx2"), m1 + UPat.var("idx2") + UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=m1))
     .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
+    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+  # arange loop folding (new ge)
+  (UPat(UOps.REDUCE, src=(UPat.any(m2:=UPat.any(
+    m1:=(UPat.var("idx") + UPat.any(UPat.cvar("mval") * UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
+    m1 + UPat.var("idx2"), m1 + UPat.var("idx2") + UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=m1))
+    .lt(UPat.cvar("compval")).ne(UPat(UOps.CONST, name="ne", arg=True))
+    .where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   # unrolled arange div folding
   (UPat.var("divs") + UPat.cvar("c"), fold_unrolled_divs),
