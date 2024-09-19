@@ -268,7 +268,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
     idx, mval, loop_start, loop_end = dvec(idx), dvec(mval), dvec(loop_start), dvec(loop_end)
   if mval.arg > 0 and ne:
     comprange = UOp.min(loop_end, UOp.max((idx-compval)//mval + (loop_end-loop_start), loop_start))
-  elif mval.arg < 0:
+  elif mval.arg < 0 and not ne:
     comprange = UOp.min(loop_end, UOp.max((idx-compval-mval)//mval + (loop_end-loop_start), loop_start))
   else:
     # don't know how to fold this
