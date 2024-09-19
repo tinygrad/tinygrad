@@ -131,7 +131,7 @@
     if (currentUOp in cache) {
       ret = cache[currentUOp];
     } else {
-      ret = await (await fetch("/"+currentUOp)).json();
+      ret = await (await fetch(`/graph?uop_idx=${currentUOp}`)).json();
       cache[currentUOp] = ret;
     }
     const [ctx, rest] = ret;
