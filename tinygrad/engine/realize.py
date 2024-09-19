@@ -3,6 +3,7 @@ import time, pprint
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
+from tinygrad.helpers import NO_MEMORY_PLANNER
 from tinygrad.ops import MetaOps, UOps, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
@@ -167,7 +168,7 @@ def get_runner(dname:str, ast:UOp) -> CompiledRunner:
 class ExecItem:
   prg: Runner
   bufs: List[Optional[Buffer]]
-  metadata: Optional[List[Metadata]] = None
+  metadata: Optional[Tuple[Metadata, ...]] = None
   def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
@@ -225,7 +226,7 @@ def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, i
 # **************** memory planning ****************
 
 def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], noopt_buffers=None, debug_prefix="") -> Dict[Buffer, Buffer]:
-  if getenv("NO_MEMORY_PLANNER"): return {}
+  if NO_MEMORY_PLANNER: return {}
   first_appearance, last_appearance = {}, {}
   for i,u in enumerate(buffers):
     for buf in u:

@@ -1795,7 +1795,7 @@ class Tensor:
             out_ellipse + ''.join(sorted(c for c in inputs_str if inputs_str.count(c) == 1 and c.isalpha() and c not in out_ellipse)))
       return formula.split("->") if "->" in formula else (formula, ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
 
-    xs:Tuple[Tensor] = argfix(*raw_xs)
+    xs:Tuple[Tensor, ...] = argfix(*raw_xs)
     inputs_str, output = parse_formula(formula.replace(" ", ""), *xs)
     inputs = inputs_str.split(",")
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
@@ -1843,7 +1843,7 @@ class Tensor:
     xup = xup.shrink(tuple(noop_ + flatten(((0,o), (0,k)) for o,k in zip(o_, k_))))
     return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
 
-  def _padding2d(self, padding:Union[int, Tuple[int, ...]], dims:int) -> Sequence[int]:
+  def _padding2d(self, padding:Union[int, Sequence[int]], dims:int) -> Sequence[int]:
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
   # NOTE: these work for more than 2D

@@ -72,7 +72,7 @@ class IndependentLowerer:
     # upcast loops
     for i,g in enumerate(full_shape[first_upcasted:], start=first_upcasted):
       assert isinstance(g, int), "needs to be int to upcast/unroll"
-      self.idxs.append(UOp(UOps.EXPAND, dtypes.pyint, tuple(UOp.const(dtypes.pyint, j) for j in range(0, g)), ((i,g),)))
+      self.idxs.append(UOp(UOps.EXPAND, dtypes.pyint, (UOp.const(dtypes.pyint.vec(g), tuple(range(g))),), ((i,g),)))
 
     # late indexes (group for reduce)
     self.ridxs = self.idxs[:]
@@ -117,7 +117,7 @@ class IndependentLowerer:
         UOp(UOps.CONTRACT, dtype=in_uops[0].dtype.vec(wmma_sz[0]), src=(in_uops[0],), arg=upcast_axes[0]),
         UOp(UOps.CONTRACT, dtype=in_uops[1].dtype.vec(wmma_sz[1]), src=(in_uops[1],), arg=upcast_axes[1]),
         UOp.const(x.dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
-      return UOp(UOps.EXPAND, x.dtype, tuple(UOp(UOps.GEP, x.dtype, (ret,), i) for i in range(wmma_sz[2])), arg=upcast_axes[2])
+      return UOp(UOps.EXPAND, x.dtype, (ret,), arg=upcast_axes[2])
     if x.op is UOps.REDUCE_AXIS:
       # NOTE: always using ridxs is fine here
       reduce_range, reduce_expand = partition([self.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
 import itertools, urllib.request, subprocess, shutil, math, json, contextvars
-from enum import Enum
 from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -111,7 +110,7 @@ GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPAT
 MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
 FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
-SPLIT_REDUCEOP, AST_REWRITE = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("AST_REWRITE", 1)
+SPLIT_REDUCEOP, AST_REWRITE, NO_MEMORY_PLANNER = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("AST_REWRITE", 1), ContextVar("NO_MEMORY_PLANNER", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -292,10 +291,10 @@ def cpu_time_execution(cb, enable):
   cb()
   if enable: return time.perf_counter()-st
 
-def cpu_objdump(lib):
+def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
     pathlib.Path(f.name).write_bytes(lib)
-    print(subprocess.check_output(['objdump', '-d', f.name]).decode('utf-8'))
+    print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
 
 # *** ctypes helpers
 
@@ -354,8 +353,3 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
   cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
-
-# small wrapper around Enum that caches the __hash__ method
-class HashEnum(Enum):
-  def __init__(self, *_): self._cached_hash = Enum.__hash__(self)
-  def __hash__(self): return self._cached_hash

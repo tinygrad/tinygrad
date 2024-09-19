@@ -61,8 +61,11 @@ class TestWhisper(unittest.TestCase):
   @unittest.skipIf(CI, "too long for CI")
   def test_transcribe_long_no_batch(self):
     waveforms = [load_file_waveform(fetch(TEST_FILE_3_URL)), load_file_waveform(TEST_FILE_1)]
-    with self.assertRaises(Exception):
-      transcribe_waveform(self.model, self.enc, waveforms)
+
+    trancriptions = transcribe_waveform(self.model, self.enc, waveforms)
+    self.assertEqual(2, len(trancriptions))
+    self.assertEqual(TRANSCRIPTION_3, trancriptions[0])
+    self.assertEqual(TRANSCRIPTION_1, trancriptions[1])
 
 if __name__ == '__main__':
   unittest.main()
