@@ -17,7 +17,6 @@ def get_sched_resnet():
   BS = getenv("BS", 64)
 
   # run model twice to get only what changes, these are the kernels of the model
-  seen = set()
   for _ in range(2):
     out = mdl(Tensor.empty(BS, 3, 224, 224))
     targets = [out.lazydata]
@@ -25,7 +24,7 @@ def get_sched_resnet():
       optim.zero_grad()
       out.sparse_categorical_crossentropy(Tensor.empty(BS, dtype=dtypes.int)).backward()
       targets += [x.lazydata for x in optim.schedule_step()]
-    sched = create_schedule(targets, seen)
+    sched = create_schedule(targets)
     print(f"schedule length {len(sched)}")
   return sched
 

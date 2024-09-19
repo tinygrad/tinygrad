@@ -16,8 +16,7 @@ if __name__ == "__main__":
   #model.load_pretrained()
   for p in nn.state.get_parameters(model): p.replace(Tensor.empty(p.shape, dtype=p.dtype)) # fake load pretrained
 
-  seen = set()
-  #early_sched = create_schedule([x.lazydata for x in nn.state.get_parameters(model)], seen)
+  #early_sched = create_schedule([x.lazydata for x in nn.state.get_parameters(model)])
   #print(f"built model {len(early_sched)}")
 
   #B, T = Variable("B", 1, 128).bind(4), 64 #Variable("T", 1, 1024).bind(64)
@@ -38,10 +37,9 @@ if __name__ == "__main__":
       tensors = optimizer.schedule_step()
     else:
       tensors = []
-    sched = create_schedule([loss.lazydata] + [x.lazydata for x in tensors], seen)
+    sched = create_schedule([loss.lazydata] + [x.lazydata for x in tensors])
     print(f"calls {i}:", len(sched))
     #run_schedule(sched[:])
-  del seen  # free the LazyBuffers
   sched = memory_planner(sched)
   ast_dedup = dedup([si.ast for si in sched if si.ast.op is UOps.SINK])
   srcs = {}

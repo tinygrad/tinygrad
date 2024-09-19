@@ -11,12 +11,11 @@ from test.unit.test_shapetracker import shapetracker_getitem
 class TestConvShapetracker(unittest.TestCase):
   def test_conv_3x3_one_view(self):
     conv = Conv2d(16, 32, (3, 3))
-    seen = set()
 
-    # first run to init the weights, they are saved in seen
-    create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen)
+    # first run to init the weights, they are scheduled.
+    create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata])
     # run it again to get the kernels
-    sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen) if si.ast.op is UOps.SINK]
+    sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata]) if si.ast.op is UOps.SINK]
     assert len(sched) == 1, f"conv should only have one kernel, getting {len(sched)}"
     for st in [x.st_arg for x in sched[0].ast.parents if x.op is UOps.LOAD]:
       assert len(st.views) == 1
@@ -52,10 +51,6 @@ class TestConvShapetracker(unittest.TestCase):
       print(i, i1, i2, si.inputs[0].size, i1==i2)
       #self.assertEqual(i1, i2)
 
-    for stt in [st, test_st]:
-      s,va = stt.expr_idxs()
-      print(s)
-      print(va)
     with self.assertRaises(AssertionError):
       assert len(st.views) <= 2
 

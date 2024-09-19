@@ -40,12 +40,9 @@ class Program:
         if u.op is UOps.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0][0] == 'i': self.local_size = None
-          if u.arg[0][0] == 'l':
-            assert self.local_size is not None
-            self.local_size[int(u.arg[0][-1])] = u.arg[1]
-          else:
-            assert self.global_size is not None
-            self.global_size[int(u.arg[0][-1])] = u.arg[1]
+          special_size = self.local_size if u.arg[0][0] == 'l' else self.global_size
+          assert special_size is not None
+          special_size[int(u.arg[0][-1])] = u.arg[1]
       self.vars = sorted(self.vars, key=lambda v: v.expr)
       self.outs = sorted(dedup(self.outs))
       self._ran_post_init = True

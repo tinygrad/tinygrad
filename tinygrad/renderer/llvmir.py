@@ -74,7 +74,7 @@ class LLVMRenderer(Renderer):
     buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
     # create llvm function
-    func_dtypes = [(dtype_to_llvm_dtype[dtype],dtype) for dtype in buf_to_dtype.values() if dtype is not None]
+    func_dtypes = [(dtype_to_llvm_dtype[dtype],dtype) for dtype in buf_to_dtype.values()]
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() if isinstance(dt, PtrDType) else x for x,dt in func_dtypes]), name=name)
     for a in func.args:
       if a.type.is_pointer: a.add_attribute("noalias")
@@ -105,7 +105,6 @@ class LLVMRenderer(Renderer):
         bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{len(loop_blocks)}")))
         bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[src[0].src[1]]), loop_entry_bb, bb[-1].block)
       else:
-        assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE:
           bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
           bb[-2].branch(bb[-1].block)
