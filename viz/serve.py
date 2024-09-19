@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-from dataclasses import dataclass
 from typing import Dict, List, Tuple
-import pickle, re, os, sys, time, threading, webbrowser, json, difflib, contextlib
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib
+from dataclasses import dataclass
+from urllib.parse import parse_qs, urlparse
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from tinygrad.helpers import getenv
 from tinygrad.ops import TrackedRewriteContext, UOp
 from tinygrad.engine.graph import uops_colors, word_wrap
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
@@ -53,25 +54,26 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
-    if self.path == "/favicon.svg":
+    if (url:=urlparse(self.path)).path == "/favicon.svg":
       self.send_response(200)
       self.send_header("Content-type", "image/svg+xml")
       self.end_headers()
       with open(os.path.join(os.path.dirname(__file__), "favicon.svg"), "rb") as f:
         ret = f.read()
-    if self.path == "/":
+    if url.path == "/":
       self.send_response(200)
       self.send_header("Content-type", "text/html")
       self.end_headers()
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
         ret = f.read()
-    elif re.search(r'/\d+', self.path):
+    elif url.path == "/graph":
+      query = parse_qs(url.query)
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
       rest = [x.loc for x in contexts]
-      g = create_graph(contexts[int(self.path.split("/")[-1])])
+      g = create_graph(contexts[int(query["uop_idx"][0])])
       ret = json.dumps(({"loc": g.loc, "graphs": [[uop_to_json(x) for x in graph] for graph in g.graphs],
                          "diffs": g.diffs, "extra": g.extra}, rest)).encode()
     else:
