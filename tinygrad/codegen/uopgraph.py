@@ -256,6 +256,7 @@ def threefry2x32(x: UOp, seed: UOp):
 
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, reduce, idx2=None, idx3=None, extra=None, vec=None, ne=False):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in reduce.src: return None  # must be the right REDUCE
+  mval_arg = mval.arg
   if loop_start.arg != 0:
     # TODO: support and test this with other mvals and loop_starts
     if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
@@ -266,9 +267,9 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng, redu
     # idx, mval, loop_start, loop_end
     def dvec(x): return UOp(UOps.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
     idx, mval, loop_start, loop_end = dvec(idx), dvec(mval), dvec(loop_start), dvec(loop_end)
-  if mval.arg > 0 and ne:
+  if mval_arg > 0 and ne:
     comprange = UOp.min(loop_end, UOp.max((idx-compval)//mval + (loop_end-loop_start), loop_start))
-  elif mval.arg < 0 and not ne:
+  elif mval_arg < 0 and not ne:
     comprange = UOp.min(loop_end, UOp.max((idx-compval-mval)//mval + (loop_end-loop_start), loop_start))
   else:
     # don't know how to fold this
@@ -353,28 +354,78 @@ constant_folder = PatternMatcher([
   (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng") +
                           UPat.var("idx2")).lt(UPat.cvar("compval"))
                         .where(UPat.cvar("multconst"), UPat.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+  # extra arange loop folding because we don't fold adds. (ne)
+  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng") +
+                          UPat.var("idx2") + UPat.var("idx3")).lt(UPat.cvar("compval").ne(UPat.const(None, True)))
+                        .where(UPat.cvar("multconst"), UPat.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
+                        lambda **kwargs: loop_collapse(**kwargs, ne=True)),
+  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng") +
+                          UPat.var("idx2")).lt(UPat.cvar("compval").ne(UPat.const(None, True)))
+                        .where(UPat.cvar("multconst"), UPat.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
+                        lambda **kwargs: loop_collapse(**kwargs, ne=True)),
+  # extra arange loop folding because we don't fold adds. (ne, 1)
+  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng") +
+                          UPat.var("idx2") + UPat.var("idx3")).lt(UPat.cvar("compval").ne(UPat.const(None, True)))
+                        .where(UPat.cvar("multconst"), UPat.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
+                        lambda **kwargs: loop_collapse(**kwargs, mval=UOp.const(dtypes.int32, 1), ne=True)),
+  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng") +
+                          UPat.var("idx2")).lt(UPat.cvar("compval").ne(UPat.const(None, True)))
+                        .where(UPat.cvar("multconst"), UPat.const(None, 0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True),
+                        lambda **kwargs: loop_collapse(**kwargs, mval=UOp.const(dtypes.int32, 1), ne=True)),
   # arange loop folding (reduce)
   (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng"))
    .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)),),
    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+  # arange loop folding (reduce, ne)
+  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng"))
+   .lt(UPat.cvar("compval")).ne(UPat.const(None, True)).where(UPat.cvar("multconst"), UPat.const(None, 0)),),
+   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), lambda **kwargs: loop_collapse(**kwargs, ne=True)),
+  # arange loop folding (reduce, 1, ne)
+  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng"))
+   .lt(UPat.cvar("compval")).ne(UPat.const(None, True)).where(UPat.cvar("multconst"), UPat.const(None, 0)),),
+   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), lambda **kwargs: loop_collapse(**kwargs, mval=UOp.const(dtypes.int32, 1), ne=True)),
   # arange loop folding (unrolled)
   (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng"))
    .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)) + UPat.var("extra"),),
    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  # arange loop folding (reduce, ne)
+  # arange loop folding (unrolled, ne)
+  (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng"))
+   .lt(UPat.cvar("compval")).ne(UPat.const(None, True)).where(UPat.cvar("multconst"), UPat.const(None, 0)) + UPat.var("extra"),),
+   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), lambda **kwargs: loop_collapse(**kwargs, ne=True)),
+  # arange loop folding (unrolled, 1, ne)
   (UPat(UOps.REDUCE, src=((UPat.var("idx") + UPat(UOps.RANGE, src=(UPat.var("loop_start"), UPat.var("loop_end")), name="rng"))
-   .lt(UPat.cvar("compval")).ne(UPat.const(dtypes.bool, True)).where(UPat.cvar("multconst"), UPat.const(None, 0)),),
+   .lt(UPat.cvar("compval")).ne(UPat.const(None, True)).where(UPat.cvar("multconst"), UPat.const(None, 0)) + UPat.var("extra"),),
    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), lambda **kwargs: loop_collapse(**kwargs, mval=UOp.const(dtypes.int32, 1), ne=True)),
   # arange loop folding (vectorized)
   (UPat(UOps.REDUCE, src=(UPat(UOps.VECTORIZE, name="vec", src=(UPat.var("idx") + UPat.cvar("mval", vec=False) *
                                                     UPat(UOps.RANGE, src=(UPat.cvar("loop_start", vec=False), UPat.var("loop_end")), name="rng")))
    .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)),),
    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+  # arange loop folding (vectorized, ne)
+  (UPat(UOps.REDUCE, src=(UPat(UOps.VECTORIZE, name="vec", src=(UPat.var("idx") + UPat.cvar("mval", vec=False) *
+                                                    UPat(UOps.RANGE, src=(UPat.cvar("loop_start", vec=False), UPat.var("loop_end")), name="rng")))
+   .lt(UPat.cvar("compval")).ne(UPat.const(None, True)).where(UPat.cvar("multconst"), UPat.const(None, 0)),),
+   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), lambda **kwargs: loop_collapse(**kwargs, ne=True)),
+  # arange loop folding (vectorized, 1, ne)
+  (UPat(UOps.REDUCE, src=(UPat(UOps.VECTORIZE, name="vec", src=(UPat.var("idx") +
+                                                    UPat(UOps.RANGE, src=(UPat.cvar("loop_start", vec=False), UPat.var("loop_end")), name="rng")))
+   .lt(UPat.cvar("compval")).ne(UPat.const(None, True)).where(UPat.cvar("multconst"), UPat.const(None, 0)),),
+   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), lambda **kwargs: loop_collapse(**kwargs, mval=UOp.const(dtypes.int32, 1), ne=True)),
   # arange loop folding (unrolled, vectorized)
   (UPat(UOps.REDUCE, src=(UPat(UOps.VECTORIZE, name="vec", src=(UPat.var("idx") + UPat.cvar("mval", vec=False) *
                                                     UPat(UOps.RANGE, src=(UPat.cvar("loop_start", vec=False), UPat.var("loop_end")), name="rng")))
    .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)) + UPat.var("extra"),),
    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+  # arange loop folding (unrolled, vectorized, ne)
+  (UPat(UOps.REDUCE, src=(UPat(UOps.VECTORIZE, name="vec", src=(UPat.var("idx") + UPat.cvar("mval", vec=False) *
+                                                    UPat(UOps.RANGE, src=(UPat.cvar("loop_start", vec=False), UPat.var("loop_end")), name="rng")))
+   .lt(UPat.cvar("compval")).ne(UPat.const(None, True)).where(UPat.cvar("multconst"), UPat.const(None, 0)) + UPat.var("extra"),),
+   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), lambda **kwargs: loop_collapse(**kwargs, ne=True)),
+  # arange loop folding (unrolled, vectorized, 1, ne)
+  (UPat(UOps.REDUCE, src=(UPat(UOps.VECTORIZE, name="vec", src=(UPat.var("idx") +
+                                                    UPat(UOps.RANGE, src=(UPat.cvar("loop_start", vec=False), UPat.var("loop_end")), name="rng")))
+   .lt(UPat.cvar("compval")).ne(UPat.const(None, True)).where(UPat.cvar("multconst"), UPat.const(None, 0)) + UPat.var("extra"),),
+   arg=BinaryOps.ADD, name="reduce", allow_any_len=True), lambda **kwargs: loop_collapse(**kwargs, mval=UOp.const(dtypes.int32, 1), ne=True)),
   # unrolled arange div folding
   (UPat.var("divs") + UPat.cvar("c"), fold_unrolled_divs),
   # indexing (with a multiply offset)!
